@@ -2,6 +2,7 @@
 import { usePlayer, dragSession } from '../../composables/player';
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc } from '@tauri-apps/api/core'; // 🟢 1. 引入转换工具
 import FolderContextMenu from '../overlays/FolderContextMenu.vue';
 import ConfirmModal from '../overlays/ConfirmModal.vue'; 
 
@@ -11,16 +12,21 @@ const {
   isLocalMusic, isFolderMode,
   playSong, openInFinder, createPlaylist, removeFolder,
   getSongsInFolder, tempQueue, moveFilesToFolder,
-  refreshFolder // 🟢 引入新函数
+  refreshFolder
 } = usePlayer();
 
 const sidebarImageCache = ref<Map<string, string>>(new Map());
+
+// 🟢 2. 修改加载逻辑：路径 -> Asset URL
 const loadSidebarCover = async (path: string) => {
   if (!path || sidebarImageCache.value.has(path)) return;
   try { 
-    const dataUrl = await invoke<string>('get_song_cover_thumbnail', { path }); 
-    if (dataUrl) {
-      sidebarImageCache.value.set(path, dataUrl); 
+    // 后端现在返回的是绝对路径 (例如 C:\Users\...\covers\xxx.jpg)
+    const filePath = await invoke<string>('get_song_cover_thumbnail', { path }); 
+    if (filePath && filePath.length > 0) {
+      // 必须转换为 asset:// 链接，浏览器才能加载
+      const assetUrl = convertFileSrc(filePath);
+      sidebarImageCache.value.set(path, assetUrl); 
     }
   } catch {}
 };
@@ -54,12 +60,10 @@ const createPlaylistFromFolder = () => { if (targetFolder.value) { const s = get
 const openFolder = () => { if (targetFolder.value) { openInFinder(targetFolder.value.path); showMenu.value = false; } };
 const removeFolderItem = () => { if (targetFolder.value) { removeFolder(targetFolder.value.path); showMenu.value = false; } };
 
-// 🟢 新增：刷新文件夹的处理函数
 const handleRefreshFolder = async () => {
   if (targetFolder.value) {
     try {
       await refreshFolder(targetFolder.value.path);
-      // 可以在这里加一个 toast 提示刷新成功，或者什么都不做
       showMenu.value = false;
     } catch (e) {
       alert("刷新失败: " + e);
@@ -106,14 +110,20 @@ onUnmounted(() => {
     
     <ul v-if="isLocalMusic && localMusicTab === 'artist'" class="p-2 space-y-1">
         <li v-for="item in artistList" :key="item.name" @click="currentArtistFilter = item.name" :class="currentArtistFilter === item.name ? 'bg-white/40 shadow-sm' : 'hover:bg-white/20'" class="flex items-center p-2 rounded-lg cursor-pointer transition-all">
-          <div class="w-10 h-10 rounded-full bg-white/30 flex items-center justify-center text-gray-500 font-bold mr-3 shrink-0 overflow-hidden relative"><img v-if="sidebarImageCache.get(item.firstSongPath)" :src="sidebarImageCache.get(item.firstSongPath)" class="w-full h-full object-cover" /><span v-else>{{ item.name.charAt(0).toUpperCase() }}</span></div>
+          <div class="w-10 h-10 rounded-full bg-white/30 flex items-center justify-center text-gray-500 font-bold mr-3 shrink-0 overflow-hidden relative">
+            <img v-if="sidebarImageCache.get(item.firstSongPath)" :src="sidebarImageCache.get(item.firstSongPath)" class="w-full h-full object-cover" />
+            <span v-else>{{ item.name.charAt(0).toUpperCase() }}</span>
+          </div>
           <div class="flex-1 min-w-0"><div class="text-sm font-medium text-gray-800 truncate">{{ item.name }}</div><div class="text-xs text-gray-500">{{ item.count }} 首</div></div>
         </li>
     </ul>
 
     <ul v-if="isLocalMusic && localMusicTab === 'album'" class="p-2 space-y-1">
         <li v-for="item in albumList" :key="item.name" @click="currentAlbumFilter = item.name" :class="currentAlbumFilter === item.name ? 'bg-white/40 shadow-sm' : 'hover:bg-white/20'" class="flex items-center p-2 rounded-lg cursor-pointer transition-all">
-          <div class="w-10 h-10 rounded bg-white/30 flex items-center justify-center text-gray-500 mr-3 shrink-0 overflow-hidden relative"><img v-if="sidebarImageCache.get(item.firstSongPath)" :src="sidebarImageCache.get(item.firstSongPath)" class="w-full h-full object-cover" /><span v-else>💿</span></div>
+          <div class="w-10 h-10 rounded bg-white/30 flex items-center justify-center text-gray-500 mr-3 shrink-0 overflow-hidden relative">
+            <img v-if="sidebarImageCache.get(item.firstSongPath)" :src="sidebarImageCache.get(item.firstSongPath)" class="w-full h-full object-cover" />
+            <span v-else>💿</span>
+          </div>
           <div class="flex-1 min-w-0"><div class="text-sm font-medium text-gray-800 truncate">{{ item.name }}</div><div class="text-xs text-gray-500">{{ item.count }} 首</div></div>
         </li>
     </ul>

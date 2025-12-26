@@ -3,6 +3,8 @@ import { ref, watch } from 'vue';
 import { usePlayer, dragSession } from '../../composables/player';
 import { useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
+// 1. 引入资源转换工具
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 const { 
   playlists, 
@@ -23,14 +25,20 @@ const playlistCoverCache = ref<Map<string, string>>(new Map());
 
 // 🟢 样式调整：hover 改为半透明白/黑，适应磨砂背景
 const baseNavClasses = "px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-all duration-200 text-sm font-medium";
-const activeNavClasses = "bg-black/10 text-black font-semibold shadow-sm"; // 选中态加深一点
+const activeNavClasses = "bg-black/10 text-black font-semibold shadow-sm"; 
 const inactiveNavClasses = "text-gray-600 hover:bg-black/5 hover:text-gray-900";
 
 const loadPlaylistCover = async (playlistId: string, firstSongPath: string) => {
   if (!firstSongPath || playlistCoverCache.value.has(playlistId)) return;
   try {
-    const dataUrl = await invoke<string>('get_song_cover_thumbnail', { path: firstSongPath });
-    if (dataUrl) { playlistCoverCache.value.set(playlistId, dataUrl); }
+    // 2. 这里获取到的是 Rust 返回的绝对路径 (例如 C:\Users\...)
+    const filePath = await invoke<string>('get_song_cover_thumbnail', { path: firstSongPath });
+    
+    // 3. 必须转换成 asset:// 协议链接，浏览器才能加载
+    if (filePath && filePath.length > 0) { 
+      const assetUrl = convertFileSrc(filePath);
+      playlistCoverCache.value.set(playlistId, assetUrl); 
+    }
   } catch (e) {}
 };
 
@@ -45,7 +53,6 @@ const handlePlaylistClick = (id: string) => { viewPlaylist(id); router.push('/')
 
 <template>
   <aside class="w-48 bg-white/40 backdrop-blur-xl flex flex-col border-r border-transparent h-full select-none overflow-hidden relative transition-colors duration-600">
-    <!-- Top Drag Region -->
     <div class="h-16 flex items-center px-6 shrink-0 mb-2 cursor-default relative" data-tauri-drag-region>
       <div class="text-xl font-bold text-[#EC4141] italic tracking-tight flex items-center gap-2 pointer-events-none">
         <span class="text-2xl drop-shadow-sm">🤪</span> 

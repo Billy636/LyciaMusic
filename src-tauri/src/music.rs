@@ -11,8 +11,12 @@ use walkdir::WalkDir;
 use image::ImageFormat;
 use sha2::{Sha256, Digest};
 use std::collections::HashMap;
-use base64::{Engine as _, engine::general_purpose};
 use std::process::Command;
+use std::time::SystemTime;
+use tokio::sync::Semaphore; 
+
+// --- 1. 定义并发控制状态 ---
+pub struct ImageConcurrencyLimit(pub Semaphore);
 
 #[derive(Serialize, Clone, Debug)]
 pub struct Song {
@@ -40,13 +44,77 @@ fn get_cover_cache_dir(app: &AppHandle) -> PathBuf {
     dir
 }
 
-fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
-    let mut hasher = Sha256::new();
-    hasher.update(path.to_string_lossy().as_bytes());
-    let hash = hex::encode(hasher.finalize());
-    
+// --- 2. 磁盘清理逻辑 (Clean Up) ---
+pub fn run_cache_cleanup(app: &AppHandle) {
     let cache_dir = get_cover_cache_dir(app);
-    let cache_path = cache_dir.join(format!("{}.jpg", hash));
+    let max_size = 500 * 1024 * 1024; // 500 MB
+
+    std::thread::spawn(move || {
+        if let Ok(read_dir) = fs::read_dir(&cache_dir) {
+            let mut files: Vec<_> = read_dir
+                .filter_map(|entry| entry.ok())
+                .filter_map(|entry| {
+                    let metadata = entry.metadata().ok()?;
+                    let len = metadata.len();
+                    let accessed = metadata.accessed().or(metadata.modified()).unwrap_or(SystemTime::now());
+                    Some((entry.path(), len, accessed))
+                })
+                .collect();
+
+            files.sort_by_key(|&(_, _, time)| time);
+
+            let mut total_size: u64 = files.iter().map(|&(_, len, _)| len).sum();
+
+            if total_size > max_size {
+                println!("缓存清理开始: 当前 {} MB", total_size / 1024 / 1024);
+                for (path, len, _) in files {
+                    if total_size <= max_size {
+                        break;
+                    }
+                    if fs::remove_file(&path).is_ok() {
+                        total_size = total_size.saturating_sub(len);
+                    }
+                }
+                println!("缓存清理结束: 剩余 {} MB", total_size / 1024 / 1024);
+            }
+        }
+    });
+}
+
+// --- 🔥 核心优化：基于“文件指纹”的哈希算法 ---
+// 不再包含 absolute_path，仅使用：文件名 + 大小 + 修改时间
+// 这样文件移动后，只要内容没变，缓存依然有效！
+fn generate_hash(path: &Path) -> String {
+    let mut hasher = Sha256::new();
+
+    // 1. 获取元数据 (Size + Mtime)
+    if let Ok(metadata) = fs::metadata(path) {
+        let len = metadata.len();
+        let mtime_secs = metadata.modified()
+            .unwrap_or(SystemTime::now())
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        hasher.update(len.to_be_bytes());          // 指纹 1: 大小
+        hasher.update(mtime_secs.to_be_bytes());   // 指纹 2: 时间
+    } else {
+        // 如果文件读不到(极罕见)，回退到用随机时间，避免崩溃
+        hasher.update(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs().to_be_bytes());
+    }
+
+    // 2. 获取文件名 (File Name) - 不含路径
+    // 即使从 D:\Music 移到 E:\Best，文件名通常不变
+    let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+    hasher.update(file_name.as_bytes());           // 指纹 3: 文件名
+
+    hex::encode(hasher.finalize())
+}
+
+fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
+    let hash = generate_hash(path);
+    let cache_dir = get_cover_cache_dir(app);
+    let cache_path = cache_dir.join(format!("{}_thumb.jpg", hash));
     
     if cache_path.exists() {
         return Some(cache_path.to_string_lossy().into_owned());
@@ -54,7 +122,12 @@ fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
     
     if let Ok(tagged_file) = Probe::open(path).ok()?.read() {
          if let Some(tag) = tagged_file.primary_tag() {
-            if let Some(pic) = tag.pictures().first() {
+            let pictures = tag.pictures();
+            let pic_opt = pictures.iter()
+                .find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront)
+                .or(pictures.first());
+
+            if let Some(pic) = pic_opt {
                 if let Ok(img) = image::load_from_memory(pic.data()) {
                     let resized = img.resize(100, 100, image::imageops::FilterType::Triangle);
                     if let Ok(mut file) = fs::File::create(&cache_path) {
@@ -69,16 +142,87 @@ fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
     None
 }
 
+fn get_or_create_full_cover(path: &Path, app: &AppHandle) -> Option<String> {
+    let hash = generate_hash(path);
+    let cache_dir = get_cover_cache_dir(app);
+    let cache_path = cache_dir.join(format!("{}_full.jpg", hash));
+    
+    if cache_path.exists() {
+        return Some(cache_path.to_string_lossy().into_owned());
+    }
+    
+    if let Ok(tagged_file) = Probe::open(path).ok()?.read() {
+         if let Some(tag) = tagged_file.primary_tag() {
+            let pictures = tag.pictures();
+            let pic_opt = pictures.iter()
+                .find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront)
+                .or(pictures.first());
+
+            if let Some(pic) = pic_opt {
+                if fs::write(&cache_path, pic.data()).is_ok() {
+                    return Some(cache_path.to_string_lossy().into_owned());
+                }
+            }
+         }
+    }
+    None
+}
+
+// --- 3. 注入并发控制的 Command ---
+
+#[tauri::command]
+pub async fn get_song_cover_thumbnail(
+    path: String, 
+    app: AppHandle,
+    semaphore: State<'_, ImageConcurrencyLimit>
+) -> Result<String, String> {
+    // 获取许可 (如果没有空闲位置，这里会等待)
+    let _permit = semaphore.0.acquire().await.map_err(|e| e.to_string())?;
+
+    let p = Path::new(&path);
+    let app_clone = app.clone();
+    let p_buf = p.to_path_buf();
+    
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        get_or_create_thumbnail(&p_buf, &app_clone)
+    }).await.map_err(|e| e.to_string())?;
+
+    if let Some(cache_path_str) = result {
+        return Ok(cache_path_str);
+    }
+    Ok(String::new())
+}
+
+#[tauri::command]
+pub async fn get_song_cover(
+    path: String, 
+    app: AppHandle,
+    semaphore: State<'_, ImageConcurrencyLimit>
+) -> Result<String, String> {
+    let _permit = semaphore.0.acquire().await.map_err(|e| e.to_string())?;
+
+    let p = Path::new(&path);
+    let app_clone = app.clone();
+    let p_buf = p.to_path_buf();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        get_or_create_full_cover(&p_buf, &app_clone)
+    }).await.map_err(|e| e.to_string())?;
+
+    if let Some(cache_path_str) = result {
+        return Ok(cache_path_str);
+    }
+    Ok(String::new())
+}
+
 #[tauri::command]
 pub async fn scan_music_folder(
     folder_path: String,
-    app: AppHandle,
+    _app: AppHandle,
     db_state: State<'_, DbState>
 ) -> Result<Vec<Song>, String> {
-    let app_handle = app.clone();
     let db_conn = db_state.conn.clone();
     
-    // Blocking task for heavy I/O
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut songs = Vec::new();
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
@@ -91,7 +235,6 @@ pub async fn scan_music_folder(
                     if ["mp3", "flac", "wav"].contains(&ext_str.as_str()) {
                         let path_str = path.to_string_lossy().to_string();
                         
-                        // Check DB first
                         let mut stmt = conn.prepare("SELECT title, artist, album, duration, cover_path FROM songs WHERE path = ?1").unwrap();
                         let db_song = stmt.query_row([&path_str], |row| {
                             Ok(Song {
@@ -105,20 +248,9 @@ pub async fn scan_music_folder(
                             })
                         }).optional().unwrap_or(None);
 
-                        if let Some(mut s) = db_song {
-                            if s.cover.is_none() {
-                                let cover_path = get_or_create_thumbnail(path, &app_handle);
-                                if cover_path.is_some() {
-                                    conn.execute(
-                                        "UPDATE songs SET cover_path = ?1 WHERE path = ?2",
-                                        (&cover_path, &path_str),
-                                    ).ok();
-                                    s.cover = cover_path;
-                                }
-                            }
+                        if let Some(s) = db_song {
                             songs.push(s);
                         } else {
-                            // Parse tags
                             let mut artist = String::from("未知歌手");
                             let mut album = String::from("未知专辑");
                             let mut title = String::new();
@@ -133,10 +265,8 @@ pub async fn scan_music_folder(
                                 }
                             }
                             
-                            // Generate Thumbnail
-                            let cover_path = get_or_create_thumbnail(path, &app_handle);
+                            let cover_path = None;
                             
-                            // Insert to DB
                             conn.execute(
                                 "INSERT INTO songs (path, title, artist, album, duration, cover_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                                 (&path_str, &title, &artist, &album, &duration, &cover_path),
@@ -192,32 +322,6 @@ pub async fn scan_folder_as_playlists(
     }
     result.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(result)
-}
-
-#[tauri::command]
-pub async fn get_song_cover_thumbnail(path: String, app: AppHandle) -> Result<String, String> {
-    let p = Path::new(&path);
-    if let Some(cache_path_str) = get_or_create_thumbnail(p, &app) {
-        if let Ok(data) = fs::read(cache_path_str) {
-            let b64 = general_purpose::STANDARD.encode(data);
-            return Ok(format!("data:image/jpeg;base64,{}", b64));
-        }
-    }
-    Ok(String::new())
-}
-
-#[tauri::command]
-pub async fn get_song_cover(path: String) -> Result<String, String> {
-    if let Ok(tagged_file) = Probe::open(&path).map_err(|e| e.to_string())?.read() {
-        if let Some(tag) = tagged_file.primary_tag() {
-            if let Some(pic) = tag.pictures().first() {
-                 let b64 = general_purpose::STANDARD.encode(pic.data());
-                 let mime = pic.mime_type().map(|m| m.as_str()).unwrap_or("image/jpeg");
-                 return Ok(format!("data:{};base64,{}", mime, b64));
-            }
-        }
-    }
-    Ok(String::new())
 }
 
 #[tauri::command]

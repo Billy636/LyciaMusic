@@ -97,7 +97,6 @@ const handleAddToPlaylist = (playlistId: string) => {
 };
 
 // --- 🔥 恢复拖拽核心逻辑 (Drag Logic Restored) ---
-// 这里的变量用于追踪“是否刚刚按下了鼠标”
 let isMouseDown = false;
 let startX = 0;
 let startY = 0;
@@ -161,7 +160,7 @@ const onGlobalMouseMove = (e: MouseEvent) => {
     dragSession.mouseX = e.clientX;
     dragSession.mouseY = e.clientY;
     
-    // 🔥 关键修复：在这里检测 Sidebar 元素，因为 Parent 能获取全局 DOM
+    // 🔥 检测 Sidebar 元素
     const target = document.elementFromPoint(e.clientX, e.clientY);
     
     // A. 检测是否拖到了文件夹上
@@ -197,17 +196,13 @@ const onGlobalMouseMove = (e: MouseEvent) => {
     // C. 列表内排序检测 (如果既不是文件夹也不是歌单，且在 Table 区域)
     if (!dragSession.targetFolder && !dragSession.targetPlaylist) {
       const row = target?.closest('tr');
-      // 注意：这里需要确保只在当前列表区域生效
       if (row) {
         const rect = row.getBoundingClientRect();
         const relativeY = e.clientY - rect.top;
         const rowIndex = parseInt(row.getAttribute('data-index') || '0');
-        const rowOffsetTop = (row as HTMLElement).offsetTop; // 这需要 table 里的 tr 配合
+        const rowOffsetTop = (row as HTMLElement).offsetTop; 
         const rowHeight = 60; // 固定高度
 
-        // 简化的排序线计算，实际情况可能需要 offsetTop 的准确值
-        // 这里只是为了演示，如果是在 SongTable 内部计算会更准，
-        // 但为了统一，我们可以简单判断是否在 Table 范围内
         if (relativeY < rect.height / 2) {
           dragSession.insertIndex = rowIndex;
           dragSession.sortLineTop = rowOffsetTop;
@@ -223,7 +218,7 @@ const onGlobalMouseMove = (e: MouseEvent) => {
   }
 };
 
-// 3. 全局 MouseUp (执行 Drop)
+// 3. 全局 MouseUp (执行 Drop / Reorder)
 const onGlobalMouseUp = () => {
   isMouseDown = false;
   isSelectionDragging.value = false;
@@ -231,21 +226,52 @@ const onGlobalMouseUp = () => {
 
   if (dragSession.active) {
     if (dragSession.targetFolder) {
-      // 触发移动文件逻辑 (通常通过事件或直接调用)
-      // 这里可以弹窗确认
+      // 移动到文件夹
       showMoveToFolderModal.value = true;
-      // 注意：这里需要把拖拽的歌曲放到 selectedPaths 方便 Modal 读取，或者直接传参
-      // 简单处理：
       selectedPaths.value = new Set(dragSession.songs.map(s => s.path));
       
     } else if (dragSession.targetPlaylist) {
+      // 添加到歌单
       const paths = dragSession.songs.map(s => s.path);
       const count = addSongsToPlaylist(dragSession.targetPlaylist.id, paths);
       toastMessage.value = count > 0 ? `已添加 ${count} 首歌曲到 ${dragSession.targetPlaylist.name}` : '歌曲已存在于歌单';
       showToast.value = true;
       setTimeout(() => showToast.value = false, 2000);
-    } 
-    // 列表排序逻辑暂略 (取决于是否支持手动排序)
+
+    } else if (dragSession.insertIndex > -1) {
+      // 🟢 恢复列表排序逻辑
+      const movingSongs = dragSession.songs;
+      if (movingSongs.length > 0) {
+        // 1. 获取目标插入位置的参照歌曲
+        // 注意：displaySongList 可能受过滤影响，所以我们需要根据这首歌去源列表中找位置
+        const targetSong = displaySongList.value[dragSession.insertIndex];
+        
+        // 2. 复制源列表以便修改
+        const newSongList = [...songList.value];
+        const movingPaths = new Set(movingSongs.map(s => s.path));
+
+        // 3. 从列表中移除被拖拽的歌曲
+        const remaining = newSongList.filter(s => !movingPaths.has(s.path));
+
+        // 4. 插入到新位置
+        if (targetSong) {
+          // 找到参照歌曲在剩余列表中的索引
+          const targetIndex = remaining.findIndex(s => s.path === targetSong.path);
+          if (targetIndex !== -1) {
+            remaining.splice(targetIndex, 0, ...movingSongs);
+          } else {
+            // 如果找不到（极少数情况），追加到末尾
+            remaining.push(...movingSongs);
+          }
+        } else {
+          // 如果 targetSong 为 undefined，说明拖到了列表的最末尾
+          remaining.push(...movingSongs);
+        }
+
+        // 5. 更新状态
+        songList.value = remaining;
+      }
+    }
     
     // 重置状态
     dragSession.active = false;
@@ -276,10 +302,6 @@ watch(() => route.path, (path) => {
   } else if (path === '/recent') {
     switchToRecent();
   } else if (path === '/') {
-    // 关键修改在这里：
-    // 如果当前已经是 'folder' (文件夹) 或 'playlist' (歌单) 模式，
-    // 说明这是用户点击侧边栏触发的，我们不要强制切回 switchViewToAll。
-    // 只有当当前状态不明（比如刚打开应用）或者确实在 'all' 模式时，才执行重置。
     if (currentViewMode.value !== 'folder' && currentViewMode.value !== 'playlist') {
        switchViewToAll();
     }

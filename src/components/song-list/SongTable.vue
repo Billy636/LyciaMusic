@@ -2,6 +2,8 @@
 import { ref, computed, watch, reactive, onMounted, onUnmounted } from 'vue';
 import { Song, usePlayer, dragSession } from '../../composables/player';
 import { invoke } from '@tauri-apps/api/core';
+// 1. 引入 Tauri 的资源转换函数
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 const props = defineProps<{
   songs: Song[];
@@ -9,7 +11,6 @@ const props = defineProps<{
   selectedPaths: Set<string>;
 }>();
 
-// 新增 'drag-start' 事件，将控制权交还给父组件
 const emit = defineEmits<{
   (e: 'play', song: Song): void;
   (e: 'contextmenu', event: MouseEvent, song: Song): void;
@@ -19,7 +20,7 @@ const emit = defineEmits<{
 
 const { isFavorite, toggleFavorite, formatDuration, currentViewMode } = usePlayer();
 
-// --- 虚拟滚动逻辑 ---
+// --- 虚拟滚动逻辑 (保持不变) ---
 const ROW_HEIGHT = 60;
 const containerRef = ref<HTMLElement | null>(null);
 const scrollTop = ref(0);
@@ -52,37 +53,68 @@ const onScroll = (e: Event) => {
   scrollTop.value = (e.target as HTMLElement).scrollTop;
 };
 
-// --- 图片按需加载与缓存 ---
+// --- 图片按需加载与缓存优化 (LRU) ---
+
+// 2. 定义 LRU 缓存最大容量
+const MAX_CACHE_SIZE = 200;
 const coverCache = reactive(new Map<string, string>());
 const loadingSet = new Set<string>();
+
+// 3. 封装更新缓存的方法，实现 LRU 淘汰机制
+const updateCache = (key: string, value: string) => {
+  // 如果已存在，先删除再添加（为了刷新在 Map 中的顺序，保持活跃）
+  if (coverCache.has(key)) {
+    coverCache.delete(key);
+  } else if (coverCache.size >= MAX_CACHE_SIZE) {
+    // 如果满了，删除第一个（即最久未使用的）
+    const firstKey = coverCache.keys().next().value;
+    if (firstKey) coverCache.delete(firstKey);
+  }
+  coverCache.set(key, value);
+};
+
 const loadCoverDebounced = (() => {
   let timer: any = null;
   return (items: any[]) => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       items.forEach(async (song) => {
+        // 如果缓存有，或者正在加载中，跳过
         if (coverCache.has(song.path) || loadingSet.has(song.path)) return;
+        
         loadingSet.add(song.path);
         try {
-          const dataUrl = await invoke<string>('get_song_cover_thumbnail', { path: song.path });
-          coverCache.set(song.path, dataUrl || '');
-        } catch { coverCache.set(song.path, ''); } 
-        finally { loadingSet.delete(song.path); }
+          // 4. 调用后端，现在返回的是绝对路径字符串
+          const filePath = await invoke<string>('get_song_cover_thumbnail', { path: song.path });
+          
+          if (filePath && filePath.length > 0) {
+            // 5. 关键：将文件路径转换为 asset:// URL
+            const assetUrl = convertFileSrc(filePath);
+            updateCache(song.path, assetUrl);
+          } else {
+            // 没有封面，存空字符串避免重复请求
+            updateCache(song.path, '');
+          }
+        } catch (e) {
+          console.error("Cover load failed", e);
+          updateCache(song.path, ''); 
+        } finally { 
+          loadingSet.delete(song.path); 
+        }
       });
-    }, 20);
+    }, 20); // 20ms 防抖
   };
 })();
 
 watch(() => virtualData.value.items, (newItems) => loadCoverDebounced(newItems), { immediate: true });
 
-// --- 鼠标按下处理 ---
-// 这里我们只负责捕获点击，具体的逻辑（是选择还是拖拽）交给父组件判断
+// --- 鼠标按下处理 (保持不变) ---
 const handleMouseDown = (e: MouseEvent, song: Song, index: number) => {
   if (e.button !== 0) return;
   emit('drag-start', { event: e, song, index });
 };
 
-// --- 交互辅助 ---
+// --- 交互辅助 (保持不变) ---
 const toggleSelectAll = () => {
   if (props.selectedPaths.size === props.songs.length) props.selectedPaths.clear();
   else props.songs.forEach(s => props.selectedPaths.add(s.path));

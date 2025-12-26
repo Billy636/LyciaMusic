@@ -3,19 +3,43 @@ import { usePlayer } from '../../composables/player';
 import { useLyrics } from '../../composables/lyrics';
 import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window'; 
+import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 const { 
-  currentSong, currentCover, isPlaying, volume, currentTime, playMode, showPlaylist,
+  currentSong, // 不解构 currentCover
+  isPlaying, volume, currentTime, playMode, showPlaylist,
   togglePlay, nextSong, prevSong, handleVolume, toggleMute, toggleMode, togglePlaylist, formatDuration,
   isFavorite, toggleFavorite,
   showPlayerDetail, togglePlayerDetail,
   seekTo, openAddToPlaylistDialog,
-  playAt // 🟢 引入新函数
+  playAt 
 } = usePlayer();
 
 const { parsedLyrics, currentLyricIndex, showDesktopLyrics } = useLyrics();
-
 const lyricsContainerRef = ref<HTMLElement | null>(null);
+
+const bigCoverUrl = ref(''); // 全屏大图 URL
+
+// 🎵 监听歌曲，获取高清大图 (Asset 协议)
+watch(currentSong, async (newSong) => {
+  if (newSong && newSong.path) {
+    try {
+      // 调用 get_song_cover 获取大图路径
+      const path = await invoke<string>('get_song_cover', { path: newSong.path });
+      if (path) {
+        bigCoverUrl.value = convertFileSrc(path);
+      } else {
+        bigCoverUrl.value = '';
+      }
+    } catch (e) {
+      bigCoverUrl.value = '';
+    }
+  } else {
+    bigCoverUrl.value = '';
+  }
+}, { immediate: true });
+
 
 // --- 窗口控制 ---
 const appWindow = getCurrentWindow();
@@ -103,11 +127,10 @@ onUnmounted(() => { window.removeEventListener('mousemove', onMouseMove); window
       
       <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <div class="absolute inset-0 bg-black/40 backdrop-blur-3xl z-10"></div>
-        <img :src="currentCover || ''" class="w-full h-full object-cover opacity-60 filter blur-[60px] scale-125" />
+        <img :src="bigCoverUrl || ''" class="w-full h-full object-cover opacity-60 filter blur-[60px] scale-125" />
       </div>
 
       <div class="relative z-50 h-16 flex items-center justify-between px-4">
-        <!-- Dedicated Drag Region -->
         <div class="absolute inset-0" data-tauri-drag-region></div>
 
         <div class="flex items-center relative z-10">
@@ -132,7 +155,7 @@ onUnmounted(() => { window.removeEventListener('mousemove', onMouseMove); window
             </div>
             <div class="w-full h-full rounded-full bg-black flex items-center justify-center shadow-2xl border-4 border-gray-800/30" :class="isPlaying ? 'animate-spin-slow' : ''" :style="{ animationPlayState: isPlaying ? 'running' : 'paused' }">
               <div class="w-52 h-52 rounded-full overflow-hidden border-[6px] border-black">
-                <img v-if="currentCover" :src="currentCover" class="w-full h-full object-cover" />
+                <img v-if="bigCoverUrl" :src="bigCoverUrl" class="w-full h-full object-cover" />
                 <div v-else class="w-full h-full bg-gray-800 flex items-center justify-center text-gray-500">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
                 </div>
@@ -252,12 +275,3 @@ onUnmounted(() => { window.removeEventListener('mousemove', onMouseMove); window
     </div>
   </transition>
 </template>
-
-<style scoped>
-.slide-up-enter-active, .slide-up-leave-active { transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-.slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); }
-.animate-spin-slow { animation: spin 20s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.mask-gradient { mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%); }
-.custom-scrollbar::-webkit-scrollbar { width: 0; }
-</style>

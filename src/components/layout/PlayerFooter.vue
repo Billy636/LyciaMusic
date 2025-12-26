@@ -2,10 +2,12 @@
 import { usePlayer } from '../../composables/player';
 import { useLyrics } from '../../composables/lyrics';
 import DesktopLyrics from "../player/DesktopLyrics.vue";
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 const { 
-  currentSong, currentCover, 
+  currentSong, // 注意：我们这里不解构 currentCover，因为我们要自己获取
   isPlaying, volume, currentTime, playMode, showPlaylist,
   togglePlay, nextSong, prevSong, handleVolume, toggleMute, toggleMode, togglePlaylist,
   isFavorite, toggleFavorite,
@@ -13,8 +15,28 @@ const {
 } = usePlayer();
 
 const { showDesktopLyrics } = useLyrics();
+const localCoverUrl = ref(''); // 本地封面 URL (Asset 协议)
 
 const toggleLyrics = () => { showDesktopLyrics.value = !showDesktopLyrics.value; };
+
+// 🎵 监听歌曲变化，自动获取缩略图 (高性能)
+watch(currentSong, async (newSong) => {
+  if (newSong && newSong.path) {
+    try {
+      // 获取小图 (Thumbnail)
+      const path = await invoke<string>('get_song_cover_thumbnail', { path: newSong.path });
+      if (path) {
+        localCoverUrl.value = convertFileSrc(path);
+      } else {
+        localCoverUrl.value = '';
+      }
+    } catch (e) {
+      localCoverUrl.value = '';
+    }
+  } else {
+    localCoverUrl.value = '';
+  }
+}, { immediate: true });
 
 // --- 进度条拖拽逻辑 ---
 const isDraggingProgress = ref(false);
@@ -107,7 +129,9 @@ onUnmounted(() => {
         title="展开详情页"
       >
         <span v-if="!currentSong" class="w-full h-full flex items-center justify-center bg-gray-100/50 text-[10px] text-gray-500">CD</span>
-        <img v-else-if="currentCover" :src="currentCover" class="w-full h-full object-cover group-hover:blur-[1px] transition-all" />
+        
+        <img v-else-if="localCoverUrl" :src="localCoverUrl" class="w-full h-full object-cover group-hover:blur-[1px] transition-all" />
+        
         <div v-else class="w-full h-full bg-gradient-to-br from-gray-400 to-gray-600 flex items-center justify-center text-white text-[8px]">DISK</div>
         
         <div class="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
