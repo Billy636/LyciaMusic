@@ -26,6 +26,8 @@ const {
 // 状态管理
 const isBatchMode = ref(false);
 const selectedPaths = ref<Set<string>>(new Set());
+// 引用 SongTable 组件实例
+const songTableRef = ref<{ containerRef: HTMLElement | null } | null>(null);
 
 // --- 弹窗与右键菜单状态 ---
 const showAddToPlaylistModal = ref(false);
@@ -43,7 +45,6 @@ const contextMenuTargetSong = ref<Song | null>(null);
 watch(isBatchMode, (val) => { if (!val) selectedPaths.value.clear(); });
 
 // --- 业务逻辑处理 ---
-
 const handleContextMenu = (e: MouseEvent, song: Song) => {
   if (isBatchMode.value) return; 
   contextMenuTargetSong.value = song;
@@ -96,59 +97,127 @@ const handleAddToPlaylist = (playlistId: string) => {
   showToast.value = true; setTimeout(() => showToast.value = false, 2000);
 };
 
-// --- 🔥 恢复拖拽核心逻辑 (Drag Logic Restored) ---
+// --- 🔥 拖拽核心逻辑 ---
 let isMouseDown = false;
 let startX = 0;
 let startY = 0;
-// 批量选择辅助
+const ROW_HEIGHT = 60; 
+
+// 自动滚动
+let autoScrollTimer: number | null = null;
+const startAutoScroll = (direction: 'up' | 'down') => {
+  if (autoScrollTimer) return;
+  const container = songTableRef.value?.containerRef;
+  if (!container) return;
+
+  const scroll = () => {
+    if (!isMouseDown) { stopAutoScroll(); return; }
+    const speed = 15;
+    if (direction === 'up') container.scrollTop -= speed;
+    else container.scrollTop += speed;
+    autoScrollTimer = requestAnimationFrame(scroll);
+  };
+  autoScrollTimer = requestAnimationFrame(scroll);
+};
+
+const stopAutoScroll = () => {
+  if (autoScrollTimer) { cancelAnimationFrame(autoScrollTimer); autoScrollTimer = null; }
+};
+
 const lastSelectedIndex = ref<number>(-1);
 const isSelectionDragging = ref(false);
 const dragSelectAction = ref<'select' | 'deselect' | null>(null);
 
-// 1. 接收子组件传来的 MouseDown
+// 1. MouseDown
 const handleTableDragStart = ({ event, song, index }: { event: MouseEvent; song: Song; index: number }) => {
   isMouseDown = true;
   startX = event.clientX;
   startY = event.clientY;
 
-  // 批量选择逻辑
+  // --- 分支 A: 批量多选模式 (恢复了你丢失的逻辑) ---
   if (isBatchMode.value) {
     const tr = event.currentTarget as HTMLElement;
     const rect = tr.getBoundingClientRect();
+    
+    // 判断点击位置：如果点击在左侧 60% 区域，视为“选择操作”
+    // (逻辑：计算鼠标相对于这一行的水平位置)
     if ((event.clientX - rect.left) / rect.width < 0.6) {
       isSelectionDragging.value = true;
-      // 处理 Shift 连选逻辑
+      
+      // 1. Shift 连选逻辑
       if (event.shiftKey && lastSelectedIndex.value !== -1) {
         const start = Math.min(lastSelectedIndex.value, index);
         const end = Math.max(lastSelectedIndex.value, index);
+        // 将中间的所有歌曲加入选中集合
         for (let i = start; i <= end; i++) {
            if (displaySongList.value[i]) selectedPaths.value.add(displaySongList.value[i].path);
         }
       } else {
-        if (selectedPaths.value.has(song.path)) selectedPaths.value.delete(song.path);
-        else selectedPaths.value.add(song.path);
+        // 2. 普通点击：单选/反选
+        if (selectedPaths.value.has(song.path)) {
+            selectedPaths.value.delete(song.path);
+        } else {
+            selectedPaths.value.add(song.path);
+        }
         lastSelectedIndex.value = index;
       }
+      
+      // 记录当前动作是“选中”还是“取消选中”，以便后续拖拽时跟随
       dragSelectAction.value = selectedPaths.value.has(song.path) ? 'select' : 'deselect';
     } else {
+      // 点击右侧区域，视为“拖拽已选歌曲”
       isSelectionDragging.value = false;
+      // 如果拖拽的这首歌还没被选中，先选中它
       if (!selectedPaths.value.has(song.path)) selectedPaths.value.add(song.path);
+      // 准备拖拽数据
       dragSession.songs = displaySongList.value.filter(s => selectedPaths.value.has(s.path));
     }
-  } else {
-    // 普通模式：准备拖拽单首
+  } 
+  // --- 分支 B: 单曲/普通模式 (应用了新的锁定修复) ---
+  else {
     if (['folder', 'playlist', 'all'].includes(currentViewMode.value)) {
        dragSession.songs = [song];
+       // 🔥 关键修复：按下瞬间，锁定当前位置为“空白坑位”
+       // 这保证了拖拽开始时列表不会乱跳
+       dragSession.insertIndex = index; 
     }
   }
 };
 
-// 2. 全局 MouseMove (检测拖拽意图 + 检测 Sidebar 目标)
+// 2. MouseMove
+// 请直接替换 SongList.vue 中的 onGlobalMouseMove 函数
 const onGlobalMouseMove = (e: MouseEvent) => {
   if (!isMouseDown) return;
-  if (isBatchMode.value && isSelectionDragging.value) return; 
 
-  // 只有移动距离超过 5px 才视为拖拽，防止误触点击
+  // 1. 批量模式下的“滑动框选”逻辑 (保持不变)
+  if (isBatchMode.value && isSelectionDragging.value) {
+    const container = songTableRef.value?.containerRef;
+    if (!container) return;
+    
+    const rect = container.getBoundingClientRect();
+    if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+      const relativeY = e.clientY - rect.top + container.scrollTop;
+      const currentIndex = Math.floor(relativeY / ROW_HEIGHT);
+
+      if (currentIndex >= 0 && currentIndex < displaySongList.value.length) {
+        const song = displaySongList.value[currentIndex];
+        if (dragSelectAction.value === 'select') {
+          selectedPaths.value.add(song.path);
+        } else if (dragSelectAction.value === 'deselect') {
+          selectedPaths.value.delete(song.path);
+        }
+        lastSelectedIndex.value = currentIndex;
+      }
+      
+      const threshold = 60;
+      if (e.clientY < rect.top + threshold) startAutoScroll('up');
+      else if (e.clientY > rect.bottom - threshold) startAutoScroll('down');
+      else stopAutoScroll();
+    }
+    return; 
+  }
+
+  // --- 拖拽激活判断 ---
   if (!dragSession.active) {
     const dist = Math.sqrt(Math.pow(e.clientX - startX, 2) + Math.pow(e.clientY - startY, 2));
     if (dist > 5) {
@@ -159,123 +228,141 @@ const onGlobalMouseMove = (e: MouseEvent) => {
   if (dragSession.active) {
     dragSession.mouseX = e.clientX;
     dragSession.mouseY = e.clientY;
+
+    const container = songTableRef.value?.containerRef;
     
-    // 🔥 检测 Sidebar 元素
+    // Auto Scroll
+    if (container) {
+       const rect = container.getBoundingClientRect();
+       const threshold = 60;
+       if (e.clientY < rect.top + threshold) startAutoScroll('up');
+       else if (e.clientY > rect.bottom - threshold) startAutoScroll('down');
+       else stopAutoScroll();
+    }
+    
+    // Sidebar / Playlist Detection (侧边栏/歌单检测 - 即使多选时也允许拖入文件夹)
     const target = document.elementFromPoint(e.clientX, e.clientY);
-    
-    // A. 检测是否拖到了文件夹上
     const folderEl = target?.closest('.folder-drop-target');
     if (folderEl) {
-      const path = folderEl.getAttribute('data-folder-path');
-      const name = folderEl.getAttribute('data-folder-name');
-      if (path && name) {
-        dragSession.targetFolder = { path, name };
-        dragSession.targetPlaylist = null;
-        dragSession.sortLineTop = -1; 
-        return; 
-      }
+      dragSession.targetFolder = { path: folderEl.getAttribute('data-folder-path')!, name: folderEl.getAttribute('data-folder-name')! };
+      dragSession.targetPlaylist = null;
+      dragSession.insertIndex = -1;
+      return; 
     } else {
       dragSession.targetFolder = null;
     }
 
-    // B. 检测是否拖到了歌单上
     const playlistEl = target?.closest('.playlist-drop-target');
     if (playlistEl) {
-      const id = playlistEl.getAttribute('data-playlist-id');
-      const name = playlistEl.getAttribute('data-playlist-name');
-      if (id && name) {
-        dragSession.targetPlaylist = { id, name };
-        dragSession.targetFolder = null;
-        dragSession.sortLineTop = -1;
-        return;
-      }
+      dragSession.targetPlaylist = { id: playlistEl.getAttribute('data-playlist-id')!, name: playlistEl.getAttribute('data-playlist-name')! };
+      dragSession.targetFolder = null;
+      dragSession.insertIndex = -1;
+      return;
     } else {
       dragSession.targetPlaylist = null;
     }
 
-    // C. 列表内排序检测 (如果既不是文件夹也不是歌单，且在 Table 区域)
-    if (!dragSession.targetFolder && !dragSession.targetPlaylist) {
-      const row = target?.closest('tr');
-      if (row) {
-        const rect = row.getBoundingClientRect();
-        const relativeY = e.clientY - rect.top;
-        const rowIndex = parseInt(row.getAttribute('data-index') || '0');
-        const rowOffsetTop = (row as HTMLElement).offsetTop; 
-        const rowHeight = 60; // 固定高度
+    // 🔥🔥🔥 核心修改点在这里 🔥🔥🔥
+    // 增加 !isBatchMode.value 判断
+    // 意思就是：如果没有命中侧边栏，且【不是批量模式】，才允许进行列表内的排序计算
+    if (!isBatchMode.value && !dragSession.targetFolder && !dragSession.targetPlaylist && container) {
+      const containerRect = container.getBoundingClientRect();
+      
+      if (
+        e.clientX >= containerRect.left && 
+        e.clientX <= containerRect.right &&
+        e.clientY >= containerRect.top &&
+        e.clientY <= containerRect.bottom
+      ) {
+         const offsetY = e.clientY - containerRect.top + container.scrollTop;
+         
+         let currentGapIndex = dragSession.insertIndex;
+         if (currentGapIndex === -1) currentGapIndex = 0;
 
-        if (relativeY < rect.height / 2) {
-          dragSession.insertIndex = rowIndex;
-          dragSession.sortLineTop = rowOffsetTop;
-        } else {
-          dragSession.insertIndex = rowIndex + 1;
-          dragSession.sortLineTop = rowOffsetTop + rowHeight;
-        }
+         // 50% 深度缓冲逻辑
+         const upTriggerLimit = (currentGapIndex - 0.5) * ROW_HEIGHT;
+         const downTriggerLimit = (currentGapIndex + 1.5) * ROW_HEIGHT;
+
+         const maxIndex = displaySongList.value.length - 1;
+
+         if (offsetY < upTriggerLimit) {
+           const newIndex = Math.floor(offsetY / ROW_HEIGHT);
+           dragSession.insertIndex = Math.max(0, newIndex);
+         } 
+         else if (offsetY > downTriggerLimit) {
+           const newIndex = Math.floor(offsetY / ROW_HEIGHT);
+           dragSession.insertIndex = Math.min(maxIndex, newIndex);
+         }
       } else {
-        dragSession.sortLineTop = -1;
         dragSession.insertIndex = -1;
       }
-    }
+    } 
+    // 如果是批量模式 (isBatchMode)，这里什么都不做，dragSession.insertIndex 保持 -1
+    // 这样列表里的歌曲就不会乱动了。
   }
 };
 
-// 3. 全局 MouseUp (执行 Drop / Reorder)
+// 3. MouseUp
 const onGlobalMouseUp = () => {
   isMouseDown = false;
+  stopAutoScroll();
   isSelectionDragging.value = false;
   dragSelectAction.value = null;
 
   if (dragSession.active) {
     if (dragSession.targetFolder) {
-      // 移动到文件夹
       showMoveToFolderModal.value = true;
       selectedPaths.value = new Set(dragSession.songs.map(s => s.path));
-      
     } else if (dragSession.targetPlaylist) {
-      // 添加到歌单
       const paths = dragSession.songs.map(s => s.path);
       const count = addSongsToPlaylist(dragSession.targetPlaylist.id, paths);
       toastMessage.value = count > 0 ? `已添加 ${count} 首歌曲到 ${dragSession.targetPlaylist.name}` : '歌曲已存在于歌单';
       showToast.value = true;
       setTimeout(() => showToast.value = false, 2000);
-
     } else if (dragSession.insertIndex > -1) {
-      // 🟢 恢复列表排序逻辑
+      // 🔥 Drop 逻辑：精确修复
       const movingSongs = dragSession.songs;
       if (movingSongs.length > 0) {
-        // 1. 获取目标插入位置的参照歌曲
-        // 注意：displaySongList 可能受过滤影响，所以我们需要根据这首歌去源列表中找位置
-        const targetSong = displaySongList.value[dragSession.insertIndex];
+        const sourcePath = movingSongs[0].path;
+        const fullList = [...songList.value];
+        const sourceRealIndex = fullList.findIndex(s => s.path === sourcePath);
         
-        // 2. 复制源列表以便修改
-        const newSongList = [...songList.value];
-        const movingPaths = new Set(movingSongs.map(s => s.path));
-
-        // 3. 从列表中移除被拖拽的歌曲
-        const remaining = newSongList.filter(s => !movingPaths.has(s.path));
-
-        // 4. 插入到新位置
-        if (targetSong) {
-          // 找到参照歌曲在剩余列表中的索引
-          const targetIndex = remaining.findIndex(s => s.path === targetSong.path);
-          if (targetIndex !== -1) {
-            remaining.splice(targetIndex, 0, ...movingSongs);
-          } else {
-            // 如果找不到（极少数情况），追加到末尾
-            remaining.push(...movingSongs);
-          }
-        } else {
-          // 如果 targetSong 为 undefined，说明拖到了列表的最末尾
-          remaining.push(...movingSongs);
+        // 目标位置的歌曲
+        const targetVisualSong = displaySongList.value[dragSession.insertIndex];
+        
+        if (sourceRealIndex !== -1 && targetVisualSong) {
+            // 1. 移除源
+            const [item] = fullList.splice(sourceRealIndex, 1);
+            
+            // 2. 找目标（在移除后的列表中）
+            let newTargetIndex = fullList.findIndex(s => s.path === targetVisualSong.path);
+            
+            // 3. 插入逻辑
+            if (newTargetIndex >= sourceRealIndex) {
+                // 👇 向下拖拽：
+                // 视觉上，目标被挤到了上方，空白在目标下方。
+                // 这意味着我们占据了目标原来的位置（物理上在它后面）
+                // 所以插在它后面 (+1)
+                fullList.splice(newTargetIndex + 1, 0, item);
+            } else {
+                // 👆 向上拖拽：
+                // 视觉上，目标被挤到了下方，空白在目标上方。
+                // 这意味着我们占据了目标原来的位置（物理上在它前面）
+                // 所以插在它前面 (+0)
+                fullList.splice(newTargetIndex, 0, item);
+            }
+            
+            songList.value = fullList;
+        } else if (sourceRealIndex !== -1) {
+            // 拖到底部空白区
+            const [item] = fullList.splice(sourceRealIndex, 1);
+            fullList.push(item);
+            songList.value = fullList;
         }
-
-        // 5. 更新状态
-        songList.value = remaining;
       }
     }
     
-    // 重置状态
     dragSession.active = false;
-    dragSession.sortLineTop = -1;
     dragSession.insertIndex = -1;
     setTimeout(() => { 
       dragSession.targetFolder = null; 
@@ -289,6 +376,7 @@ onMounted(() => {
   window.addEventListener('mouseup', onGlobalMouseUp);
 });
 onUnmounted(() => {
+  stopAutoScroll();
   window.removeEventListener('mousemove', onGlobalMouseMove);
   window.removeEventListener('mouseup', onGlobalMouseUp);
 });
@@ -328,6 +416,7 @@ watch(() => route.path, (path) => {
         
         <SongTable 
           v-else
+          ref="songTableRef"
           :songs="displaySongList"
           :isBatchMode="isBatchMode"
           :selectedPaths="selectedPaths"

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { usePlayer } from '../../composables/player';
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'; // 🟢 引入 watch
 import { useRoute } from 'vue-router';
+import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc } from '@tauri-apps/api/core'; // 🟢 1. 引入资源转换工具
 import ConfirmModal from '../overlays/ConfirmModal.vue';
 
 defineProps<{
@@ -20,7 +22,7 @@ const {
   playSong, displaySongList,
   playlists, filterCondition, playlistCover,
   addFoldersFromStructure,
-  refreshFolder // 🟢 1. 引入刷新函数
+  refreshFolder
 } = usePlayer();
 
 const isLocalMusic = computed(() => currentViewMode.value === 'all' && route.path === '/');
@@ -41,6 +43,36 @@ const detailInfo = computed(() => {
   }
   return null;
 });
+
+// 🟢 2. 高清封面加载逻辑
+const headerCover = ref('');
+
+const updateHeaderCover = async () => {
+  // 只有在详情页模式且列表不为空时才尝试加载
+  if (detailInfo.value && displaySongList.value.length > 0) {
+    const firstSongPath = displaySongList.value[0].path;
+    try {
+      // 🔥 请求高清封面 (get_song_cover) 而不是缩略图
+      const filePath = await invoke<string>('get_song_cover', { path: firstSongPath });
+      if (filePath && filePath.length > 0) {
+        headerCover.value = convertFileSrc(filePath);
+      } else {
+        headerCover.value = '';
+      }
+    } catch (e) {
+      headerCover.value = '';
+    }
+  } else {
+    // 如果没有歌，或者不是详情页，重置封面
+    headerCover.value = '';
+  }
+};
+
+// 监听列表变化，实时更新封面（比如切歌单、切文件夹时）
+watch(() => displaySongList.value, updateHeaderCover, { immediate: true });
+// 监听详情信息变化
+watch(() => detailInfo.value, updateHeaderCover);
+
 
 const showHeaderMenu = ref(false);
 const handleHeaderMenuClick = () => showHeaderMenu.value = !showHeaderMenu.value;
@@ -67,12 +99,10 @@ const requestClearList = () => {
   showHeaderMenu.value = false; 
 };
 
-// 🟢 2. 处理刷新逻辑
 const handleRefreshClick = async () => {
   if (isFolderMode.value && currentFolderFilter.value) {
     try {
       await refreshFolder(currentFolderFilter.value);
-      // 可以在这里加一个 toast 提示“刷新成功”
       showHeaderMenu.value = false;
     } catch (e) {
       alert("刷新失败: " + e);
@@ -122,7 +152,7 @@ const handleShufflePlay = () => {
 
     <div v-else-if="detailInfo" class="flex gap-8 h-full">
         <div class="w-48 h-48 bg-gray-50 rounded-xl border border-gray-100 shadow-sm flex items-center justify-center shrink-0 overflow-hidden group relative select-none">
-          <img v-if="playlistCover" :src="playlistCover" class="w-full h-full object-cover animate-in fade-in duration-300" alt="Cover" />
+          <img v-if="headerCover || playlistCover" :src="headerCover || playlistCover" class="w-full h-full object-cover animate-in fade-in duration-300" alt="Cover" />
           <div v-else class="flex flex-col items-center justify-center h-full w-full">
              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-24 h-24 text-indigo-500 mb-2 drop-shadow-md"><path fill-rule="evenodd" d="M19.952 1.651a.75.75 0 01.298.599V16.303a3 3 0 01-2.176 2.884l-1.32.377a2.553 2.553 0 11-1.403-4.909l2.311-.66a1.5 1.5 0 001.088-1.442V6.994l-9 2.572v9.737a3 3 0 01-2.176 2.884l-1.32.377a2.553 2.553 0 11-1.403-4.909l2.311-.66a1.5 1.5 0 001.088-1.442V9.017c0-.528.246-1.032.67-1.371l10.038-5.996z" clip-rule="evenodd" /></svg>
              <span class="text-xs text-gray-400 font-medium">封面图</span>

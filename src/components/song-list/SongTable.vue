@@ -2,7 +2,6 @@
 import { ref, computed, watch, reactive, onMounted, onUnmounted } from 'vue';
 import { Song, usePlayer, dragSession } from '../../composables/player';
 import { invoke } from '@tauri-apps/api/core';
-// 1. 引入 Tauri 的资源转换函数
 import { convertFileSrc } from '@tauri-apps/api/core';
 
 const props = defineProps<{
@@ -20,12 +19,11 @@ const emit = defineEmits<{
 
 const { isFavorite, toggleFavorite, formatDuration, currentViewMode } = usePlayer();
 
-// --- 虚拟滚动逻辑 (保持不变) ---
+// --- 虚拟滚动逻辑 ---
 const ROW_HEIGHT = 60;
 const containerRef = ref<HTMLElement | null>(null);
 const scrollTop = ref(0);
 const containerHeight = ref(600);
-const listBodyRef = ref<HTMLElement | null>(null);
 
 const updateContainerHeight = () => {
   if (containerRef.value) containerHeight.value = containerRef.value.clientHeight;
@@ -53,20 +51,14 @@ const onScroll = (e: Event) => {
   scrollTop.value = (e.target as HTMLElement).scrollTop;
 };
 
-// --- 图片按需加载与缓存优化 (LRU) ---
-
-// 2. 定义 LRU 缓存最大容量
+// --- LRU Cache ---
 const MAX_CACHE_SIZE = 200;
 const coverCache = reactive(new Map<string, string>());
 const loadingSet = new Set<string>();
 
-// 3. 封装更新缓存的方法，实现 LRU 淘汰机制
 const updateCache = (key: string, value: string) => {
-  // 如果已存在，先删除再添加（为了刷新在 Map 中的顺序，保持活跃）
-  if (coverCache.has(key)) {
-    coverCache.delete(key);
-  } else if (coverCache.size >= MAX_CACHE_SIZE) {
-    // 如果满了，删除第一个（即最久未使用的）
+  if (coverCache.has(key)) coverCache.delete(key);
+  else if (coverCache.size >= MAX_CACHE_SIZE) {
     const firstKey = coverCache.keys().next().value;
     if (firstKey) coverCache.delete(firstKey);
   }
@@ -79,42 +71,26 @@ const loadCoverDebounced = (() => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       items.forEach(async (song) => {
-        // 如果缓存有，或者正在加载中，跳过
         if (coverCache.has(song.path) || loadingSet.has(song.path)) return;
-        
         loadingSet.add(song.path);
         try {
-          // 4. 调用后端，现在返回的是绝对路径字符串
           const filePath = await invoke<string>('get_song_cover_thumbnail', { path: song.path });
-          
-          if (filePath && filePath.length > 0) {
-            // 5. 关键：将文件路径转换为 asset:// URL
-            const assetUrl = convertFileSrc(filePath);
-            updateCache(song.path, assetUrl);
-          } else {
-            // 没有封面，存空字符串避免重复请求
-            updateCache(song.path, '');
-          }
-        } catch (e) {
-          console.error("Cover load failed", e);
-          updateCache(song.path, ''); 
-        } finally { 
-          loadingSet.delete(song.path); 
-        }
+          if (filePath) updateCache(song.path, convertFileSrc(filePath));
+          else updateCache(song.path, '');
+        } catch { updateCache(song.path, ''); } 
+        finally { loadingSet.delete(song.path); }
       });
-    }, 20); // 20ms 防抖
+    }, 20);
   };
 })();
 
 watch(() => virtualData.value.items, (newItems) => loadCoverDebounced(newItems), { immediate: true });
 
-// --- 鼠标按下处理 (保持不变) ---
 const handleMouseDown = (e: MouseEvent, song: Song, index: number) => {
   if (e.button !== 0) return;
   emit('drag-start', { event: e, song, index });
 };
 
-// --- 交互辅助 (保持不变) ---
 const toggleSelectAll = () => {
   if (props.selectedPaths.size === props.songs.length) props.selectedPaths.clear();
   else props.songs.forEach(s => props.selectedPaths.add(s.path));
@@ -129,12 +105,63 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('resize', updateContainerHeight);
 });
+
+defineExpose({ containerRef });
+
+// --- 🔥 CSS Transform 计算逻辑 ---
+const getRowStyle = (songIndex: number, songPath: string) => {
+  const baseStyle: any = { height: `${ROW_HEIGHT}px` };
+
+  if (!dragSession.active || dragSession.insertIndex === -1) return baseStyle;
+
+  const dragSourcePath = dragSession.songs[0]?.path;
+  const dragIndex = props.songs.findIndex(s => s.path === dragSourcePath);
+  const targetIndex = dragSession.insertIndex;
+
+  // 1. 被拖拽的行：瞬移到目标位置
+  if (songPath === dragSourcePath) {
+    const diff = targetIndex - dragIndex;
+    return {
+      ...baseStyle,
+      transform: `translateY(${diff * 100}%)`,
+      transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)',
+      opacity: 0, 
+      zIndex: 0
+    };
+  }
+
+  // 2. 其他行：让位逻辑
+  let translateY = 0;
+  
+  if (targetIndex > dragIndex) {
+    // 向下拖拽：中间的行向上移
+    if (songIndex > dragIndex && songIndex <= targetIndex) {
+      translateY = -100;
+    }
+  } else if (targetIndex < dragIndex) {
+    // 向上拖拽：中间的行向下移
+    if (songIndex >= targetIndex && songIndex < dragIndex) {
+      translateY = 100;
+    }
+  }
+
+  if (translateY !== 0) {
+    return {
+      ...baseStyle,
+      transform: `translateY(${translateY}%)`,
+      transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)',
+      zIndex: 1
+    };
+  }
+
+  return { ...baseStyle, transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)' };
+};
 </script>
 
 <template>
   <div 
     ref="containerRef" 
-    class="flex-1 overflow-y-auto pl-2.5 pr-3 pb-8 custom-scrollbar" 
+    class="flex-1 overflow-y-auto pl-2.5 pr-3 pb-8 custom-scrollbar song-list-scroll-container" 
     @scroll="onScroll"
   >
     <table class="w-full text-left text-sm text-gray-600 table-fixed relative border-collapse">
@@ -154,23 +181,14 @@ onUnmounted(() => {
       <tbody ref="listBodyRef" class="relative">
         <tr :style="{ height: virtualData.paddingTop + 'px' }"></tr>
 
-        <div 
-          v-if="dragSession.sortLineTop !== -1"
-          class="sort-line absolute left-0 right-0 z-20 pointer-events-none"
-          :style="{ top: dragSession.sortLineTop + 'px' }"
-        ></div>
-
         <tr v-for="song in virtualData.items" :key="song.path" 
           :data-index="song.virtualIndex"
           @mousedown="handleMouseDown($event, song, song.virtualIndex)" 
           @dblclick="!isBatchMode && emit('play', song)"
           @contextmenu.prevent="emit('contextmenu', $event, song)"
-          class="group border-b border-black/5 transition-colors hover:bg-black/5 select-none cursor-default" 
-          :style="{ height: ROW_HEIGHT + 'px' }"
-          :class="{
-            'bg-red-500/10': selectedPaths.has(song.path),
-            'opacity-40': dragSession.active && dragSession.songs[0]?.path === song.path
-          }"
+          class="group border-b border-black/5 hover:bg-black/5 select-none cursor-default relative" 
+          :class="{ 'bg-red-500/10': selectedPaths.has(song.path) }"
+          :style="getRowStyle(song.virtualIndex, song.path)"
         >
           <td class="py-0 h-full w-12 p-0">
              <div class="h-full w-full flex items-center justify-center relative">
@@ -196,26 +214,17 @@ onUnmounted(() => {
                </div>
              </div>
           </td>
-          
           <td class="py-3 pr-4 overflow-hidden pl-2">
             <div class="flex items-center h-full">
               <div class="w-9 h-9 rounded bg-gray-200/50 flex items-center justify-center mr-3 shrink-0 overflow-hidden text-gray-400 relative border border-black/5">
-                <img 
-                  v-if="coverCache.get(song.path)"
-                  :src="coverCache.get(song.path)" 
-                  class="w-full h-full object-cover transition-opacity duration-300"
-                  alt="Cover"
-                />
+                <img v-if="coverCache.get(song.path)" :src="coverCache.get(song.path)" class="w-full h-full object-cover transition-opacity duration-300" alt="Cover"/>
                 <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-40 absolute inset-0 m-auto -z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
                 </svg>
               </div>
-              <span class="text-gray-900 font-medium truncate">
-                {{ song.title || song.name.replace(/\.[^/.]+$/, "") }}
-              </span>
+              <span class="text-gray-900 font-medium truncate">{{ song.title || song.name.replace(/\.[^/.]+$/, "") }}</span>
             </div>
           </td>
-          
           <td class="py-3 pr-4 truncate text-gray-700">{{ song.artist }}</td>
           <td class="py-3 pr-4 truncate text-gray-500 text-xs italic">{{ song.album }}</td>
           <td class="py-3 pr-4 text-right font-mono text-xs text-gray-500">
@@ -236,11 +245,3 @@ onUnmounted(() => {
     <div v-if="songs.length === 0" class="py-20 text-center select-none text-gray-500">列表为空</div>
   </div>
 </template>
-
-<style scoped>
-.sort-line {
-  height: 2px;
-  background: radial-gradient(ellipse at center, rgba(236,65,65,0.7) 0%, rgba(236,65,65,0) 80%);
-  box-shadow: 0 1px 2px rgba(236,65,65,0.2);
-}
-</style>
