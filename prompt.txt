@@ -1,0 +1,87 @@
+Deep Critique & Refactoring Roadmap
+Based on the logic summary you provided, I can pinpoint exactly why you are still experiencing scroll lag and the annoying "pop-in" effect (where images flicker from empty to visible).
+
+While you have implemented some optimizations (thumbnails, virtual scrolling), your core architectural design is "Reactive" instead of "Proactive."
+
+Here is the breakdown of the current issues and how to fix them.
+
+Part 1: Deep Critique (Why is it lagging?)
+1. Critical Bottleneck: Wrong Timing for Thumbnail Generation (The "On-Demand" Trap)
+Current State: get_song_cover_thumbnail is called only when the Vue component renders a row (i.e., when the user scrolls to it).
+
+The Problem: When a user scrolls quickly, Vue triggers dozens of invoke requests instantly. For any song without a cache (or if the OS cleared the temp folder), your Rust backend must perform heavy operations within a single UI frame (16ms): Open MP3 -> Parse ID3 -> Decode Image -> Resize -> Write to Disk.
+
+Consequence: This causes massive disk I/O and CPU contention. The user sees a blank space, and then the image "pops" in late. This is the definition of the "from nothing to something" bad experience.
+
+2. Communication Overhead: The IPC Storm
+Current State: The virtual list triggers an invoke call for every new item appearing on screen.
+
+The Problem: Tauri's invoke (bridging JS and Rust) has overhead. While fast individually, firing hundreds of them during a scroll floods the main thread, causing UI frame drops.
+
+3. Caching Risk: Using temp_dir
+Current State: You are saving images to the system's temporary directory.
+
+The Problem: Operating Systems (Windows/macOS) automatically clean up temp directories, and they are often cleared on reboot. This means your users will constantly face "cold starts" where caches must be regenerated, leading to repeated lag.
+
+4. Frontend Security: Missing convertFileSrc
+Current State: SongTable.vue assigns raw absolute file paths (e.g., C:\Users\...) directly to <img>.
+
+The Problem: Modern WebViews (Chromium/WKWebView) restrict direct access to local files for security reasons. This often causes image load failures or console errors, further bogging down the JS thread. You must use the asset:// protocol (via convertFileSrc).
+
+Part 2: Refactoring Roadmap (The Solution)
+To achieve a "silky smooth" experience, you must shift your logic from "Generate on Scroll" to "Generate on Import, Read on Scroll."
+
+Step 1: Introduce a Database (SQLite) & Persistence
+You need a local database (like SQLite) to store song metadata and the paths to the cached covers. Do not read MP3 files during scrolling.
+
+Suggested Table Schema:
+
+SQL
+
+CREATE TABLE songs (
+    id INTEGER PRIMARY KEY,
+    path TEXT NOT NULL,          -- Original MP3 path
+    title TEXT,
+    artist TEXT,
+    cover_thumbnail_path TEXT    -- [CRITICAL] Path to the pre-generated thumbnail
+                                 -- (Store in AppData/Cache, NOT Temp)
+);
+Step 2: Implement "Pre-Scan" Logic (The Game Changer)
+When the user imports a folder or when the App starts up (scanning for new files), run a background thread in Rust to:
+
+Scan for MP3 files.
+
+Extract the cover and generate a thumbnail (100x100) immediately.
+
+Save the thumbnail to a Persistent Cache Directory (e.g., AppLocalData, not Temp).
+
+Write the MP3 path and the new JPG path into the database.
+
+Result: When the user finally opens the list, the thumbnails already exist on the disk.
+
+Step 3: Refactor Backend Logic
+Modify get_song_cover_thumbnail or the general song fetcher. It should no longer accept a file path to generate an image.
+
+Instead, when fetching the song list (get_all_songs), Rust should return the cover_thumbnail_path directly from the database.
+
+Goal: Zero file processing during scrolling.
+
+Step 4: Fix Frontend (SongTable.vue)
+The frontend should no longer invoke commands to get covers. It should simply render what it is given.
+
+New Logic:
+
+Vue receives the song list: [{ title: "Song A", cover: "C:/.../cache/hash.jpg", ... }].
+
+Render directly using convertFileSrc:
+
+HTML
+
+<template>
+  <img loading="lazy" :src="convertFileSrc(song.cover)" />
+</template>
+Remove the reactive(Map) cache logic. The browser's native HTTP/Asset cache is more efficient than a manual JS Map.
+
+Based on the above content, redesign the logic for displaying song list covers. Do not place all the code in a single file, as this will make one file too long and difficult to read. If possible, separate the code into different files, as systematic management is highly beneficial!
+
+Finally, all paths mentioned above are just examples. You must combine them with the actual structure of my current project and use appropriate paths.
