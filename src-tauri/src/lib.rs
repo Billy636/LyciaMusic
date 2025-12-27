@@ -1,6 +1,7 @@
 mod database;
 mod music;
 mod player;
+pub mod error;
 
 use database::DbState;
 use music::{

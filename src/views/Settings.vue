@@ -50,8 +50,4 @@ const tabs = [
 </template>
 
 <style scoped>
-.custom-scrollbar::-webkit-scrollbar { width: 4px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(229, 231, 235, 0.5); border-radius: 20px; }
-.custom-scrollbar:hover::-webkit-scrollbar-thumb { background-color: rgba(209, 213, 219, 0.8); }
 </style>

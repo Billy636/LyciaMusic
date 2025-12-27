@@ -1,4 +1,5 @@
 use crate::database::DbState;
+use crate::error::CommandError;
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::ItemKey;
@@ -343,10 +344,12 @@ pub async fn get_song_lyrics(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn batch_move_music_files(paths: Vec<String>, target_folder: String) -> Result<u32, String> { 
+pub fn batch_move_music_files(paths: Vec<String>, target_folder: String) -> Result<u32, CommandError> { 
     let mut success_count = 0; 
     let target = Path::new(&target_folder); 
-    if !target.exists() || !target.is_dir() { return Err("目标文件夹不存在".to_string()); } 
+    if !target.exists() || !target.is_dir() { 
+        return Err(CommandError::new("TARGET_NOT_FOUND", "目标文件夹不存在")); 
+    } 
     for path_str in paths { 
         let src = Path::new(&path_str); 
         if let Some(file_name) = src.file_name() { 

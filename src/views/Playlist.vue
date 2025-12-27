@@ -18,7 +18,7 @@ const handleClear = () => {
     <transition name="slide-right">
       <div 
         v-if="showPlaylist"
-        class="fixed bottom-24 right-0 w-[340px] max-h-[70vh] bg-white/90 backdrop-blur-2xl rounded-l-2xl rounded-r-none shadow-[0_8px_40px_rgba(0,0,0,0.15)] border border-white/40 z-[100] flex flex-col overflow-hidden font-sans select-none"
+        class="fixed bottom-24 right-0 w-[340px] max-h-[70vh] bg-white/80 backdrop-blur-2xl rounded-l-2xl rounded-r-none shadow-[0_8px_40px_rgba(0,0,0,0.15)] border border-white/40 z-[100] flex flex-col overflow-hidden font-sans select-none"
         @click.stop
       >
         <!-- Header -->
@@ -87,38 +87,4 @@ const handleClear = () => {
 </template>
 
 <style scoped>
-.slide-right-enter-active,
-.slide-right-leave-active {
-  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.slide-right-enter-from,
-.slide-right-leave-to {
-  transform: translateX(110%);
-  opacity: 0;
-}
-
-@keyframes music-bar {
-  0%, 100% { height: 30%; }
-  50% { height: 100%; }
-}
-
-.animate-music-bar-1 { animation: music-bar 0.6s ease-in-out infinite alternate; }
-.animate-music-bar-2 { animation: music-bar 0.6s ease-in-out infinite alternate 0.2s; }
-.animate-music-bar-3 { animation: music-bar 0.6s ease-in-out infinite alternate 0.4s; }
-
-/* Scrollbar */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(0, 0, 0, 0.1);
-  border-radius: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(0, 0, 0, 0.2);
-}
 </style>

@@ -67,7 +67,19 @@ export function usePlayer() {
       if (State.favTab.value === 'albums') return State.favDetailFilter.value?.type === 'album' ? favoriteSongList.value.filter(s => s.album === State.favDetailFilter.value!.name) : [];
       return favoriteSongList.value;
     }
-    if (State.currentViewMode.value === 'playlist') { const pl = State.playlists.value.find(p=>p.id===State.filterCondition.value); return pl ? State.songList.value.filter(s=>pl.songPaths.includes(s.path)) : []; }
+    if (State.currentViewMode.value === 'playlist') { 
+      const pl = State.playlists.value.find(p => p.id === State.filterCondition.value); 
+      if (!pl) return [];
+      
+      // 🟢 优化：使用 Map 建立索引，O(N) 复杂度
+      const songMap = new Map(State.songList.value.map(s => [s.path, s]));
+      
+      // 🟢 关键：按照 pl.songPaths 的顺序映射出 Song 对象
+      // filter(Boolean) 用于过滤掉可能已经被删除的歌曲
+      return pl.songPaths
+        .map(path => songMap.get(path))
+        .filter((s): s is State.Song => !!s);
+    }
     return State.songList.value.filter(s => (s.artist||'Unknown') === State.filterCondition.value || (s.album||'Unknown') === State.filterCondition.value || (s.genre||'Unknown') === State.filterCondition.value || ((s.year?.substring(0,4))||'Unknown') === State.filterCondition.value);
   });
 

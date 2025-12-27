@@ -217,16 +217,16 @@ const handlePlayAll = () => { if (displaySongList.value.length > 0) playSong(dis
         </div>
 
         <div class="flex items-center gap-3" v-if="!favDetailFilter || (favDetailFilter && (favTab==='artists'||favTab==='albums'))">
-          <button @click="handlePlayAll" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-1.5 rounded-full text-sm transition flex items-center gap-1 active:scale-95 border border-gray-200">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg> 播放全部
+          <button @click="handlePlayAll" class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 px-5 py-2 rounded-full text-sm font-medium transition flex items-center gap-2 active:scale-95 shadow-sm hover:border-gray-200">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg> 播放全部
           </button>
           
           <div class="relative">
-             <button @click.stop="handleHeaderMenuClick" class="header-menu-trigger bg-gray-100 hover:bg-gray-200 text-gray-600 w-9 h-9 flex items-center justify-center rounded-full transition border border-gray-200 active:scale-95">
+             <button @click.stop="handleHeaderMenuClick" class="header-menu-trigger bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 w-9 h-9 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200">
                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" /></svg>
              </button>
              
-             <div v-if="showHeaderMenu" id="header-action-menu" class="absolute right-0 top-full mt-2 w-52 bg-white rounded-lg shadow-xl border border-gray-100 py-1 z-20 animate-in fade-in zoom-in-95 duration-100 origin-top-right">
+             <div v-if="showHeaderMenu" id="header-action-menu" class="absolute right-0 top-full mt-2 w-52 bg-white/80 backdrop-blur-2xl rounded-lg shadow-xl border border-gray-100/50 py-1 z-20 animate-in fade-in zoom-in-95 duration-100 origin-top-right">
                <div v-if="isFolderMode" @click="addFoldersFromStructure" class="px-4 py-2 hover:bg-gray-50 cursor-pointer text-sm text-gray-700 flex items-center">
                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                  自动添加
