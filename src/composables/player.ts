@@ -76,7 +76,6 @@ export function usePlayer() {
     if (newList.length > 0) { try { const cover = await invoke<string>('get_song_cover', { path: newList[0].path }); State.playlistCover.value = cover; } catch { State.playlistCover.value = ''; } } else { State.playlistCover.value = ''; }
   }, { immediate: true });
 
-  // ... (addFoldersFromStructure, getSongsInFolder, createPlaylist, moveFilesToFolder 保持不变) ...
   async function addFoldersFromStructure() {
     try {
       const selectedPath = await open({ directory: true, multiple: false, title: '选择要扫描的根目录' });
@@ -97,31 +96,36 @@ export function usePlayer() {
   }
 
   function getSongsInFolder(folderPath: string) { return State.songList.value.filter(s => s.path.startsWith(folderPath)); }
-  function createPlaylist(n: string, initialSongs: string[] = []) { if(n.trim()) { State.playlists.value.push({ id: Date.now().toString() + Math.random().toString().slice(2), name: n, songPaths: [...initialSongs] }); } }
+  
+  // 🟢 重点：创建歌单时，记录当前日期
+  function createPlaylist(n: string, initialSongs: string[] = []) { 
+    if(n.trim()) { 
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}-${(now.getMonth()+1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+      
+      State.playlists.value.push({ 
+        id: Date.now().toString() + Math.random().toString().slice(2), 
+        name: n, 
+        songPaths: [...initialSongs],
+        createdAt: dateStr // 新增字段
+      } );
+    } 
+  }
   
   async function moveFilesToFolder(paths: string[], targetFolder: string) { try { const count = await invoke<number>('batch_move_music_files', { paths, targetFolder }); const sep = targetFolder.includes('\\') ? '\\' : '/'; const basePath = targetFolder.endsWith(sep) ? targetFolder : targetFolder + sep; paths.forEach(oldPath => { const songToUpdate = State.songList.value.find(s => s.path === oldPath); if (songToUpdate) { const fileName = oldPath.split(/[/\\]/).pop(); if (fileName) { const newPath = basePath + fileName; songToUpdate.path = newPath; } } }); return count; } catch (e) { throw e; } }
 
-  // 🟢 新增：刷新指定文件夹
   async function refreshFolder(folderPath: string) {
     try {
-      // 1. 重新扫描该文件夹
       const newSongs = await invoke<State.Song[]>('scan_music_folder', { folderPath });
-      
-      // 2. 在现有列表中，移除属于该文件夹的旧数据
-      // 注意：这里假设 folderPath 是根路径。我们保留所有 不以 该路径开头 的歌曲
       const otherSongs = State.songList.value.filter(s => !s.path.startsWith(folderPath));
-      
-      // 3. 将新扫描的歌曲与保留的歌曲合并
       State.songList.value = [...otherSongs, ...newSongs];
-      
-      // console.log(`已刷新文件夹: ${folderPath}, 找到 ${newSongs.length} 首歌曲`);
     } catch (e) {
       console.error("刷新失败:", e);
-      throw e; // 抛出错误供 UI 处理
+      throw e; 
     }
   }
 
-  // ... (其他原有函数保持不变) ...
+  // ... (其他函数保持不变) ...
   function deletePlaylist(id: string) { State.playlists.value = State.playlists.value.filter(p=>p.id!==id); if(State.currentViewMode.value==='playlist' && State.filterCondition.value===id) switchViewToAll(); }
   function addToPlaylist(pid:string, path:string) { const pl=State.playlists.value.find(p=>p.id===pid); if(pl && !pl.songPaths.includes(path)) pl.songPaths.push(path); }
   function removeFromPlaylist(pid:string, path:string) { const pl=State.playlists.value.find(p=>p.id===pid); if(pl) pl.songPaths=pl.songPaths.filter(p=>p!==path); }
@@ -204,7 +208,6 @@ export function usePlayer() {
   function togglePlayerDetail() { State.showPlayerDetail.value = !State.showPlayerDetail.value; }
   function openAddToPlaylistDialog(songPath: string) { State.playlistAddTargetSongs.value = [songPath]; State.showAddToPlaylistModal.value = true; }
 
-  // 🟢 恢复：init 函数 (包含了播放记忆逻辑)
   function init() {
     watch(State.volume, (v) => localStorage.setItem('player_volume', v.toString()));
     watch(State.playMode, (v) => localStorage.setItem('player_mode', v.toString()));
@@ -215,7 +218,6 @@ export function usePlayer() {
     watch(State.settings, (v) => localStorage.setItem('player_settings', JSON.stringify(v)), { deep: true });
     watch(State.recentSongs, (v) => localStorage.setItem('player_history', JSON.stringify(v)), { deep: true });
 
-    // 1. 自动保存当前歌曲
     watch(State.currentSong, (newSong) => {
       if (newSong) {
         localStorage.setItem('player_last_song', JSON.stringify(newSong));
@@ -224,7 +226,6 @@ export function usePlayer() {
       }
     }, { deep: true });
 
-    // 2. 暂停时保存进度
     watch(State.isPlaying, (playing) => {
       if (!playing) {
         localStorage.setItem('player_last_time', State.currentTime.value.toString());
@@ -240,7 +241,6 @@ export function usePlayer() {
       const sSettings = localStorage.getItem('player_settings'); if (sSettings) try { Object.assign(State.settings.value, JSON.parse(sSettings)); } catch(e) {}
       const sHistory = localStorage.getItem('player_history'); if (sHistory) try { State.recentSongs.value = JSON.parse(sHistory); } catch(e) {}
 
-      // 3. 恢复上次播放的歌曲
       const lastSong = localStorage.getItem('player_last_song');
       if (lastSong) {
         try {
@@ -253,7 +253,6 @@ export function usePlayer() {
         } catch (e) {}
       }
 
-      // 4. 恢复上次播放进度
       const lastTime = localStorage.getItem('player_last_time');
       if (lastTime) {
         State.currentTime.value = parseFloat(lastTime);
@@ -277,6 +276,6 @@ export function usePlayer() {
     stepSeek, toggleAlwaysOnTop, togglePlayerDetail, seekTo, openAddToPlaylistDialog, playAt,
     addFoldersFromStructure, getSongsInFolder,
     moveFilesToFolder,
-    refreshFolder // 🟢 导出这个新函数
+    refreshFolder
   };
 }

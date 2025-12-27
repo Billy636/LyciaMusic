@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, } from 'vue';
 import { usePlayer, dragSession } from '../../composables/player';
 import { useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
-// 1. 引入资源转换工具
 import { convertFileSrc } from '@tauri-apps/api/core';
 
 const { 
   playlists, 
+  songList, // 🟢 必须引入全局 songList，因为顺序是由它决定的
   switchViewToAll, 
   switchToFolderView, 
   switchToRecent, 
@@ -21,30 +21,99 @@ const {
 const router = useRouter();
 
 const isPlaylistOpen = ref(true);
-const playlistCoverCache = ref<Map<string, string>>(new Map());
 
-// 🟢 样式调整：hover 改为半透明白/黑，适应磨砂背景
+// 缓存 Map
+// playlistCoverCache: 存储最终用于显示的图片 URL (asset://...)
+// playlistRealFirstSongMap: 存储每个歌单目前计算出的“第一首歌”的路径，用于比对变化
+const playlistCoverCache = ref<Map<string, string>>(new Map());
+const playlistRealFirstSongMap = new Map<string, string>();
+
+// 样式定义
 const baseNavClasses = "px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-all duration-200 text-sm font-medium";
 const activeNavClasses = "bg-black/10 text-black font-semibold shadow-sm"; 
 const inactiveNavClasses = "text-gray-600 hover:bg-black/5 hover:text-gray-900";
 
-const loadPlaylistCover = async (playlistId: string, firstSongPath: string) => {
-  if (!firstSongPath || playlistCoverCache.value.has(playlistId)) return;
+/**
+ * 🟢 核心算法：计算所有歌单的封面
+ * 逻辑：歌单的显示顺序是由全局 songList 决定的。
+ * 所以我们不能直接取 playlist.songPaths[0]，而是要看 songList 中哪首歌最先出现且属于该歌单。
+ */
+const calculatePlaylistCovers = async () => {
+  // 1. 预处理：构建 "歌曲路径 -> 包含该歌曲的歌单ID列表" 的反向索引
+  // 这避免了在循环中进行 O(N*M) 的嵌套查找，极大提升性能
+  const songToPlaylistsMap = new Map<string, Set<string>>();
+  
+  playlists.value.forEach(pl => {
+    pl.songPaths.forEach(path => {
+      if (!songToPlaylistsMap.has(path)) {
+        songToPlaylistsMap.set(path, new Set());
+      }
+      songToPlaylistsMap.get(path)!.add(pl.id);
+    });
+  });
+
+  // 用于记录哪些歌单已经找到“第一首歌”了，找到就不用再找了
+  const resolvedPlaylists = new Set<string>();
+  const totalPlaylists = playlists.value.length;
+
+  // 2. 扫描全局 SongList (顺序就是现在的拖拽后顺序)
+  for (const song of songList.value) {
+    if (resolvedPlaylists.size === totalPlaylists) break; // 所有歌单都搞定了，提前结束
+
+    const relatedPlaylistIds = songToPlaylistsMap.get(song.path);
+    if (relatedPlaylistIds) {
+      for (const pid of relatedPlaylistIds) {
+        if (!resolvedPlaylists.has(pid)) {
+          // 🎉 找到了歌单 pid 在当前排序下的第一首歌！
+          resolvedPlaylists.add(pid);
+          updateCoverIfChanged(pid, song.path);
+        }
+      }
+    }
+  }
+
+  // 3. 处理空歌单 (即全局列表中找不到任何属于该歌单的歌)
+  playlists.value.forEach(pl => {
+    if (!resolvedPlaylists.has(pl.id)) {
+      // 歌单被清空了，移除封面
+      if (playlistCoverCache.value.has(pl.id)) {
+        playlistCoverCache.value.delete(pl.id);
+        playlistRealFirstSongMap.delete(pl.id);
+      }
+    }
+  });
+};
+
+// 🟢 加载封面图片 (仅当路径变化时触发)
+const updateCoverIfChanged = async (playlistId: string, firstSongPath: string) => {
+  // 如果这首歌已经是当前记录的封面歌曲，直接跳过 (防抖/省资源)
+  if (playlistRealFirstSongMap.get(playlistId) === firstSongPath && playlistCoverCache.value.has(playlistId)) {
+    return;
+  }
+
+  // 更新记录
+  playlistRealFirstSongMap.set(playlistId, firstSongPath);
+
   try {
-    // 2. 这里获取到的是 Rust 返回的绝对路径 (例如 C:\Users\...)
+    // 调用后端生成/获取缩略图
     const filePath = await invoke<string>('get_song_cover_thumbnail', { path: firstSongPath });
     
-    // 3. 必须转换成 asset:// 协议链接，浏览器才能加载
     if (filePath && filePath.length > 0) { 
       const assetUrl = convertFileSrc(filePath);
       playlistCoverCache.value.set(playlistId, assetUrl); 
+    } else {
+      // 没封面
+      playlistCoverCache.value.delete(playlistId);
     }
-  } catch (e) {}
+  } catch (e) {
+    playlistCoverCache.value.delete(playlistId);
+  }
 };
 
-watch(playlists, (newPlaylists) => {
-  newPlaylists.forEach(pl => { if (pl.songPaths.length > 0) { loadPlaylistCover(pl.id, pl.songPaths[0]); } });
-}, { immediate: true, deep: true });
+// 🟢 深度监听：无论是全局列表重排，还是歌单增删改，都重新计算
+watch([songList, playlists], () => {
+  calculatePlaylistCovers();
+}, { deep: true, immediate: true });
 
 const handleCreatePlaylist = () => { const name = window.prompt("请输入新歌单的名称："); if (name) createPlaylist(name); };
 const handleDeletePlaylist = (id: string, name: string) => { if (confirm(`确定要删除歌单 "${name}" 吗？此操作不可恢复。`)) deletePlaylist(id); };

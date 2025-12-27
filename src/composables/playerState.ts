@@ -2,7 +2,7 @@ import { ref, reactive } from 'vue';
 
 export interface Song {
   name: string;
-  title?: string; // 🟢 加回 title (可选，因为可能为空)
+  title?: string; 
   path: string;
   artist: string;
   album: string;
@@ -13,9 +13,15 @@ export interface Song {
 }
 
 export interface HistoryItem { song: Song; playedAt: number; }
-export interface Playlist { id: string; name: string; songPaths: string[]; }
 
-// 🟢 保留了之前加的主题设置
+// 🟢 修复：添加 createdAt 字段
+export interface Playlist { 
+  id: string; 
+  name: string; 
+  songPaths: string[]; 
+  createdAt?: string; 
+}
+
 export interface ThemeSettings {
   mode: 'light' | 'dark' | 'custom';
   enableDynamicBg: boolean;
@@ -28,7 +34,7 @@ export interface AppSettings {
   organizeRoot: string; 
   enableAutoOrganize: boolean; 
   organizeRule: string;
-  theme: ThemeSettings; // 🟢
+  theme: ThemeSettings;
 }
 
 // --- 全局播放状态 ---
@@ -68,7 +74,6 @@ export const favoritePaths = ref<string[]>([]);
 export const playlists = ref<Playlist[]>([]);
 export const recentSongs = ref<HistoryItem[]>([]);
 
-// 🟢 包含主题默认值的设置
 export const settings = ref<AppSettings>({ 
   organizeRoot: 'D:\\Music', 
   enableAutoOrganize: true, 
