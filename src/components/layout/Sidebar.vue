@@ -5,9 +5,12 @@ import { useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
 
+import ModernModal from '../common/ModernModal.vue';
+import ModernInputModal from '../common/ModernInputModal.vue';
+
 const { 
   playlists, 
-  songList, // 🟢 必须引入全局 songList，因为顺序是由它决定的
+  songList, 
   switchViewToAll, 
   switchToFolderView, 
   switchToRecent, 
@@ -21,6 +24,33 @@ const {
 const router = useRouter();
 
 const isPlaylistOpen = ref(true);
+
+// --- Create Playlist Modal State ---
+const showCreateModal = ref(false);
+const handleCreatePlaylist = () => {
+  showCreateModal.value = true;
+};
+const confirmCreatePlaylist = (name: string) => {
+  if (name) createPlaylist(name);
+};
+// ---------------------------------
+
+// --- Delete Modal State ---
+const showDeleteModal = ref(false);
+const playlistToDelete = ref<{id: string, name: string} | null>(null);
+
+const handleDeletePlaylist = (id: string, name: string) => {
+  playlistToDelete.value = { id, name };
+  showDeleteModal.value = true;
+};
+
+const confirmDeletePlaylist = () => {
+  if (playlistToDelete.value) {
+    deletePlaylist(playlistToDelete.value.id);
+    playlistToDelete.value = null;
+  }
+};
+// ------------------------
 
 // 缓存 Map
 // playlistCoverCache: 存储最终用于显示的图片 URL (asset://...)
@@ -86,8 +116,6 @@ watch([songList, playlists], () => {
   calculatePlaylistCovers();
 }, { deep: true, immediate: true });
 
-const handleCreatePlaylist = () => { const name = window.prompt("请输入新歌单的名称："); if (name) createPlaylist(name); };
-const handleDeletePlaylist = (id: string, name: string) => { if (confirm(`确定要删除歌单 "${name}" 吗？此操作不可恢复。`)) deletePlaylist(id); };
 const handlePlaylistClick = (id: string) => { viewPlaylist(id); router.push('/'); };
 </script>
 
@@ -165,6 +193,23 @@ const handlePlaylistClick = (id: string) => { viewPlaylist(id); router.push('/')
           </ul>
       </div>
     </nav>
+
+    <ModernModal
+      v-model:visible="showDeleteModal"
+      title="删除歌单"
+      :content="playlistToDelete ? `确定要删除歌单 '${playlistToDelete.name}' 吗？此操作不可恢复。` : ''"
+      type="danger"
+      confirm-text="删除"
+      @confirm="confirmDeletePlaylist"
+    />
+    
+    <ModernInputModal
+      v-model:visible="showCreateModal"
+      title="新建歌单"
+      placeholder="请输入歌单名称"
+      confirm-text="创建"
+      @confirm="confirmCreatePlaylist"
+    />
   </aside>
 </template>
 
