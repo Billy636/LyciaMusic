@@ -1,41 +1,6 @@
 import { ref, reactive } from 'vue';
-
-export interface Song {
-  name: string;
-  title?: string; 
-  path: string;
-  artist: string;
-  album: string;
-  duration: number;
-  genre?: string;
-  year?: string;
-  cover?: string;
-}
-
-export interface HistoryItem { song: Song; playedAt: number; }
-
-// 🟢 修复：添加 createdAt 字段
-export interface Playlist { 
-  id: string; 
-  name: string; 
-  songPaths: string[]; 
-  createdAt?: string; 
-}
-
-export interface ThemeSettings {
-  mode: 'light' | 'dark' | 'custom';
-  enableDynamicBg: boolean;
-  customBgPath: string;
-  opacity: number;
-  blur: number;
-}
-
-export interface AppSettings { 
-  organizeRoot: string; 
-  enableAutoOrganize: boolean; 
-  organizeRule: string;
-  theme: ThemeSettings;
-}
+import { Song, Playlist, HistoryItem, AppSettings } from '../types';
+export type { Song, Playlist, HistoryItem, AppSettings };
 
 // --- 全局播放状态 ---
 export const isPlaying = ref(false);

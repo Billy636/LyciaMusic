@@ -35,53 +35,24 @@ const inactiveNavClasses = "text-gray-600 hover:bg-black/5 hover:text-gray-900";
 
 /**
  * 🟢 核心算法：计算所有歌单的封面
- * 逻辑：歌单的显示顺序是由全局 songList 决定的。
- * 所以我们不能直接取 playlist.songPaths[0]，而是要看 songList 中哪首歌最先出现且属于该歌单。
+ * 逻辑：直接使用歌单 internal order 的第一首歌作为封面。
+ * 这保证了歌单封面只受歌单自身排序影响，不受全局 songList 排序影响。
  */
 const calculatePlaylistCovers = async () => {
-  // 1. 预处理：构建 "歌曲路径 -> 包含该歌曲的歌单ID列表" 的反向索引
-  // 这避免了在循环中进行 O(N*M) 的嵌套查找，极大提升性能
-  const songToPlaylistsMap = new Map<string, Set<string>>();
-  
-  playlists.value.forEach(pl => {
-    pl.songPaths.forEach(path => {
-      if (!songToPlaylistsMap.has(path)) {
-        songToPlaylistsMap.set(path, new Set());
-      }
-      songToPlaylistsMap.get(path)!.add(pl.id);
-    });
-  });
-
-  // 用于记录哪些歌单已经找到“第一首歌”了，找到就不用再找了
-  const resolvedPlaylists = new Set<string>();
-  const totalPlaylists = playlists.value.length;
-
-  // 2. 扫描全局 SongList (顺序就是现在的拖拽后顺序)
-  for (const song of songList.value) {
-    if (resolvedPlaylists.size === totalPlaylists) break; // 所有歌单都搞定了，提前结束
-
-    const relatedPlaylistIds = songToPlaylistsMap.get(song.path);
-    if (relatedPlaylistIds) {
-      for (const pid of relatedPlaylistIds) {
-        if (!resolvedPlaylists.has(pid)) {
-          // 🎉 找到了歌单 pid 在当前排序下的第一首歌！
-          resolvedPlaylists.add(pid);
-          updateCoverIfChanged(pid, song.path);
-        }
-      }
-    }
-  }
-
-  // 3. 处理空歌单 (即全局列表中找不到任何属于该歌单的歌)
-  playlists.value.forEach(pl => {
-    if (!resolvedPlaylists.has(pl.id)) {
-      // 歌单被清空了，移除封面
+  // 遍历所有歌单
+  for (const pl of playlists.value) {
+    if (pl.songPaths.length > 0) {
+      // 直接取歌单的第一首歌
+      const firstSongPath = pl.songPaths[0];
+      await updateCoverIfChanged(pl.id, firstSongPath);
+    } else {
+      // 歌单为空，清除封面
       if (playlistCoverCache.value.has(pl.id)) {
         playlistCoverCache.value.delete(pl.id);
         playlistRealFirstSongMap.delete(pl.id);
       }
     }
-  });
+  }
 };
 
 // 🟢 加载封面图片 (仅当路径变化时触发)
@@ -198,8 +169,4 @@ const handlePlaylistClick = (id: string) => { viewPlaylist(id); router.push('/')
 </template>
 
 <style scoped>
-.custom-scrollbar::-webkit-scrollbar { width: 4px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(229, 231, 235, 0.5); border-radius: 20px; }
-.custom-scrollbar:hover::-webkit-scrollbar-thumb { background-color: rgba(209, 213, 219, 0.8); }
 </style>

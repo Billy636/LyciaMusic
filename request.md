@@ -1,0 +1,4 @@
+Fix a small issue: when we delete a playlist we created from the sidebar, clicking the trash icon immediately shows a prompt saying, “Are you sure you want to delete this playlist? This action cannot be undone.” However, the playlist has already been deleted at that point. This logic clearly does not match good user experience. The application should first ask the user for confirmation and only perform the deletion after the user confirms.
+
+Second, the confirmation dialog is too simplistic. Could we design a modern, up-to-date confirmation dialog that matches the overall style of the application—especially considering that many users choose the “follow the album artwork” theme?
+Would it be possible to create a dedicated file specifically for styling these pop-up dialogs? This application still has many dialogs that have not been properly designed and currently look very basic. Or is it only possible to add styles within each corresponding file?

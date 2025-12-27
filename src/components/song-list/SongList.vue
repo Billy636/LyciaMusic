@@ -86,7 +86,10 @@ const confirmBatchMove = async (targetFolder: string, folderName: string) => {
     toastMessage.value = `已成功移动 ${count} 首歌曲到 "${folderName}"`;
     showToast.value = true; setTimeout(() => showToast.value = false, 3000);
     showMoveToFolderModal.value = false; selectedPaths.value.clear();
-  } catch (e) { alert("移动失败: " + e); }
+  } catch (e: any) { 
+    const msg = e.message || e;
+    alert("移动失败: " + msg); 
+  }
 };
 
 const handleAddToPlaylist = (playlistId: string) => {
@@ -171,6 +174,8 @@ const handleTableDragStart = ({ event, song, index }: { event: MouseEvent; song:
       if (!selectedPaths.value.has(song.path)) selectedPaths.value.add(song.path);
       // 准备拖拽数据
       dragSession.songs = displaySongList.value.filter(s => selectedPaths.value.has(s.path));
+      // 锁定当前位置为插槽，防止跳动
+      dragSession.insertIndex = index;
     }
   } 
   // --- 分支 B: 单曲/普通模式 (应用了新的锁定修复) ---
@@ -185,26 +190,41 @@ const handleTableDragStart = ({ event, song, index }: { event: MouseEvent; song:
 };
 
 // 2. MouseMove
-// 请直接替换 SongList.vue 中的 onGlobalMouseMove 函数
 const onGlobalMouseMove = (e: MouseEvent) => {
   if (!isMouseDown) return;
 
-  // 1. 批量模式下的“滑动框选”逻辑 (保持不变)
+  // 1. 批量模式下的“滑动框选”逻辑
   if (isBatchMode.value && isSelectionDragging.value) {
     const container = songTableRef.value?.containerRef;
     if (!container) return;
     
     const rect = container.getBoundingClientRect();
     if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+      // 动态获取 header 高度以修正 offset
+      const header = container.querySelector('thead') as HTMLElement | null;
+      const headerHeight = header ? header.offsetHeight : 0;
+      
       const relativeY = e.clientY - rect.top + container.scrollTop;
-      const currentIndex = Math.floor(relativeY / ROW_HEIGHT);
+      // 修正 currentIndex 计算，减去 headerHeight
+      let currentIndex = Math.floor((relativeY - headerHeight) / ROW_HEIGHT);
+      
+      // 边界处理
+      currentIndex = Math.max(0, Math.min(displaySongList.value.length - 1, currentIndex));
 
-      if (currentIndex >= 0 && currentIndex < displaySongList.value.length) {
-        const song = displaySongList.value[currentIndex];
-        if (dragSelectAction.value === 'select') {
-          selectedPaths.value.add(song.path);
-        } else if (dragSelectAction.value === 'deselect') {
-          selectedPaths.value.delete(song.path);
+      if (currentIndex !== lastSelectedIndex.value) {
+        // 范围选择逻辑：防止快速滑动导致跳过某些行
+        const start = Math.min(lastSelectedIndex.value, currentIndex);
+        const end = Math.max(lastSelectedIndex.value, currentIndex);
+        
+        for (let i = start; i <= end; i++) {
+          const song = displaySongList.value[i];
+          if (song) {
+            if (dragSelectAction.value === 'select') {
+              selectedPaths.value.add(song.path);
+            } else if (dragSelectAction.value === 'deselect') {
+              selectedPaths.value.delete(song.path);
+            }
+          }
         }
         lastSelectedIndex.value = currentIndex;
       }
@@ -323,41 +343,78 @@ const onGlobalMouseUp = () => {
       // 🔥 Drop 逻辑：精确修复
       const movingSongs = dragSession.songs;
       if (movingSongs.length > 0) {
-        const sourcePath = movingSongs[0].path;
-        const fullList = [...songList.value];
-        const sourceRealIndex = fullList.findIndex(s => s.path === sourcePath);
         
-        // 目标位置的歌曲
-        const targetVisualSong = displaySongList.value[dragSession.insertIndex];
-        
-        if (sourceRealIndex !== -1 && targetVisualSong) {
-            // 1. 移除源
-            const [item] = fullList.splice(sourceRealIndex, 1);
+        // 🟢 分支处理：如果是歌单视图，只调整歌单内的 songPaths 顺序
+        if (currentViewMode.value === 'playlist') {
+           const plId = usePlayer().filterCondition.value; // 使用 usePlayer() 获取当前 filterCondition
+           const pl = usePlayer().playlists.value.find(p => p.id === plId);
+           
+           if (pl) {
+             const sourcePath = movingSongs[0].path;
+             const sourceIndex = pl.songPaths.indexOf(sourcePath);
+             
+             // 目标位置的歌曲 (在视觉列表中的位置)
+             const targetVisualSong = displaySongList.value[dragSession.insertIndex];
+             
+             if (sourceIndex !== -1) {
+                // 1. 移除
+                pl.songPaths.splice(sourceIndex, 1);
+                
+                // 2. 确定新位置
+                if (targetVisualSong) {
+                   // 找到目标歌曲在 songPaths 中的新索引 (因为已经移除了 source，索引可能变化)
+                   let targetIndex = pl.songPaths.indexOf(targetVisualSong.path);
+                   
+                   // 插入逻辑同理
+                   if (targetIndex >= sourceIndex) {
+                       // 目标在原位置之后（或就是原位置），由于已经移除了 source，
+                       // 实际上 targetIndex 已经指向了“原目标的前一个”或者“原目标自己位移后”的位置
+                       // 但这里 indexof 返回的是移除后的数组中的位置
+                       // 逻辑：向下拖拽，视觉上要插在 target 后面
+                       pl.songPaths.splice(targetIndex + 1, 0, sourcePath);
+                   } else {
+                       // 向上拖拽，插在 target 前面
+                       pl.songPaths.splice(targetIndex, 0, sourcePath);
+                   }
+                } else {
+                   // 拖到底部
+                   pl.songPaths.push(sourcePath);
+                }
+             }
+           }
+        } 
+        // 🟢 默认逻辑：调整全局 songList (Folder视图/All视图)
+        else {
+            const sourcePath = movingSongs[0].path;
+            const fullList = [...songList.value];
+            const sourceRealIndex = fullList.findIndex(s => s.path === sourcePath);
             
-            // 2. 找目标（在移除后的列表中）
-            let newTargetIndex = fullList.findIndex(s => s.path === targetVisualSong.path);
+            // 目标位置的歌曲
+            const targetVisualSong = displaySongList.value[dragSession.insertIndex];
             
-            // 3. 插入逻辑
-            if (newTargetIndex >= sourceRealIndex) {
-                // 👇 向下拖拽：
-                // 视觉上，目标被挤到了上方，空白在目标下方。
-                // 这意味着我们占据了目标原来的位置（物理上在它后面）
-                // 所以插在它后面 (+1)
-                fullList.splice(newTargetIndex + 1, 0, item);
-            } else {
-                // 👆 向上拖拽：
-                // 视觉上，目标被挤到了下方，空白在目标上方。
-                // 这意味着我们占据了目标原来的位置（物理上在它前面）
-                // 所以插在它前面 (+0)
-                fullList.splice(newTargetIndex, 0, item);
+            if (sourceRealIndex !== -1 && targetVisualSong) {
+                // 1. 移除源
+                const [item] = fullList.splice(sourceRealIndex, 1);
+                
+                // 2. 找目标（在移除后的列表中）
+                let newTargetIndex = fullList.findIndex(s => s.path === targetVisualSong.path);
+                
+                // 3. 插入逻辑
+                if (newTargetIndex >= sourceRealIndex) {
+                    // 👇 向下拖拽
+                    fullList.splice(newTargetIndex + 1, 0, item);
+                } else {
+                    // 👆 向上拖拽
+                    fullList.splice(newTargetIndex, 0, item);
+                }
+                
+                songList.value = fullList;
+            } else if (sourceRealIndex !== -1) {
+                // 拖到底部空白区
+                const [item] = fullList.splice(sourceRealIndex, 1);
+                fullList.push(item);
+                songList.value = fullList;
             }
-            
-            songList.value = fullList;
-        } else if (sourceRealIndex !== -1) {
-            // 拖到底部空白区
-            const [item] = fullList.splice(sourceRealIndex, 1);
-            fullList.push(item);
-            songList.value = fullList;
         }
       }
     }
@@ -439,13 +496,4 @@ watch(() => route.path, (path) => {
 </template>
 
 <style scoped>
-:deep(.custom-scrollbar)::-webkit-scrollbar {
-  display: none;
-  width: 0 !important;
-  height: 0 !important;
-}
-:deep(.custom-scrollbar) {
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE/Edge */
-}
 </style>

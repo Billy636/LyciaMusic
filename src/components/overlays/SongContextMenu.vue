@@ -64,7 +64,7 @@ const handleAction = (action: string) => {
     <div 
       v-if="visible" 
       ref="menuRef"
-      class="fixed z-[9999] bg-white rounded-lg shadow-xl border border-gray-100 py-1.5 text-sm text-gray-700 min-w-[180px] animate-in fade-in zoom-in-95 duration-75 select-none"
+      class="fixed z-[9999] bg-white/80 backdrop-blur-2xl rounded-lg shadow-xl border border-gray-100/50 py-1.5 text-sm text-gray-700 min-w-[180px] animate-in fade-in zoom-in-95 duration-75 select-none"
       :style="{ left: x + 'px', top: y + 'px' }"
       @contextmenu.prevent
     >
