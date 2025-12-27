@@ -1,4 +1,12 @@
-Fix a small issue: when we delete a playlist we created from the sidebar, clicking the trash icon immediately shows a prompt saying, “Are you sure you want to delete this playlist? This action cannot be undone.” However, the playlist has already been deleted at that point. This logic clearly does not match good user experience. The application should first ask the user for confirmation and only perform the deletion after the user confirms.
+In the application’s sidebar, when I click the plus (+) button to create a new playlist, a prompt appears with the text:
+“localhost:1420 says: Please enter the name of the new playlist.”
+The style of this prompt also looks bad. Please create a modern, trend-aligned confirmation dialog that matches the overall style of the application—especially considering that many users choose the “follow the album artwork” theme.
 
-Second, the confirmation dialog is too simplistic. Could we design a modern, up-to-date confirmation dialog that matches the overall style of the application—especially considering that many users choose the “follow the album artwork” theme?
-Would it be possible to create a dedicated file specifically for styling these pop-up dialogs? This application still has many dialogs that have not been properly designed and currently look very basic. Or is it only possible to add styles within each corresponding file?
+Second, there is a small bug in the application:
+When I right-click a song in the song list and choose “Add to Playlist”, a dialog appears allowing me to select an existing playlist or create a new one. The problem is that, in this dialog, the playlists we previously created do not display cover images. Instead, their covers appear as broken image placeholders, which indicates that the cover images are not being loaded correctly. Please fix this issue.
+
+Important notes:
+
+While making these changes, please ensure that none of the existing features stop working.
+
+Do not make any single file excessively long. Use a refactoring-oriented approach so that the codebase remains clean, modular, and easy to manage and read.
