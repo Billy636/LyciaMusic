@@ -441,6 +441,17 @@ onUnmounted(() => {
 const enterFavDetail = (type: 'artist' | 'album', name: string) => { router.push({ query: { type, name } }); };
 const isFavorites = computed(() => route.path === '/favorites');
 
+// 监听 query 参数变化，控制详情页显隐
+watch(() => route.query, (query) => {
+  if (route.path === '/favorites') {
+    if (query.type && query.name) {
+      favDetailFilter.value = { type: query.type as 'artist' | 'album', name: query.name as string };
+    } else {
+      favDetailFilter.value = null;
+    }
+  }
+}, { immediate: true });
+
 watch(() => route.path, (path) => {
   if (path === '/favorites') {
     switchToFavorites();

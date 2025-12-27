@@ -1,9 +1,8 @@
-In the application’s sidebar, when I click the plus (+) button to create a new playlist, a prompt appears with the text:
-“localhost:1420 says: Please enter the name of the new playlist.”
-The style of this prompt also looks bad. Please create a modern, trend-aligned confirmation dialog that matches the overall style of the application—especially considering that many users choose the “follow the album artwork” theme.
+In the previous changes, you successfully made the artist and album covers on my Favorites page display correctly. However, I noticed that the images appear to be compressed. For larger images, users can immediately tell whether they are blurry, so maintaining image clarity is very important. I would like the large circular artist images and the square album images to appear sharper and clearer.
 
-Second, there is a small bug in the application:
-When I right-click a song in the song list and choose “Add to Playlist”, a dialog appears allowing me to select an existing playlist or create a new one. The problem is that, in this dialog, the playlists we previously created do not display cover images. Instead, their covers appear as broken image placeholders, which indicates that the cover images are not being loaded correctly. Please fix this issue.
+Finally, I would like to ask whether this approach will affect performance. Is it related to the number of songs?
+Would having 3,000 songs cause lag? What about 5,000? Or 10,000?
+Of course, a typical user usually has only a few thousand songs, not tens of thousands.
 
 Important notes:
 

@@ -115,7 +115,7 @@ fn generate_hash(path: &Path) -> String {
 fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
     let hash = generate_hash(path);
     let cache_dir = get_cover_cache_dir(app);
-    let cache_path = cache_dir.join(format!("{}_thumb.jpg", hash));
+    let cache_path = cache_dir.join(format!("{}_thumb_300.jpg", hash));
     
     if cache_path.exists() {
         return Some(cache_path.to_string_lossy().into_owned());
@@ -130,7 +130,7 @@ fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
 
             if let Some(pic) = pic_opt {
                 if let Ok(img) = image::load_from_memory(pic.data()) {
-                    let resized = img.resize(100, 100, image::imageops::FilterType::Triangle);
+                    let resized = img.resize(300, 300, image::imageops::FilterType::Triangle);
                     if let Ok(mut file) = fs::File::create(&cache_path) {
                          if resized.write_to(&mut file, ImageFormat::Jpeg).is_ok() {
                              return Some(cache_path.to_string_lossy().into_owned());
