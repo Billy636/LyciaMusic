@@ -8,7 +8,7 @@ import SongListHeader from './SongListHeader.vue';
 import SongListSidebar from './SongListSidebar.vue';
 import AddToPlaylistModal from '../overlays/AddToPlaylistModal.vue';
 import SongContextMenu from '../overlays/SongContextMenu.vue';
-import ConfirmModal from '../overlays/ConfirmModal.vue';
+import ModernModal from '../common/ModernModal.vue';
 import FavoritesGrid from '../common/FavoritesGrid.vue';
 import DragGhost from '../common/DragGhost.vue';
 import MoveToFolderModal from '../overlays/MoveToFolderModal.vue';
@@ -498,7 +498,7 @@ watch(() => route.path, (path) => {
     <AddToPlaylistModal :visible="showAddToPlaylistModal" :selectedCount="isBatchMode ? selectedPaths.size : 1" @close="showAddToPlaylistModal = false" @add="handleAddToPlaylist"/>
     <MoveToFolderModal :visible="showMoveToFolderModal" :selectedCount="selectedPaths.size" @close="showMoveToFolderModal = false" @confirm="confirmBatchMove" />
     <SongContextMenu :visible="showContextMenu" :x="contextMenuX" :y="contextMenuY" :song="contextMenuTargetSong" :is-playlist-view="currentViewMode === 'playlist'" @close="showContextMenu = false" @add-to-playlist="showAddToPlaylistModal = true" />
-    <ConfirmModal :visible="showConfirm" title="my-cloud-music" :content="confirmMessage" @confirm="executeBatchDelete" @cancel="showConfirm = false" />
+    <ModernModal :visible="showConfirm" title="移除歌曲" :content="confirmMessage" type="danger" confirm-text="移除" @confirm="executeBatchDelete" @cancel="showConfirm = false" />
 
     <Teleport to="body">
       <div v-if="showToast" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/70 text-white px-6 py-2 rounded-full text-sm shadow-lg z-[10000] animate-in fade-in duration-200">{{ toastMessage }}</div>
