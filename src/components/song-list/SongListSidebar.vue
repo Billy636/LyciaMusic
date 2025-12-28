@@ -4,7 +4,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core'; // 🟢 1. 引入转换工具
 import FolderContextMenu from '../overlays/FolderContextMenu.vue';
-import ConfirmModal from '../overlays/ConfirmModal.vue'; 
+import ModernModal from '../common/ModernModal.vue'; 
 
 const { 
   currentViewMode, localMusicTab, currentArtistFilter, currentAlbumFilter,
@@ -46,11 +46,12 @@ const menuX = ref(0);
 const menuY = ref(0);
 const targetFolder = ref<{ name: string, path: string } | null>(null);
 
-// --- 🟢 批量选择逻辑 ---
+// 🟢 批量选择逻辑
 const selectedFolderPaths = ref<Set<string>>(new Set());
 const lastSelectedFolderPath = ref<string | null>(null);
 
 const handleFolderClick = (e: MouseEvent, folder: { name: string, path: string }) => {
+  e.stopPropagation(); // 阻止冒泡，防止触发背景点击
   // 总是设为当前过滤条件
   currentFolderFilter.value = folder.path;
 
@@ -88,8 +89,17 @@ const handleFolderClick = (e: MouseEvent, folder: { name: string, path: string }
   }
 };
 
+const handleBackgroundClick = () => {
+  // 点击空白处，重置为单选当前文件夹（如果存在）
+  if (currentFolderFilter.value) {
+    selectedFolderPaths.value.clear();
+    selectedFolderPaths.value.add(currentFolderFilter.value);
+  }
+};
+
 const handleContextMenu = (e: MouseEvent, folder: { name: string, path: string }) => { 
   e.preventDefault(); 
+  e.stopPropagation(); // 防止冒泡
   targetFolder.value = folder; 
   
   // 如果右键点击的项不在选中集合中，则视为单选该项（符合操作系统习惯）
@@ -105,22 +115,40 @@ const handleContextMenu = (e: MouseEvent, folder: { name: string, path: string }
   showMenu.value = true; 
 };
 
+const handleMenuCancel = () => {
+  showMenu.value = false;
+  // 右键菜单取消（点击外部），重置为单选当前文件夹
+  if (currentFolderFilter.value) {
+    selectedFolderPaths.value.clear();
+    selectedFolderPaths.value.add(currentFolderFilter.value);
+  }
+};
+
 const playFolder = () => { if (targetFolder.value) { const s = getSongsInFolder(targetFolder.value.path); if (s.length > 0) { playSong(s[0]); currentFolderFilter.value = targetFolder.value.path; } showMenu.value = false; } };
 const addToQueue = () => { if (targetFolder.value) { getSongsInFolder(targetFolder.value.path).forEach(s => tempQueue.value.push(s)); showMenu.value = false; } };
 const createPlaylistFromFolder = () => { if (targetFolder.value) { const s = getSongsInFolder(targetFolder.value.path); if (s.length > 0) createPlaylist(targetFolder.value.name, s.map(song => song.path)); showMenu.value = false; } };
 const openFolder = () => { if (targetFolder.value) { openInFinder(targetFolder.value.path); showMenu.value = false; } };
 
 // 🟢 批量删除逻辑
+const showDeleteConfirm = ref(false);
+const foldersToDelete = ref<string[]>([]);
+
 const removeFolderItem = () => { 
   if (selectedFolderPaths.value.size > 0) {
-    if (confirm(`确定要移除选中的 ${selectedFolderPaths.value.size} 个文件夹吗？`)) {
-      selectedFolderPaths.value.forEach(path => removeFolder(path));
-      selectedFolderPaths.value.clear();
-    }
+    foldersToDelete.value = Array.from(selectedFolderPaths.value);
+    showDeleteConfirm.value = true;
   } else if (targetFolder.value) { 
-    removeFolder(targetFolder.value.path); 
+    foldersToDelete.value = [targetFolder.value.path];
+    showDeleteConfirm.value = true;
   }
   showMenu.value = false; 
+};
+
+const executeDeleteFolders = () => {
+  foldersToDelete.value.forEach(path => removeFolder(path));
+  selectedFolderPaths.value.clear();
+  foldersToDelete.value = [];
+  showDeleteConfirm.value = false;
 };
 
 const handleRefreshFolder = async () => {
@@ -191,7 +219,7 @@ onUnmounted(() => {
         </li>
     </ul>
 
-    <ul v-if="isFolderMode" class="p-2 space-y-1 transition-all duration-300">
+    <ul v-if="isFolderMode" @click="handleBackgroundClick" class="p-2 space-y-1 transition-all duration-300 min-h-full">
         <li 
           v-for="item in folderList" 
           :key="item.path" 
@@ -217,29 +245,36 @@ onUnmounted(() => {
         <li v-if="folderList.length === 0" class="text-xs text-gray-400 text-center py-4">暂无文件夹，请点击右上角添加</li>
     </ul>
 
-    <Teleport to="body">
-      <FolderContextMenu 
-        :visible="showMenu" 
-        :x="menuX" 
-        :y="menuY" 
-        :folder-path="targetFolder?.path || ''" 
-        :selected-count="selectedFolderPaths.size"
-        @close="showMenu = false" 
-        @play="playFolder" 
-        @add-to-queue="addToQueue" 
-        @create-playlist="createPlaylistFromFolder" 
-        @open-folder="openFolder" 
-        @refresh="handleRefreshFolder" 
-        @remove="removeFolderItem" 
-      />
-    </Teleport>
+    <FolderContextMenu 
+      :visible="showMenu" 
+      :x="menuX" 
+      :y="menuY" 
+      :folder-path="targetFolder?.path || ''" 
+      :selected-count="selectedFolderPaths.size"
+      @close="showMenu = false" 
+      @cancel="handleMenuCancel"
+      @play="playFolder" 
+      @add-to-queue="addToQueue" 
+      @create-playlist="createPlaylistFromFolder" 
+      @open-folder="openFolder" 
+      @refresh="handleRefreshFolder" 
+      @remove="removeFolderItem" 
+    />
 
-    <ConfirmModal 
-      :visible="showMoveConfirm" 
+    <ModernModal 
+      v-model:visible="showMoveConfirm" 
       title="物理移动文件" 
       :content="`确定将这 ${dragPendingFiles.length} 个文件物理移动到文件夹 '${moveTarget?.name}' 吗？`" 
       @confirm="executeMove" 
-      @cancel="showMoveConfirm = false" 
+    />
+
+    <ModernModal 
+      v-model:visible="showDeleteConfirm" 
+      title="移除文件夹" 
+      :content="`确定要从列表中移除选中的 ${foldersToDelete.length} 个文件夹吗？`" 
+      type="danger"
+      confirm-text="移除"
+      @confirm="executeDeleteFolders" 
     />
 
   </aside>

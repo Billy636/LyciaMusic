@@ -4,7 +4,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import ConfirmModal from '../overlays/ConfirmModal.vue';
+import ModernModal from '../common/ModernModal.vue';
 
 defineProps<{
   isBatchMode: boolean
@@ -257,10 +257,11 @@ const handlePlayAll = () => { if (displaySongList.value.length > 0) playSong(dis
         </div>
     </div>
 
-    <ConfirmModal 
+    <ModernModal 
       :visible="showConfirm" 
-      title="my-cloud-music" 
+      title="确认操作" 
       :content="confirmMessage" 
+      type="danger"
       @confirm="handleConfirm" 
       @cancel="showConfirm = false" 
     />
