@@ -42,7 +42,7 @@ const bgImageSrc = computed(() => {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-[-1] overflow-hidden pointer-events-none bg-[#fafafa] transition-colors duration-500">
+  <div class="fixed inset-0 z-[-1] overflow-hidden pointer-events-none bg-[#fafafa] dark:bg-[#121212] transition-colors duration-500">
     
     <transition name="fade">
       <div v-if="activeBackgroundInfo && bgImageSrc" class="absolute inset-0">

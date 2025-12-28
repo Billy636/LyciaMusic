@@ -164,9 +164,9 @@ const getRowStyle = (songIndex: number, songPath: string) => {
     class="flex-1 overflow-y-auto pl-2.5 pr-3 pb-8 custom-scrollbar song-list-scroll-container" 
     @scroll="onScroll"
   >
-    <table class="w-full text-left text-sm text-gray-600 table-fixed relative border-collapse">
-      <thead class="select-none border-b border-black/5 z-10">
-        <tr class="text-gray-500 text-xs">
+    <table class="w-full text-left text-sm text-gray-600 dark:text-gray-400 table-fixed relative border-collapse">
+      <thead class="select-none border-b border-black/5 dark:border-white/5 z-10">
+        <tr class="text-gray-500 dark:text-gray-400 text-xs">
           <th class="py-3 font-normal w-12 text-center">
             <input v-if="isBatchMode" type="checkbox" @change="toggleSelectAll" :checked="selectedPaths.size === songs.length && songs.length > 0" class="rounded text-[#EC4141] focus:ring-[#EC4141] cursor-pointer" />
             <span v-else>#</span>
@@ -186,8 +186,8 @@ const getRowStyle = (songIndex: number, songPath: string) => {
           @mousedown="handleMouseDown($event, song, song.virtualIndex)" 
           @dblclick="!isBatchMode && emit('play', song)"
           @contextmenu.prevent="emit('contextmenu', $event, song)"
-          class="group border-b border-black/5 hover:bg-black/5 select-none cursor-default relative" 
-          :class="{ 'bg-red-500/10': selectedPaths.has(song.path) }"
+          class="group border-b border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5 select-none cursor-default relative" 
+          :class="{ 'bg-red-500/10 dark:bg-red-500/20': selectedPaths.has(song.path) }"
           :style="getRowStyle(song.virtualIndex, song.path)"
         >
           <td class="py-0 h-full w-12 p-0">
@@ -200,12 +200,12 @@ const getRowStyle = (songIndex: number, songPath: string) => {
                     {{ song.virtualIndex + 1 < 10 ? '0' + (song.virtualIndex + 1) : song.virtualIndex + 1 }}
                  </span>
                  <div class="hidden group-hover:flex items-center justify-center w-full h-full">
-                    <span v-if="showDragIcon" class="text-gray-500 active:text-[#EC4141] cursor-grab flex items-center justify-center">
+                    <span v-if="showDragIcon" class="text-gray-500 dark:text-gray-400 active:text-[#EC4141] cursor-grab flex items-center justify-center">
                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 12h16M4 18h16" />
                        </svg>
                     </span>
-                    <span v-else class="text-gray-500 flex items-center justify-center">
+                    <span v-else class="text-gray-500 dark:text-gray-400 flex items-center justify-center">
                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                           <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
                        </svg>
@@ -216,22 +216,22 @@ const getRowStyle = (songIndex: number, songPath: string) => {
           </td>
           <td class="py-3 pr-4 overflow-hidden pl-2">
             <div class="flex items-center h-full">
-              <div class="w-9 h-9 rounded bg-gray-200/50 flex items-center justify-center mr-3 shrink-0 overflow-hidden text-gray-400 relative border border-black/5">
+              <div class="w-9 h-9 rounded bg-gray-200/50 dark:bg-white/5 flex items-center justify-center mr-3 shrink-0 overflow-hidden text-gray-400 relative border border-black/5 dark:border-white/5">
                 <img v-if="coverCache.get(song.path)" :src="coverCache.get(song.path)" class="w-full h-full object-cover transition-opacity duration-300" alt="Cover"/>
                 <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-40 absolute inset-0 m-auto -z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
                 </svg>
               </div>
-              <span class="text-gray-900 font-medium truncate">{{ song.title || song.name.replace(/\.[^/.]+$/, "") }}</span>
+              <span class="text-gray-900 dark:text-gray-100 font-medium truncate">{{ song.title || song.name.replace(/\.[^/.]+$/, "") }}</span>
             </div>
           </td>
-          <td class="py-3 pr-4 truncate text-gray-700">{{ song.artist }}</td>
-          <td class="py-3 pr-4 truncate text-gray-500 text-xs italic">{{ song.album }}</td>
-          <td class="py-3 pr-4 text-right font-mono text-xs text-gray-500">
+          <td class="py-3 pr-4 truncate text-gray-700 dark:text-gray-300">{{ song.artist }}</td>
+          <td class="py-3 pr-4 truncate text-gray-500 dark:text-gray-400 text-xs italic">{{ song.album }}</td>
+          <td class="py-3 pr-4 text-right font-mono text-xs text-gray-500 dark:text-gray-400">
             <div class="flex items-center justify-end gap-3" :class="{'opacity-20 pointer-events-none': dragSession.active}">
               <button v-if="!isBatchMode" @click.stop="toggleFavorite(song)" class="focus:outline-none">
                 <svg v-if="isFavorite(song)" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-[#EC4141]" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd" /></svg>
-                <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 opacity-0 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
               </button>
               <span class="w-10">{{ formatDuration(song.duration) }}</span>
             </div>

@@ -15,10 +15,10 @@ const tabs = [
 </script>
 
 <template>
-  <div class="flex-1 flex flex-col overflow-hidden bg-white/60 backdrop-blur-xl transition-colors duration-500">
+  <div class="flex-1 flex flex-col overflow-hidden transition-colors duration-500">
     
-    <header class="h-20 flex items-end px-8 pb-4 border-b border-gray-200/50 shrink-0 bg-white/40 backdrop-blur-md sticky top-0 z-10">
-      <h1 class="text-3xl font-bold text-gray-800 mr-12 mb-1 drop-shadow-sm">设置</h1>
+    <header class="h-20 flex items-end px-8 pb-4 shrink-0 sticky top-0 z-10">
+      <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-200 mr-12 mb-1 drop-shadow-sm">设置</h1>
       
       <div class="flex gap-8 mb-1.5">
         <button 
@@ -26,7 +26,7 @@ const tabs = [
           :key="tab.id"
           @click="activeTab = tab.id as any"
           class="pb-2 text-base font-medium transition-all relative"
-          :class="activeTab === tab.id ? 'text-[#EC4141] font-bold' : 'text-gray-600 hover:text-gray-900'"
+          :class="activeTab === tab.id ? 'text-[#EC4141] font-bold' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'"
         >
           {{ tab.name }}
           <div 

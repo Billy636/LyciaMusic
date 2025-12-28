@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* 🟢 Force class-based dark mode for Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   font-family: "Inter", system-ui, sans-serif;
   overflow: hidden; /* 防止整个窗口出现滚动条，我们只让中间区域滚动 */
