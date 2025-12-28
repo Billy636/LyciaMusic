@@ -122,7 +122,7 @@ onUnmounted(() => { window.removeEventListener('mousemove', onMouseMove); window
 </script>
 
 <template>
-  <transition name="slide-up">
+  <transition name="expand-up">
     <div v-if="showPlayerDetail" class="fixed inset-0 z-[100] bg-[#fafafa] flex flex-col overflow-hidden font-sans select-none">
       
       <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none">
@@ -277,15 +277,18 @@ onUnmounted(() => { window.removeEventListener('mousemove', onMouseMove); window
 </template>
 
 <style scoped>
-.slide-up-enter-active,
-.slide-up-leave-active {
-  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+.expand-up-enter-active,
+.expand-up-leave-active {
+  transition: all 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* 40px left (approx center of cover), 40px from bottom */
+  transform-origin: 40px calc(100% - 40px);
 }
 
-.slide-up-enter-from,
-.slide-up-leave-to {
-  transform: translate(-100%, 100%);
+.expand-up-enter-from,
+.expand-up-leave-to {
+  transform: scale(0);
   opacity: 0;
+  border-radius: 100%;
 }
 
 /* 歌词容器遮罩：让顶部和底部边缘平滑消失 */
