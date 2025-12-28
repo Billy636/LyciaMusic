@@ -60,8 +60,8 @@ const playlistRealFirstSongMap = new Map<string, string>();
 
 // 样式定义
 const baseNavClasses = "px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-all duration-200 text-sm font-medium";
-const activeNavClasses = "bg-black/10 text-black font-semibold shadow-sm"; 
-const inactiveNavClasses = "text-gray-600 hover:bg-black/5 hover:text-gray-900";
+const activeNavClasses = "bg-black/10 dark:bg-white/10 text-black dark:text-white font-semibold shadow-sm"; 
+const inactiveNavClasses = "text-gray-600 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-gray-100";
 
 /**
  * 🟢 核心算法：计算所有歌单的封面
@@ -120,7 +120,7 @@ const handlePlaylistClick = (id: string) => { viewPlaylist(id); router.push('/')
 </script>
 
 <template>
-  <aside class="w-48 bg-white/40 backdrop-blur-xl flex flex-col border-r border-transparent h-full select-none overflow-hidden relative transition-colors duration-600">
+  <aside class="w-48 bg-white/40 dark:bg-black/40 backdrop-blur-xl flex flex-col border-r border-transparent h-full select-none overflow-hidden relative transition-colors duration-600">
     <div class="h-16 flex items-center px-6 shrink-0 mb-2 cursor-default relative" data-tauri-drag-region>
       <div class="text-xl font-bold text-[#EC4141] italic tracking-tight flex items-center gap-2 pointer-events-none">
         <span class="text-2xl drop-shadow-sm">🤪</span> 

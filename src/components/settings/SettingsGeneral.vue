@@ -1,72 +1,111 @@
 <script setup lang="ts">
-import { usePlayer } from '../../composables/player';
-import { open } from '@tauri-apps/plugin-dialog';
+import { ref } from 'vue';
 
-const { settings } = usePlayer();
-
-const selectRoot = async () => {
-  try {
-    const selected = await open({ directory: true, multiple: false, title: "选择默认归档目录" });
-    if (selected && typeof selected === 'string') { settings.value.organizeRoot = selected; }
-  } catch (err) { console.error(err); }
-};
-
-const insertPlaceholder = (ph: string) => { settings.value.organizeRule += ph + '/'; };
+// Placeholder states for demonstration
+const launchOnStartup = ref(false);
+const gpuAcceleration = ref(true);
+const autoPlay = ref(true);
+const normalizeVolume = ref(false);
+const downloadPath = ref('D:\\Music\\Downloads');
 </script>
 
 <template>
   <div class="max-w-3xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
     
-    <div class="space-y-4">
-      <h2 class="text-base font-bold text-gray-800 border-l-4 border-[#EC4141] pl-3">启动与外观</h2>
-      <div class="bg-white/50 backdrop-blur-sm p-4 rounded-lg border border-gray-100/50">
-        <label class="flex items-center gap-2 text-sm text-gray-700">
-           <input type="checkbox" class="rounded text-[#EC4141] focus:ring-[#EC4141]" checked disabled />
-           <span>开机自动运行 (开发中)</span>
-        </label>
-        <label class="flex items-center gap-2 text-sm text-gray-700 mt-3">
-           <input type="checkbox" class="rounded text-[#EC4141] focus:ring-[#EC4141]" checked />
-           <span>开启 GPU 加速</span>
-        </label>
-      </div>
-    </div>
-
-    <div class="space-y-4">
-      <h2 class="text-base font-bold text-gray-800 border-l-4 border-[#EC4141] pl-3">文件整理助手</h2>
-      <p class="text-xs text-gray-500">当你在歌曲列表右键选择“整理文件”时，我们将依据以下规则移动文件。</p>
-
-      <div class="bg-white/50 backdrop-blur-sm p-5 rounded-lg border border-gray-100/50 space-y-4">
-        <div>
-          <label class="block text-xs font-semibold text-gray-500 mb-1">默认归档根目录</label>
-          <div class="flex gap-2">
-            <div class="flex-1 bg-white/80 border border-gray-200 rounded px-3 py-1.5 text-sm text-gray-600 font-mono flex items-center shadow-sm truncate">
-              {{ settings.organizeRoot }}
-            </div>
-            <button @click="selectRoot" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm transition border border-gray-200">更改</button>
+    <!-- Startup & Behavior -->
+    <section class="space-y-3">
+      <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+        <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
+        常规与启动
+      </h2>
+      <div class="bg-white/50 dark:bg-black/40 backdrop-blur-sm rounded-xl border border-gray-100/50 dark:border-white/5 overflow-hidden">
+        <div class="p-4 flex items-center justify-between border-b border-gray-100/50 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+          <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">开机自动运行</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">系统启动时自动打开应用</div>
           </div>
-        </div>
-
-        <div class="flex items-center justify-between">
-          <span class="text-sm text-gray-700">启用自动整理规则</span>
-          <button @click="settings.enableAutoOrganize = !settings.enableAutoOrganize" class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none" :class="settings.enableAutoOrganize ? 'bg-[#EC4141]' : 'bg-gray-300'">
-            <span class="inline-block h-3 w-3 transform rounded-full bg-white transition duration-200 ease-in-out shadow" :class="settings.enableAutoOrganize ? 'translate-x-5' : 'translate-x-1'" />
+          <button @click="launchOnStartup = !launchOnStartup" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="launchOnStartup ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="launchOnStartup ? 'translate-x-6' : 'translate-x-1'" />
           </button>
         </div>
 
-        <div v-if="settings.enableAutoOrganize">
-          <label class="block text-xs font-semibold text-gray-500 mb-1">目录结构规则</label>
-          <input v-model="settings.organizeRule" type="text" class="w-full text-sm p-2 border border-gray-200 rounded bg-white/80 focus:border-[#EC4141] focus:ring-1 focus:ring-[#EC4141] outline-none font-mono mb-2" />
-          <div class="flex flex-wrap gap-2 mb-2">
-            <button @click="insertPlaceholder('{Artist}')" class="px-2 py-0.5 bg-white border border-gray-200 rounded text-xs hover:text-[#EC4141] transition">+ 歌手</button>
-            <button @click="insertPlaceholder('{Album}')" class="px-2 py-0.5 bg-white border border-gray-200 rounded text-xs hover:text-[#EC4141] transition">+ 专辑</button>
-            <button @click="insertPlaceholder('{Title}')" class="px-2 py-0.5 bg-white border border-gray-200 rounded text-xs hover:text-[#EC4141] transition">+ 歌名</button>
+        <div class="p-4 flex items-center justify-between border-b border-gray-100/50 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+          <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">GPU 加速</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">使用显卡硬件加速界面渲染 (需要重启)</div>
           </div>
-          <div class="text-[10px] text-gray-500 bg-gray-100/50 p-2 rounded border border-gray-200/50 font-mono break-all">
-            预览: {{ settings.organizeRoot }}\{{ settings.organizeRule.replace('{Artist}', '周杰伦').replace('{Album}', '叶惠美').replace('{Title}', '晴天.mp3').replace(/\//g, '\\') }}
-          </div>
+          <button @click="gpuAcceleration = !gpuAcceleration" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="gpuAcceleration ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="gpuAcceleration ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
         </div>
       </div>
-    </div>
+    </section>
+
+    <!-- Playback -->
+    <section class="space-y-3">
+      <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+        <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
+        播放设置
+      </h2>
+      <div class="bg-white/50 dark:bg-black/40 backdrop-blur-sm rounded-xl border border-gray-100/50 dark:border-white/5 overflow-hidden">
+        <div class="p-4 flex items-center justify-between border-b border-gray-100/50 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+          <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">自动播放</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">程序启动后自动恢复上次播放</div>
+          </div>
+           <button @click="autoPlay = !autoPlay" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="autoPlay ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="autoPlay ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
+        </div>
+
+        <div class="p-4 flex items-center justify-between border-b border-gray-100/50 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+          <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">音量标准化</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">平衡不同歌曲的音量大小</div>
+          </div>
+          <button @click="normalizeVolume = !normalizeVolume" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="normalizeVolume ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="normalizeVolume ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
+        </div>
+        
+        <div class="p-4 flex items-center justify-between border-b border-gray-100/50 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+           <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">输出设备</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">默认系统设备</div>
+          </div>
+          <button class="text-xs px-3 py-1.5 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded text-gray-600 dark:text-gray-300 hover:text-[#EC4141] hover:border-[#EC4141] transition">管理设备</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Downloads (Placeholder) -->
+    <section class="space-y-3">
+      <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+        <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
+        下载与缓存
+      </h2>
+      <div class="bg-white/50 dark:bg-black/40 backdrop-blur-sm rounded-xl border border-gray-100/50 dark:border-white/5 overflow-hidden">
+        <div class="p-4 flex flex-col gap-2 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+          <div class="flex items-center justify-between">
+             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">下载目录</div>
+             <button class="text-xs text-[#EC4141] hover:underline">更改目录</button>
+          </div>
+          <div class="flex items-center gap-2">
+             <div class="flex-1 bg-white/70 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded px-3 py-2 text-xs text-gray-600 dark:text-gray-300 font-mono truncate">
+               {{ downloadPath }}
+             </div>
+             <button class="px-3 py-2 bg-white dark:bg-white/10 border border-gray-200 dark:border-white/10 rounded text-xs hover:bg-gray-50 dark:hover:bg-white/5 transition text-gray-600 dark:text-gray-300">打开文件夹</button>
+          </div>
+        </div>
+         <div class="p-4 flex items-center justify-between border-t border-gray-100/50 dark:border-white/5 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+          <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">清除缓存</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">释放磁盘空间 (当前占用: 128 MB)</div>
+          </div>
+          <button class="text-xs px-3 py-1.5 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded text-gray-600 dark:text-gray-300 hover:text-red-500 hover:border-red-500 transition">立即清除</button>
+        </div>
+      </div>
+    </section>
 
   </div>
 </template>
