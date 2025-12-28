@@ -13,12 +13,14 @@ const handleClear = () => {
 <template>
   <Teleport to="body">
     <!-- 遮罩层：点击空白处关闭 -->
-    <div v-if="showPlaylist" class="fixed inset-0 z-[90]" @click="togglePlaylist"></div>
+    <transition name="fade">
+      <div v-if="showPlaylist" class="fixed inset-0 z-[90] bg-black/20 backdrop-blur-[2px]" @click="togglePlaylist"></div>
+    </transition>
 
     <transition name="slide-right">
       <div 
         v-if="showPlaylist"
-        class="fixed bottom-24 right-0 w-[340px] max-h-[70vh] bg-white/80 backdrop-blur-2xl rounded-l-2xl rounded-r-none shadow-[0_8px_40px_rgba(0,0,0,0.15)] border border-white/40 z-[100] flex flex-col overflow-hidden font-sans select-none"
+        class="fixed bottom-24 right-0 w-[340px] max-h-[70vh] bg-white/80 backdrop-blur-2xl rounded-l-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] border border-white/40 z-[100] flex flex-col overflow-hidden font-sans select-none"
         @click.stop
       >
         <!-- Header -->
@@ -87,4 +89,33 @@ const handleClear = () => {
 </template>
 
 <style scoped>
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.slide-right-enter-from,
+.slide-right-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+@keyframes music-bar {
+  0%, 100% { height: 4px; }
+  50% { height: 12px; }
+}
+
+.animate-music-bar-1 { animation: music-bar 0.6s ease-in-out infinite; }
+.animate-music-bar-2 { animation: music-bar 0.8s ease-in-out infinite 0.1s; }
+.animate-music-bar-3 { animation: music-bar 0.7s ease-in-out infinite 0.2s; }
 </style>

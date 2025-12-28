@@ -122,7 +122,7 @@ onUnmounted(() => { window.removeEventListener('mousemove', onMouseMove); window
 </script>
 
 <template>
-  <transition name="slide-up">
+  <transition name="expand-up">
     <div v-if="showPlayerDetail" class="fixed inset-0 z-[100] bg-[#fafafa] flex flex-col overflow-hidden font-sans select-none">
       
       <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none">
@@ -275,3 +275,57 @@ onUnmounted(() => { window.removeEventListener('mousemove', onMouseMove); window
     </div>
   </transition>
 </template>
+
+<style scoped>
+.expand-up-enter-active,
+.expand-up-leave-active {
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  /* 40px left, 40px from bottom - aligned with the footer cover */
+  transform-origin: 40px calc(100% - 40px);
+  will-change: transform, opacity;
+}
+
+.expand-up-enter-from,
+.expand-up-leave-to {
+  transform: translate3d(0, 100%, 0) scale(0.3);
+  opacity: 0;
+  border-radius: 100%;
+}
+
+/* 歌词容器遮罩：让顶部和底部边缘平滑消失 */
+.mask-gradient {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 15%,
+    black 85%,
+    transparent 100%
+  );
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 20s linear infinite;
+}
+</style>
