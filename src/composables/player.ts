@@ -1,5 +1,6 @@
 import { computed, watch, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window'; 
 import { open } from '@tauri-apps/plugin-dialog';
 import * as State from './playerState';
@@ -208,8 +209,32 @@ export function usePlayer() {
     }, 1000);
   }
 
-  async function playSong(song: State.Song) { State.currentSong.value=song; State.isPlaying.value=true; State.isSongLoaded.value=true; State.currentTime.value=0; State.currentCover.value=''; addToHistory(song); loadLyrics(); startTimer(); try{ invoke('play_audio',{path:song.path}); invoke<string>('get_song_cover',{path:song.path}).then(c=>State.currentCover.value=c); }catch(e){State.isPlaying.value=false;} }
-  async function togglePlay() { if(!State.currentSong.value)return; if(State.isPlaying.value){ await invoke('pause_audio'); State.isPlaying.value=false; stopTimer(); } else { if(!State.isSongLoaded.value){ await invoke('play_audio',{path:State.currentSong.value.path}); invoke<string>('get_song_cover',{path:State.currentSong.value.path}).then(c=>State.currentCover.value=c); State.isSongLoaded.value=true; loadLyrics(); } else { await invoke('resume_audio'); } State.isPlaying.value=true; startTimer(); } }
+  async function playSong(song: State.Song) { 
+    State.currentSong.value=song; 
+    State.isPlaying.value=true; 
+    State.isSongLoaded.value=true; 
+    State.currentTime.value=0; 
+    State.currentCover.value=''; 
+    addToHistory(song); 
+    loadLyrics(); 
+    startTimer(); 
+    try{ 
+      // 先尝试获取封面，为了 metadata 完整
+      const cover = await invoke<string>('get_song_cover',{path:song.path}).catch(()=>"");
+      State.currentCover.value = cover;
+      
+      invoke('play_audio',{
+        path: song.path,
+        title: song.name,
+        artist: song.artist || "Unknown Artist",
+        album: song.album || "Unknown Album",
+        cover: cover,
+        duration: Math.floor(song.duration)
+      }); 
+    }catch(e){State.isPlaying.value=false;} 
+  }
+
+  async function togglePlay() { if(!State.currentSong.value)return; if(State.isPlaying.value){ await invoke('pause_audio'); State.isPlaying.value=false; stopTimer(); } else { if(!State.isSongLoaded.value){ await playSong(State.currentSong.value); } else { await invoke('resume_audio'); } State.isPlaying.value=true; startTimer(); } }
   function nextSong() { if (State.tempQueue.value.length > 0) { const next = State.tempQueue.value.shift(); if (next) { playSong(next); return; } } const l=displaySongList.value.length?displaySongList.value:State.songList.value; if(!l.length)return; let i=l.findIndex(s=>s.path===State.currentSong.value?.path); i=(i+1)%l.length; playSong(l[i]); }
   function prevSong() { const l=displaySongList.value.length?displaySongList.value:State.songList.value; if(!l.length)return; let i=l.findIndex(s=>s.path===State.currentSong.value?.path); i=(i-1+l.length)%l.length; playSong(l[i]); }
   async function seekTo(newTime: number) { if (!State.currentSong.value) return; if (seekTimeout) clearTimeout(seekTimeout); stopTimer(); let targetTime = Math.max(0, Math.min(newTime, State.currentSong.value.duration)); State.currentTime.value = targetTime; seekTimeout = setTimeout(async () => { const originalVolume = State.volume.value / 100.0; await invoke('set_volume', { volume: 0.0 }); await invoke('seek_audio', { time: Math.floor(targetTime) }); playbackStartOffset = targetTime; setTimeout(async () => { await invoke('set_volume', { volume: originalVolume }); }, 150); if (State.isPlaying.value) { startTimer(); } }, 100); }
@@ -221,6 +246,12 @@ export function usePlayer() {
   function openAddToPlaylistDialog(songPath: string) { State.playlistAddTargetSongs.value = [songPath]; State.showAddToPlaylistModal.value = true; }
 
   function init() {
+    // 注册系统媒体控制事件监听
+    listen('player:play', () => { if(!State.isPlaying.value) togglePlay(); });
+    listen('player:pause', () => { if(State.isPlaying.value) togglePlay(); });
+    listen('player:next', () => { nextSong(); });
+    listen('player:prev', () => { prevSong(); });
+
     watch(State.volume, (v) => localStorage.setItem('player_volume', v.toString()));
     watch(State.playMode, (v) => localStorage.setItem('player_mode', v.toString()));
     watch(State.songList, (v) => localStorage.setItem('player_playlist', JSON.stringify(v)), { deep: true });

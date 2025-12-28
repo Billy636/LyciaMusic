@@ -27,7 +27,7 @@ pub fn run() {
             app.manage(db_state);
 
             // 2. 初始化播放器状态
-            let player_state = init_player();
+            let player_state = init_player(app.handle());
             app.manage(player_state);
 
             // 3. 🟢 初始化图片处理并发限制 (限制为同时 4 个)
