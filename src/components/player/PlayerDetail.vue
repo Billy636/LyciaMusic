@@ -279,14 +279,15 @@ onUnmounted(() => { window.removeEventListener('mousemove', onMouseMove); window
 <style scoped>
 .expand-up-enter-active,
 .expand-up-leave-active {
-  transition: all 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
-  /* 40px left (approx center of cover), 40px from bottom */
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  /* 40px left, 40px from bottom - aligned with the footer cover */
   transform-origin: 40px calc(100% - 40px);
+  will-change: transform, opacity;
 }
 
 .expand-up-enter-from,
 .expand-up-leave-to {
-  transform: scale(0);
+  transform: translate3d(0, 100%, 0) scale(0.3);
   opacity: 0;
   border-radius: 100%;
 }
