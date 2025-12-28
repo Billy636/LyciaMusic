@@ -1,8 +1,7 @@
-In the previous changes, you successfully made the artist and album covers on my Favorites page display correctly. However, I noticed that the images appear to be compressed. For larger images, users can immediately tell whether they are blurry, so maintaining image clarity is very important. I would like the large circular artist images and the square album images to appear sharper and clearer.
+On the Folders page, there is currently no way to select multiple folders for deletion. Users can only delete folders by right-clicking a single folder and choosing “Delete Folder.”
+Please design a method that allows batch deletion of folders, and make sure it matches the overall style of the application.
 
-Finally, I would like to ask whether this approach will affect performance. Is it related to the number of songs?
-Would having 3,000 songs cause lag? What about 5,000? Or 10,000?
-Of course, a typical user usually has only a few thousand songs, not tens of thousands.
+In addition, when a folder is positioned near the bottom of the list, part of the right-click context menu extends beyond the application window and becomes hidden, making those options impossible to click. Please resolve this issue as well.
 
 Important notes:
 

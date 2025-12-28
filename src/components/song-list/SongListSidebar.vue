@@ -46,9 +46,60 @@ const menuX = ref(0);
 const menuY = ref(0);
 const targetFolder = ref<{ name: string, path: string } | null>(null);
 
+// --- 🟢 批量选择逻辑 ---
+const selectedFolderPaths = ref<Set<string>>(new Set());
+const lastSelectedFolderPath = ref<string | null>(null);
+
+const handleFolderClick = (e: MouseEvent, folder: { name: string, path: string }) => {
+  // 总是设为当前过滤条件
+  currentFolderFilter.value = folder.path;
+
+  // 1. Shift 连选
+  if (e.shiftKey && lastSelectedFolderPath.value) {
+    const list = folderList.value;
+    const lastIndex = list.findIndex(f => f.path === lastSelectedFolderPath.value);
+    const currentIndex = list.findIndex(f => f.path === folder.path);
+    
+    if (lastIndex !== -1 && currentIndex !== -1) {
+      const start = Math.min(lastIndex, currentIndex);
+      const end = Math.max(lastIndex, currentIndex);
+      // 清空旧选区还是追加？通常 Shift 是追加或重置范围。这里简化为追加范围。
+      // 但为了符合直觉，通常 Shift 会重置为锚点到当前的范围。
+      // 这里采用简单追加逻辑
+      for (let i = start; i <= end; i++) {
+        selectedFolderPaths.value.add(list[i].path);
+      }
+    }
+  } 
+  // 2. Ctrl/Cmd 加选
+  else if (e.ctrlKey || e.metaKey) {
+    if (selectedFolderPaths.value.has(folder.path)) {
+      selectedFolderPaths.value.delete(folder.path);
+    } else {
+      selectedFolderPaths.value.add(folder.path);
+    }
+    lastSelectedFolderPath.value = folder.path;
+  } 
+  // 3. 普通单选
+  else {
+    selectedFolderPaths.value.clear();
+    selectedFolderPaths.value.add(folder.path);
+    lastSelectedFolderPath.value = folder.path;
+  }
+};
+
 const handleContextMenu = (e: MouseEvent, folder: { name: string, path: string }) => { 
   e.preventDefault(); 
   targetFolder.value = folder; 
+  
+  // 如果右键点击的项不在选中集合中，则视为单选该项（符合操作系统习惯）
+  if (!selectedFolderPaths.value.has(folder.path)) {
+    selectedFolderPaths.value.clear();
+    selectedFolderPaths.value.add(folder.path);
+    lastSelectedFolderPath.value = folder.path;
+    currentFolderFilter.value = folder.path;
+  }
+
   menuX.value = e.clientX; 
   menuY.value = e.clientY; 
   showMenu.value = true; 
@@ -58,7 +109,19 @@ const playFolder = () => { if (targetFolder.value) { const s = getSongsInFolder(
 const addToQueue = () => { if (targetFolder.value) { getSongsInFolder(targetFolder.value.path).forEach(s => tempQueue.value.push(s)); showMenu.value = false; } };
 const createPlaylistFromFolder = () => { if (targetFolder.value) { const s = getSongsInFolder(targetFolder.value.path); if (s.length > 0) createPlaylist(targetFolder.value.name, s.map(song => song.path)); showMenu.value = false; } };
 const openFolder = () => { if (targetFolder.value) { openInFinder(targetFolder.value.path); showMenu.value = false; } };
-const removeFolderItem = () => { if (targetFolder.value) { removeFolder(targetFolder.value.path); showMenu.value = false; } };
+
+// 🟢 批量删除逻辑
+const removeFolderItem = () => { 
+  if (selectedFolderPaths.value.size > 0) {
+    if (confirm(`确定要移除选中的 ${selectedFolderPaths.value.size} 个文件夹吗？`)) {
+      selectedFolderPaths.value.forEach(path => removeFolder(path));
+      selectedFolderPaths.value.clear();
+    }
+  } else if (targetFolder.value) { 
+    removeFolder(targetFolder.value.path); 
+  }
+  showMenu.value = false; 
+};
 
 const handleRefreshFolder = async () => {
   if (targetFolder.value) {
@@ -134,11 +197,11 @@ onUnmounted(() => {
           :key="item.path" 
           :data-folder-path="item.path"
           :data-folder-name="item.name"
-          @click="currentFolderFilter = item.path" 
+          @click="handleFolderClick($event, item)" 
           @contextmenu="handleContextMenu($event, item)" 
           class="folder-drop-target flex items-center p-2 rounded-lg cursor-pointer transition-all"
           :class="[
-            currentFolderFilter === item.path ? 'bg-white/40 shadow-sm' : 'hover:bg-white/20',
+            selectedFolderPaths.has(item.path) ? 'bg-white/40 shadow-sm' : 'hover:bg-white/20',
             (dragSession.active && dragSession.targetFolder?.path === item.path && currentFolderFilter !== item.path) ? 'ring-2 ring-[#EC4141] bg-red-50/50' : ''
           ]"
         >
@@ -160,6 +223,7 @@ onUnmounted(() => {
         :x="menuX" 
         :y="menuY" 
         :folder-path="targetFolder?.path || ''" 
+        :selected-count="selectedFolderPaths.size"
         @close="showMenu = false" 
         @play="playFolder" 
         @add-to-queue="addToQueue" 
