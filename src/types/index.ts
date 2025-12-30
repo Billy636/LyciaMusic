@@ -24,10 +24,25 @@ export interface Playlist {
 
 export interface ThemeSettings {
   mode: 'light' | 'dark' | 'custom';
-  enableDynamicBg: boolean;
-  customBgPath: string;
-  opacity: number;
-  blur: number;
+  dynamicBgType: 'none' | 'flow' | 'blur';
+  customBgPath: string; // Legacy field, keeping for compatibility if needed, but we'll use customBackground
+  opacity: number;      // Legacy field
+  blur: number;         // Legacy field
+  customBackground: {
+    imagePath: string;
+    blur: number;
+    opacity: number;
+    maskColor: string;
+    maskAlpha: number;
+    scale: number;
+  }
+}
+
+export interface SidebarSettings {
+  showLocalMusic: boolean;
+  showFavorites: boolean;
+  showRecent: boolean;
+  showFolders: boolean;
 }
 
 export interface AppSettings { 
@@ -35,4 +50,5 @@ export interface AppSettings {
   enableAutoOrganize: boolean; 
   organizeRule: string;
   theme: ThemeSettings;
+  sidebar: SidebarSettings;
 }

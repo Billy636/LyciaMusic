@@ -13,7 +13,7 @@ const props = defineProps<{
 const emit = defineEmits(['close', 'addToPlaylist']);
 
 // 引入需要的操作
-const { playSong, playNext, removeSongFromList, removeFromPlaylist, openInFinder, deleteFromDisk, filterCondition } = usePlayer();
+const { playSong, playNext, addSongToQueue, removeSongFromList, removeFromPlaylist, openInFinder, deleteFromDisk, filterCondition } = usePlayer();
 
 const menuRef = ref<HTMLElement | null>(null);
 
@@ -36,6 +36,9 @@ const handleAction = (action: string) => {
       break;
     case 'playNext':
       playNext(props.song);
+      break;
+    case 'addToQueue': // 🟢 新增
+      addSongToQueue(props.song);
       break;
     case 'addToPlaylist':
       emit('addToPlaylist'); // 触发父组件弹窗
@@ -84,6 +87,18 @@ const handleAction = (action: string) => {
           </svg>
         </div>
         <span>下一首播放</span>
+      </div>
+
+      <!-- 🟢 新增：添加到播放队列 -->
+      <div @click="handleAction('addToQueue')" class="px-4 py-2.5 hover:bg-gray-100 cursor-pointer flex items-center group transition-colors">
+        <div class="w-5 h-5 mr-3 flex items-center justify-center text-gray-500 group-hover:text-gray-800">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+            <path fill-rule="evenodd" d="M3.75 12a.75.75 0 01.75-.75h15a.75.75 0 010 1.5h-15a.75.75 0 01-.75-.75z" clip-rule="evenodd" />
+            <path fill-rule="evenodd" d="M3.75 6a.75.75 0 01.75-.75h15a.75.75 0 010 1.5h-15a.75.75 0 01-.75-.75z" clip-rule="evenodd" />
+            <path fill-rule="evenodd" d="M3.75 18a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75z" clip-rule="evenodd" />
+          </svg>
+        </div>
+        <span>添加到播放队列</span>
       </div>
 
       <div @click="handleAction('addToPlaylist')" class="px-4 py-2.5 hover:bg-gray-100 cursor-pointer flex items-center group transition-colors border-b border-gray-100 mb-1">

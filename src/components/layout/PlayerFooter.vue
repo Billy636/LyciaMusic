@@ -11,13 +11,24 @@ const {
   isPlaying, volume, currentTime, playMode, showPlaylist,
   togglePlay, nextSong, prevSong, handleVolume, toggleMute, toggleMode, togglePlaylist,
   isFavorite, toggleFavorite,
-  togglePlayerDetail, seekTo
+  togglePlayerDetail, seekTo,
+  settings
 } = usePlayer();
 
 const { showDesktopLyrics } = useLyrics();
 const localCoverUrl = ref(''); // 本地封面 URL (Asset 协议)
 
 const toggleLyrics = () => { showDesktopLyrics.value = !showDesktopLyrics.value; };
+
+// 🎵 动态模糊计算
+const footerBlurStyle = computed(() => {
+  if (settings.value.theme.enableDynamicBg) return 'blur(20px) saturate(180%)';
+  if (settings.value.theme.mode === 'custom') {
+    const b = settings.value.theme.customBackground.blur;
+    return b <= 0 ? 'none' : `blur(${b}px) saturate(180%)`;
+  }
+  return 'blur(20px) saturate(180%)';
+});
 
 // 🎵 监听歌曲变化，自动获取缩略图 (高性能)
 watch(currentSong, async (newSong) => {
@@ -94,6 +105,23 @@ const onGlobalMouseUp = () => {
   stopProgressDrag();
 };
 
+// --- 音量滑块显示逻辑 ---
+const showVolumeSlider = ref(false);
+let volumeTimer: any = null;
+
+const handleVolumeEnter = () => {
+  if (volumeTimer) clearTimeout(volumeTimer);
+  showVolumeSlider.value = true;
+};
+
+const handleVolumeLeave = () => {
+  volumeTimer = setTimeout(() => {
+    if (!isDraggingVolume.value) {
+      showVolumeSlider.value = false;
+    }
+  }, 300);
+};
+
 onMounted(() => { 
   window.addEventListener('mousemove', onGlobalMouseMove); 
   window.addEventListener('mouseup', onGlobalMouseUp); 
@@ -105,12 +133,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <footer class="h-20 bg-white/25 dark:bg-black/25 backdrop-blur-md border-t border-white/10 dark:border-white/5 flex items-center justify-between px-4 z-50 relative select-none transition-colors duration-500">
+  <footer 
+    class="h-20 bg-transparent flex items-center justify-between px-4 z-50 relative select-none transition-colors duration-500"
+  >
     
     <div 
       ref="progressBarRef"
       class="absolute top-[-1px] left-0 w-full h-[3px] hover:h-[5px] cursor-pointer group/progress z-50 transition-all duration-200"
       @mousedown="startProgressDrag"
+      style="filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6));"
     >
        <div class="absolute inset-0 bg-transparent w-full h-full"></div>
        
@@ -128,7 +159,7 @@ onUnmounted(() => {
         class="group relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-black/5 dark:border-white/5 cursor-pointer transition-transform active:scale-95 shadow-sm"
         title="展开详情页"
       >
-        <span v-if="!currentSong" class="w-full h-full flex items-center justify-center bg-gray-100/50 dark:bg-white/5 text-[10px] text-gray-500 dark:text-gray-400">CD</span>
+        <span v-if="!currentSong" class="w-full h-full flex items-center justify-center bg-gray-100/50 dark:bg-white/5 text-[10px] text-gray-500 dark:text-white/60">CD</span>
         
         <img v-else-if="localCoverUrl" :src="localCoverUrl" class="w-full h-full object-cover group-hover:blur-[1px] transition-all" />
         
@@ -141,9 +172,9 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="ml-3 overflow-hidden flex-1">
+      <div class="ml-3 overflow-hidden flex-1" style="text-shadow: 0 1px 2px rgba(0,0,0,0.8);">
         <div class="flex items-center">
-          <div class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate cursor-pointer hover:underline shadow-sm">
+          <div class="text-sm font-medium text-gray-800 dark:text-white truncate cursor-pointer hover:underline shadow-sm">
             {{ currentSong ? (currentSong.title || currentSong.name.replace(/\.[^/.]+$/, "")) : '听我想听的音乐' }}
           </div>
           
@@ -156,62 +187,73 @@ onUnmounted(() => {
             <svg v-if="isFavorite(currentSong)" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-[#EC4141]" viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd" />
             </svg>
-            <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 dark:text-white/40 hover:text-gray-600 dark:hover:text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
             </svg>
           </button>
         </div>
-        <div class="text-xs text-gray-500 dark:text-gray-400 truncate cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 mt-0.5">
+        <div class="text-xs text-gray-500 dark:text-white/60 truncate cursor-pointer hover:text-gray-700 dark:hover:text-white mt-0.5">
           {{ currentSong ? currentSong.artist : 'My Music' }}
         </div>
       </div>
     </div>
 
-    <div class="flex items-center justify-center flex-1 gap-6">
-      <button @click="toggleMode" class="text-gray-500 dark:text-gray-400 hover:text-[#EC4141] dark:hover:text-[#EC4141] transition-colors" :title="['列表循环', '单曲循环', '随机播放'][playMode]">
+    <div class="flex items-center justify-center flex-1 gap-6" style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));">
+      <button @click="toggleMode" class="text-gray-500 dark:text-white/60 hover:text-[#EC4141] dark:hover:text-[#EC4141] transition-colors" :title="['列表循环', '单曲循环', '随机播放'][playMode]">
         <svg v-if="playMode === 0" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
         <svg v-else-if="playMode === 1" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /><text x="12" y="16" font-family="sans-serif" font-size="10" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">1</text></svg>
         <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" /></svg>
       </button>
 
-      <button @click="prevSong" class="text-gray-700 dark:text-gray-300 hover:text-[#EC4141] transition-colors hover:scale-110 transform duration-200">
+      <button @click="prevSong" class="text-gray-700 dark:text-white/80 hover:text-[#EC4141] transition-colors hover:scale-110 transform duration-200">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6V6zm3.5 6l8.5 6V6l-8.5 6z" /></svg>
       </button>
 
-      <button @click="togglePlay" class="w-12 h-12 bg-[#f4f4f4]/80 dark:bg-white/10 hover:bg-[#e5e5e5] dark:hover:bg-white/20 text-black dark:text-white rounded-full flex items-center justify-center transition-all hover:scale-105 active:scale-95 shadow-md">
-        <svg v-if="isPlaying" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-        <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+      <button @click="togglePlay" class="w-12 h-12 bg-transparent text-gray-800 dark:text-white hover:text-[#EC4141] dark:hover:text-[#EC4141] flex items-center justify-center transition-all hover:scale-110 active:scale-95">
+        <svg v-if="isPlaying" xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+        <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 fill-current ml-1" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
       </button>
 
-      <button @click="nextSong" class="text-gray-700 dark:text-gray-300 hover:text-[#EC4141] transition-colors hover:scale-110 transform duration-200">
+      <button @click="nextSong" class="text-gray-700 dark:text-white/80 hover:text-[#EC4141] transition-colors hover:scale-110 transform duration-200">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg>
       </button>
 
       <button 
         @click="toggleLyrics"
-        :class="['text-sm font-bold transition-colors', showDesktopLyrics ? 'text-[#EC4141]' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300']"
+        :class="['text-sm font-bold transition-colors', showDesktopLyrics ? 'text-[#EC4141]' : 'text-gray-400 dark:text-white/60 hover:text-gray-600 dark:hover:text-white']"
       >
         词
       </button>
     </div>
 
-    <div class="flex items-center justify-end w-1/3 min-w-[150px] space-x-5 pr-2"> 
-      <div class="relative group flex items-center justify-center h-full">
-        <div class="absolute bottom-full left-1/2 -translate-x-1/2 pb-3 hidden group-hover:block hover:block z-50">
+    <div class="flex items-center justify-end w-1/3 min-w-[150px] space-x-5 pr-2" style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));"> 
+      <div 
+        class="relative flex items-center justify-center h-full z-[70]"
+        @mouseenter="handleVolumeEnter"
+        @mouseleave="handleVolumeLeave"
+      >
+        <!-- 音量滑块弹窗 -->
+        <div 
+          v-if="showVolumeSlider || isDraggingVolume"
+          class="absolute bottom-full left-1/2 -translate-x-1/2 pb-3 z-[70]"
+        >
+          <!-- 透明桥接层：防止鼠标从图标移动到滑块时断触 -->
+          <div class="absolute top-full left-0 w-full h-4"></div>
+          
           <div class="w-9 h-32 bg-white/90 dark:bg-black/90 backdrop-blur-md shadow-2xl rounded-2xl border border-gray-100 dark:border-white/5 flex flex-col items-center justify-between py-3">
-            <div class="text-[10px] text-gray-500 dark:text-gray-400 font-bold select-none">{{ volume }}%</div>
+            <div class="text-[10px] text-gray-500 dark:text-white/60 font-bold select-none">{{ volume }}%</div>
             <div ref="volumeBarRef" class="relative flex-1 w-1.5 bg-gray-200 dark:bg-white/20 rounded-full cursor-pointer my-1" @mousedown="startDrag">
                <div class="absolute bottom-0 w-full bg-[#EC4141] rounded-full" :style="{ height: volume + '%' }"></div>
                <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-white rounded-full shadow-sm cursor-grab active:cursor-grabbing" :style="{ bottom: `calc(${volume}% - 7px)` }"></div>
             </div>
           </div>
         </div>
-        <button @click="toggleMute" class="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 p-2 rounded-full hover:bg-gray-100/50 dark:hover:bg-white/5 transition-colors"> 
+        <button @click="toggleMute" class="text-gray-500 dark:text-white/60 hover:text-gray-800 dark:hover:text-white p-2 rounded-full hover:bg-gray-100/50 dark:hover:bg-white/5 transition-colors"> 
           <svg v-if="volume === 0" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>
           <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
         </button>
       </div>
-      <button @click="togglePlaylist" class="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 relative" :class="showPlaylist ? 'text-[#EC4141]' : ''">
+      <button @click="togglePlaylist" class="text-gray-500 dark:text-white/60 hover:text-gray-800 dark:hover:text-white relative" :class="showPlaylist ? 'text-[#EC4141]' : ''">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" /></svg>
       </button>
     </div>
