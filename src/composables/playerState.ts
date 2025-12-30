@@ -10,6 +10,7 @@ export const playMode = ref(0);
 export const showPlaylist = ref(false);
 export const isSongLoaded = ref(false);
 export const showPlayerDetail = ref(false); 
+export const showQueue = ref(false);
 export const AUDIO_DELAY = ref(0.45); 
 
 // --- 自定义拖拽状态 ---
@@ -30,9 +31,11 @@ export const dragSession = reactive({
 export const showAddToPlaylistModal = ref(false);
 export const playlistAddTargetSongs = ref<string[]>([]); 
 export const songList = ref<Song[]>([]); 
+export const playQueue = ref<Song[]>([]);
 export const tempQueue = ref<Song[]>([]);
 export const currentSong = ref<Song | null>(null);
 export const currentCover = ref<string>(''); 
+export const dominantColors = ref<string[]>(['#4c1d95', '#8b5cf6', '#c4b5fd']); 
 export const playlistCover = ref<string>(''); 
 export const watchedFolders = ref<string[]>([]); 
 export const favoritePaths = ref<string[]>([]);
@@ -45,10 +48,24 @@ export const settings = ref<AppSettings>({
   organizeRule: '{Artist}/{Album}/{Title}',
   theme: {
     mode: 'light',
-    enableDynamicBg: false,
+    dynamicBgType: 'flow',
     customBgPath: '',
     opacity: 0.8,
-    blur: 20
+    blur: 20,
+    customBackground: {
+      imagePath: '',
+      blur: 20,
+      opacity: 1.0,
+      maskColor: '#000000',
+      maskAlpha: 0.4,
+      scale: 1.0
+    }
+  },
+  sidebar: {
+    showLocalMusic: true,
+    showFavorites: true,
+    showRecent: true,
+    showFolders: true
   }
 });
 

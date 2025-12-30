@@ -16,7 +16,7 @@ impl<S> Source for TimedSource<S> where S: Source<Item = f32> { fn channels(&sel
 
 pub struct SharedProgress { pub samples_played: Arc<AtomicU64>, pub sample_rate: Arc<AtomicU32>, pub channels: Arc<AtomicU32> }
 
-pub enum AudioCommand { Play(String), Pause, Resume, Seek(u32), SetVolume(f32) }
+pub enum AudioCommand { Play(String), Pause, Resume, Seek(u32, bool), SetVolume(f32) }
 
 pub struct PlayerState {
     pub tx: Mutex<Sender<AudioCommand>>, 
@@ -105,7 +105,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                 }
                 AudioCommand::Pause => { if let Some(sink) = &current_sink { sink.pause(); } }
                 AudioCommand::Resume => { if let Some(sink) = &current_sink { sink.play(); } }
-                AudioCommand::Seek(time) => {
+                AudioCommand::Seek(time, is_playing) => {
                     let jump_target = Duration::from_secs(time as u64);
                     if !current_path.is_empty() {
                         if let Some(sink) = &current_sink { sink.stop(); }
@@ -117,7 +117,16 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                                 let samples_to_skip = time as u64 * rate as u64 * channels as u64;
                                 thread_progress.samples_played.store(samples_to_skip, Ordering::Relaxed);
                                 let timed_source = TimedSource { inner: source.convert_samples::<f32>().skip_duration(jump_target), samples_played: thread_progress.samples_played.clone() };
-                                if let Ok(new_sink) = Sink::try_new(&stream_handle) { new_sink.set_volume(current_volume); new_sink.append(timed_source); new_sink.play(); current_sink = Some(new_sink); }
+                                if let Ok(new_sink) = Sink::try_new(&stream_handle) { 
+                                    new_sink.set_volume(current_volume); 
+                                    new_sink.append(timed_source); 
+                                    if is_playing {
+                                        new_sink.play(); 
+                                    } else {
+                                        new_sink.pause();
+                                    }
+                                    current_sink = Some(new_sink); 
+                                }
                             }
                         }
                     }
@@ -177,12 +186,16 @@ pub fn resume_audio(state: tauri::State<PlayerState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn seek_audio(time: u32, state: tauri::State<PlayerState>) -> Result<(), String> { 
+pub fn seek_audio(time: u32, is_playing: bool, state: tauri::State<PlayerState>) -> Result<(), String> { 
     let tx = state.tx.lock().map_err(|e| e.to_string())?; 
-    tx.send(AudioCommand::Seek(time)).map_err(|e| e.to_string())?; 
+    tx.send(AudioCommand::Seek(time, is_playing)).map_err(|e| e.to_string())?; 
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
-             let _ = mc.set_playback(MediaPlayback::Playing { progress: Some(MediaPosition(Duration::from_secs(time as u64))) });
+             if is_playing {
+                let _ = mc.set_playback(MediaPlayback::Playing { progress: Some(MediaPosition(Duration::from_secs(time as u64))) });
+             } else {
+                let _ = mc.set_playback(MediaPlayback::Paused { progress: Some(MediaPosition(Duration::from_secs(time as u64))) });
+             }
         }
     }
     Ok(()) 

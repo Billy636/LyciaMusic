@@ -4,11 +4,14 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window'; 
 import { open } from '@tauri-apps/plugin-dialog';
 import * as State from './playerState';
-import { useLyrics } from './lyrics';
-
 export * from './playerState'; 
+import { useLyrics } from './lyrics';
+import { useToast } from './toast';
+import { extractDominantColors } from './colorExtraction';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 // 动画帧 ID
+
 let progressFrameId: number | null = null; 
 // 校准定时器 ID
 let syncIntervalId: any = null;
@@ -211,6 +214,22 @@ export function usePlayer() {
 
   async function playSong(song: State.Song) { 
     State.currentSong.value=song; 
+    
+    // 🟢 核心逻辑：播放时更新播放队列
+    // 如果当前展示的列表包含这首歌，则把播放队列设置为当前展示列表
+    // 这样保证了 "接着放下一首" 的逻辑是正确的
+    if (displaySongList.value.some(s => s.path === song.path)) {
+      State.playQueue.value = [...displaySongList.value];
+    } else {
+      // 如果不在当前列表（比如来自搜索结果，或者历史记录），
+      // 且队列里也没有这首歌，则把它加入队列（或者重置队列？）
+      // 策略：如果队列里没有，就把它加进去；如果队列为空，就只放它
+      if (!State.playQueue.value.some(s => s.path === song.path)) {
+         if (State.playQueue.value.length === 0) State.playQueue.value = [song];
+         else State.playQueue.value.push(song);
+      }
+    }
+
     State.isPlaying.value=true; 
     State.isSongLoaded.value=true; 
     State.currentTime.value=0; 
@@ -235,14 +254,92 @@ export function usePlayer() {
   }
 
   async function togglePlay() { if(!State.currentSong.value)return; if(State.isPlaying.value){ await invoke('pause_audio'); State.isPlaying.value=false; stopTimer(); } else { if(!State.isSongLoaded.value){ await playSong(State.currentSong.value); } else { await invoke('resume_audio'); } State.isPlaying.value=true; startTimer(); } }
-  function nextSong() { if (State.tempQueue.value.length > 0) { const next = State.tempQueue.value.shift(); if (next) { playSong(next); return; } } const l=displaySongList.value.length?displaySongList.value:State.songList.value; if(!l.length)return; let i=l.findIndex(s=>s.path===State.currentSong.value?.path); i=(i+1)%l.length; playSong(l[i]); }
-  function prevSong() { const l=displaySongList.value.length?displaySongList.value:State.songList.value; if(!l.length)return; let i=l.findIndex(s=>s.path===State.currentSong.value?.path); i=(i-1+l.length)%l.length; playSong(l[i]); }
-  async function seekTo(newTime: number) { if (!State.currentSong.value) return; if (seekTimeout) clearTimeout(seekTimeout); stopTimer(); let targetTime = Math.max(0, Math.min(newTime, State.currentSong.value.duration)); State.currentTime.value = targetTime; seekTimeout = setTimeout(async () => { const originalVolume = State.volume.value / 100.0; await invoke('set_volume', { volume: 0.0 }); await invoke('seek_audio', { time: Math.floor(targetTime) }); playbackStartOffset = targetTime; setTimeout(async () => { await invoke('set_volume', { volume: originalVolume }); }, 150); if (State.isPlaying.value) { startTimer(); } }, 100); }
+  
+  function nextSong() { 
+    if (State.tempQueue.value.length > 0) { const next = State.tempQueue.value.shift(); if (next) { playSong(next); return; } } 
+    
+    // 🟢 核心逻辑：使用 playQueue
+    const l = State.playQueue.value.length ? State.playQueue.value : State.songList.value; 
+    if(!l.length) return; 
+    
+    let i = l.findIndex(s => s.path === State.currentSong.value?.path); 
+    i = (i + 1) % l.length; 
+    playSong(l[i]); 
+  }
+
+  function prevSong() { 
+    // 🟢 核心逻辑：使用 playQueue
+    const l = State.playQueue.value.length ? State.playQueue.value : State.songList.value;
+    if(!l.length) return; 
+    
+    let i = l.findIndex(s => s.path === State.currentSong.value?.path); 
+    i = (i - 1 + l.length) % l.length; 
+    playSong(l[i]); 
+  }
+  
+  // 🟢 新增：清空播放队列 (仅内存)
+  async function clearQueue() {
+    State.playQueue.value = [];
+    State.tempQueue.value = []; // 也清空插队队列
+    if (State.isPlaying.value) {
+      await invoke('pause_audio');
+      State.isPlaying.value = false;
+    }
+    stopTimer();
+    State.currentSong.value = null; // 可选：是否清空当前歌曲？通常清空列表也会停止当前播放
+  }
+
+  // 🟢 新增：从队列移除歌曲
+  function removeSongFromQueue(song: State.Song) {
+    State.playQueue.value = State.playQueue.value.filter(s => s.path !== song.path);
+    State.tempQueue.value = State.tempQueue.value.filter(s => s.path !== song.path);
+  }
+
+  // 🟢 新增：添加到队列末尾
+  function addSongToQueue(song: State.Song) {
+    State.playQueue.value.push(song);
+    useToast().showToast('已添加到队列', 'success');
+  }
+
+  // 🟢 批量添加
+  function addSongsToQueue(songs: State.Song[]) {
+    if (songs.length === 0) return;
+    State.playQueue.value.push(...songs);
+    useToast().showToast(`已添加 ${songs.length} 首歌曲到队列`, 'success');
+  }
+
+  function getSongsFromPlaylist(playlistId: string): State.Song[] {
+    const pl = State.playlists.value.find(p => p.id === playlistId);
+    if (!pl) return [];
+    const songMap = new Map(State.songList.value.map(s => [s.path, s]));
+    return pl.songPaths.map(path => songMap.get(path)).filter((s): s is State.Song => !!s);
+  }
+
+  async function seekTo(newTime: number) { 
+    if (!State.currentSong.value) return; 
+    if (seekTimeout) clearTimeout(seekTimeout); 
+    stopTimer(); 
+    let targetTime = Math.max(0, Math.min(newTime, State.currentSong.value.duration)); 
+    State.currentTime.value = targetTime; 
+    seekTimeout = setTimeout(async () => { 
+      const originalVolume = State.volume.value / 100.0; 
+      await invoke('set_volume', { volume: 0.0 }); 
+      await invoke('seek_audio', { time: Math.floor(targetTime), isPlaying: State.isPlaying.value }); 
+      playbackStartOffset = targetTime; 
+      setTimeout(async () => { 
+        await invoke('set_volume', { volume: originalVolume }); 
+      }, 150); 
+      if (State.isPlaying.value) { 
+        startTimer(); 
+      } 
+    }, 100); 
+  }
   async function playAt(time: number) { await seekTo(time); if (!State.isPlaying.value) { setTimeout(async () => { if (!State.isPlaying.value) await togglePlay(); }, 150); } }
   async function handleSeek(e: MouseEvent) { if(!State.currentSong.value) return; const t = e.currentTarget as HTMLElement; const r = t.getBoundingClientRect(); const p = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); const tm = p * State.currentSong.value.duration; await seekTo(tm); }
   async function stepSeek(step: number) { if (!State.currentSong.value) return; await seekTo(State.currentTime.value + step); }
   async function toggleAlwaysOnTop(enable: boolean) { try { await getCurrentWindow().setAlwaysOnTop(enable); } catch (e) { console.error('Failed to set always on top:', e); } }
   function togglePlayerDetail() { State.showPlayerDetail.value = !State.showPlayerDetail.value; }
+  function toggleQueue() { State.showQueue.value = !State.showQueue.value; }
   function openAddToPlaylistDialog(songPath: string) { State.playlistAddTargetSongs.value = [songPath]; State.showAddToPlaylistModal.value = true; }
 
   function init() {
@@ -260,6 +357,9 @@ export function usePlayer() {
     watch(State.playlists, (v) => localStorage.setItem('player_custom_playlists', JSON.stringify(v)), { deep: true });
     watch(State.settings, (v) => localStorage.setItem('player_settings', JSON.stringify(v)), { deep: true });
     watch(State.recentSongs, (v) => localStorage.setItem('player_history', JSON.stringify(v)), { deep: true });
+    
+    // 🟢 持久化 playQueue
+    watch(State.playQueue, (v) => localStorage.setItem('player_queue', JSON.stringify(v)), { deep: true });
 
     watch(State.currentSong, (newSong) => {
       if (newSong) {
@@ -268,6 +368,17 @@ export function usePlayer() {
         localStorage.removeItem('player_last_song');
       }
     }, { deep: true });
+
+    watch(State.currentCover, async (newCover) => {
+      if (newCover) {
+        let url = newCover;
+        if (!newCover.startsWith('http') && !newCover.startsWith('data:')) {
+          url = convertFileSrc(newCover);
+        }
+        const colors = await extractDominantColors(url, 4);
+        State.dominantColors.value = colors;
+      }
+    });
 
     watch(State.isPlaying, (playing) => {
       if (!playing) {
@@ -281,8 +392,51 @@ export function usePlayer() {
       const sList = localStorage.getItem('player_playlist'); if (sList) try { State.songList.value = JSON.parse(sList); } catch(e) {}
       const sFavs = localStorage.getItem('player_favorites'); if (sFavs) try { State.favoritePaths.value = JSON.parse(sFavs); } catch(e) {}
       const sPlaylists = localStorage.getItem('player_custom_playlists'); if (sPlaylists) try { State.playlists.value = JSON.parse(sPlaylists); } catch(e) {}
-      const sSettings = localStorage.getItem('player_settings'); if (sSettings) try { Object.assign(State.settings.value, JSON.parse(sSettings)); } catch(e) {}
+      
+      const sSettings = localStorage.getItem('player_settings'); 
+      if (sSettings) {
+        try { 
+          const saved = JSON.parse(sSettings);
+          // 确保 saved 是真实存在的对象 (排除 null)
+          if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+            const savedTheme = (saved.theme && typeof saved.theme === 'object') ? saved.theme : {};
+            const savedSidebar = (saved.sidebar && typeof saved.sidebar === 'object') ? saved.sidebar : {};
+            const savedCustomBg = (savedTheme.customBackground && typeof savedTheme.customBackground === 'object') ? savedTheme.customBackground : {};
+
+            // 迁移逻辑：将旧的 enableDynamicBg 转换为新的 dynamicBgType
+            let dynamicBgType = savedTheme.dynamicBgType;
+            if (dynamicBgType === undefined && savedTheme.enableDynamicBg !== undefined) {
+              dynamicBgType = savedTheme.enableDynamicBg ? 'flow' : 'none';
+            }
+
+            const merged = {
+              ...State.settings.value,
+              ...saved,
+              theme: {
+                ...State.settings.value.theme,
+                ...savedTheme,
+                dynamicBgType: dynamicBgType || State.settings.value.theme.dynamicBgType,
+                customBackground: {
+                  ...State.settings.value.theme.customBackground,
+                  ...savedCustomBg
+                }
+              },
+              sidebar: {
+                ...State.settings.value.sidebar,
+                ...savedSidebar
+              }
+            };
+            State.settings.value = merged;
+          }
+        } catch(e) {
+          console.error("Failed to parse settings:", e);
+        }
+      }
+      
       const sHistory = localStorage.getItem('player_history'); if (sHistory) try { State.recentSongs.value = JSON.parse(sHistory); } catch(e) {}
+      
+      // 🟢 读取 playQueue
+      const sQueue = localStorage.getItem('player_queue'); if (sQueue) try { State.playQueue.value = JSON.parse(sQueue); } catch(e) {}
 
       const lastSong = localStorage.getItem('player_last_song');
       if (lastSong) {
@@ -319,6 +473,9 @@ export function usePlayer() {
     stepSeek, toggleAlwaysOnTop, togglePlayerDetail, seekTo, openAddToPlaylistDialog, playAt,
     addFoldersFromStructure, getSongsInFolder,
     moveFilesToFolder,
-    refreshFolder
+    refreshFolder,
+    // 🟢 导出新函数
+    clearQueue, removeSongFromQueue, addSongToQueue, toggleQueue,
+    addSongsToQueue, getSongsFromPlaylist
   };
 }

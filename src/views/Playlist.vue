@@ -1,12 +1,23 @@
 <script setup lang="ts">
 import { usePlayer } from '../composables/player';
 
-const { songList, currentSong, showPlaylist, togglePlaylist, playSong, formatDuration } = usePlayer();
+// 🟢 核心修改：解构出 playQueue 和新的操作函数
+const { 
+  playQueue, // 替换 songList
+  currentSong, showPlaylist, togglePlaylist, playSong, formatDuration,
+  clearQueue, removeSongFromQueue, // 新增函数
+  settings
+} = usePlayer();
 
 const handleClear = () => {
-  if (confirm("确定要清空播放列表吗？")) {
-    songList.value = [];
+  if (confirm("确定要清空播放列表吗？(仅清空正在播放队列)")) {
+    clearQueue(); // 🟢 使用 clearQueue，不再操作 songList
   }
+};
+
+const handleRemove = (song: any, e: Event) => {
+  e.stopPropagation(); // 防止触发播放
+  removeSongFromQueue(song);
 };
 </script>
 
@@ -20,14 +31,18 @@ const handleClear = () => {
     <transition name="slide-right">
       <div 
         v-if="showPlaylist"
-        class="fixed bottom-24 right-0 w-[340px] max-h-[70vh] bg-white/80 backdrop-blur-2xl rounded-l-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] border border-white/40 z-[100] flex flex-col overflow-hidden font-sans select-none"
+        class="fixed bottom-24 right-0 w-[340px] max-h-[70vh] bg-white/80 rounded-l-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] border border-white/40 z-[100] flex flex-col overflow-hidden font-sans select-none"
+        :class="[(!settings.theme.enableDynamicBg && settings.theme.mode === 'custom') ? '' : 'backdrop-blur-2xl']"
         @click.stop
       >
         <!-- Header -->
-        <div class="px-6 py-4 border-b border-black/5 flex justify-between items-center bg-white/50 backdrop-blur-sm z-10">
+        <div 
+          class="px-6 py-4 border-b border-black/5 flex justify-between items-center bg-white/50 z-10"
+          :class="[(!settings.theme.enableDynamicBg && settings.theme.mode === 'custom') ? '' : 'backdrop-blur-sm']"
+        >
           <div class="flex items-center gap-3">
             <h3 class="font-bold text-gray-800 text-lg tracking-tight">播放列表</h3>
-            <span class="text-xs text-gray-500 font-medium bg-gray-200/60 px-2 py-0.5 rounded-full">{{ songList.length }}</span>
+            <span class="text-xs text-gray-500 font-medium bg-gray-200/60 px-2 py-0.5 rounded-full">{{ playQueue.length }}</span>
           </div>
           <button 
             @click="handleClear" 
@@ -41,13 +56,14 @@ const handleClear = () => {
         
         <!-- List -->
         <div class="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
-          <div v-if="songList.length === 0" class="h-full flex flex-col items-center justify-center text-gray-400 space-y-2 py-20">
+          <div v-if="playQueue.length === 0" class="h-full flex flex-col items-center justify-center text-gray-400 space-y-2 py-20">
              <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
-             <span class="text-sm">你还没有添加任何歌曲</span>
+             <span class="text-sm">播放队列为空</span>
           </div>
 
+          <!-- 🟢 遍历 playQueue -->
           <div 
-            v-for="(song, index) in songList" 
+            v-for="(song, index) in playQueue" 
             :key="song.path + index"
             @click="playSong(song)"
             class="group relative p-2 rounded-xl flex justify-between items-center cursor-pointer transition-all duration-200 border border-transparent"
@@ -78,8 +94,18 @@ const handleClear = () => {
               >{{ song.artist || 'Unknown Artist' }}</span>
             </div>
             
-            <div class="text-xs font-mono shrink-0" :class="currentSong?.path === song.path ? 'text-[#EC4141]/70' : 'text-gray-400'">
-               {{ formatDuration(song.duration) }}
+            <div class="flex items-center gap-3">
+               <div class="text-xs font-mono shrink-0 group-hover:hidden" :class="currentSong?.path === song.path ? 'text-[#EC4141]/70' : 'text-gray-400'">
+                  {{ formatDuration(song.duration) }}
+               </div>
+               <!-- 🟢 删除按钮 (Hover显示) -->
+               <button 
+                 @click="handleRemove(song, $event)"
+                 class="hidden group-hover:flex w-6 h-6 items-center justify-center text-gray-400 hover:text-red-500 transition-colors rounded-full hover:bg-black/5 active:scale-90"
+                 title="从队列移除"
+               >
+                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+               </button>
             </div>
           </div>
         </div>

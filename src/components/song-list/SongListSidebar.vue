@@ -12,7 +12,8 @@ const {
   isLocalMusic, isFolderMode,
   playSong, openInFinder, createPlaylist, removeFolder,
   getSongsInFolder, tempQueue, moveFilesToFolder,
-  refreshFolder
+  refreshFolder,
+  addSongsToQueue
 } = usePlayer();
 
 const sidebarImageCache = ref<Map<string, string>>(new Map());
@@ -125,7 +126,7 @@ const handleMenuCancel = () => {
 };
 
 const playFolder = () => { if (targetFolder.value) { const s = getSongsInFolder(targetFolder.value.path); if (s.length > 0) { playSong(s[0]); currentFolderFilter.value = targetFolder.value.path; } showMenu.value = false; } };
-const addToQueue = () => { if (targetFolder.value) { getSongsInFolder(targetFolder.value.path).forEach(s => tempQueue.value.push(s)); showMenu.value = false; } };
+const addToQueue = () => { if (targetFolder.value) { const s = getSongsInFolder(targetFolder.value.path); addSongsToQueue(s); showMenu.value = false; } };
 const createPlaylistFromFolder = () => { if (targetFolder.value) { const s = getSongsInFolder(targetFolder.value.path); if (s.length > 0) createPlaylist(targetFolder.value.name, s.map(song => song.path)); showMenu.value = false; } };
 const openFolder = () => { if (targetFolder.value) { openInFinder(targetFolder.value.path); showMenu.value = false; } };
 

@@ -39,7 +39,7 @@ const goBack = () => { router.back(); };
     <div class="flex items-center gap-4 relative z-10">
       <button 
         @click="goBack" 
-        class="w-8 h-8 rounded-full bg-white/60 dark:bg-white/10 hover:bg-white/90 dark:hover:bg-white/20 flex items-center justify-center text-gray-700 dark:text-gray-300 transition-colors focus:outline-none cursor-pointer shadow-sm border border-black/5 dark:border-white/5"
+        class="w-8 h-8 rounded-full bg-white/5 dark:bg-white/5 hover:bg-white/20 dark:hover:bg-white/20 flex items-center justify-center text-gray-600 dark:text-gray-300 transition-colors focus:outline-none cursor-pointer border border-black/10 dark:border-white/10"
         title="后退"
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 -ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
@@ -47,14 +47,14 @@ const goBack = () => { router.back(); };
         </svg>
       </button>
 
-      <div class="group bg-white/60 dark:bg-white/10 hover:bg-white/80 dark:hover:bg-white/15 focus-within:bg-white dark:focus-within:bg-black/40 focus-within:ring-2 focus-within:ring-[#EC4141]/20 pl-4 pr-3 py-1.5 rounded-full text-sm flex items-center transition-all w-60 ml-2 shadow-sm border border-black/5 dark:border-white/5">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-500 dark:text-gray-400 mr-2 group-focus-within:text-[#EC4141]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div class="group bg-white/5 dark:bg-white/5 hover:bg-white/10 dark:hover:bg-white/10 focus-within:bg-white/20 dark:focus-within:bg-white/10 focus-within:ring-2 focus-within:ring-[#EC4141]/20 pl-4 pr-3 py-1.5 rounded-full text-sm flex items-center transition-all w-60 ml-2 border border-black/10 dark:border-white/20">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-500 dark:text-gray-300 mr-2 group-focus-within:text-[#EC4141]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
         <input 
           type="text" 
           placeholder="搜索音乐..." 
-          class="bg-transparent outline-none w-full placeholder-gray-500 dark:placeholder-gray-400 text-gray-800 dark:text-gray-200 text-xs font-medium"
+          class="bg-transparent outline-none w-full placeholder-gray-500 dark:placeholder-gray-400 text-gray-800 dark:text-gray-100 text-xs font-medium"
           :value="searchQuery"
           @input="handleInput"
         />

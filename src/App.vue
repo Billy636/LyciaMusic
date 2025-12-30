@@ -4,7 +4,7 @@ import Sidebar from './components/layout/Sidebar.vue';
 import TitleBar from './components/layout/TitleBar.vue'; 
 import PlayerFooter from './components/layout/PlayerFooter.vue';
 import GlobalBackground from './components/layout/GlobalBackground.vue';
-import { watch } from 'vue';
+import { watch, computed } from 'vue';
 
 // ✅ 页面 (Views) - 路径正确
 import Playlist from './views/Playlist.vue';
@@ -14,6 +14,7 @@ import PlayerDetail from './components/player/PlayerDetail.vue';
 
 // 🔴 修正点 2: AddToPlaylistModal 移到了 overlays 文件夹
 import AddToPlaylistModal from './components/overlays/AddToPlaylistModal.vue'; 
+import Toast from './components/common/Toast.vue';
 
 const { init, showAddToPlaylistModal, playlistAddTargetSongs, addSongsToPlaylist, settings } = usePlayer();
 init();
@@ -39,6 +40,22 @@ const handleGlobalAdd = (playlistId: string) => {
   addSongsToPlaylist(playlistId, playlistAddTargetSongs.value);
   showAddToPlaylistModal.value = false;
 };
+
+// --- 动态模糊逻辑 ---
+const mainBlurStyle = computed(() => {
+  const { dynamicBgType, mode, customBackground } = settings.value.theme;
+  
+  if (dynamicBgType === 'flow' || dynamicBgType === 'blur') {
+    return 'blur(40px)';
+  }
+  
+  if (mode === 'custom') {
+    const b = customBackground.blur;
+    return b <= 0 ? 'none' : `blur(${b}px)`;
+  }
+  
+  return 'none';
+});
 </script>
 
 <template>
@@ -46,21 +63,24 @@ const handleGlobalAdd = (playlistId: string) => {
     
     <GlobalBackground />
 
-    <div class="flex flex-1 overflow-hidden relative z-0">
-      <Sidebar />
-      
-      <div class="flex-1 flex flex-col min-w-0 bg-white/30 dark:bg-black/30 backdrop-blur-2xl transition-colors duration-500">
-        <TitleBar />
-        <main class="flex-1 overflow-hidden relative">
-          <router-view /> 
-        </main>
+    <div 
+      class="flex-1 flex flex-col overflow-hidden relative z-0 transition-colors duration-500"
+      :class="[settings.theme.mode === 'custom' ? 'bg-transparent' : 'bg-white/30 dark:bg-black/60']"
+      :style="{ backdropFilter: mainBlurStyle }"
+    >
+      <div class="flex flex-1 overflow-hidden">
+        <Sidebar />
+        
+        <div class="flex-1 flex flex-col min-w-0">
+          <TitleBar />
+          <main class="flex-1 overflow-hidden relative">
+            <router-view /> 
+          </main>
+        </div>
       </div>
-      
-    </div>
 
-    <Playlist />
-    
-    <PlayerFooter />
+      <PlayerFooter />
+    </div>
 
     <PlayerDetail />
 
@@ -70,6 +90,8 @@ const handleGlobalAdd = (playlistId: string) => {
       @close="showAddToPlaylistModal = false" 
       @add="handleGlobalAdd"
     />
+
+    <Toast />
     
   </div>
 </template>
