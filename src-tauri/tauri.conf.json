@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "1Lycia Music",
-  "version": "0.1.0",
-  "identifier": "com.music.player",
+  "productName": "Lycia Music",
+  "version": "1.0.0",
+  "identifier": "com.lover.lyciamusic",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "my-cloud-music",
+        "title": "Lycia Music",
         "width": 1280,
         "height": 850,
         "minWidth": 900,    
@@ -33,6 +33,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "copyright": "Copyright © 2025 Lycia Music Team",
+    "shortDescription": "A beautiful local music player powered by Tauri.",
+    "license": "MIT",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

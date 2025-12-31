@@ -59,7 +59,7 @@ const menuStyle = computed(() => {
   return {
     left: `${left}px`,
     top: `${top}px`,
-    visibility: menuSize.value.height === 0 ? 'hidden' : 'visible'
+    visibility: (menuSize.value.height === 0 ? 'hidden' : 'visible') as any
   };
 });
 

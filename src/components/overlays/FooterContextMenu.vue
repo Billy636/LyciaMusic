@@ -53,7 +53,7 @@ const menuStyle = computed(() => {
   return {
     left: `${left}px`,
     top: `${top}px`,
-    visibility: menuSize.value.height === 0 ? 'hidden' : 'visible' // 测量前隐藏，防止闪烁
+    visibility: (menuSize.value.height === 0 ? 'hidden' : 'visible') as any
   };
 });
 

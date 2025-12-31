@@ -1,10 +1,86 @@
-"刚才拉取代码试运行了一下，编译报错了。问题出在 PlayQueueSidebar.vue 的第 46 行。
+when i run 'npm run tauri build' there are some issues here!fix it !
+ 
+(base) PS C:\Users\lover\Desktop\my-cloud-music> npm run tauri build
 
-在 :style 动态绑定里，对象键名如果包含连字符（比如 min-height），必须加引号，或者改成驼峰写法。现在的写法导致 Vite 解析失败了。
+> my-cloud-music@0.1.0 tauri
+> tauri build
 
-报错代码： min-height: '200px'
+        Info Looking up installed tauri packages to check mismatched versions...
+     Running beforeBuildCommand `npm run build`
 
-修正建议： 把它改成 'min-height': '200px' 或者 minHeight: '200px' 就可以了。"
+> my-cloud-music@0.1.0 build
+> vue-tsc --noEmit && vite build
+
+src/App.vue:15:63 - error TS6133: 'addSongsToQueue' is declared but its value is never read.
+
+15 const { init, showAddToPlaylistModal, playlistAddTargetSongs, addSongsToQueue, settings, playQueue } = usePlayer();
+                                                                 ~~~~~~~~~~~~~~~
+
+src/App.vue:38:3 - error TS2304: Cannot find name 'addSongsToPlaylist'.
+
+38   addSongsToPlaylist(playlistId, playlistAddTargetSongs.value);
+     ~~~~~~~~~~~~~~~~~~
+
+src/components/overlays/FolderContextMenu.vue:77:6 - error TS2345: Argument of type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to parameter of type 'HTMLAttributes & ReservedProps & Record<string, unknown>'.
+  Type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to type 'HTMLAttributes'.
+    Types of property 'style' are incompatible.
+      Type '{ left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
+        Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
+          Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'CSSProperties'.
+            Types of property 'visibility' are incompatible.
+              Type 'string' is not assignable to type 'Visibility | undefined'.
+
+77     <div
+        ~~~
+
+src/components/overlays/FooterContextMenu.vue:77:6 - error TS2345: Argument of type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to parameter of type 'HTMLAttributes & ReservedProps & Record<string, unknown>'.
+  Type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to type 'HTMLAttributes'.
+    Types of property 'style' are incompatible.
+      Type '{ left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
+        Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
+          Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'CSSProperties'.
+            Types of property 'visibility' are incompatible.
+              Type 'string' is not assignable to type 'Visibility | undefined'.
+
+77     <div
+        ~~~
+
+src/components/overlays/PlaylistContextMenu.vue:76:6 - error TS2345: Argument of type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to parameter of type 'HTMLAttributes & ReservedProps & Record<string, unknown>'.
+  Type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to type 'HTMLAttributes'.
+    Types of property 'style' are incompatible.
+      Type '{ left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
+        Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
+          Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'CSSProperties'.
+            Types of property 'visibility' are incompatible.
+              Type 'string' is not assignable to type 'Visibility | undefined'.
+
+76     <div
+        ~~~
+
+src/components/overlays/SongContextMenu.vue:113:6 - error TS2345: Argument of type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to parameter of type 'HTMLAttributes & ReservedProps & Record<string, unknown>'.
+  Type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to type 'HTMLAttributes'.
+    Types of property 'style' are incompatible.
+      Type '{ left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
+        Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
+          Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'CSSProperties'.
+            Types of property 'visibility' are incompatible.
+              Type 'string' is not assignable to type 'Visibility | undefined'.
+
+113     <div
+         ~~~
+
+
+Found 6 errors in 5 files.
+
+Errors  Files
+     2  src/App.vue:15
+     1  src/components/overlays/FolderContextMenu.vue:77
+     1  src/components/overlays/FooterContextMenu.vue:77
+     1  src/components/overlays/PlaylistContextMenu.vue:76
+     1  src/components/overlays/SongContextMenu.vue:113
+beforeBuildCommand `npm run build` failed with exit code 2
+       Error beforeBuildCommand `npm run build` failed with exit code 2
+
 
 Important notes:
 it is Tauri v2.0,please remember it !

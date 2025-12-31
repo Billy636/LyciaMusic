@@ -12,7 +12,7 @@ const PlayerDetail = defineAsyncComponent(() => import('./components/player/Play
 const AddToPlaylistModal = defineAsyncComponent(() => import('./components/overlays/AddToPlaylistModal.vue')); 
 const Toast = defineAsyncComponent(() => import('./components/common/Toast.vue'));
 
-const { init, showAddToPlaylistModal, playlistAddTargetSongs, addSongsToQueue, settings, playQueue } = usePlayer();
+const { init, showAddToPlaylistModal, playlistAddTargetSongs, addSongsToPlaylist, settings, playQueue } = usePlayer();
 init();
 
 const isFooterVisible = computed(() => playQueue.value.length > 0);
