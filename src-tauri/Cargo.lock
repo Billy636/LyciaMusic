@@ -2611,6 +2611,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "lycia_music"
+version = "1.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "hex",
+ "image",
+ "lofty",
+ "raw-window-handle",
+ "rodio",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "souvlaki",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tokio",
+ "urlencoding",
+ "walkdir",
+]
+
+[[package]]
 name = "mac"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2752,30 +2776,6 @@ dependencies = [
  "serde",
  "thiserror 2.0.17",
  "windows-sys 0.60.2",
-]
-
-[[package]]
-name = "my-cloud-music"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "hex",
- "image",
- "lofty",
- "raw-window-handle",
- "rodio",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "souvlaki",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tokio",
- "urlencoding",
- "walkdir",
 ]
 
 [[package]]
