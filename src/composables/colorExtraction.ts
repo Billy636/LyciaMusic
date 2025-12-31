@@ -9,7 +9,7 @@ export async function extractDominantColors(imageUrl: string, count: number = 4)
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (!ctx) {
-        resolve(['#4c1d95', '#8b5cf6', '#c4b5fd', '#312e81']);
+        resolve(['#f3f4f6', '#e5e7eb', '#d1d5db', '#f9fafb']);
         return;
       }
 
@@ -34,7 +34,7 @@ export async function extractDominantColors(imageUrl: string, count: number = 4)
       }
 
       if (colors.length === 0) {
-        resolve(['#5b21b6', '#7c3aed', '#a78bfa', '#4c1d95']);
+        resolve(['#f3f4f6', '#e5e7eb', '#d1d5db', '#f9fafb']);
         return;
       }
 
@@ -110,7 +110,7 @@ export async function extractDominantColors(imageUrl: string, count: number = 4)
     };
 
     img.onerror = () => {
-      resolve(['#5b21b6', '#7c3aed', '#a78bfa', '#4c1d95']);
+      resolve(['#f3f4f6', '#e5e7eb', '#d1d5db', '#f9fafb']);
     };
   });
 }
