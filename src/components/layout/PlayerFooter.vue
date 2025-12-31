@@ -22,7 +22,7 @@ const toggleLyrics = () => { showDesktopLyrics.value = !showDesktopLyrics.value;
 
 // 🎵 动态模糊计算
 const footerBlurStyle = computed(() => {
-  if (settings.value.theme.enableDynamicBg) return 'blur(20px) saturate(180%)';
+  if (settings.value.theme.dynamicBgType !== 'none') return 'blur(20px) saturate(180%)';
   if (settings.value.theme.mode === 'custom') {
     const b = settings.value.theme.customBackground.blur;
     return b <= 0 ? 'none' : `blur(${b}px) saturate(180%)`;
@@ -135,6 +135,7 @@ onUnmounted(() => {
 <template>
   <footer 
     class="h-20 bg-transparent flex items-center justify-between px-4 z-50 relative select-none transition-colors duration-500"
+    :style="{ backdropFilter: footerBlurStyle }"
   >
     
     <div 

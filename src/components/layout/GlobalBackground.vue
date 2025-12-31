@@ -59,7 +59,7 @@ const bgImageSrc = computed(() => {
 
 <template>
   <div 
-    class="fixed inset-0 z-[-1] overflow-hidden pointer-events-none transition-colors duration-500"
+    class="fixed inset-0 z-0 overflow-hidden pointer-events-none transition-colors duration-500"
     :class="[settings.theme.mode === 'custom' ? 'bg-black' : 'bg-[#fafafa] dark:bg-[#121212]']"
   >
     

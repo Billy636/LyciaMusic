@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { useSettings } from '../../composables/settings';
+
+const { settings } = useSettings();
 
 // Placeholder states for demonstration
 const launchOnStartup = ref(false);
@@ -36,6 +39,26 @@ const downloadPath = ref('D:\\Music\\Downloads');
           </div>
           <button @click="gpuAcceleration = !gpuAcceleration" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="gpuAcceleration ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
             <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="gpuAcceleration ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
+        </div>
+
+        <div class="p-4 flex items-center justify-between border-b border-gray-100/50 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+          <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">最小化到系统托盘</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">点击最小化按钮时隐藏到托盘</div>
+          </div>
+          <button @click="settings.minimizeToTray = !settings.minimizeToTray" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.minimizeToTray ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.minimizeToTray ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
+        </div>
+
+        <div class="p-4 flex items-center justify-between border-b border-gray-100/50 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+          <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">关闭主面板时最小化到托盘</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">点击关闭按钮时隐藏到托盘，不退出程序</div>
+          </div>
+          <button @click="settings.closeToTray = !settings.closeToTray" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.closeToTray ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.closeToTray ? 'translate-x-6' : 'translate-x-1'" />
           </button>
         </div>
       </div>

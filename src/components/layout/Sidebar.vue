@@ -20,7 +20,6 @@ const {
   viewPlaylist,   
   currentViewMode, 
   filterCondition,
-  playQueue,
   playSong,
   addSongsToQueue,
   getSongsFromPlaylist,
@@ -61,7 +60,7 @@ const handleDeletePlaylist = (id: string, name: string) => {
   showDeleteModal.value = true;
 };
 
-const handleDeletePlaylistBatch = (ids: string[], count: number, names: string) => {
+const handleDeletePlaylistBatch = (ids: string[], count: number) => {
   playlistsToDelete.value = ids;
   deleteModalContent.value = `确定要删除选中的 ${count} 个歌单吗？此操作不可恢复。`;
   showDeleteModal.value = true;
@@ -171,7 +170,7 @@ const handleMenuDelete = () => {
       .map(p => p.name)
       .join(', ');
     
-    handleDeletePlaylistBatch(Array.from(selectedPlaylistIds.value), count, names);
+    handleDeletePlaylistBatch(Array.from(selectedPlaylistIds.value), count);
   } else if (targetPlaylist.value) {
     handleDeletePlaylist(targetPlaylist.value.id, targetPlaylist.value.name);
   }
@@ -248,8 +247,8 @@ watch([songList, playlists], () => {
   <aside class="w-48 bg-transparent flex flex-col border-r border-transparent h-full select-none overflow-hidden relative transition-colors duration-600">
     <div class="h-16 flex items-center px-6 shrink-0 mb-2 cursor-default relative" data-tauri-drag-region>
       <div class="text-xl font-bold text-[#EC4141] italic tracking-tight flex items-center gap-2 pointer-events-none">
-        <span class="text-2xl drop-shadow-sm">🤪</span> 
-        <span class="drop-shadow-sm">FkMus</span>
+        <span class="text-2xl drop-shadow-sm"></span> 
+        <span class="drop-shadow-sm">LyciaMusic</span>
       </div>
     </div>
 
