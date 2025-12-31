@@ -44,6 +44,9 @@
 ### 播放界面
 <img src="./screenshots/playdetail.png" width="100%">
 
+### 设置界面
+<img src="./screenshots/setting.png" width="100%">
+
 </details>
 
 
