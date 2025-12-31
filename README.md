@@ -1,9 +1,3 @@
-<div align="center">
-
-**[English](./README.md) | [简体中文](./README_CN.md)**
-
-</div>
-
 # LyciaMusic 🎵
 
 A modern, high-performance desktop local music player built with **Tauri v2.0**, **Vue 3**, and **TypeScript**. Designed for beauty, speed, and a native desktop experience.
