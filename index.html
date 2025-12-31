@@ -8,7 +8,106 @@
   </head>
 
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <style>
+        :root {
+          --bg: #ffffff;
+          --side: #fafafa;
+          --footer: #ffffff;
+          --divider: rgba(0,0,0,0.05);
+        }
+        @media (prefers-color-scheme: dark) {
+          :root {
+            --bg: #121212;
+            --side: #161616;
+            --footer: #121212;
+            --divider: rgba(255,255,255,0.05);
+          }
+        }
+        body {
+          margin: 0;
+          padding: 0;
+          background-color: var(--bg);
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        .skeleton-container {
+          display: flex;
+          flex-direction: column;
+          height: 100vh;
+          width: 100vw;
+          overflow: hidden;
+        }
+        .skeleton-body {
+          display: flex;
+          flex: 1;
+          overflow: hidden;
+        }
+        .skeleton-sidebar {
+          width: 192px; /* w-48 */
+          background-color: var(--side);
+          border-right: 1px solid var(--divider);
+          display: flex;
+          flex-direction: column;
+          padding: 24px 0;
+        }
+        .skeleton-main {
+          flex: 1;
+          background-color: var(--bg);
+          padding: 40px;
+        }
+        .skeleton-footer {
+          height: 80px; /* h-20 */
+          background-color: var(--footer);
+          border-top: 1px solid var(--divider);
+          display: flex;
+          align-items: center;
+          padding: 0 20px;
+        }
+        .skeleton-item {
+          background-color: var(--divider);
+          border-radius: 4px;
+        }
+        .pulse {
+          animation: skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes skeleton-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      </style>
+      <div class="skeleton-container">
+        <div class="skeleton-body">
+          <div class="skeleton-sidebar">
+            <div class="skeleton-item pulse" style="width: 120px; height: 32px; margin: 0 24px 32px 24px; border-radius: 8px;"></div>
+            <div class="skeleton-item pulse" style="width: 144px; height: 36px; margin: 8px 12px; border-radius: 6px;"></div>
+            <div class="skeleton-item pulse" style="width: 144px; height: 36px; margin: 8px 12px; border-radius: 6px;"></div>
+            <div class="skeleton-item pulse" style="width: 144px; height: 36px; margin: 8px 12px; border-radius: 6px;"></div>
+          </div>
+          <div class="skeleton-main">
+            <div class="skeleton-item pulse" style="width: 200px; height: 36px; margin-bottom: 24px;"></div>
+            <div style="display: flex; gap: 16px; margin-bottom: 32px;">
+              <div class="skeleton-item pulse" style="width: 120px; height: 120px; border-radius: 12px;"></div>
+              <div class="skeleton-item pulse" style="width: 120px; height: 120px; border-radius: 12px;"></div>
+              <div class="skeleton-item pulse" style="width: 120px; height: 120px; border-radius: 12px;"></div>
+            </div>
+            <div class="skeleton-item pulse" style="width: 100%; height: 200px; border-radius: 8px;"></div>
+          </div>
+        </div>
+        <div class="skeleton-footer">
+          <div class="skeleton-item pulse" style="width: 48px; height: 48px; border-radius: 8px; margin-right: 12px;"></div>
+          <div style="flex: 1;">
+            <div class="skeleton-item pulse" style="width: 160px; height: 14px; margin-bottom: 8px;"></div>
+            <div class="skeleton-item pulse" style="width: 100px; height: 10px;"></div>
+          </div>
+          <div style="display: flex; gap: 24px; margin: 0 40px;">
+            <div class="skeleton-item pulse" style="width: 32px; height: 32px; border-radius: 50%;"></div>
+            <div class="skeleton-item pulse" style="width: 40px; height: 40px; border-radius: 50%;"></div>
+            <div class="skeleton-item pulse" style="width: 32px; height: 32px; border-radius: 50%;"></div>
+          </div>
+          <div class="skeleton-item pulse" style="width: 100px; height: 12px;"></div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

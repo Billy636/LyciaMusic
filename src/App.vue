@@ -4,20 +4,18 @@ import Sidebar from './components/layout/Sidebar.vue';
 import TitleBar from './components/layout/TitleBar.vue'; 
 import PlayerFooter from './components/layout/PlayerFooter.vue';
 import GlobalBackground from './components/layout/GlobalBackground.vue';
-import { watch, computed } from 'vue';
+import { watch, computed, defineAsyncComponent } from 'vue';
 
-// ✅ 播放队列侧边栏
-import PlayQueueSidebar from './components/player/PlayQueueSidebar.vue';
+// 使用异步组件按需加载非首屏组件
+const PlayQueueSidebar = defineAsyncComponent(() => import('./components/player/PlayQueueSidebar.vue'));
+const PlayerDetail = defineAsyncComponent(() => import('./components/player/PlayerDetail.vue')); 
+const AddToPlaylistModal = defineAsyncComponent(() => import('./components/overlays/AddToPlaylistModal.vue')); 
+const Toast = defineAsyncComponent(() => import('./components/common/Toast.vue'));
 
-// 🔴 修正点 1: PlayerDetail 移到了 player 文件夹
-import PlayerDetail from './components/player/PlayerDetail.vue'; 
-
-// 🔴 修正点 2: AddToPlaylistModal 移到了 overlays 文件夹
-import AddToPlaylistModal from './components/overlays/AddToPlaylistModal.vue'; 
-import Toast from './components/common/Toast.vue';
-
-const { init, showAddToPlaylistModal, playlistAddTargetSongs, addSongsToPlaylist, settings } = usePlayer();
+const { init, showAddToPlaylistModal, playlistAddTargetSongs, addSongsToQueue, settings, playQueue } = usePlayer();
 init();
+
+const isFooterVisible = computed(() => playQueue.value.length > 0);
 
 // --- 主题切换逻辑 ---
 const applyTheme = () => {
@@ -79,7 +77,9 @@ const mainBlurStyle = computed(() => {
         </div>
       </div>
 
-      <PlayerFooter />
+      <transition name="footer-slide">
+        <PlayerFooter v-if="isFooterVisible" />
+      </transition>
     </div>
 
     <PlayerDetail />
@@ -93,7 +93,56 @@ const mainBlurStyle = computed(() => {
       @add="handleGlobalAdd"
     />
 
-    <Toast />
+        <Toast />
+
+        
+
+      </div>
+
+    </template>
+
     
-  </div>
-</template>
+
+    <style>
+
+    .footer-slide-enter-active,
+
+    .footer-slide-leave-active {
+
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+      overflow: hidden;
+
+    }
+
+    
+
+    .footer-slide-enter-from,
+
+    .footer-slide-leave-to {
+
+      transform: translateY(100%);
+
+      max-height: 0 !important;
+
+      opacity: 0;
+
+    }
+
+    
+
+    .footer-slide-enter-to,
+
+    .footer-slide-leave-from {
+
+      transform: translateY(0);
+
+      max-height: 80px !important;
+
+      opacity: 1;
+
+    }
+
+    </style>
+
+    

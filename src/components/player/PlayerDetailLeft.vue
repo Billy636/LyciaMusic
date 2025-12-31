@@ -2,15 +2,29 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { usePlayer } from '../../composables/player';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import FooterContextMenu from "../overlays/FooterContextMenu.vue";
 
 const { 
   currentSong, isPlaying, currentTime, playMode, volume,
-  togglePlay, nextSong, prevSong, toggleMute, toggleMode,
+  togglePlay, nextSong, prevSong, toggleMute,
   formatDuration, isFavorite, toggleFavorite,
   seekTo, openAddToPlaylistDialog,
   dominantColors, handleVolume,
   showQueue, toggleQueue
 } = usePlayer();
+
+// --- Context Menu State ---
+const showContextMenu = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+
+const handleContextMenu = (e: MouseEvent) => {
+  if (!currentSong.value) return;
+  e.preventDefault();
+  contextMenuX.value = e.clientX;
+  contextMenuY.value = e.clientY;
+  showContextMenu.value = true;
+};
 
 const bigCoverUrl = ref('');
 
@@ -116,7 +130,7 @@ const remainingTime = computed(() => {
     <!-- Block B: Metadata & Actions -->
     <div class="w-full px-4 mb-4">
       <div class="flex items-end justify-between gap-4">
-        <div class="flex flex-col min-w-0">
+        <div class="flex flex-col min-w-0" @contextmenu="handleContextMenu">
           <h1 class="text-[24px] font-bold text-white truncate leading-tight tracking-tight">{{ currentSong?.title || currentSong?.name || '未知歌曲' }}</h1>
           <p class="text-[17px] font-medium text-white/45 truncate leading-tight mt-1.5">{{ currentSong?.artist || '未知歌手' }}</p>
         </div>
@@ -259,11 +273,31 @@ const remainingTime = computed(() => {
           <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
         </button>
 
-      </div>
-    </div>
+            </div>
 
-  </div>
-</template>
+          </div>
+
+      
+
+          <FooterContextMenu 
+
+            :visible="showContextMenu" 
+
+            :x="contextMenuX" 
+
+            :y="contextMenuY" 
+
+            :path="currentSong?.path || ''"
+
+            @close="showContextMenu = false"
+
+          />
+
+        </div>
+
+      </template>
+
+      
 
 <style scoped>
 /* 隐藏原生 range 样式，使用自定义样式 */

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue';
 import { usePlayer, Song } from '../../composables/player';
 
 const props = defineProps<{
@@ -16,6 +16,52 @@ const emit = defineEmits(['close', 'addToPlaylist']);
 const { playSong, playNext, addSongToQueue, removeSongFromList, removeFromPlaylist, openInFinder, deleteFromDisk, filterCondition } = usePlayer();
 
 const menuRef = ref<HTMLElement | null>(null);
+
+// 存储菜单尺寸
+const menuSize = ref({ width: 0, height: 0 });
+
+// 当菜单显示时，立即测量其尺寸
+watch(() => props.visible, async (newVal) => {
+  if (newVal) {
+    await nextTick();
+    if (menuRef.value) {
+      menuSize.value = {
+        width: menuRef.value.offsetWidth,
+        height: menuRef.value.offsetHeight
+      };
+    }
+  } else {
+    // 隐藏时重置，确保下次弹出时重新计算
+    menuSize.value = { width: 0, height: 0 };
+  }
+});
+
+const menuStyle = computed(() => {
+  if (!props.visible) return {};
+
+  let top = props.y;
+  let left = props.x;
+
+  // 边界检查 - 垂直方向
+  if (top + menuSize.value.height > window.innerHeight) {
+    top = props.y - menuSize.value.height;
+  }
+
+  // 边界检查 - 水平方向
+  if (left + menuSize.value.width > window.innerWidth) {
+    left = props.x - menuSize.value.width;
+  }
+
+  // 极致兜底：确保不溢出屏幕顶端或左侧
+  top = Math.max(8, top);
+  left = Math.max(8, left);
+
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+    visibility: menuSize.value.height === 0 ? 'hidden' : 'visible'
+  };
+});
 
 // 点击外部自动关闭
 const handleGlobalClick = (e: MouseEvent) => {
@@ -68,7 +114,7 @@ const handleAction = (action: string) => {
       v-if="visible" 
       ref="menuRef"
       class="fixed z-[9999] bg-white/80 backdrop-blur-2xl rounded-lg shadow-xl border border-gray-100/50 py-1.5 text-sm text-gray-700 min-w-[180px] animate-in fade-in zoom-in-95 duration-75 select-none"
-      :style="{ left: x + 'px', top: y + 'px' }"
+      :style="menuStyle"
       @contextmenu.prevent
     >
       <div @click="handleAction('play')" class="px-4 py-2.5 hover:bg-gray-100 cursor-pointer flex items-center group transition-colors">

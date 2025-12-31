@@ -165,10 +165,6 @@ const handleMenuAddToQueue = () => {
 const handleMenuDelete = () => {
   if (selectedPlaylistIds.value.size > 0) {
     const count = selectedPlaylistIds.value.size;
-    const names = playlists.value
-      .filter(p => selectedPlaylistIds.value.has(p.id))
-      .map(p => p.name)
-      .join(', ');
     
     handleDeletePlaylistBatch(Array.from(selectedPlaylistIds.value), count);
   } else if (targetPlaylist.value) {

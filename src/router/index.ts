@@ -1,11 +1,12 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
-// import SongList from '../components/song-list/SongList.vue'; // Removed
-import Home from '../views/Home.vue';
-import Favorites from '../views/Favorites.vue';
-import Recent from '../views/Recent.vue';
-import Artists from '../views/Artists.vue'; 
-import Albums from '../views/Albums.vue'; 
-import Settings from '../views/Settings.vue'; 
+
+// 使用路由懒加载优化首屏加载速度
+const Home = () => import('../views/Home.vue');
+const Favorites = () => import('../views/Favorites.vue');
+const Recent = () => import('../views/Recent.vue');
+const Artists = () => import('../views/Artists.vue'); 
+const Albums = () => import('../views/Albums.vue'); 
+const Settings = () => import('../views/Settings.vue'); 
 
 const routes: Array<RouteRecordRaw> = [
   { path: '/', name: 'Home', component: Home },

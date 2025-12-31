@@ -11,7 +11,7 @@ const {
   artistList, albumList, folderList, currentFolderFilter,
   isLocalMusic, isFolderMode,
   playSong, openInFinder, createPlaylist, removeFolder,
-  getSongsInFolder, tempQueue, moveFilesToFolder,
+  getSongsInFolder, moveFilesToFolder,
   refreshFolder,
   addSongsToQueue
 } = usePlayer();

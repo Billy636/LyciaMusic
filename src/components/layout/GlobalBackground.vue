@@ -118,7 +118,7 @@ const bgImageSrc = computed(() => {
       <div v-if="activeBackgroundInfo?.type === 'custom' && bgImageSrc" class="absolute inset-0">
         <!-- 蒙层 (Mask Layer) -->
         <div 
-          v-if="activeBackgroundInfo.maskAlpha > 0"
+          v-if="activeBackgroundInfo.maskAlpha !== undefined && activeBackgroundInfo.maskAlpha > 0"
           class="absolute inset-0 z-10 transition-all duration-300"
           :style="{ 
             backgroundColor: activeBackgroundInfo.maskColor || '#000000',

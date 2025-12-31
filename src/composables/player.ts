@@ -387,73 +387,76 @@ export function usePlayer() {
     });
 
     onMounted(async () => {
-      const sVol = localStorage.getItem('player_volume'); if (sVol) { State.volume.value = parseInt(sVol); await invoke('set_volume', { volume: State.volume.value / 100.0 }); }
-      const sFolders = localStorage.getItem('player_watched_folders'); if (sFolders) try { State.watchedFolders.value = JSON.parse(sFolders); } catch(e) {}
-      const sList = localStorage.getItem('player_playlist'); if (sList) try { State.songList.value = JSON.parse(sList); } catch(e) {}
-      const sFavs = localStorage.getItem('player_favorites'); if (sFavs) try { State.favoritePaths.value = JSON.parse(sFavs); } catch(e) {}
-      const sPlaylists = localStorage.getItem('player_custom_playlists'); if (sPlaylists) try { State.playlists.value = JSON.parse(sPlaylists); } catch(e) {}
-      
-      const sSettings = localStorage.getItem('player_settings'); 
-      if (sSettings) {
-        try { 
-          const saved = JSON.parse(sSettings);
-          // 确保 saved 是真实存在的对象 (排除 null)
-          if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
-            const savedTheme = (saved.theme && typeof saved.theme === 'object') ? saved.theme : {};
-            const savedSidebar = (saved.sidebar && typeof saved.sidebar === 'object') ? saved.sidebar : {};
-            const savedCustomBg = (savedTheme.customBackground && typeof savedTheme.customBackground === 'object') ? savedTheme.customBackground : {};
+      // 🟢 性能优化：将持久化数据的读取放入 setTimeout，确保首屏 Skeleton 优先渲染
+      setTimeout(async () => {
+        const sVol = localStorage.getItem('player_volume'); if (sVol) { State.volume.value = parseInt(sVol); await invoke('set_volume', { volume: State.volume.value / 100.0 }); }
+        const sFolders = localStorage.getItem('player_watched_folders'); if (sFolders) try { State.watchedFolders.value = JSON.parse(sFolders); } catch(e) {}
+        const sList = localStorage.getItem('player_playlist'); if (sList) try { State.songList.value = JSON.parse(sList); } catch(e) {}
+        const sFavs = localStorage.getItem('player_favorites'); if (sFavs) try { State.favoritePaths.value = JSON.parse(sFavs); } catch(e) {}
+        const sPlaylists = localStorage.getItem('player_custom_playlists'); if (sPlaylists) try { State.playlists.value = JSON.parse(sPlaylists); } catch(e) {}
+        
+        const sSettings = localStorage.getItem('player_settings'); 
+        if (sSettings) {
+          try { 
+            const saved = JSON.parse(sSettings);
+            // 确保 saved 是真实存在的对象 (排除 null)
+            if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+              const savedTheme = (saved.theme && typeof saved.theme === 'object') ? saved.theme : {};
+              const savedSidebar = (saved.sidebar && typeof saved.sidebar === 'object') ? saved.sidebar : {};
+              const savedCustomBg = (savedTheme.customBackground && typeof savedTheme.customBackground === 'object') ? savedTheme.customBackground : {};
 
-            // 迁移逻辑：将旧的 enableDynamicBg 转换为新的 dynamicBgType
-            let dynamicBgType = savedTheme.dynamicBgType;
-            if (dynamicBgType === undefined && savedTheme.enableDynamicBg !== undefined) {
-              dynamicBgType = savedTheme.enableDynamicBg ? 'flow' : 'none';
-            }
-
-            const merged = {
-              ...State.settings.value,
-              ...saved,
-              theme: {
-                ...State.settings.value.theme,
-                ...savedTheme,
-                dynamicBgType: dynamicBgType || State.settings.value.theme.dynamicBgType,
-                customBackground: {
-                  ...State.settings.value.theme.customBackground,
-                  ...savedCustomBg
-                }
-              },
-              sidebar: {
-                ...State.settings.value.sidebar,
-                ...savedSidebar
+              // 迁移逻辑：将旧的 enableDynamicBg 转换为新的 dynamicBgType
+              let dynamicBgType = savedTheme.dynamicBgType;
+              if (dynamicBgType === undefined && savedTheme.enableDynamicBg !== undefined) {
+                dynamicBgType = savedTheme.enableDynamicBg ? 'flow' : 'none';
               }
-            };
-            State.settings.value = merged;
+
+              const merged = {
+                ...State.settings.value,
+                ...saved,
+                theme: {
+                  ...State.settings.value.theme,
+                  ...savedTheme,
+                  dynamicBgType: dynamicBgType || State.settings.value.theme.dynamicBgType,
+                  customBackground: {
+                    ...State.settings.value.theme.customBackground,
+                    ...savedCustomBg
+                  }
+                },
+                sidebar: {
+                  ...State.settings.value.sidebar,
+                  ...savedSidebar
+                }
+              };
+              State.settings.value = merged;
+            }
+          } catch(e) {
+            console.error("Failed to parse settings:", e);
           }
-        } catch(e) {
-          console.error("Failed to parse settings:", e);
         }
-      }
-      
-      const sHistory = localStorage.getItem('player_history'); if (sHistory) try { State.recentSongs.value = JSON.parse(sHistory); } catch(e) {}
-      
-      // 🟢 读取 playQueue
-      const sQueue = localStorage.getItem('player_queue'); if (sQueue) try { State.playQueue.value = JSON.parse(sQueue); } catch(e) {}
+        
+        const sHistory = localStorage.getItem('player_history'); if (sHistory) try { State.recentSongs.value = JSON.parse(sHistory); } catch(e) {}
+        
+        // 🟢 读取 playQueue
+        const sQueue = localStorage.getItem('player_queue'); if (sQueue) try { State.playQueue.value = JSON.parse(sQueue); } catch(e) {}
 
-      const lastSong = localStorage.getItem('player_last_song');
-      if (lastSong) {
-        try {
-          const parsedSong = JSON.parse(lastSong);
-          State.currentSong.value = parsedSong;
-          if (parsedSong.path) {
-            invoke<string>('get_song_cover', { path: parsedSong.path }).then(cover => State.currentCover.value = cover).catch(() => {});
-          }
-          State.isSongLoaded.value = false; 
-        } catch (e) {}
-      }
+        const lastSong = localStorage.getItem('player_last_song');
+        if (lastSong) {
+          try {
+            const parsedSong = JSON.parse(lastSong);
+            State.currentSong.value = parsedSong;
+            if (parsedSong.path) {
+              invoke<string>('get_song_cover', { path: parsedSong.path }).then(cover => State.currentCover.value = cover).catch(() => {});
+            }
+            State.isSongLoaded.value = false; 
+          } catch (e) {}
+        }
 
-      const lastTime = localStorage.getItem('player_last_time');
-      if (lastTime) {
-        State.currentTime.value = parseFloat(lastTime);
-      }
+        const lastTime = localStorage.getItem('player_last_time');
+        if (lastTime) {
+          State.currentTime.value = parseFloat(lastTime);
+        }
+      }, 50);
 
       window.addEventListener('beforeunload', () => {
         localStorage.setItem('player_last_time', State.currentTime.value.toString());

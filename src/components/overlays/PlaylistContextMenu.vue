@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue';
 
-defineProps<{
+const props = defineProps<{
   visible: boolean;
   x: number;
   y: number;
@@ -12,6 +12,51 @@ defineProps<{
 const emit = defineEmits(['close', 'play', 'addToQueue', 'delete', 'cancel']);
 
 const menuRef = ref<HTMLElement | null>(null);
+
+// 存储菜单尺寸
+const menuSize = ref({ width: 0, height: 0 });
+
+// 当菜单显示时，立即测量其尺寸
+watch(() => props.visible, async (newVal) => {
+  if (newVal) {
+    await nextTick();
+    if (menuRef.value) {
+      menuSize.value = {
+        width: menuRef.value.offsetWidth,
+        height: menuRef.value.offsetHeight
+      };
+    }
+  } else {
+    menuSize.value = { width: 0, height: 0 };
+  }
+});
+
+const menuStyle = computed(() => {
+  if (!props.visible) return {};
+
+  let top = props.y;
+  let left = props.x;
+
+  // 边界检查 - 垂直方向
+  if (top + menuSize.value.height > window.innerHeight) {
+    top = props.y - menuSize.value.height;
+  }
+
+  // 边界检查 - 水平方向
+  if (left + menuSize.value.width > window.innerWidth) {
+    left = props.x - menuSize.value.width;
+  }
+
+  // 极致兜底
+  top = Math.max(8, top);
+  left = Math.max(8, left);
+
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+    visibility: menuSize.value.height === 0 ? 'hidden' : 'visible'
+  };
+});
 
 const handleClickOutside = (e: MouseEvent) => {
   if (menuRef.value && !menuRef.value.contains(e.target as Node)) {
@@ -32,7 +77,7 @@ const itemClass = "px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-white/10 cursor-p
       v-if="visible"
       ref="menuRef"
       class="fixed z-[9999] bg-white/80 dark:bg-[#2b2b2b]/90 backdrop-blur-2xl rounded-lg shadow-xl border border-gray-100/50 dark:border-white/10 py-1.5 text-sm text-gray-700 dark:text-white/90 min-w-[180px] animate-in fade-in zoom-in-95 duration-75 select-none"
-      :style="{ top: y + 'px', left: x + 'px' }"
+      :style="menuStyle"
       @contextmenu.prevent
     >
       <div class="px-4 py-2 text-xs text-gray-400 dark:text-white/40 border-b border-gray-100/50 dark:border-white/10 mb-1 truncate max-w-[200px]">

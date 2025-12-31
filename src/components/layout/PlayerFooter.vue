@@ -2,6 +2,7 @@
 import { usePlayer } from '../../composables/player';
 import { useLyrics } from '../../composables/lyrics';
 import DesktopLyrics from "../player/DesktopLyrics.vue";
+import FooterContextMenu from "../overlays/FooterContextMenu.vue";
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
@@ -17,6 +18,19 @@ const {
 
 const { showDesktopLyrics } = useLyrics();
 const localCoverUrl = ref(''); // 本地封面 URL (Asset 协议)
+
+// --- Context Menu State ---
+const showContextMenu = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+
+const handleContextMenu = (e: MouseEvent) => {
+  if (!currentSong.value) return;
+  e.preventDefault();
+  contextMenuX.value = e.clientX;
+  contextMenuY.value = e.clientY;
+  showContextMenu.value = true;
+};
 
 const toggleLyrics = () => { showDesktopLyrics.value = !showDesktopLyrics.value; };
 
@@ -154,7 +168,7 @@ onUnmounted(() => {
        </div>
     </div>
 
-    <div class="flex items-center w-1/3 min-w-[200px]">
+    <div class="flex items-center w-1/3 min-w-[200px]" @contextmenu="handleContextMenu">
       <div 
         @click="togglePlayerDetail"
         class="group relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-black/5 dark:border-white/5 cursor-pointer transition-transform active:scale-95 shadow-sm"
@@ -175,7 +189,7 @@ onUnmounted(() => {
 
       <div class="ml-3 overflow-hidden flex-1" style="text-shadow: 0 1px 2px rgba(0,0,0,0.8);">
         <div class="flex items-center">
-          <div class="text-sm font-medium text-gray-800 dark:text-white truncate cursor-pointer hover:underline shadow-sm">
+          <div class="text-sm font-medium text-gray-800 dark:text-white truncate shadow-sm cursor-default">
             {{ currentSong ? (currentSong.title || currentSong.name.replace(/\.[^/.]+$/, "")) : '听我想听的音乐' }}
           </div>
           
@@ -193,7 +207,7 @@ onUnmounted(() => {
             </svg>
           </button>
         </div>
-        <div class="text-xs text-gray-500 dark:text-white/60 truncate cursor-pointer hover:text-gray-700 dark:hover:text-white mt-0.5">
+        <div class="text-xs text-gray-500 dark:text-white/60 truncate mt-0.5 cursor-default">
           {{ currentSong ? currentSong.artist : 'My Music' }}
         </div>
       </div>
@@ -259,6 +273,26 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <DesktopLyrics />
-  </footer>
-</template>
+        <DesktopLyrics />
+
+    
+
+        <FooterContextMenu 
+
+          :visible="showContextMenu" 
+
+          :x="contextMenuX" 
+
+          :y="contextMenuY" 
+
+          :path="currentSong?.path || ''"
+
+          @close="showContextMenu = false"
+
+        />
+
+      </footer>
+
+    </template>
+
+    
