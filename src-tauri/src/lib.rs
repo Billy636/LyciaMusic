@@ -13,7 +13,11 @@ use music::{
 use player::{
     init_player, play_audio, pause_audio, resume_audio, seek_audio, set_volume, get_playback_progress
 };
-use tauri::Manager;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager,
+};
 use tokio::sync::Semaphore; // 引入信号量
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -36,6 +40,43 @@ pub fn run() {
 
             // 4. 🟢 启动时执行一次缓存清理 (后台运行，不卡启动)
             run_cache_cleanup(app.handle());
+
+            // 5. System Tray Setup
+            let handle = app.handle();
+            let show_i = MenuItem::with_id(handle, "show", "显示主界面", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(handle, "quit", "退出", true, None::<&str>)?;
+            let menu = Menu::with_items(handle, &[&show_i, &quit_i])?;
+
+            let _tray = TrayIconBuilder::with_id("tray")
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app.handle())?;
 
             Ok(())
         })

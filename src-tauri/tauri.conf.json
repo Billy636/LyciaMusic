@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "my-cloud-music",
+  "productName": "1Lycia Music",
   "version": "0.1.0",
   "identifier": "com.music.player",
   "build": {

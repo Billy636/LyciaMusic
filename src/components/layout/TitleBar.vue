@@ -2,14 +2,20 @@
 import { useRouter } from 'vue-router';
 import { usePlayer } from '../../composables/player';
 import { getCurrentWindow } from '@tauri-apps/api/window'; 
+import { useSettings } from '../../composables/settings';
 
 const router = useRouter();
 const { searchQuery, setSearch } = usePlayer();
 const appWindow = getCurrentWindow();
+const { settings } = useSettings();
 
 // 最小化
 const minimize = async () => { 
-  await appWindow.minimize(); 
+  if (settings.value.minimizeToTray) {
+    await appWindow.hide();
+  } else {
+    await appWindow.minimize(); 
+  }
 };
 
 // 最大化/还原
@@ -24,7 +30,11 @@ const toggleMaximize = async () => {
 
 // 关闭
 const closeWindow = async () => { 
-  await appWindow.close(); 
+  if (settings.value.closeToTray) {
+    await appWindow.hide();
+  } else {
+    await appWindow.close();
+  }
 };
 
 const handleInput = (e: Event) => { setSearch((e.target as HTMLInputElement).value); };

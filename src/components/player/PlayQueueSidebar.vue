@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { usePlayer } from '../composables/player';
+import { usePlayer } from '../../composables/player';
 
 // 🟢 核心修改：解构出 playQueue 和新的操作函数
 const { 
@@ -32,13 +32,13 @@ const handleRemove = (song: any, e: Event) => {
       <div 
         v-if="showPlaylist"
         class="fixed bottom-24 right-0 w-[340px] max-h-[70vh] bg-white/80 rounded-l-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] border border-white/40 z-[100] flex flex-col overflow-hidden font-sans select-none"
-        :class="[(!settings.theme.enableDynamicBg && settings.theme.mode === 'custom') ? '' : 'backdrop-blur-2xl']"
+        :class="[(settings.theme.dynamicBgType === 'none' && settings.theme.mode === 'custom') ? '' : 'backdrop-blur-2xl']"
         @click.stop
       >
         <!-- Header -->
         <div 
           class="px-6 py-4 border-b border-black/5 flex justify-between items-center bg-white/50 z-10"
-          :class="[(!settings.theme.enableDynamicBg && settings.theme.mode === 'custom') ? '' : 'backdrop-blur-sm']"
+          :class="[(settings.theme.dynamicBgType === 'none' && settings.theme.mode === 'custom') ? '' : 'backdrop-blur-sm']"
         >
           <div class="flex items-center gap-3">
             <h3 class="font-bold text-gray-800 text-lg tracking-tight">播放列表</h3>

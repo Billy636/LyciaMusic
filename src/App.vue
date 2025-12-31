@@ -6,8 +6,8 @@ import PlayerFooter from './components/layout/PlayerFooter.vue';
 import GlobalBackground from './components/layout/GlobalBackground.vue';
 import { watch, computed } from 'vue';
 
-// ✅ 页面 (Views) - 路径正确
-import Playlist from './views/Playlist.vue';
+// ✅ 播放队列侧边栏
+import PlayQueueSidebar from './components/player/PlayQueueSidebar.vue';
 
 // 🔴 修正点 1: PlayerDetail 移到了 player 文件夹
 import PlayerDetail from './components/player/PlayerDetail.vue'; 
@@ -64,7 +64,7 @@ const mainBlurStyle = computed(() => {
     <GlobalBackground />
 
     <div 
-      class="flex-1 flex flex-col overflow-hidden relative z-0 transition-colors duration-500"
+      class="flex-1 flex flex-col overflow-hidden relative z-10 transition-colors duration-500"
       :class="[settings.theme.mode === 'custom' ? 'bg-transparent' : 'bg-white/30 dark:bg-black/60']"
       :style="{ backdropFilter: mainBlurStyle }"
     >
@@ -83,6 +83,8 @@ const mainBlurStyle = computed(() => {
     </div>
 
     <PlayerDetail />
+
+    <PlayQueueSidebar />
 
     <AddToPlaylistModal 
       :visible="showAddToPlaylistModal" 
