@@ -242,9 +242,10 @@ watch([songList, playlists], () => {
 <template>
   <aside class="w-48 bg-transparent flex flex-col border-r border-transparent h-full select-none overflow-hidden relative transition-colors duration-600">
     <div class="h-16 flex items-center px-6 shrink-0 mb-2 cursor-default relative" data-tauri-drag-region>
-      <div class="text-xl font-bold text-[#EC4141] italic tracking-tight flex items-center gap-2 pointer-events-none">
-        <span class="text-2xl drop-shadow-sm"></span> 
-        <span class="drop-shadow-sm">LyciaMusic</span>
+      <div class="flex items-center gap-2 pointer-events-none">
+        <h1 class="text-2xl font-bold bg-gradient-to-r from-teal-400 to-blue-500 bg-clip-text text-transparent tracking-tight italic">
+          LyciaMusic
+        </h1>
       </div>
     </div>
 

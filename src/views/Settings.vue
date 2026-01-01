@@ -2,20 +2,23 @@
 import { ref } from 'vue';
 import SettingsGeneral from "../components/settings/SettingsGeneral.vue";
 import SettingsTheme from "../components/settings/SettingsTheme.vue";
+import SettingsToolbox from "../components/settings/SettingsToolbox.vue";
+import SettingsAbout from "../components/settings/SettingsAbout.vue";
 
 // 定义 Tabs
-const activeTab = ref<'general' | 'theme' | 'shortcuts' | 'about'>('general');
+const activeTab = ref<'general' | 'theme' | 'toolbox' | 'shortcuts' | 'about'>('general');
 
 const tabs = [
   { id: 'general', name: '常规' },
   { id: 'theme', name: '主题' },
+  { id: 'toolbox', name: '工具箱' },
   { id: 'shortcuts', name: '快捷键' },
   { id: 'about', name: '关于' }
 ];
 </script>
 
 <template>
-  <div class="flex-1 flex flex-col overflow-hidden transition-colors duration-500">
+  <div class="flex-1 h-full flex flex-col overflow-hidden transition-colors duration-500">
     
     <header class="h-20 flex items-end px-8 pb-4 shrink-0 sticky top-0 z-10">
       <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-200 mr-12 mb-1 drop-shadow-sm">设置</h1>
@@ -37,14 +40,19 @@ const tabs = [
       </div>
     </header>
 
-    <section class="flex-1 overflow-y-auto p-8 custom-scrollbar relative">
+    <section class="flex-1 min-h-0 w-full overflow-y-auto p-8 custom-scrollbar relative">
       <SettingsGeneral v-if="activeTab === 'general'" />
       <SettingsTheme v-else-if="activeTab === 'theme'" />
+      <SettingsToolbox v-else-if="activeTab === 'toolbox'" />
+      <SettingsAbout v-else-if="activeTab === 'about'" />
       
       <div v-else class="flex flex-col items-center justify-center h-full text-gray-400 space-y-4">
         <div class="text-4xl opacity-50">🚧</div>
         <div>{{ activeTab === 'shortcuts' ? '快捷键设置' : '关于信息' }} 模块正在施工中...</div>
       </div>
+
+      <!-- 底部留白，确保能完全滚出阴影区 -->
+      <div class="h-12"></div>
     </section>
   </div>
 </template>

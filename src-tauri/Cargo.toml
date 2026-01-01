@@ -35,6 +35,8 @@ hex = "0.4.3"
 tokio = { version = "1.48.0", features = ["full"] }
 souvlaki = "0.7"
 raw-window-handle = "0.6"
+regex = "1"
+cpal = "0.15"
 
 # ... 现有的内容 ...
 

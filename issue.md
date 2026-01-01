@@ -1,64 +1,70 @@
-There are warnings when the compiler runs the software. Please help me resolve the following warnings, making sure that the functionality of the software remains unchanged.
-[{
-	"resource": "/c:/Users/lover/Desktop/my-cloud-music/src-tauri/src/lib.rs",
-	"owner": "rustc",
-	"code": {
-		"value": "Click for full compiler diagnostic",
-		"target": {
-			"$mid": 1,
-			"path": "/diagnostic message [0]",
-			"scheme": "rust-analyzer-diagnostics-view",
-			"query": "0",
-			"fragment": "file:///c%3A/Users/lover/Desktop/my-cloud-music/src-tauri/src/lib.rs"
-		}
-	},
-	"severity": 8,
-	"message": "this function takes 0 arguments but 1 argument was supplied",
-	"source": "rustc",
-	"startLineNumber": 30,
-	"startColumn": 32,
-	"endLineNumber": 30,
-	"endColumn": 43,
-	"relatedInformation": [
-		{
-			"startLineNumber": 30,
-			"startColumn": 44,
-			"endLineNumber": 30,
-			"endColumn": 64,
-			"message": "unexpected argument of type `AppHandle`",
-			"resource": "/c:/Users/lover/Desktop/my-cloud-music/src-tauri/src/lib.rs"
-		},
-		{
-			"startLineNumber": 20,
-			"startColumn": 8,
-			"endLineNumber": 20,
-			"endColumn": 19,
-			"message": "function defined here",
-			"resource": "/c:/Users/lover/Desktop/my-cloud-music/src-tauri/src/player.rs"
-		},
-		{
-			"startLineNumber": 30,
-			"startColumn": 44,
-			"endLineNumber": 30,
-			"endColumn": 64,
-			"message": "remove the extra argument",
-			"resource": "/c:/Users/lover/Desktop/my-cloud-music/src-tauri/src/lib.rs"
-		}
-	],
-	"origin": "extHost1"
-}]
+(base) PS C:\Users\lover\Desktop\my-cloud-music> npm run tauri dev
+
+> lycia-music@1.0.0 tauri
+> tauri dev
+
+     Running BeforeDevCommand (`npm run dev`)
+
+> lycia-music@1.0.0 dev
+> vite
 
 
-[{
-	"resource": "/c:/Users/lover/Desktop/my-cloud-music/src/style.css",
-	"owner": "_generated_diagnostic_collection_name_#6",
-	"code": "unknownAtRules",
-	"severity": 4,
-	"message": "Unknown at rule @custom-variant",
-	"source": "css",
-	"startLineNumber": 4,
-	"startColumn": 1,
-	"endLineNumber": 4,
-	"endColumn": 16,
-	"origin": "extHost1"
-}]
+  VITE v6.4.1  ready in 251 ms
+
+  ➜  Local:   http://localhost:1420/
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+        Info Watching C:\Users\lover\Desktop\my-cloud-music\src-tauri for changes...
+   Compiling lycia_music v1.0.0 (C:\Users\lover\Desktop\my-cloud-music\src-tauri)
+error[E0425]: cannot find function `get_output_devices` in this scope
+   --> src\lib.rs:103:13
+    |
+103 |             get_output_devices,
+    |             ^^^^^^^^^^^^^^^^^^ not found in this scope
+    |
+help: consider importing this function
+    |
+  7 + use crate::player::get_output_devices;
+    |
+
+error[E0425]: cannot find function `set_output_device` in this scope
+   --> src\lib.rs:104:13
+    |
+104 |             set_output_device
+    |             ^^^^^^^^^^^^^^^^^ not found in this scope
+    |
+help: consider importing this function
+    |
+  7 + use crate::player::set_output_device;
+    |
+
+error: this function depends on never type fallback being `()`
+   --> src\lib.rs:26:1
+    |
+ 26 | pub fn run() {
+    | ^^^^^^^^^^^^
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in Rust 2024 and in a future release in all editions!
+    = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/never-type-fallback.html>
+    = help: specify the types explicitly
+note: in edition 2024, the requirement `!: Deserialize<'_>` will fail
+   --> src\player.rs:49:1
+    |
+ 49 |   #[tauri::command]
+    |   ^^^^^^^^^^^^^^^^^
+    |
+   ::: src\lib.rs:85:25
+    |
+ 85 |           .invoke_handler(tauri::generate_handler![
+    |  _________________________-
+ 86 | |             scan_music_folder,
+ 87 | |             scan_folder_as_playlists,
+ 88 | |             get_song_cover_thumbnail,
+...   |
+104 | |             set_output_device
+105 | |         ])
+    | |_________- in this macro invocation
+    = note: `#[deny(dependency_on_unit_never_type_fallback)]` (part of `#[deny(rust_2024_compatibility)]`) on by default
+    = note: this error originates in the macro `__cmd__set_output_device` which comes from the expansion of the macro `tauri::generate_handler` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `lycia_music` (lib) due to 4 previous errors

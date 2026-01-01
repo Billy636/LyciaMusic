@@ -2615,10 +2615,12 @@ name = "lycia_music"
 version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
+ "cpal",
  "hex",
  "image",
  "lofty",
  "raw-window-handle",
+ "regex",
  "rodio",
  "rusqlite",
  "serde",

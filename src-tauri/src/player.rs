@@ -5,10 +5,12 @@ use std::thread;
 use std::fs::File;
 use std::io::BufReader;
 use std::time::Duration;
-use rodio::{Decoder, OutputStream, Sink, Source};
+use rodio::{Decoder, OutputStream, Sink, Source, OutputStreamHandle};
 use tauri::{AppHandle, Manager, Emitter};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use souvlaki::{MediaControls, PlatformConfig, MediaMetadata, MediaControlEvent, MediaPlayback, MediaPosition};
+use cpal::traits::{HostTrait, DeviceTrait};
+use serde::Serialize;
 
 pub struct TimedSource<S> { pub inner: S, pub samples_played: Arc<AtomicU64> }
 impl<S> Iterator for TimedSource<S> where S: Source<Item = f32> { type Item = f32; fn next(&mut self) -> Option<Self::Item> { let sample = self.inner.next(); if sample.is_some() { self.samples_played.fetch_add(1, Ordering::Relaxed); } sample } }
@@ -16,12 +18,39 @@ impl<S> Source for TimedSource<S> where S: Source<Item = f32> { fn channels(&sel
 
 pub struct SharedProgress { pub samples_played: Arc<AtomicU64>, pub sample_rate: Arc<AtomicU32>, pub channels: Arc<AtomicU32> }
 
-pub enum AudioCommand { Play(String), Pause, Resume, Seek(u32, bool), SetVolume(f32) }
+pub enum AudioCommand { Play(String), Pause, Resume, Seek(u32, bool), SetVolume(f32), SetDevice(String) }
 
 pub struct PlayerState {
     pub tx: Mutex<Sender<AudioCommand>>, 
     pub progress: Arc<SharedProgress>,
     pub controls: Arc<Mutex<Option<MediaControls>>>, // Store MediaControls
+}
+
+#[derive(Serialize, Clone)]
+pub struct AudioDevice {
+    id: String,
+    name: String,
+}
+
+#[tauri::command]
+pub fn get_output_devices() -> Result<Vec<AudioDevice>, String> {
+    let host = cpal::default_host();
+    let devices = host.output_devices().map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for device in devices {
+        if let Ok(name) = device.name() {
+            // Using name as ID for simplicity since cpal doesn't expose stable IDs easily across platforms
+            result.push(AudioDevice { id: name.clone(), name });
+        }
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn set_output_device(device_id: String, state: tauri::State<PlayerState>) -> Result<(), String> {
+    let tx = state.tx.lock().map_err(|e| e.to_string())?;
+    tx.send(AudioCommand::SetDevice(device_id)).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub fn init_player(app: &AppHandle) -> PlayerState {
@@ -76,62 +105,141 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
     }
 
     thread::spawn(move || {
-        let stream_result = OutputStream::try_default();
-        if stream_result.is_err() {
-            println!("Failed to get default output stream: {:?}", stream_result.err());
-            return;
-        }
-        let (_stream, stream_handle) = stream_result.unwrap();
+        let host = cpal::default_host();
+        
+        // Helper to create stream
+        let create_stream = |device_name: Option<String>| -> Option<(OutputStream, OutputStreamHandle)> {
+            if let Some(name) = device_name {
+                if let Ok(mut devices) = host.output_devices() {
+                    if let Some(device) = devices.find(|d| d.name().map(|n| n == name).unwrap_or(false)) {
+                        return OutputStream::try_from_device(&device).ok();
+                    }
+                }
+            }
+            OutputStream::try_default().ok()
+        };
+
+        let mut stream_data = create_stream(None);
         let mut current_sink: Option<Sink> = None;
         let mut current_path: String = String::new();
         let mut current_volume: f32 = 1.0;
+        let mut is_playing_flag = false;
+
+        // Try to create initial sink
+        if let Some((_, ref handle)) = stream_data {
+             current_sink = Sink::try_new(handle).ok();
+        }
 
         while let Ok(cmd) = rx.recv() {
             match cmd {
                 AudioCommand::Play(path) => {
                     current_path = path.clone();
-                    if let Ok(file) = File::open(&current_path) {
-                        let reader = BufReader::with_capacity(512 * 1024, file);
-                        if let Ok(source) = Decoder::new(reader) {
-                            let rate = source.sample_rate();
-                            let channels = source.channels();
-                            thread_progress.sample_rate.store(rate, Ordering::Relaxed);
-                            thread_progress.channels.store(channels as u32, Ordering::Relaxed);
-                            thread_progress.samples_played.store(0, Ordering::Relaxed);
-                            let timed_source = TimedSource { inner: source.convert_samples::<f32>(), samples_played: thread_progress.samples_played.clone() };
-                            if let Ok(new_sink) = Sink::try_new(&stream_handle) { new_sink.append(timed_source); new_sink.set_volume(current_volume); new_sink.play(); current_sink = Some(new_sink); }
-                        }
-                    }
-                }
-                AudioCommand::Pause => { if let Some(sink) = &current_sink { sink.pause(); } }
-                AudioCommand::Resume => { if let Some(sink) = &current_sink { sink.play(); } }
-                AudioCommand::Seek(time, is_playing) => {
-                    let jump_target = Duration::from_secs(time as u64);
-                    if !current_path.is_empty() {
+                    is_playing_flag = true;
+                    if let Some((_, ref handle)) = stream_data {
+                        // Recreate sink to clear previous
                         if let Some(sink) = &current_sink { sink.stop(); }
+                        current_sink = Sink::try_new(handle).ok();
+
                         if let Ok(file) = File::open(&current_path) {
                             let reader = BufReader::with_capacity(512 * 1024, file);
                             if let Ok(source) = Decoder::new(reader) {
                                 let rate = source.sample_rate();
                                 let channels = source.channels();
-                                let samples_to_skip = time as u64 * rate as u64 * channels as u64;
-                                thread_progress.samples_played.store(samples_to_skip, Ordering::Relaxed);
-                                let timed_source = TimedSource { inner: source.convert_samples::<f32>().skip_duration(jump_target), samples_played: thread_progress.samples_played.clone() };
-                                if let Ok(new_sink) = Sink::try_new(&stream_handle) { 
-                                    new_sink.set_volume(current_volume); 
-                                    new_sink.append(timed_source); 
-                                    if is_playing {
-                                        new_sink.play(); 
-                                    } else {
-                                        new_sink.pause();
-                                    }
-                                    current_sink = Some(new_sink); 
+                                thread_progress.sample_rate.store(rate, Ordering::Relaxed);
+                                thread_progress.channels.store(channels as u32, Ordering::Relaxed);
+                                thread_progress.samples_played.store(0, Ordering::Relaxed);
+                                let timed_source = TimedSource { inner: source.convert_samples::<f32>(), samples_played: thread_progress.samples_played.clone() };
+                                if let Some(sink) = &current_sink { 
+                                    sink.append(timed_source); 
+                                    sink.set_volume(current_volume); 
+                                    sink.play(); 
                                 }
                             }
                         }
                     }
                 }
-                AudioCommand::SetVolume(vol) => { current_volume = vol; if let Some(sink) = &current_sink { sink.set_volume(vol); } }
+                AudioCommand::Pause => { 
+                    is_playing_flag = false;
+                    if let Some(sink) = &current_sink { sink.pause(); } 
+                }
+                AudioCommand::Resume => { 
+                    is_playing_flag = true;
+                    if let Some(sink) = &current_sink { sink.play(); } 
+                }
+                AudioCommand::Seek(time, is_playing) => {
+                    let jump_target = Duration::from_secs(time as u64);
+                    is_playing_flag = is_playing;
+                    if !current_path.is_empty() {
+                        if let Some((_, ref handle)) = stream_data {
+                            if let Some(sink) = &current_sink { sink.stop(); }
+                            current_sink = Sink::try_new(handle).ok();
+
+                            if let Ok(file) = File::open(&current_path) {
+                                let reader = BufReader::with_capacity(512 * 1024, file);
+                                if let Ok(source) = Decoder::new(reader) {
+                                    let rate = source.sample_rate();
+                                    let channels = source.channels();
+                                    let samples_to_skip = time as u64 * rate as u64 * channels as u64;
+                                    thread_progress.samples_played.store(samples_to_skip, Ordering::Relaxed);
+                                    let timed_source = TimedSource { inner: source.convert_samples::<f32>().skip_duration(jump_target), samples_played: thread_progress.samples_played.clone() };
+                                    if let Some(sink) = &current_sink { 
+                                        sink.set_volume(current_volume); 
+                                        sink.append(timed_source); 
+                                        if is_playing {
+                                            sink.play(); 
+                                        } else {
+                                            sink.pause();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                AudioCommand::SetVolume(vol) => { 
+                    current_volume = vol; 
+                    if let Some(sink) = &current_sink { sink.set_volume(vol); } 
+                }
+                AudioCommand::SetDevice(device_name) => {
+                    // 1. Drop current sink and stream (implicitly done by reassignment)
+                    if let Some(sink) = &current_sink { sink.stop(); }
+                    current_sink = None;
+                    
+                    // 2. Create new stream
+                    stream_data = create_stream(Some(device_name));
+                    
+                    // 3. Resume playback if we had a path and stream is valid
+                    if let Some((_, ref handle)) = stream_data {
+                        current_sink = Sink::try_new(handle).ok();
+                        
+                        if !current_path.is_empty() {
+                            // Resume logic similar to Seek
+                            let current_samples = thread_progress.samples_played.load(Ordering::Relaxed);
+                            let rate = thread_progress.sample_rate.load(Ordering::Relaxed);
+                            let channels = thread_progress.channels.load(Ordering::Relaxed);
+                            let time_played = if rate > 0 && channels > 0 {
+                                current_samples as f64 / (rate as u64 * channels as u64) as f64
+                            } else { 0.0 };
+                            let jump_target = Duration::from_secs_f64(time_played);
+
+                            if let Ok(file) = File::open(&current_path) {
+                                let reader = BufReader::with_capacity(512 * 1024, file);
+                                if let Ok(source) = Decoder::new(reader) {
+                                    let timed_source = TimedSource { inner: source.convert_samples::<f32>().skip_duration(jump_target), samples_played: thread_progress.samples_played.clone() };
+                                    if let Some(sink) = &current_sink { 
+                                        sink.set_volume(current_volume); 
+                                        sink.append(timed_source); 
+                                        if is_playing_flag {
+                                            sink.play(); 
+                                        } else {
+                                            sink.pause();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     });

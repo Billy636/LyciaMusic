@@ -1,9 +1,11 @@
 mod database;
 mod music;
 mod player;
+mod toolbox;
 pub mod error;
 
 use database::DbState;
+use toolbox::{preview_rename, apply_rename};
 use music::{
     scan_music_folder, scan_folder_as_playlists, get_song_cover_thumbnail, 
     get_song_cover, get_song_lyrics, 
@@ -11,7 +13,8 @@ use music::{
     run_cache_cleanup, ImageConcurrencyLimit // 引入新组件
 };
 use player::{
-    init_player, play_audio, pause_audio, resume_audio, seek_audio, set_volume, get_playback_progress
+    init_player, play_audio, pause_audio, resume_audio, seek_audio, set_volume, get_playback_progress,
+    get_output_devices, set_output_device
 };
 use tauri::{
     menu::{Menu, MenuItem},
@@ -95,7 +98,11 @@ pub fn run() {
             resume_audio, 
             seek_audio, 
             set_volume, 
-            get_playback_progress
+            get_playback_progress,
+            preview_rename,
+            apply_rename,
+            get_output_devices,
+            set_output_device
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

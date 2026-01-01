@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useSettings } from '../../composables/settings';
+import { invoke } from '@tauri-apps/api/core';
 
 const { settings } = useSettings();
 
@@ -8,8 +9,64 @@ const { settings } = useSettings();
 const launchOnStartup = ref(false);
 const gpuAcceleration = ref(true);
 const autoPlay = ref(true);
-const normalizeVolume = ref(false);
-const downloadPath = ref('D:\\Music\\Downloads');
+
+interface AudioDevice {
+  id: string;
+  name: string;
+}
+
+const outputDevices = ref<AudioDevice[]>([]);
+const currentDeviceId = ref('');
+const showDeviceMenu = ref(false);
+const triggerButtonRef = ref<HTMLElement | null>(null);
+const dropdownStyle = ref({});
+
+const fetchDevices = async () => {
+  try {
+    const devices = await invoke<AudioDevice[]>('get_output_devices');
+    outputDevices.value = devices;
+  } catch (e) {
+    console.error("Failed to get devices:", e);
+  }
+};
+
+const selectDevice = async (device: AudioDevice) => {
+  try {
+    await invoke('set_output_device', { deviceId: device.id });
+    currentDeviceId.value = device.id;
+    localStorage.setItem('player_output_device', device.id);
+    showDeviceMenu.value = false;
+  } catch (e) {
+    console.error("Failed to set device:", e);
+  }
+};
+
+const toggleDeviceMenu = () => {
+  if (showDeviceMenu.value) {
+    showDeviceMenu.value = false;
+  } else {
+    if (triggerButtonRef.value) {
+      const rect = triggerButtonRef.value.getBoundingClientRect();
+      // Calculate position: align right edge of dropdown with right edge of button
+      // Dropdown width is w-48 (12rem = 192px)
+      dropdownStyle.value = {
+        top: `${rect.bottom + 8}px`,
+        left: `${rect.right - 192}px`,
+        position: 'fixed',
+        zIndex: 9999
+      };
+    }
+    showDeviceMenu.value = true;
+  }
+};
+
+onMounted(async () => {
+  await fetchDevices();
+  const savedId = localStorage.getItem('player_output_device');
+  if (savedId) {
+    currentDeviceId.value = savedId;
+  }
+});
 </script>
 
 <template>
@@ -80,50 +137,68 @@ const downloadPath = ref('D:\\Music\\Downloads');
             <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="autoPlay ? 'translate-x-6' : 'translate-x-1'" />
           </button>
         </div>
-
-        <div class="p-4 flex items-center justify-between border-b border-gray-100/50 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
-          <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">音量标准化</div>
-            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">平衡不同歌曲的音量大小</div>
-          </div>
-          <button @click="normalizeVolume = !normalizeVolume" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="normalizeVolume ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="normalizeVolume ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
         
-        <div class="p-4 flex items-center justify-between border-b border-gray-100/50 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-gray-100/50 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/5 transition-colors relative">
            <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">输出设备</div>
-            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">默认系统设备</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              {{ outputDevices.find(d => d.id === currentDeviceId)?.name || '默认系统设备' }}
+            </div>
           </div>
-          <button class="text-xs px-3 py-1.5 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded text-gray-600 dark:text-gray-300 hover:text-[#EC4141] hover:border-[#EC4141] transition">管理设备</button>
+          
+          <div class="relative">
+            <button 
+              ref="triggerButtonRef"
+              @click="toggleDeviceMenu"
+              class="text-xs px-3 py-1.5 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded text-gray-600 dark:text-gray-300 hover:text-[#EC4141] hover:border-[#EC4141] transition flex items-center gap-1"
+            >
+              管理设备
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+              </svg>
+            </button>
+
+            <!-- Dropdown Teleport -->
+            <Teleport to="body">
+              <div v-if="showDeviceMenu">
+                <!-- Overlay -->
+                <div class="fixed inset-0 z-[9998]" @click="showDeviceMenu = false"></div>
+                
+                <!-- Menu -->
+                <div 
+                  class="fixed w-48 bg-white dark:bg-[#2b2b2b] rounded-xl shadow-xl border border-gray-100 dark:border-white/10 py-1 z-[9999] animate-in fade-in zoom-in-95 duration-100"
+                  :style="dropdownStyle"
+                >
+                  <div v-if="outputDevices.length === 0" class="px-4 py-2 text-xs text-gray-400">未找到设备</div>
+                  <button 
+                    v-for="device in outputDevices" 
+                    :key="device.id"
+                    @click="selectDevice(device)"
+                    class="w-full text-left px-4 py-2 text-xs hover:bg-gray-50 dark:hover:bg-white/5 transition-colors flex items-center justify-between group"
+                    :class="currentDeviceId === device.id ? 'text-[#EC4141] font-medium' : 'text-gray-600 dark:text-gray-300'"
+                  >
+                    <span class="truncate">{{ device.name }}</span>
+                    <span v-if="currentDeviceId === device.id" class="text-[#EC4141]">✓</span>
+                  </button>
+                </div>
+              </div>
+            </Teleport>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- Downloads (Placeholder) -->
+    <!-- Storage -->
     <section class="space-y-3">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
         <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
-        下载与缓存
+        存储空间
       </h2>
       <div class="bg-white/50 dark:bg-black/40 backdrop-blur-sm rounded-xl border border-gray-100/50 dark:border-white/5 overflow-hidden">
-        <div class="p-4 flex flex-col gap-2 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
-          <div class="flex items-center justify-between">
-             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">下载目录</div>
-             <button class="text-xs text-[#EC4141] hover:underline">更改目录</button>
-          </div>
-          <div class="flex items-center gap-2">
-             <div class="flex-1 bg-white/70 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded px-3 py-2 text-xs text-gray-600 dark:text-gray-300 font-mono truncate">
-               {{ downloadPath }}
-             </div>
-             <button class="px-3 py-2 bg-white dark:bg-white/10 border border-gray-200 dark:border-white/10 rounded text-xs hover:bg-gray-50 dark:hover:bg-white/5 transition text-gray-600 dark:text-gray-300">打开文件夹</button>
-          </div>
-        </div>
-         <div class="p-4 flex items-center justify-between border-t border-gray-100/50 dark:border-white/5 hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
+         <div class="p-4 flex items-center justify-between hover:bg-white/40 dark:hover:bg-white/5 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">清除缓存</div>
-            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">释放磁盘空间 (当前占用: 128 MB)</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">释放封面与歌词缓存</div>
           </div>
           <button class="text-xs px-3 py-1.5 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded text-gray-600 dark:text-gray-300 hover:text-red-500 hover:border-red-500 transition">立即清除</button>
         </div>
