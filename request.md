@@ -1,85 +1,121 @@
-when i run 'npm run tauri build' there are some issues here!fix it !
- 
-(base) PS C:\Users\lover\Desktop\my-cloud-music> npm run tauri build
+📂 v1.2 新增功能需求文档：音乐工具箱 (Music Toolbox)
+1. 功能入口 (Entry Point)
+在 设置 (Settings) 页面中，新增一个独立的 Tab，命名为 “工具箱” (Toolbox)。
 
-> my-cloud-music@0.1.0 tauri
-> tauri build
+定位： 面向进阶用户的批量处理中心。
 
-        Info Looking up installed tauri packages to check mismatched versions...
-     Running beforeBuildCommand `npm run build`
+主要模块：
 
-> my-cloud-music@0.1.0 build
-> vue-tsc --noEmit && vite build
+本地文件重命名 (File Renamer)
 
-src/App.vue:15:63 - error TS6133: 'addSongsToQueue' is declared but its value is never read.
+元数据匹配刮削 (Metadata Fetcher) [预留位置，后续迭代]
 
-15 const { init, showAddToPlaylistModal, playlistAddTargetSongs, addSongsToQueue, settings, playQueue } = usePlayer();
-                                                                 ~~~~~~~~~~~~~~~
+2. 核心功能：本地文件重命名 (File Renamer)
+我们需要实现一个强大的重命名引擎，支持“基于标签”和“基于规则”两种模式。
 
-src/App.vue:38:3 - error TS2304: Cannot find name 'addSongsToPlaylist'.
+2.1 操作模式 (Operation Modes) 请提供一个单选组 (Radio Group)，让用户决定重命名的数据来源：
 
-38   addSongsToPlaylist(playlistId, playlistAddTargetSongs.value);
-     ~~~~~~~~~~~~~~~~~~
+⚪ 模式 A：标准化重命名 (Standardize via Tags)
 
-src/components/overlays/FolderContextMenu.vue:77:6 - error TS2345: Argument of type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to parameter of type 'HTMLAttributes & ReservedProps & Record<string, unknown>'.
-  Type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to type 'HTMLAttributes'.
-    Types of property 'style' are incompatible.
-      Type '{ left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
-        Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
-          Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'CSSProperties'.
-            Types of property 'visibility' are incompatible.
-              Type 'string' is not assignable to type 'Visibility | undefined'.
+逻辑： 读取文件的元数据 (Metadata)，按照用户指定的模板重命名文件。
 
-77     <div
-        ~~~
+前置条件： 文件必须包含完整的标签信息。如果标签缺失，标记为“跳过”。
 
-src/components/overlays/FooterContextMenu.vue:77:6 - error TS2345: Argument of type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to parameter of type 'HTMLAttributes & ReservedProps & Record<string, unknown>'.
-  Type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to type 'HTMLAttributes'.
-    Types of property 'style' are incompatible.
-      Type '{ left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
-        Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
-          Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'CSSProperties'.
-            Types of property 'visibility' are incompatible.
-              Type 'string' is not assignable to type 'Visibility | undefined'.
+⚪ 模式 B：文件名清洗 (Clean via Rules)
 
-77     <div
-        ~~~
+逻辑： 仅对当前文件名进行字符串修剪（去除序号等），不依赖标签。
 
-src/components/overlays/PlaylistContextMenu.vue:76:6 - error TS2345: Argument of type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to parameter of type 'HTMLAttributes & ReservedProps & Record<string, unknown>'.
-  Type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to type 'HTMLAttributes'.
-    Types of property 'style' are incompatible.
-      Type '{ left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
-        Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
-          Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'CSSProperties'.
-            Types of property 'visibility' are incompatible.
-              Type 'string' is not assignable to type 'Visibility | undefined'.
+适用场景： 用户没有标签，只想单纯去掉文件名的 01. 前缀。
 
-76     <div
-        ~~~
+🔘 模式 C：智能自动 (Auto / Hybrid) [默认]
 
-src/components/overlays/SongContextMenu.vue:113:6 - error TS2345: Argument of type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to parameter of type 'HTMLAttributes & ReservedProps & Record<string, unknown>'.
-  Type '{ style: { left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }; class: string; ref: string; onContextmenu: () => void; }' is not assignable to type 'HTMLAttributes'.
-    Types of property 'style' are incompatible.
-      Type '{ left?: undefined; top?: undefined; visibility?: undefined; } | { left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
-        Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'StyleValue'.
-          Type '{ left: string; top: string; visibility: string; }' is not assignable to type 'CSSProperties'.
-            Types of property 'visibility' are incompatible.
-              Type 'string' is not assignable to type 'Visibility | undefined'.
+逻辑： 优先尝试模式 A；如果标签缺失，自动降级执行模式 B。
 
-113     <div
-         ~~~
+2.2 命名模板系统 (Modern Template System) 仅针对“模式 A”生效
 
+为了替代老旧的 @1 @2 语法，请实现基于占位符的模板系统。 请提供以下预设选项 + 自定义输入框：
 
-Found 6 errors in 5 files.
+[ ] 歌名 - 歌手 (例如：七里香 - 周杰伦)
 
-Errors  Files
-     2  src/App.vue:15
-     1  src/components/overlays/FolderContextMenu.vue:77
-     1  src/components/overlays/FooterContextMenu.vue:77
-     1  src/components/overlays/PlaylistContextMenu.vue:76
-     1  src/components/overlays/SongContextMenu.vue:113
-beforeBuildCommand `npm run build` failed with exit code 2
-       Error beforeBuildCommand `npm run build` failed with exit code 2
+模板：{title} - {artist}
+
+[ ] 歌手 - 歌名 (例如：周杰伦 - 七里香)
+
+模板：{artist} - {title}
+
+[ ] 轨道. 歌名 (例如：01. 七里香)
+
+模板：{track}. {title}
+
+[ ] 自定义格式 (输入框)
+
+允许用户输入任意字符和变量。
+
+支持的变量 (Variables):
+
+{title} : 标题
+
+{artist} : 艺术家
+
+{album} : 专辑
+
+{year} : 年份
+
+{track} : 轨道号 (关键： 必须自动补零，例如 1 -> 01, 12 -> 12)
+
+⚠️ 安全性要求 (Sanitization): 在生成文件名时，必须自动检测并替换 Windows 非法字符 (\ / : * ? " < > |)。
+
+建议替换为下划线 _ 或全角符号。
+
+Case: {title} 为 Love/Hate -> 文件名应变为 Love_Hate.mp3。
+
+2.3 清洗规则 (Cleaning Rules) 仅针对“模式 B”生效
+
+提供复选框供用户选择清洗规则（正则匹配文件头部）：
+
+[x] 去除序号前缀 (Regex: ^\d+[\.\-\s]+)
+
+覆盖：01. Song, 02 - Song, 03 Song
+
+[ ] 去除来源前缀 (Regex: ^\[.*?\]\s*)
+
+覆盖：[网易云] Song
+
+3. 辅助逻辑：隐形清洗与搜索 (Silent Cleaning Logic)
+这是为了配合“元数据匹配”功能的底层逻辑优化
+
+当未来执行“匹配标签”或“搜索歌词”操作时，不需要先强制用户改名。请在内存中执行“隐形清洗”：
+
+读取文件名： 01. 七里香.mp3
+
+内存预处理： 应用上述的 ^\d+[\.\-\s]+ 正则，提取出关键词 七里香。
+
+API 请求： 使用清洗后的关键词 七里香 去请求 iTunes/MusicBrainz 接口。
+
+目的： 提高搜索准确率，同时不破坏用户的原始文件（除非用户显式要求重命名）。
+
+4. 交互流程与安全 (UX & Safety)
+🚫 严禁静默修改！所有批量操作必须经过预览。
+
+选择目标： 用户在设置页选择一个文件夹，或者在侧边栏右键选择“批量整理”。
+
+配置参数： 用户选择模式（A/B/C）和模板。
+
+点击“扫描”：
+
+弹出 预览模态框 (Preview Modal)。
+
+显示表格：[状态图标] | 原文件名 | -> | 新文件名预览
+
+状态分类：
+
+✨ (绿色)：将根据标签重命名。
+
+✂️ (黄色)：将根据规则清洗。
+
+⚠️ (红色/灰色)：无标签且不匹配规则，将跳过。
+
+最终执行： 用户检查无误后，点击“应用修改”，后端执行 fs::rename。
 
 
 Important notes:

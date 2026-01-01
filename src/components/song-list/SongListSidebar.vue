@@ -201,22 +201,22 @@ onUnmounted(() => {
   <aside v-if="(isLocalMusic && localMusicTab !== 'default') || isFolderMode" class="w-60 h-full border-r border-white/10 overflow-y-auto custom-scrollbar bg-transparent shrink-0 select-none">
     
     <ul v-if="isLocalMusic && localMusicTab === 'artist'" class="p-2 space-y-1">
-        <li v-for="item in artistList" :key="item.name" @click="currentArtistFilter = item.name" :class="currentArtistFilter === item.name ? 'bg-white/40 shadow-sm' : 'hover:bg-white/20'" class="flex items-center p-2 rounded-lg cursor-pointer transition-all">
-          <div class="w-10 h-10 rounded-full bg-white/30 flex items-center justify-center text-gray-500 font-bold mr-3 shrink-0 overflow-hidden relative">
+        <li v-for="item in artistList" :key="item.name" @click="currentArtistFilter = item.name" :class="currentArtistFilter === item.name ? 'bg-white/40 dark:bg-white/20 shadow-sm' : 'hover:bg-white/20 dark:hover:bg-white/10'" class="flex items-center p-2 rounded-lg cursor-pointer transition-all">
+          <div class="w-10 h-10 rounded-full bg-white/30 dark:bg-white/10 flex items-center justify-center text-gray-500 dark:text-gray-400 font-bold mr-3 shrink-0 overflow-hidden relative">
             <img v-if="sidebarImageCache.get(item.firstSongPath)" :src="sidebarImageCache.get(item.firstSongPath)" class="w-full h-full object-cover" />
             <span v-else>{{ item.name.charAt(0).toUpperCase() }}</span>
           </div>
-          <div class="flex-1 min-w-0"><div class="text-sm font-medium text-gray-800 truncate">{{ item.name }}</div><div class="text-xs text-gray-500">{{ item.count }} 首</div></div>
+          <div class="flex-1 min-w-0"><div class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{{ item.name }}</div><div class="text-xs text-gray-500 dark:text-gray-400">{{ item.count }} 首</div></div>
         </li>
     </ul>
 
     <ul v-if="isLocalMusic && localMusicTab === 'album'" class="p-2 space-y-1">
-        <li v-for="item in albumList" :key="item.name" @click="currentAlbumFilter = item.name" :class="currentAlbumFilter === item.name ? 'bg-white/40 shadow-sm' : 'hover:bg-white/20'" class="flex items-center p-2 rounded-lg cursor-pointer transition-all">
-          <div class="w-10 h-10 rounded bg-white/30 flex items-center justify-center text-gray-500 mr-3 shrink-0 overflow-hidden relative">
+        <li v-for="item in albumList" :key="item.name" @click="currentAlbumFilter = item.name" :class="currentAlbumFilter === item.name ? 'bg-white/40 dark:bg-white/20 shadow-sm' : 'hover:bg-white/20 dark:hover:bg-white/10'" class="flex items-center p-2 rounded-lg cursor-pointer transition-all">
+          <div class="w-10 h-10 rounded bg-white/30 dark:bg-white/10 flex items-center justify-center text-gray-500 dark:text-gray-400 mr-3 shrink-0 overflow-hidden relative">
             <img v-if="sidebarImageCache.get(item.firstSongPath)" :src="sidebarImageCache.get(item.firstSongPath)" class="w-full h-full object-cover" />
             <span v-else>💿</span>
           </div>
-          <div class="flex-1 min-w-0"><div class="text-sm font-medium text-gray-800 truncate">{{ item.name }}</div><div class="text-xs text-gray-500">{{ item.count }} 首</div></div>
+          <div class="flex-1 min-w-0"><div class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{{ item.name }}</div><div class="text-xs text-gray-500 dark:text-gray-400">{{ item.count }} 首</div></div>
         </li>
     </ul>
 
@@ -230,20 +230,20 @@ onUnmounted(() => {
           @contextmenu="handleContextMenu($event, item)" 
           class="folder-drop-target flex items-center p-2 rounded-lg cursor-pointer transition-all"
           :class="[
-            selectedFolderPaths.has(item.path) ? 'bg-white/40 shadow-sm' : 'hover:bg-white/20',
-            (dragSession.active && dragSession.targetFolder?.path === item.path && currentFolderFilter !== item.path) ? 'ring-2 ring-[#EC4141] bg-red-50/50' : ''
+            selectedFolderPaths.has(item.path) ? 'bg-white/40 dark:bg-white/20 shadow-sm' : 'hover:bg-white/20 dark:hover:bg-white/10',
+            (dragSession.active && dragSession.targetFolder?.path === item.path && currentFolderFilter !== item.path) ? 'ring-2 ring-[#EC4141] bg-red-50/50 dark:bg-red-500/10' : ''
           ]"
         >
-          <div class="w-10 h-10 rounded bg-blue-50/50 border border-blue-100/50 flex items-center justify-center text-blue-400 mr-3 shrink-0 overflow-hidden relative">
+          <div class="w-10 h-10 rounded bg-blue-50/50 dark:bg-blue-500/10 border border-blue-100/50 dark:border-blue-500/20 flex items-center justify-center text-blue-400 dark:text-blue-300 mr-3 shrink-0 overflow-hidden relative">
             <img v-if="sidebarImageCache.get(item.firstSongPath)" :src="sidebarImageCache.get(item.firstSongPath)" class="w-full h-full object-cover" />
             <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" /></svg>
           </div>
           <div class="flex-1 min-w-0">
-            <div class="text-sm font-medium text-gray-800 truncate" :title="item.path">{{ item.name }}</div>
-            <div class="text-xs text-gray-500">{{ item.count }} 首</div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate" :title="item.path">{{ item.name }}</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">{{ item.count }} 首</div>
           </div>
         </li>
-        <li v-if="folderList.length === 0" class="text-xs text-gray-400 text-center py-4">暂无文件夹，请点击右上角添加</li>
+        <li v-if="folderList.length === 0" class="text-xs text-gray-400 dark:text-gray-500 text-center py-4">暂无文件夹，请点击右上角添加</li>
     </ul>
 
     <FolderContextMenu 

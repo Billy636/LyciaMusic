@@ -143,13 +143,13 @@ const handlePlayAll = () => { if (displaySongList.value.length > 0) playSong(dis
     <div v-if="isBatchMode" class="flex items-center justify-between animate-in fade-in slide-in-from-top-1 duration-200">
       <div class="flex items-center gap-3">
         <button @click="emit('batchPlay')" class="bg-[#EC4141] hover:bg-[#d13b3b] text-white px-4 py-1.5 rounded-full text-sm transition flex items-center gap-1 active:scale-95 shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg></button>
-        <button class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-1.5 rounded text-sm transition flex items-center gap-1 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg> 添加到播放列表</button>
-        <button @click="emit('openAddToPlaylist')" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-1.5 rounded text-sm transition flex items-center gap-1 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg> 收藏到歌单</button>
-        <button v-if="isFolderMode" @click="emit('batchMove')" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-1.5 rounded text-sm transition flex items-center gap-1 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg> 移动到文件夹</button>
-        <button @click="emit('batchDelete')" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-1.5 rounded text-sm transition flex items-center gap-1 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> 删除</button>
+        <button class="bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 text-gray-700 dark:text-gray-200 px-4 py-1.5 rounded text-sm transition flex items-center gap-1 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg> 添加到播放列表</button>
+        <button @click="emit('openAddToPlaylist')" class="bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 text-gray-700 dark:text-gray-200 px-4 py-1.5 rounded text-sm transition flex items-center gap-1 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg> 收藏到歌单</button>
+        <button v-if="isFolderMode" @click="emit('batchMove')" class="bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 text-gray-700 dark:text-gray-200 px-4 py-1.5 rounded text-sm transition flex items-center gap-1 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg> 移动到文件夹</button>
+        <button @click="emit('batchDelete')" class="bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 text-gray-700 dark:text-gray-200 px-4 py-1.5 rounded text-sm transition flex items-center gap-1 active:scale-95"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> 删除</button>
       </div>
       <div class="flex items-center gap-4">
-        <button @click="emit('update:isBatchMode', false)" class="text-[#EC4141] hover:bg-red-50 px-3 py-1 rounded transition">完成</button>
+        <button @click="emit('update:isBatchMode', false)" class="text-[#EC4141] hover:bg-red-50 dark:hover:bg-red-500/10 px-3 py-1 rounded transition">完成</button>
       </div>
     </div>
 
@@ -165,11 +165,11 @@ const handlePlayAll = () => { if (displaySongList.value.length > 0) playSong(dis
         <div class="h-40 flex flex-col justify-between py-1 flex-1">
           <div>
             <div class="flex items-center gap-2 mb-1">
-              <h1 class="text-3xl font-bold text-gray-800 truncate max-w-[400px]">{{ detailInfo.name }}</h1>
+              <h1 class="text-3xl font-bold text-gray-800 dark:text-white truncate max-w-[400px]">{{ detailInfo.name }}</h1>
               <button 
                 v-if="currentViewMode === 'playlist'" 
                 @click="handleRenamePlaylist" 
-                class="text-gray-500 hover:text-gray-800 transition p-1.5 rounded-lg hover:bg-black/5 active:scale-95"
+                class="text-gray-500 dark:text-white/60 hover:text-gray-800 dark:hover:text-white transition p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 active:scale-95"
                 title="修改歌单名称"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -178,18 +178,18 @@ const handlePlayAll = () => { if (displaySongList.value.length > 0) playSong(dis
               </button>
             </div>
             
-            <div class="flex items-center text-xs text-gray-400 font-medium">
+            <div class="flex items-center text-xs text-gray-400 dark:text-gray-500 font-medium">
                <span v-if="detailInfo.date">{{ detailInfo.date }} 创建</span>
             </div>
           </div>
 
           <div class="flex items-center gap-3">
-             <button @click="handlePlayAll" class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 px-5 py-2 rounded-full text-sm font-medium transition flex items-center gap-2 active:scale-95 shadow-sm hover:border-gray-200">
+             <button @click="handlePlayAll" class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-100 px-5 py-2 rounded-full text-sm font-medium transition flex items-center gap-2 active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20">
                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg>
                播放全部
              </button>
              
-             <button @click="emit('update:isBatchMode', true)" title="批量操作" class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 px-5 py-2 rounded-full text-sm font-medium transition flex items-center gap-2 active:scale-95 shadow-sm hover:border-gray-200"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg></button>
+             <button @click="emit('update:isBatchMode', true)" title="批量操作" class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-100 px-5 py-2 rounded-full text-sm font-medium transition flex items-center gap-2 active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg></button>
           </div>
         </div>
     </div>
@@ -197,32 +197,32 @@ const handlePlayAll = () => { if (displaySongList.value.length > 0) playSong(dis
     <div v-else class="flex items-center justify-between">
         <div class="flex items-center gap-6 text-base font-medium pb-1">
            <template v-if="isLocalMusic">
-             <button @click="switchLocalTab('default')" :class="localMusicTab === 'default' ? 'text-gray-900 font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 hover:text-gray-600'">歌曲</button>
-             <button @click="switchLocalTab('artist')" :class="localMusicTab === 'artist' ? 'text-gray-900 font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 hover:text-gray-600'">歌手</button>
-             <button @click="switchLocalTab('album')" :class="localMusicTab === 'album' ? 'text-gray-900 font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 hover:text-gray-600'">专辑</button>
+             <button @click="switchLocalTab('default')" :class="localMusicTab === 'default' ? 'text-gray-900 dark:text-white font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'">歌曲</button>
+             <button @click="switchLocalTab('artist')" :class="localMusicTab === 'artist' ? 'text-gray-900 dark:text-white font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'">歌手</button>
+             <button @click="switchLocalTab('album')" :class="localMusicTab === 'album' ? 'text-gray-900 dark:text-white font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'">专辑</button>
            </template>
            <template v-else-if="isFavorites && !favDetailFilter">
-             <button @click="switchFavTab('songs')" :class="favTab === 'songs' ? 'text-gray-900 font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 hover:text-gray-600'">歌曲</button>
-             <button @click="switchFavTab('artists')" :class="favTab === 'artists' ? 'text-gray-900 font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 hover:text-gray-600'">歌手</button>
-             <button @click="switchFavTab('albums')" :class="favTab === 'albums' ? 'text-gray-900 font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 hover:text-gray-600'">专辑</button>
+             <button @click="switchFavTab('songs')" :class="favTab === 'songs' ? 'text-gray-900 dark:text-white font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'">歌曲</button>
+             <button @click="switchFavTab('artists')" :class="favTab === 'artists' ? 'text-gray-900 dark:text-white font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'">歌手</button>
+             <button @click="switchFavTab('albums')" :class="favTab === 'albums' ? 'text-gray-900 dark:text-white font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'">专辑</button>
            </template>
            <template v-else-if="isFolderMode">
-             <span class="text-gray-900 font-bold text-xl">文件夹</span>
+             <span class="text-gray-900 dark:text-white font-bold text-xl">文件夹</span>
            </template>
            <template v-else-if="isRecentPlayed">
-             <button @click="recentTab='songs'" :class="recentTab === 'songs' ? 'text-gray-900 font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 hover:text-gray-600'">单曲</button>
-             <button @click="recentTab='playlists'" :class="recentTab === 'playlists' ? 'text-gray-900 font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 hover:text-gray-600'">歌单</button>
-             <button @click="recentTab='albums'" :class="recentTab === 'albums' ? 'text-gray-900 font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 hover:text-gray-600'">专辑</button>
+             <button @click="recentTab='songs'" :class="recentTab === 'songs' ? 'text-gray-900 dark:text-white font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'">单曲</button>
+             <button @click="recentTab='playlists'" :class="recentTab === 'playlists' ? 'text-gray-900 dark:text-white font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'">歌单</button>
+             <button @click="recentTab='albums'" :class="recentTab === 'albums' ? 'text-gray-900 dark:text-white font-bold text-xl relative after:content-[\'\'] after:absolute after:-bottom-2 after:left-1/2 after:-translate-x-1/2 after:w-4 after:h-1 after:bg-[#EC4141] after:rounded-full' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'">专辑</button>
            </template>
         </div>
 
         <div class="flex items-center gap-3" v-if="!favDetailFilter || (favDetailFilter && (favTab==='artists'||favTab==='albums'))">
-          <button @click="handlePlayAll" class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 px-5 py-2 rounded-full text-sm font-medium transition flex items-center gap-2 active:scale-95 shadow-sm hover:border-gray-200">
+          <button @click="handlePlayAll" class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-100 px-5 py-2 rounded-full text-sm font-medium transition flex items-center gap-2 active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg> 播放全部
           </button>
           
           <div class="relative">
-             <button @click.stop="handleHeaderMenuClick" class="header-menu-trigger bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 w-9 h-9 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200">
+             <button @click.stop="handleHeaderMenuClick" class="header-menu-trigger bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-200 w-9 h-9 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20">
                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" /></svg>
              </button>
              

@@ -58,7 +58,8 @@ export const settings = ref<AppSettings>({
       opacity: 1.0,
       maskColor: '#000000',
       maskAlpha: 0.4,
-      scale: 1.0
+      scale: 1.0,
+      foregroundStyle: 'auto'
     }
   },
   sidebar: {

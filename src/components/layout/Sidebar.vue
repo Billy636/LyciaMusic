@@ -282,12 +282,12 @@ watch([songList, playlists], () => {
 
       <div class="mt-6">
           <div class="px-4 pr-3 py-2 flex items-center justify-between group">
-            <div class="flex items-center gap-1 cursor-pointer text-gray-500 dark:text-white/60 hover:text-gray-700 dark:hover:text-white transition-colors" @click.stop="isPlaylistOpen = !isPlaylistOpen">
+            <div class="flex items-center gap-1 cursor-pointer text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors" @click.stop="isPlaylistOpen = !isPlaylistOpen">
               <svg xmlns="http://www.w3.org/2000/svg" :class="['h-3 w-3 transition-transform duration-200', isPlaylistOpen ? 'rotate-90' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
               <span class="text-xs font-bold tracking-wide">我的歌单</span>
-              <span class="text-xs text-gray-400 dark:text-white/40 font-normal ml-0.5">{{ playlists.length }}</span>
+              <span class="text-xs text-gray-400 dark:text-gray-500 font-normal ml-0.5">{{ playlists.length }}</span>
             </div>
-            <button @click.stop="handleCreatePlaylist" class="text-gray-400 dark:text-white/40 hover:text-gray-600 dark:hover:text-white hover:bg-black/5 rounded p-0.5 transition-colors" title="新建歌单"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></button>
+            <button @click.stop="handleCreatePlaylist" class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded p-0.5 transition-colors" title="新建歌单"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></button>
           </div>
           
           <ul v-show="isPlaylistOpen" class="space-y-0.5 mt-1">
@@ -300,7 +300,7 @@ watch([songList, playlists], () => {
               :data-playlist-name="list.name"
               class="playlist-drop-target px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-all group relative"
               :class="[
-                selectedPlaylistIds.has(list.id) ? 'bg-black/10 dark:bg-white/10 text-black dark:text-white font-medium shadow-sm' : 'hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-white/70',
+                selectedPlaylistIds.has(list.id) ? 'bg-black/10 dark:bg-white/10 text-black dark:text-white font-medium shadow-sm' : 'hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-300',
                 (dragSession.active && dragSession.targetPlaylist?.id === list.id) ? '!bg-red-500/10 !ring-2 !ring-[#EC4141] ring-inset' : ''
               ]"
             >

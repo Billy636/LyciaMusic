@@ -18,155 +18,534 @@ let syncIntervalId: any = null;
 let seekTimeout: any = null;
 
 // 插值锚点
+
 let playbackAnchorTime = 0;   
+
 let playbackStartOffset = 0;  
 
+
+
+// 🟢 辅助函数：判断是否为直属父目录 (非递归)
+
+const isDirectParent = (parentPath: string, childPath: string) => {
+
+  if (!parentPath || !childPath) return false;
+
+  const p = parentPath.replace(/\\/g, '/').replace(/\/$/, '');
+
+  const c = childPath.replace(/\\/g, '/');
+
+  const lastSlash = c.lastIndexOf('/');
+
+  return lastSlash !== -1 && c.substring(0, lastSlash) === p;
+
+};
+
+
+
 // 定义后端返回的结构
+
 interface GeneratedFolder {
+
   name: string;
+
   path: string; 
+
   songs: State.Song[];
+
 }
 
+
+
 export function usePlayer() {
+
   
+
   const { loadLyrics } = useLyrics();
 
-  // ... (格式化函数保持不变) ...
-  function formatDuration(seconds: number) { if (!seconds) return "00:00"; const mins = Math.floor(seconds / 60); const secs = Math.floor(seconds % 60); return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`; }
-  function formatTimeAgo(timestamp: number) { const now = Date.now(); const diff = now - timestamp; const oneHour = 60 * 60 * 1000; if (diff < oneHour) return `${Math.max(1, Math.floor(diff / 60000))}分钟前`; if (diff < 24 * oneHour) return `${Math.floor(diff / oneHour)}小时前`; return `${Math.floor(diff / (24 * oneHour))}天前`; }
-  
-  // ... (计算属性保持不变) ...
-  const isLocalMusic = computed(() => State.currentViewMode.value === 'all' || State.currentViewMode.value === 'artist' || State.currentViewMode.value === 'album');
-  const isFolderMode = computed(() => State.currentViewMode.value === 'folder');
-  
-  const artistList = computed(() => { const map = new Map<string, { count: number, firstSongPath: string }>(); State.songList.value.forEach(s => { const k = s.artist || 'Unknown'; const existing = map.get(k); if (existing) { existing.count++; } else { map.set(k, { count: 1, firstSongPath: s.path }); } }); return Array.from(map).map(([n, v]) => ({ name: n, count: v.count, firstSongPath: v.firstSongPath })).sort((a,b)=>b.count-a.count); });
-  const albumList = computed(() => { const map = new Map<string, { count: number, artist: string, firstSongPath: string }>(); State.songList.value.forEach(s => { const k = s.album || 'Unknown'; const existing = map.get(k); if (existing) { existing.count++; } else { map.set(k, { count: 1, artist: s.artist, firstSongPath: s.path }); } }); return Array.from(map).map(([n, v]) => ({ name: n, count: v.count, artist: v.artist, firstSongPath: v.firstSongPath })).sort((a, b) => b.count - a.count); });
-  const folderList = computed(() => { return State.watchedFolders.value.map(folderPath => { const songsInFolder = State.songList.value.filter(s => s.path.startsWith(folderPath)); return { path: folderPath, name: folderPath.split(/[/\\]/).pop() || folderPath, count: songsInFolder.length, firstSongPath: songsInFolder.length > 0 ? songsInFolder[0].path : '' }; }); });
-  const favoriteSongList = computed(() => { return State.songList.value.filter(s => State.favoritePaths.value.includes(s.path)); });
-  const favArtistList = computed(() => { const map = new Map<string, { count: number, firstSongPath: string }>(); favoriteSongList.value.forEach(s => { const k = s.artist || 'Unknown'; const existing = map.get(k); if (existing) { existing.count++; } else { map.set(k, { count: 1, firstSongPath: s.path }); } }); return Array.from(map).map(([name, val]) => ({ name, count: val.count, firstSongPath: val.firstSongPath })).sort((a, b) => b.count - a.count); });
-  const favAlbumList = computed(() => { const map = new Map<string, { count: number, artist: string, firstSongPath: string }>(); favoriteSongList.value.forEach(s => { const k = s.album || 'Unknown'; const existing = map.get(k); if (existing) { existing.count++; } else { map.set(k, { count: 1, artist: s.artist, firstSongPath: s.path }); } }); return Array.from(map).map(([name, val]) => ({ name, count: val.count, artist: val.artist, firstSongPath: val.firstSongPath })).sort((a, b) => b.count - a.count); });
-  const recentAlbumList = computed(() => { const map = new Map<string, { artist: string, playedAt: number, firstSongPath: string }>(); State.recentSongs.value.forEach(item => { const k = item.song.album || 'Unknown'; if (!map.has(k) || item.playedAt > map.get(k)!.playedAt) { map.set(k, { artist: item.song.artist, playedAt: item.playedAt, firstSongPath: item.song.path }); } }); return Array.from(map).map(([name, val]) => ({ name, artist: val.artist, playedAt: val.playedAt, firstSongPath: val.firstSongPath })).sort((a, b) => b.playedAt - a.playedAt); });
-  const recentPlaylistList = computed(() => { const result: { id: string, name: string, count: number, playedAt: number, firstSongPath: string }[] = []; State.playlists.value.forEach(pl => { let lastPlayedTime = 0; let hasPlayed = false; const plSongPaths = new Set(pl.songPaths); for (const historyItem of State.recentSongs.value) { if (plSongPaths.has(historyItem.song.path)) { if (historyItem.playedAt > lastPlayedTime) { lastPlayedTime = historyItem.playedAt; hasPlayed = true; } } } if (hasPlayed) { result.push({ id: pl.id, name: pl.name, count: pl.songPaths.length, playedAt: lastPlayedTime, firstSongPath: pl.songPaths.length > 0 ? pl.songPaths[0] : '' }); } }); return result.sort((a, b) => b.playedAt - a.playedAt); });
-  const genreList = computed(() => { const map = new Map(); State.songList.value.forEach(s => { const k = s.genre || 'Unknown'; map.set(k, (map.get(k)||0)+1); }); return Array.from(map).map(([n,c]) => ({name:n, count:c})).sort((a,b)=>b.count-a.count); });
-  const yearList = computed(() => { const map = new Map(); State.songList.value.forEach(s => { const k = (s.year && s.year.length>=4) ? s.year.substring(0,4) : 'Unknown'; map.set(k, (map.get(k)||0)+1); }); return Array.from(map).map(([n,c]) => ({name:n, count:c})).sort((a,b)=>b.name.localeCompare(a.name)); });
 
-  const displaySongList = computed(() => {
-    if (State.searchQuery.value.trim()) {
-      const q = State.searchQuery.value.toLowerCase();
-      if (State.currentViewMode.value === 'favorites') return favoriteSongList.value.filter(s => s.name.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q));
-      if (State.currentViewMode.value === 'recent') return State.recentSongs.value.map(h => h.song).filter(s => s.name.toLowerCase().includes(q));
-      return State.songList.value.filter(s => s.name.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q) || s.album.toLowerCase().includes(q));
-    }
-    if (State.currentViewMode.value === 'all') {
-      if (State.localMusicTab.value === 'artist' && State.currentArtistFilter.value) return State.songList.value.filter(s => s.artist === State.currentArtistFilter.value);
-      if (State.localMusicTab.value === 'album' && State.currentAlbumFilter.value) return State.songList.value.filter(s => s.album === State.currentAlbumFilter.value);
-      return State.songList.value;
-    }
-    if (State.currentViewMode.value === 'folder' && State.currentFolderFilter.value) return State.songList.value.filter(s => s.path.startsWith(State.currentFolderFilter.value));
-    if (State.currentViewMode.value === 'recent') return State.recentSongs.value.map(h => h.song);
-    if (State.currentViewMode.value === 'favorites') {
-      if (State.favTab.value === 'songs') return favoriteSongList.value;
-      if (State.favTab.value === 'artists') return State.favDetailFilter.value?.type === 'artist' ? favoriteSongList.value.filter(s => s.artist === State.favDetailFilter.value!.name) : [];
-      if (State.favTab.value === 'albums') return State.favDetailFilter.value?.type === 'album' ? favoriteSongList.value.filter(s => s.album === State.favDetailFilter.value!.name) : [];
-      return favoriteSongList.value;
-    }
-    if (State.currentViewMode.value === 'playlist') { 
-      const pl = State.playlists.value.find(p => p.id === State.filterCondition.value); 
-      if (!pl) return [];
-      
-      // 🟢 优化：使用 Map 建立索引，O(N) 复杂度
-      const songMap = new Map(State.songList.value.map(s => [s.path, s]));
-      
-      // 🟢 关键：按照 pl.songPaths 的顺序映射出 Song 对象
-      // filter(Boolean) 用于过滤掉可能已经被删除的歌曲
-      return pl.songPaths
-        .map(path => songMap.get(path))
-        .filter((s): s is State.Song => !!s);
-    }
-    return State.songList.value.filter(s => (s.artist||'Unknown') === State.filterCondition.value || (s.album||'Unknown') === State.filterCondition.value || (s.genre||'Unknown') === State.filterCondition.value || ((s.year?.substring(0,4))||'Unknown') === State.filterCondition.value);
+
+  // ... (格式化函数保持不变) ...
+
+  function formatDuration(seconds: number) { if (!seconds) return "00:00"; const mins = Math.floor(seconds / 60); const secs = Math.floor(seconds % 60); return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`; }
+
+  function formatTimeAgo(timestamp: number) { const now = Date.now(); const diff = now - timestamp; const oneHour = 60 * 60 * 1000; if (diff < oneHour) return `${Math.max(1, Math.floor(diff / 60000))}分钟前`; if (diff < 24 * oneHour) return `${Math.floor(diff / oneHour)}小时前`; return `${Math.floor(diff / (24 * oneHour))}天前`; }
+
+  
+
+  // ... (计算属性保持不变) ...
+
+  const isLocalMusic = computed(() => State.currentViewMode.value === 'all' || State.currentViewMode.value === 'artist' || State.currentViewMode.value === 'album');
+
+  const isFolderMode = computed(() => State.currentViewMode.value === 'folder');
+
+  
+
+  // 🟢 核心：定义“库内歌曲” (仅包含当前在“已添加文件夹”中的歌曲)
+
+  // 这保证了移除文件夹后，Local Music 视图会更新，但 SongList 依然保留数据供歌单使用
+
+  const librarySongs = computed(() => {
+
+    return State.songList.value.filter(s => 
+
+      State.watchedFolders.value.some(folder => s.path.startsWith(folder))
+
+    );
+
   });
 
+
+
+  const artistList = computed(() => { 
+
+    const map = new Map<string, { count: number, firstSongPath: string }>(); 
+
+    librarySongs.value.forEach(s => { 
+
+      const k = s.artist || 'Unknown'; 
+
+      const existing = map.get(k); 
+
+      if (existing) { existing.count++; } 
+
+      else { map.set(k, { count: 1, firstSongPath: s.path }); } 
+
+    }); 
+
+    return Array.from(map).map(([n, v]) => ({ name: n, count: v.count, firstSongPath: v.firstSongPath })).sort((a,b)=>b.count-a.count); 
+
+  });
+
+
+
+  const albumList = computed(() => { 
+
+    const map = new Map<string, { count: number, artist: string, firstSongPath: string }>(); 
+
+    librarySongs.value.forEach(s => { 
+
+      const k = s.album || 'Unknown'; 
+
+      const existing = map.get(k); 
+
+      if (existing) { existing.count++; } 
+
+      else { map.set(k, { count: 1, artist: s.artist, firstSongPath: s.path }); } 
+
+    }); 
+
+    return Array.from(map).map(([n, v]) => ({ name: n, count: v.count, artist: v.artist, firstSongPath: v.firstSongPath })).sort((a, b) => b.count - a.count); 
+
+  });
+
+
+
+  const folderList = computed(() => { 
+
+    return State.watchedFolders.value.map(folderPath => { 
+
+      // 🟢 关键修改：仅统计直属该目录的歌曲 (非递归)
+
+      const songsInFolder = State.songList.value.filter(s => isDirectParent(folderPath, s.path)); 
+
+      return { 
+
+        path: folderPath, 
+
+        name: folderPath.split(/[/\\]/).pop() || folderPath, 
+
+        count: songsInFolder.length, 
+
+        firstSongPath: songsInFolder.length > 0 ? songsInFolder[0].path : '' 
+
+      }; 
+
+    }); 
+
+  });
+
+  const favoriteSongList = computed(() => { return State.songList.value.filter(s => State.favoritePaths.value.includes(s.path)); });
+
+  const favArtistList = computed(() => { const map = new Map<string, { count: number, firstSongPath: string }>(); favoriteSongList.value.forEach(s => { const k = s.artist || 'Unknown'; const existing = map.get(k); if (existing) { existing.count++; } else { map.set(k, { count: 1, firstSongPath: s.path }); } }); return Array.from(map).map(([name, val]) => ({ name, count: val.count, firstSongPath: val.firstSongPath })).sort((a, b) => b.count - a.count); });
+
+  const favAlbumList = computed(() => { const map = new Map<string, { count: number, artist: string, firstSongPath: string }>(); favoriteSongList.value.forEach(s => { const k = s.album || 'Unknown'; const existing = map.get(k); if (existing) { existing.count++; } else { map.set(k, { count: 1, artist: s.artist, firstSongPath: s.path }); } }); return Array.from(map).map(([name, val]) => ({ name, count: val.count, artist: val.artist, firstSongPath: val.firstSongPath })).sort((a, b) => b.count - a.count); });
+
+  const recentAlbumList = computed(() => { const map = new Map<string, { artist: string, playedAt: number, firstSongPath: string }>(); State.recentSongs.value.forEach(item => { const k = item.song.album || 'Unknown'; if (!map.has(k) || item.playedAt > map.get(k)!.playedAt) { map.set(k, { artist: item.song.artist, playedAt: item.playedAt, firstSongPath: item.song.path }); } }); return Array.from(map).map(([name, val]) => ({ name, artist: val.artist, playedAt: val.playedAt, firstSongPath: val.firstSongPath })).sort((a, b) => b.playedAt - a.playedAt); });
+
+  const recentPlaylistList = computed(() => { const result: { id: string, name: string, count: number, playedAt: number, firstSongPath: string }[] = []; State.playlists.value.forEach(pl => { let lastPlayedTime = 0; let hasPlayed = false; const plSongPaths = new Set(pl.songPaths); for (const historyItem of State.recentSongs.value) { if (plSongPaths.has(historyItem.song.path)) { if (historyItem.playedAt > lastPlayedTime) { lastPlayedTime = historyItem.playedAt; hasPlayed = true; } } } if (hasPlayed) { result.push({ id: pl.id, name: pl.name, count: pl.songPaths.length, playedAt: lastPlayedTime, firstSongPath: pl.songPaths.length > 0 ? pl.songPaths[0] : '' }); } }); return result.sort((a, b) => b.playedAt - a.playedAt); });
+
+  
+
+  const genreList = computed(() => { 
+
+    const map = new Map(); 
+
+    librarySongs.value.forEach(s => { 
+
+      const k = s.genre || 'Unknown'; 
+
+      map.set(k, (map.get(k)||0)+1); 
+
+    }); 
+
+    return Array.from(map).map(([n,c]) => ({name:n, count:c})).sort((a,b)=>b.count-a.count); 
+
+  });
+
+
+
+  const yearList = computed(() => { 
+
+    const map = new Map(); 
+
+    librarySongs.value.forEach(s => { 
+
+      const k = (s.year && s.year.length>=4) ? s.year.substring(0,4) : 'Unknown'; 
+
+      map.set(k, (map.get(k)||0)+1); 
+
+    }); 
+
+    return Array.from(map).map(([n,c]) => ({name:n, count:c})).sort((a,b)=>b.name.localeCompare(a.name)); 
+
+  });
+
+
+
+  const displaySongList = computed(() => {
+
+    if (State.searchQuery.value.trim()) {
+
+      const q = State.searchQuery.value.toLowerCase();
+
+      if (State.currentViewMode.value === 'favorites') return favoriteSongList.value.filter(s => s.name.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q));
+
+      if (State.currentViewMode.value === 'recent') return State.recentSongs.value.map(h => h.song).filter(s => s.name.toLowerCase().includes(q));
+
+      return State.songList.value.filter(s => s.name.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q) || s.album.toLowerCase().includes(q));
+
+    }
+
+    if (State.currentViewMode.value === 'all') {
+
+      const base = librarySongs.value;
+
+      if (State.localMusicTab.value === 'artist' && State.currentArtistFilter.value) return base.filter(s => s.artist === State.currentArtistFilter.value);
+
+      if (State.localMusicTab.value === 'album' && State.currentAlbumFilter.value) return base.filter(s => s.album === State.currentAlbumFilter.value);
+
+      return base;
+
+    }
+
+    // 🟢 关键修改：文件夹视图仅显示该文件夹直属的歌曲 (非递归)
+
+    if (State.currentViewMode.value === 'folder' && State.currentFolderFilter.value) return State.songList.value.filter(s => isDirectParent(State.currentFolderFilter.value, s.path));
+
+    
+
+    if (State.currentViewMode.value === 'recent') return State.recentSongs.value.map(h => h.song);
+
+    if (State.currentViewMode.value === 'favorites') {
+
+      if (State.favTab.value === 'songs') return favoriteSongList.value;
+
+      if (State.favTab.value === 'artists') return State.favDetailFilter.value?.type === 'artist' ? favoriteSongList.value.filter(s => s.artist === State.favDetailFilter.value!.name) : [];
+
+      if (State.favTab.value === 'albums') return State.favDetailFilter.value?.type === 'album' ? favoriteSongList.value.filter(s => s.album === State.favDetailFilter.value!.name) : [];
+
+      return favoriteSongList.value;
+
+    }
+
+    if (State.currentViewMode.value === 'playlist') { 
+
+      const pl = State.playlists.value.find(p => p.id === State.filterCondition.value); 
+
+      if (!pl) return [];
+
+      
+
+      const songMap = new Map(State.songList.value.map(s => [s.path, s]));
+
+      
+
+      return pl.songPaths
+
+        .map(path => songMap.get(path))
+
+        .filter((s): s is State.Song => !!s);
+
+    }
+
+    return State.songList.value.filter(s => (s.artist||'Unknown') === State.filterCondition.value || (s.album||'Unknown') === State.filterCondition.value || (s.genre||'Unknown') === State.filterCondition.value || ((s.year?.substring(0,4))||'Unknown') === State.filterCondition.value);
+
+  });
+
+
+
   watch(displaySongList, async (newList) => {
+
     if (State.currentViewMode.value === 'favorites' && (State.favTab.value === 'artists' || State.favTab.value === 'albums') && !State.favDetailFilter.value) return;
+
     if (newList.length > 0) { try { const cover = await invoke<string>('get_song_cover', { path: newList[0].path }); State.playlistCover.value = cover; } catch { State.playlistCover.value = ''; } } else { State.playlistCover.value = ''; }
+
   }, { immediate: true });
 
-  async function addFoldersFromStructure() {
-    try {
-      const selectedPath = await open({ directory: true, multiple: false, title: '选择要扫描的根目录' });
-      if (!selectedPath || typeof selectedPath !== 'string') return;
-      const newFolders = await invoke<GeneratedFolder[]>('scan_folder_as_playlists', { rootPath: selectedPath });
-      if (newFolders.length === 0) { alert("未在该目录下找到包含音乐文件的文件夹"); return; }
-      let addedCount = 0;
-      let allNewSongs: State.Song[] = [];
-      newFolders.forEach(folder => {
-        if (!State.watchedFolders.value.includes(folder.path)) { State.watchedFolders.value.push(folder.path); addedCount++; }
-        allNewSongs.push(...folder.songs);
-      });
-      const existingPaths = new Set(State.songList.value.map(s => s.path));
-      const uniqueNewSongs = allNewSongs.filter(s => !existingPaths.has(s.path));
-      State.songList.value = [...State.songList.value, ...uniqueNewSongs];
-      alert(`已添加 ${addedCount} 个文件夹到侧边栏`);
-    } catch (e) { console.error("添加文件夹失败:", e); alert("添加文件夹失败: " + e); }
+
+
+    async function addFoldersFromStructure() {
+
+
+
+      try {
+
+
+
+        const selectedPath = await open({ directory: true, multiple: false, title: '选择要扫描的根目录' });
+
+
+
+        if (!selectedPath || typeof selectedPath !== 'string') return;
+
+
+
+        const newFolders = await invoke<GeneratedFolder[]>('scan_folder_as_playlists', { rootPath: selectedPath });
+
+
+
+        if (newFolders.length === 0) { alert("未在该目录下找到包含音乐文件的文件夹"); return; }
+
+
+
+        let addedCount = 0;
+
+
+
+        let allNewSongs: State.Song[] = [];
+
+
+
+        newFolders.forEach(folder => {
+
+
+
+          if (!State.watchedFolders.value.includes(folder.path)) { State.watchedFolders.value.push(folder.path); addedCount++; }
+
+
+
+          allNewSongs.push(...folder.songs);
+
+
+
+        });
+
+
+
+        const existingPaths = new Set(State.songList.value.map(s => s.path));
+
+
+
+        const uniqueNewSongs = allNewSongs.filter(s => !existingPaths.has(s.path));
+
+
+
+        State.songList.value = [...State.songList.value, ...uniqueNewSongs];
+
+
+
+        alert(`已添加 ${addedCount} 个文件夹到侧边栏`);
+
+
+
+      } catch (e) { console.error("添加文件夹失败:", e); alert("添加文件夹失败: " + e); }
+
+
+
+    }
+
+
+
+  
+
+
+
+    function getSongsInFolder(folderPath: string) { return State.songList.value.filter(s => isDirectParent(folderPath, s.path)); }
+
+
+
+    
+
+
+
+    // 🟢 重点：创建歌单时，记录当前日期
+
+  function createPlaylist(n: string, initialSongs: string[] = []) { 
+
+    if(n.trim()) { 
+
+      const now = new Date();
+
+      const dateStr = `${now.getFullYear()}-${(now.getMonth()+1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+
+      
+
+      State.playlists.value.push({ 
+
+        id: Date.now().toString() + Math.random().toString().slice(2), 
+
+        name: n, 
+
+        songPaths: [...initialSongs],
+
+        createdAt: dateStr // 新增字段
+
+      } );
+
+    } 
+
   }
 
-  function getSongsInFolder(folderPath: string) { return State.songList.value.filter(s => s.path.startsWith(folderPath)); }
   
-  // 🟢 重点：创建歌单时，记录当前日期
-  function createPlaylist(n: string, initialSongs: string[] = []) { 
-    if(n.trim()) { 
-      const now = new Date();
-      const dateStr = `${now.getFullYear()}-${(now.getMonth()+1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
-      
-      State.playlists.value.push({ 
-        id: Date.now().toString() + Math.random().toString().slice(2), 
-        name: n, 
-        songPaths: [...initialSongs],
-        createdAt: dateStr // 新增字段
-      } );
-    } 
-  }
-  
+
   async function moveFilesToFolder(paths: string[], targetFolder: string) { try { const count = await invoke<number>('batch_move_music_files', { paths, targetFolder }); const sep = targetFolder.includes('\\') ? '\\' : '/'; const basePath = targetFolder.endsWith(sep) ? targetFolder : targetFolder + sep; paths.forEach(oldPath => { const songToUpdate = State.songList.value.find(s => s.path === oldPath); if (songToUpdate) { const fileName = oldPath.split(/[/\\]/).pop(); if (fileName) { const newPath = basePath + fileName; songToUpdate.path = newPath; } } }); return count; } catch (e) { throw e; } }
 
+
+
   async function refreshFolder(folderPath: string) {
+
     try {
+
       const newSongs = await invoke<State.Song[]>('scan_music_folder', { folderPath });
+
       const otherSongs = State.songList.value.filter(s => !s.path.startsWith(folderPath));
+
       State.songList.value = [...otherSongs, ...newSongs];
+
     } catch (e) {
+
       console.error("刷新失败:", e);
+
       throw e; 
+
     }
+
   }
 
+
+
   // ... (其他函数保持不变) ...
+
   function deletePlaylist(id: string) { State.playlists.value = State.playlists.value.filter(p=>p.id!==id); if(State.currentViewMode.value==='playlist' && State.filterCondition.value===id) switchViewToAll(); }
+
   function addToPlaylist(pid:string, path:string) { const pl=State.playlists.value.find(p=>p.id===pid); if(pl && !pl.songPaths.includes(path)) pl.songPaths.push(path); }
+
   function removeFromPlaylist(pid:string, path:string) { const pl=State.playlists.value.find(p=>p.id===pid); if(pl) pl.songPaths=pl.songPaths.filter(p=>p!==path); }
+
   function addSongsToPlaylist(playlistId: string, songPaths: string[]): number { const pl = State.playlists.value.find(p => p.id === playlistId); if (!pl) return 0; let addedCount = 0; songPaths.forEach(path => { if (!pl.songPaths.includes(path)) { pl.songPaths.push(path); addedCount++; } }); return addedCount; }
+
   function viewPlaylist(id:string) { State.currentViewMode.value='playlist'; State.filterCondition.value=id; State.searchQuery.value=''; }
+
   function switchToFolderView() { State.currentViewMode.value = 'folder'; State.searchQuery.value = ''; if (!State.currentFolderFilter.value && State.watchedFolders.value.length > 0) State.currentFolderFilter.value = State.watchedFolders.value[0]; }
-  function removeFolder(folderPath: string) { State.watchedFolders.value = State.watchedFolders.value.filter(p => p !== folderPath); State.songList.value = State.songList.value.filter(s => !s.path.startsWith(folderPath)); if (State.currentFolderFilter.value === folderPath) State.currentFolderFilter.value = State.watchedFolders.value.length > 0 ? State.watchedFolders.value[0] : ''; }
+
+  function removeFolder(folderPath: string) { 
+
+    State.watchedFolders.value = State.watchedFolders.value.filter(p => p !== folderPath); 
+
+    // 🟢 关键：移除文件夹不再从全局 songList 中删除歌曲数据
+
+    // 这样已生成的歌单依然可以正常引用这些歌曲路径
+
+    if (State.currentFolderFilter.value === folderPath) State.currentFolderFilter.value = State.watchedFolders.value.length > 0 ? State.watchedFolders.value[0] : ''; 
+
+  }
+
   function viewArtist(n:string) { State.currentViewMode.value='artist'; State.filterCondition.value=n; State.searchQuery.value=''; }
+
   function viewAlbum(n:string) { State.currentViewMode.value='album'; State.filterCondition.value=n; State.searchQuery.value=''; }
+
   function viewGenre(n:string) { State.currentViewMode.value='genre'; State.filterCondition.value=n; State.searchQuery.value=''; }
+
   function viewYear(n:string) { State.currentViewMode.value='year'; State.filterCondition.value=n; State.searchQuery.value=''; }
+
   function switchViewToAll() { State.currentViewMode.value='all'; State.filterCondition.value=''; State.searchQuery.value=''; }
+
   function switchViewToFolder(p:string) { State.currentViewMode.value='folder'; State.filterCondition.value=p; State.searchQuery.value=''; }
+
   function switchToRecent() { State.currentViewMode.value = 'recent'; State.searchQuery.value = ''; }
+
   function switchToFavorites() { State.currentViewMode.value = 'favorites'; State.searchQuery.value = ''; }
+
   function setSearch(q:string) { State.searchQuery.value=q; }
+
   function switchLocalTab(tab: 'default' | 'artist' | 'album') { State.localMusicTab.value = tab; State.currentArtistFilter.value = ''; State.currentAlbumFilter.value = ''; if (tab === 'artist' && artistList.value.length > 0) State.currentArtistFilter.value = artistList.value[0].name; if (tab === 'album' && albumList.value.length > 0) State.currentAlbumFilter.value = albumList.value[0].name; }
+
   function switchFavTab(tab: 'songs' | 'artists' | 'albums') { State.favTab.value = tab; }
+
   function isFavorite(s:State.Song|null) { if(!s)return false; return State.favoritePaths.value.includes(s.path); }
+
   function toggleFavorite(s:State.Song) { if(isFavorite(s)) State.favoritePaths.value=State.favoritePaths.value.filter(p=>p!==s.path); else State.favoritePaths.value.push(s.path); }
+
   function addToHistory(song: State.Song) { State.recentSongs.value = State.recentSongs.value.filter(item => item.song.path !== song.path); State.recentSongs.value.unshift({ song, playedAt: Date.now() }); if (State.recentSongs.value.length > 1000) State.recentSongs.value = State.recentSongs.value.slice(0, 1000); }
+
   function clearHistory() { State.recentSongs.value = []; }
+
   function clearLocalMusic() { State.songList.value = []; State.watchedFolders.value = []; }
+
   function clearFavorites() { State.favoritePaths.value = []; }
-  async function addFolder() { try { const sel = await open({directory:true, multiple:false}); if(sel && typeof sel==='string') { if(!State.watchedFolders.value.includes(sel)) State.watchedFolders.value.push(sel); const newS = await invoke<State.Song[]>('scan_music_folder', {folderPath:sel}); const exist = new Set(State.songList.value.map(s=>s.path)); const uniq = newS.filter(s=>!exist.has(s.path)); State.songList.value=[...State.songList.value, ...uniq]; } } catch(e){console.error(e);} }
+
+  async function addFolder() { 
+
+    try { 
+
+      const sel = await open({directory:true, multiple:false}); 
+
+      if(sel && typeof sel==='string') { 
+
+        // 🟢 修改点：手动添加也使用“拆分”逻辑，将子目录识别为独立实体
+
+        const newFolders = await invoke<GeneratedFolder[]>('scan_folder_as_playlists', { rootPath: sel });
+
+        if (newFolders.length === 0) { 
+
+          // 如果没有子目录有歌，或者就是单层目录，尝试作为单层目录添加
+
+          if(!State.watchedFolders.value.includes(sel)) State.watchedFolders.value.push(sel); 
+
+          const newS = await invoke<State.Song[]>('scan_music_folder', {folderPath:sel}); 
+
+          const exist = new Set(State.songList.value.map(s=>s.path)); 
+
+          const uniq = newS.filter(s=>!exist.has(s.path)); 
+
+          State.songList.value=[...State.songList.value, ...uniq]; 
+
+        } else {
+
+          // 使用拆分后的文件夹
+
+          newFolders.forEach(folder => {
+
+            if (!State.watchedFolders.value.includes(folder.path)) State.watchedFolders.value.push(folder.path);
+
+          });
+
+          const allNewSongs = newFolders.flatMap(f => f.songs);
+
+          const existingPaths = new Set(State.songList.value.map(s => s.path));
+
+          const uniqueNewSongs = allNewSongs.filter(s => !existingPaths.has(s.path));
+
+          State.songList.value = [...State.songList.value, ...uniqueNewSongs];
+
+        }
+
+      } 
+
+    } catch(e){console.error(e);} 
+
+  }
   function generateOrganizedPath(song: State.Song): string { const root = State.settings.value.organizeRoot || 'D:\\Music'; const sep = root.includes('/') ? '/' : '\\'; if (!State.settings.value.enableAutoOrganize) return ""; const clean = (s: string) => s.replace(/[<>:"/\\|?*]/g, '_').trim(); const artist = clean(song.artist && song.artist !== 'Unknown' ? song.artist : 'Unknown Artist'); const album = clean(song.album && song.album !== 'Unknown' ? song.album : 'Unknown Album'); const title = clean(song.title || song.name); const year = clean(song.year ? song.year.substring(0,4) : '0000'); let relativePath = State.settings.value.organizeRule.replace('{Artist}', artist).replace('{Album}', album).replace('{Title}', title).replace('{Year}', year); relativePath = relativePath.replace(/\/\//g, '/').replace(/\\\\/g, '\\'); return `${root}${sep}${relativePath}`; }
   async function moveFile(song: State.Song, newPath: string) { try { await invoke('move_music_file', { oldPath: song.path, newPath }); const oldPath = song.path; const target = State.songList.value.find(s => s.path === oldPath); if (target) target.path = newPath; if (State.currentSong.value && State.currentSong.value.path === oldPath) State.currentSong.value.path = newPath; State.playlists.value.forEach(pl => { const i = pl.songPaths.indexOf(oldPath); if(i!==-1) pl.songPaths[i]=newPath; }); const fi = State.favoritePaths.value.indexOf(oldPath); if(fi!==-1) State.favoritePaths.value[fi]=newPath; return true; } catch (e) { alert(`整理失败: ${e}`); return false; } }
   function handleAutoNext() { if (State.playMode.value===1 && State.currentSong.value) { playSong(State.currentSong.value); } else { nextSong(); } }

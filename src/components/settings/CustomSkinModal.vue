@@ -2,13 +2,33 @@
 import { usePlayer } from '../../composables/player';
 import { open } from '@tauri-apps/plugin-dialog';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { ref } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 
 const { settings } = usePlayer();
 const emit = defineEmits(['close']);
 
-// 预览状态（临时修改，保存后同步到全局）
-const preview = ref({ ...settings.value.theme.customBackground });
+// 备份原始主题配置，用于取消时恢复
+let originalTheme: any = null;
+
+onMounted(() => {
+  originalTheme = JSON.parse(JSON.stringify(settings.value.theme));
+});
+
+// 预览状态
+const preview = ref({ 
+  ...settings.value.theme.customBackground,
+  foregroundStyle: settings.value.theme.customBackground.foregroundStyle || 'auto' // 确保有默认值
+});
+
+// 监听预览变化，实时同步到全局设置 (实现实时预览)
+watch(preview, (newVal) => {
+  settings.value.theme.customBackground = { ...newVal };
+  // 如果有图片，强制切换到自定义模式以便预览
+  if (newVal.imagePath) {
+    settings.value.theme.mode = 'custom';
+    settings.value.theme.dynamicBgType = 'none';
+  }
+}, { deep: true });
 
 // 选择本地图片
 const handleSelectImage = async () => {
@@ -23,10 +43,16 @@ const handleSelectImage = async () => {
   } catch (e) {}
 };
 
+const handleCancel = () => {
+  // 恢复原始设置
+  if (originalTheme) {
+    settings.value.theme = originalTheme;
+  }
+  emit('close');
+};
+
 const handleSave = () => {
-  settings.value.theme.customBackground = { ...preview.value };
-  settings.value.theme.mode = 'custom';
-  settings.value.theme.dynamicBgType = 'none'; // 互斥逻辑
+  // 确认保存，无需操作（watch 已同步）
   emit('close');
 };
 </script>
@@ -38,7 +64,7 @@ const handleSave = () => {
       <!-- 标题栏 -->
       <div class="flex items-center justify-between px-6 py-4 border-b border-white/10">
         <span class="font-bold text-base">自定义皮肤</span>
-        <button @click="$emit('close')" class="text-white/50 hover:text-white transition">
+        <button @click="handleCancel" class="text-white/50 hover:text-white transition">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
           </svg>
@@ -124,7 +150,7 @@ const handleSave = () => {
             />
           </div>
 
-          <!-- 缩放 (Optional) -->
+          <!-- 缩放 -->
           <div class="space-y-2">
             <div class="flex justify-between items-center text-xs text-white/60">
               <span>画面缩放</span>
@@ -136,12 +162,30 @@ const handleSave = () => {
               class="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-[#EC4141]"
             />
           </div>
+
+          <!-- 字体适应 -->
+          <div class="space-y-2">
+            <div class="flex justify-between items-center text-xs text-white/60">
+              <span>字体适应</span>
+            </div>
+            <div class="flex bg-white/10 rounded-lg p-1 gap-1">
+              <button 
+                v-for="opt in ['auto', 'light', 'dark']" 
+                :key="opt"
+                @click="preview.foregroundStyle = opt as any"
+                class="flex-1 py-1.5 text-xs rounded-md transition-all font-medium"
+                :class="preview.foregroundStyle === opt ? 'bg-[#EC4141] text-white shadow-sm' : 'text-white/60 hover:text-white hover:bg-white/5'"
+              >
+                {{ opt === 'auto' ? '自动' : opt === 'light' ? '浅色' : '深色' }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
       <!-- 底部按钮 -->
       <div class="px-6 py-4 flex gap-4 border-t border-white/10 bg-[#242424]">
-        <button @click="$emit('close')" class="flex-1 py-2.5 rounded-full border border-white/10 text-sm font-medium hover:bg-white/5 transition">取消</button>
+        <button @click="handleCancel" class="flex-1 py-2.5 rounded-full border border-white/10 text-sm font-medium hover:bg-white/5 transition">取消</button>
         <button 
           @click="handleSave" 
           :disabled="!preview.imagePath"

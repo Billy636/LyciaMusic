@@ -53,21 +53,21 @@ const ghostStyle = computed(() => ({
     <transition name="fade">
       <div 
         v-if="dragSession.active && dragSession.songs.length > 0"
-        class="fixed z-[9999] pointer-events-none p-3 bg-white/90 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 flex items-center gap-3 select-none transition-transform"
+        class="fixed z-[9999] pointer-events-none p-3 bg-white/90 dark:bg-[#1a1a1a]/90 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 dark:border-white/10 flex items-center gap-3 select-none transition-transform"
         :style="ghostStyle"
       >
-        <div class="w-12 h-12 rounded bg-gray-200/50 flex items-center justify-center overflow-hidden shrink-0 shadow-sm relative">
+        <div class="w-12 h-12 rounded bg-gray-200/50 dark:bg-white/10 flex items-center justify-center overflow-hidden shrink-0 shadow-sm relative">
           <img v-if="ghostCover" :src="ghostCover" class="w-full h-full object-cover" />
-          <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-400 dark:text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
           </svg>
           <div class="absolute inset-0 bg-black/5"></div>
         </div>
         <div class="flex flex-col min-w-0">
-          <span class="text-sm font-bold text-gray-900 truncate max-w-[200px] drop-shadow-sm">{{ dragSession.songs[0].title || dragSession.songs[0].name }}</span>
-          <span class="text-xs text-gray-500 truncate max-w-[200px]">{{ dragSession.songs[0].artist }}</span>
+          <span class="text-sm font-bold text-gray-900 dark:text-white truncate max-w-[200px] drop-shadow-sm">{{ dragSession.songs[0].title || dragSession.songs[0].name }}</span>
+          <span class="text-xs text-gray-500 dark:text-white/60 truncate max-w-[200px]">{{ dragSession.songs[0].artist }}</span>
         </div>
-        <div v-if="dragSession.songs.length > 1" class="absolute -top-2 -right-2 w-6 h-6 bg-[#EC4141] text-white rounded-full flex items-center justify-center text-xs font-bold shadow-md border-2 border-white">
+        <div v-if="dragSession.songs.length > 1" class="absolute -top-2 -right-2 w-6 h-6 bg-[#EC4141] text-white rounded-full flex items-center justify-center text-xs font-bold shadow-md border-2 border-white dark:border-[#222]">
            {{ dragSession.songs.length }}
         </div>
       </div>

@@ -19,9 +19,27 @@ const isFooterVisible = computed(() => playQueue.value.length > 0);
 
 // --- 主题切换逻辑 ---
 const applyTheme = () => {
-  if (settings.value.theme.mode === 'dark') {
+  const theme = settings.value.theme;
+  const isDarkSystem = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  if (theme.mode === 'custom') {
+    const style = theme.customBackground.foregroundStyle || 'auto';
+    if (style === 'light') {
+      document.documentElement.classList.add('dark');
+    } else if (style === 'dark') {
+      document.documentElement.classList.remove('dark');
+    } else {
+      // Auto
+      if (isDarkSystem) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    }
+  } else if (theme.mode === 'dark') {
     document.documentElement.classList.add('dark');
   } else {
+    // light or others
     document.documentElement.classList.remove('dark');
   }
 };
