@@ -12,6 +12,7 @@ import ModernModal from '../common/ModernModal.vue';
 import FavoritesGrid from '../common/FavoritesGrid.vue';
 import DragGhost from '../common/DragGhost.vue';
 import MoveToFolderModal from '../overlays/MoveToFolderModal.vue';
+import { useToast } from '../../composables/toast';
 
 const route = useRoute();
 const router = useRouter();
@@ -33,8 +34,6 @@ const songTableRef = ref<{ containerRef: HTMLElement | null } | null>(null);
 const showAddToPlaylistModal = ref(false);
 const showMoveToFolderModal = ref(false);
 const showConfirm = ref(false);
-const showToast = ref(false);
-const toastMessage = ref('');
 const confirmMessage = ref('');
 const confirmAction = ref<() => void>(() => {});
 const showContextMenu = ref(false);
@@ -83,12 +82,11 @@ const confirmBatchMove = async (targetFolder: string, folderName: string) => {
   try {
     const paths = Array.from(selectedPaths.value);
     const count = await moveFilesToFolder(paths, targetFolder);
-    toastMessage.value = `已成功移动 ${count} 首歌曲到 "${folderName}"`;
-    showToast.value = true; setTimeout(() => showToast.value = false, 3000);
+    useToast().showToast(`已成功移动 ${count} 首歌曲到 "${folderName}"`, 'success');
     showMoveToFolderModal.value = false; selectedPaths.value.clear();
   } catch (e: any) { 
     const msg = e.message || e;
-    alert("移动失败: " + msg); 
+    useToast().showToast("移动失败: " + msg, 'error'); 
   }
 };
 
@@ -96,8 +94,8 @@ const handleAddToPlaylist = (playlistId: string) => {
   const songsToAdd = isBatchMode.value ? Array.from(selectedPaths.value) : (contextMenuTargetSong.value ? [contextMenuTargetSong.value.path] : []);
   const addedCount = addSongsToPlaylist(playlistId, songsToAdd);
   showAddToPlaylistModal.value = false;
-  toastMessage.value = addedCount === 0 ? "歌单内歌曲重复" : "已加入歌单";
-  showToast.value = true; setTimeout(() => showToast.value = false, 2000);
+  const msg = addedCount === 0 ? "歌单内歌曲重复" : "已加入歌单";
+  useToast().showToast(msg, addedCount === 0 ? 'info' : 'success');
 };
 
 // --- 🔥 拖拽核心逻辑 ---
@@ -336,9 +334,8 @@ const onGlobalMouseUp = () => {
     } else if (dragSession.targetPlaylist) {
       const paths = dragSession.songs.map(s => s.path);
       const count = addSongsToPlaylist(dragSession.targetPlaylist.id, paths);
-      toastMessage.value = count > 0 ? `已添加 ${count} 首歌曲到 ${dragSession.targetPlaylist.name}` : '歌曲已存在于歌单';
-      showToast.value = true;
-      setTimeout(() => showToast.value = false, 2000);
+      const msg = count > 0 ? `已添加 ${count} 首歌曲到 ${dragSession.targetPlaylist.name}` : '歌曲已存在于歌单';
+      useToast().showToast(msg, count > 0 ? 'success' : 'info');
     } else if (dragSession.insertIndex > -1) {
       // 🔥 Drop 逻辑：精确修复
       const movingSongs = dragSession.songs;
@@ -500,9 +497,6 @@ watch(() => route.path, (path) => {
     <SongContextMenu :visible="showContextMenu" :x="contextMenuX" :y="contextMenuY" :song="contextMenuTargetSong" :is-playlist-view="currentViewMode === 'playlist'" @close="showContextMenu = false" @add-to-playlist="showAddToPlaylistModal = true" />
     <ModernModal :visible="showConfirm" title="移除歌曲" :content="confirmMessage" type="danger" confirm-text="移除" @confirm="executeBatchDelete" @cancel="showConfirm = false" />
 
-    <Teleport to="body">
-      <div v-if="showToast" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/70 text-white px-6 py-2 rounded-full text-sm shadow-lg z-[10000] animate-in fade-in duration-200">{{ toastMessage }}</div>
-    </Teleport>
   </div>
 </template>
 

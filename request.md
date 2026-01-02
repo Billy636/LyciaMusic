@@ -1,18 +1,51 @@
-🎨 UI 样式调整：左上角标题改为品牌蓝 (UI Tweak: Brand Color for App Title)
-目标 (Goal) 修改左上角侧边栏顶部的 "LyciaMusic" 标题颜色。 目前的红橙色 (text-red-500 等) 与品牌主色调（Logo 的蓝绿色）冲突。请将其改为与 Logo 呼应的蓝色/青色渐变。
+📝 发给程序员的需求单
+标题：UI 优化 - 替换原生弹窗为自定义组件 (Replace Native Dialogs with Custom UI)
 
-修改文件 (Target File) src/components/layout/Sidebar.vue (或者是 Header 组件，取决于布局)。
+1. 痛点描述 (The Problem) 目前的弹窗使用了系统原生的 alert() / Tauri Dialog 和浏览器的 window.prompt()。
 
-代码修改 (Code Change) 请找到包含 LyciaMusic 文字的 <h1> 或 <span> 标签，替换其颜色类名。
+视觉割裂： 风格与我们的 LyciaMusic UI 不统一。
 
-推荐方案：清爽的海洋蓝渐变 (Ocean Gradient) 请使用以下 Tailwind CSS 类组合来实现“文字渐变”效果：
+体验极差： window.prompt 会显示 localhost:1420，暴露了 Webview 地址，显得不专业。
 
-HTML
+2. 需求一：实现全局“轻提示” (Toast Notification)
 
-<h1 class="text-2xl font-bold bg-gradient-to-r from-teal-400 to-blue-500 bg-clip-text text-transparent tracking-tight">
-  LyciaMusic
-</h1>
-备选方案 (如果是纯色): 如果渐变不好看，请使用 text-teal-500 或 text-cyan-600。
+场景： 用于替代 中的“已添加 18 个文件夹”这种成功提示。
+
+要求：
+
+不要使用系统弹窗，也不要阻断用户操作。
+
+样式： 做一个小巧的悬浮胶囊，出现在顶部中央或底部中央。
+
+动效： 淡入淡出 (Fade In/Out)，显示 2-3 秒后自动消失。
+
+配色： 绿色（成功）、红色（错误）、蓝色（信息），带一点透明度和背景模糊。
+
+3. 需求二：实现自定义“模态输入框” (Custom Input Modal)
+
+场景： 用于替代 中的“修改歌单名称”。
+
+要求：
+
+遮罩层 (Backdrop)： 全屏黑色半透明遮罩，带模糊效果 (Backdrop Blur)，让背景变暗，聚焦用户视线。
+
+居中卡片： 屏幕正中间显示一个圆角卡片（风格参考软件其他部分）。
+
+内容： * 标题：“重命名歌单”
+
+输入框：美化的 Input，默认填入旧名字。
+
+按钮组：右下角放置“取消”（灰色）和“确认”（主色调/红色）。
+
+交互： 支持按 Enter 键确认，按 Esc 键取消。
+
+4. 技术建议 (Tech Stack)
+
+既然我们用的是 Vue + Tailwind CSS，建议封装两个通用组件：
+
+<Toast /> (或者引入 vue-sonner 这种轻量库)。
+
+<BaseModal /> (使用 Vue 的 <Teleport to="body"> 传送门技术，确保层级最高)。
 
 Important notes:
 it is Tauri v2.0 project,please remember it !

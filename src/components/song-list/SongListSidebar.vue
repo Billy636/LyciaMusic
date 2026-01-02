@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core'; // 🟢 1. 引入转换工具
 import FolderContextMenu from '../overlays/FolderContextMenu.vue';
 import ModernModal from '../common/ModernModal.vue'; 
+import { useToast } from '../../composables/toast';
 
 const { 
   currentViewMode, localMusicTab, currentArtistFilter, currentAlbumFilter,
@@ -157,8 +158,9 @@ const handleRefreshFolder = async () => {
     try {
       await refreshFolder(targetFolder.value.path);
       showMenu.value = false;
+      useToast().showToast("刷新成功", "success");
     } catch (e) {
-      alert("刷新失败: " + e);
+      useToast().showToast("刷新失败: " + e, "error");
     }
   }
 };
@@ -182,8 +184,9 @@ const executeMove = async () => {
       await moveFilesToFolder(dragPendingFiles.value, moveTarget.value.path);
       dragPendingFiles.value = [];
       showMoveConfirm.value = false;
+      useToast().showToast("移动成功", "success");
     } catch (e) {
-      alert("移动失败: " + e);
+      useToast().showToast("移动失败: " + e, "error");
     }
   }
 };

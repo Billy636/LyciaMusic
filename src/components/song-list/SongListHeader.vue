@@ -5,6 +5,8 @@ import { useRoute } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import ModernModal from '../common/ModernModal.vue';
+import ModernInputModal from '../common/ModernInputModal.vue';
+import { useToast } from '../../composables/toast';
 
 defineProps<{
   isBatchMode: boolean
@@ -24,6 +26,10 @@ const {
   addFoldersFromStructure,
   refreshFolder
 } = usePlayer();
+
+const { showToast } = useToast();
+const showRenameModal = ref(false);
+const renameInitialValue = ref('');
 
 const isLocalMusic = computed(() => currentViewMode.value === 'all' && route.path === '/');
 const isFavorites = computed(() => route.path === '/favorites');
@@ -76,10 +82,17 @@ const handleRenamePlaylist = () => {
   if (currentViewMode.value !== 'playlist') return;
   const pl = playlists.value.find(p => p.id === filterCondition.value);
   if (pl) {
-    const newName = prompt("请输入新的歌单名称", pl.name);
-    if (newName && newName.trim() !== "") {
-      pl.name = newName.trim();
-    }
+    renameInitialValue.value = pl.name;
+    showRenameModal.value = true;
+  }
+};
+
+const confirmRename = (newName: string) => {
+  if (currentViewMode.value !== 'playlist') return;
+  const pl = playlists.value.find(p => p.id === filterCondition.value);
+  if (pl && newName.trim()) {
+    pl.name = newName.trim();
+    showToast('歌单重命名成功', 'success');
   }
 };
 
@@ -113,8 +126,9 @@ const handleRefreshClick = async () => {
     try {
       await refreshFolder(currentFolderFilter.value);
       showHeaderMenu.value = false;
+      showToast('文件夹刷新成功', 'success');
     } catch (e) {
-      alert("刷新失败: " + e);
+      showToast("刷新失败: " + e, 'error');
     }
   }
 };
@@ -264,6 +278,16 @@ const handlePlayAll = () => { if (displaySongList.value.length > 0) playSong(dis
       type="danger"
       @confirm="handleConfirm" 
       @cancel="showConfirm = false" 
+    />
+
+    <ModernInputModal
+      :visible="showRenameModal"
+      title="重命名歌单"
+      :initial-value="renameInitialValue"
+      placeholder="请输入新的歌单名称"
+      @confirm="confirmRename"
+      @cancel="showRenameModal = false"
+      @update:visible="showRenameModal = $event"
     />
 
   </div>

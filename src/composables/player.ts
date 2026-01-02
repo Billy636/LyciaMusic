@@ -315,7 +315,7 @@ export function usePlayer() {
 
 
 
-        if (newFolders.length === 0) { alert("未在该目录下找到包含音乐文件的文件夹"); return; }
+        if (newFolders.length === 0) { useToast().showToast("未在该目录下找到包含音乐文件的文件夹", "error"); return; }
 
 
 
@@ -355,11 +355,11 @@ export function usePlayer() {
 
 
 
-        alert(`已添加 ${addedCount} 个文件夹到侧边栏`);
+        useToast().showToast(`已添加 ${addedCount} 个文件夹到侧边栏`, "success");
 
 
 
-      } catch (e) { console.error("添加文件夹失败:", e); alert("添加文件夹失败: " + e); }
+      } catch (e) { console.error("添加文件夹失败:", e); useToast().showToast("添加文件夹失败: " + e, "error"); }
 
 
 
@@ -547,7 +547,7 @@ export function usePlayer() {
 
   }
   function generateOrganizedPath(song: State.Song): string { const root = State.settings.value.organizeRoot || 'D:\\Music'; const sep = root.includes('/') ? '/' : '\\'; if (!State.settings.value.enableAutoOrganize) return ""; const clean = (s: string) => s.replace(/[<>:"/\\|?*]/g, '_').trim(); const artist = clean(song.artist && song.artist !== 'Unknown' ? song.artist : 'Unknown Artist'); const album = clean(song.album && song.album !== 'Unknown' ? song.album : 'Unknown Album'); const title = clean(song.title || song.name); const year = clean(song.year ? song.year.substring(0,4) : '0000'); let relativePath = State.settings.value.organizeRule.replace('{Artist}', artist).replace('{Album}', album).replace('{Title}', title).replace('{Year}', year); relativePath = relativePath.replace(/\/\//g, '/').replace(/\\\\/g, '\\'); return `${root}${sep}${relativePath}`; }
-  async function moveFile(song: State.Song, newPath: string) { try { await invoke('move_music_file', { oldPath: song.path, newPath }); const oldPath = song.path; const target = State.songList.value.find(s => s.path === oldPath); if (target) target.path = newPath; if (State.currentSong.value && State.currentSong.value.path === oldPath) State.currentSong.value.path = newPath; State.playlists.value.forEach(pl => { const i = pl.songPaths.indexOf(oldPath); if(i!==-1) pl.songPaths[i]=newPath; }); const fi = State.favoritePaths.value.indexOf(oldPath); if(fi!==-1) State.favoritePaths.value[fi]=newPath; return true; } catch (e) { alert(`整理失败: ${e}`); return false; } }
+  async function moveFile(song: State.Song, newPath: string) { try { await invoke('move_music_file', { oldPath: song.path, newPath }); const oldPath = song.path; const target = State.songList.value.find(s => s.path === oldPath); if (target) target.path = newPath; if (State.currentSong.value && State.currentSong.value.path === oldPath) State.currentSong.value.path = newPath; State.playlists.value.forEach(pl => { const i = pl.songPaths.indexOf(oldPath); if(i!==-1) pl.songPaths[i]=newPath; }); const fi = State.favoritePaths.value.indexOf(oldPath); if(fi!==-1) State.favoritePaths.value[fi]=newPath; return true; } catch (e) { useToast().showToast(`整理失败: ${e}`, "error"); return false; } }
   function handleAutoNext() { if (State.playMode.value===1 && State.currentSong.value) { playSong(State.currentSong.value); } else { nextSong(); } }
   async function handleVolume(e:Event) { const v=parseInt((e.target as HTMLInputElement).value); State.volume.value=v; await invoke('set_volume',{volume:v/100.0}); }
   async function toggleMute() { if (State.volume.value>0) { State.volume.value=0; await invoke('set_volume',{volume:0.0}); } else { State.volume.value=100; await invoke('set_volume',{volume:1.0}); } }
@@ -557,7 +557,7 @@ export function usePlayer() {
   function playNext(song: State.Song) { State.tempQueue.value.unshift(song); }
   function removeSongFromList(song: State.Song) { if (State.currentViewMode.value === 'all') { State.songList.value = State.songList.value.filter(s => s.path !== song.path); } else if (State.currentViewMode.value === 'favorites') { State.favoritePaths.value = State.favoritePaths.value.filter(p => p !== song.path); } else if (State.currentViewMode.value === 'recent') { State.recentSongs.value = State.recentSongs.value.filter(i => i.song.path !== song.path); } }
   async function openInFinder(path: string) { await invoke('show_in_folder', { path }); }
-  async function deleteFromDisk(song: State.Song) { try { await invoke('delete_music_file', { path: song.path }); State.songList.value = State.songList.value.filter(s => s.path !== song.path); State.favoritePaths.value = State.favoritePaths.value.filter(p => p !== song.path); State.recentSongs.value = State.recentSongs.value.filter(i => i.song.path !== song.path); State.playlists.value.forEach(pl => { pl.songPaths = pl.songPaths.filter(p => p !== song.path); }); } catch (e) { alert("删除失败: " + e); } }
+  async function deleteFromDisk(song: State.Song) { try { await invoke('delete_music_file', { path: song.path }); State.songList.value = State.songList.value.filter(s => s.path !== song.path); State.favoritePaths.value = State.favoritePaths.value.filter(p => p !== song.path); State.recentSongs.value = State.recentSongs.value.filter(i => i.song.path !== song.path); State.playlists.value.forEach(pl => { pl.songPaths = pl.songPaths.filter(p => p !== song.path); }); } catch (e) { useToast().showToast("删除失败: " + e, "error"); } }
 
   function stopTimer() { 
     if (progressFrameId !== null) { cancelAnimationFrame(progressFrameId); progressFrameId = null; }
