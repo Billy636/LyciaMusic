@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, reactive, onMounted, onUnmounted } from 'vue';
 import { Song, usePlayer, dragSession } from '../../composables/player';
+import { useSettings } from '../../composables/settings';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import QualityBadge from '../common/QualityBadge.vue';
+
+const { settings } = useSettings();
 
 const props = defineProps<{
   songs: Song[];
@@ -215,14 +219,21 @@ const getRowStyle = (songIndex: number, songPath: string) => {
              </div>
           </td>
           <td class="py-3 pr-4 overflow-hidden pl-2">
-            <div class="flex items-center h-full">
-              <div class="w-9 h-9 rounded bg-gray-200/50 dark:bg-white/5 flex items-center justify-center mr-3 shrink-0 overflow-hidden text-gray-400 dark:text-white/40 relative border border-black/5 dark:border-white/5">
+            <div class="flex items-center h-full gap-2">
+              <div class="w-9 h-9 rounded bg-gray-200/50 dark:bg-white/5 flex items-center justify-center mr-1 shrink-0 overflow-hidden text-gray-400 dark:text-white/40 relative border border-black/5 dark:border-white/5">
                 <img v-if="coverCache.get(song.path)" :src="coverCache.get(song.path)" class="w-full h-full object-cover transition-opacity duration-300" alt="Cover"/>
                 <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-40 absolute inset-0 m-auto -z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
                 </svg>
               </div>
               <span class="text-gray-900 dark:text-gray-100 font-medium truncate">{{ song.title || song.name.replace(/\.[^/.]+$/, "") }}</span>
+              <QualityBadge
+                v-if="settings.showQualityBadges"
+                :bitrate="song.bitrate"
+                :sample-rate="song.sample_rate"
+                :bit-depth="song.bit_depth"
+                :format="song.format"
+              />
             </div>
           </td>
           <td class="py-3 pr-4 truncate text-gray-700 dark:text-white/70">{{ song.artist }}</td>

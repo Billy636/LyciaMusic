@@ -28,6 +28,11 @@ pub struct Song {
     pub album: String,
     pub duration: u32,
     pub cover: Option<String>,
+    // Audio quality fields (v1.1.1)
+    pub bitrate: u32,
+    pub sample_rate: u32,
+    pub bit_depth: Option<u8>,
+    pub format: String,
 }
 
 #[derive(Serialize)]
@@ -235,30 +240,64 @@ pub async fn scan_music_folder(
                     let ext_str = ext.to_string_lossy().to_lowercase();
                     if ["mp3", "flac", "wav"].contains(&ext_str.as_str()) {
                         let path_str = path.to_string_lossy().to_string();
+                        let format = ext_str.clone();
                         
-                        let mut stmt = conn.prepare("SELECT title, artist, album, duration, cover_path FROM songs WHERE path = ?1").unwrap();
+                        // Read from DB with new columns
+                        let mut stmt = conn.prepare("SELECT title, artist, album, duration, cover_path, bitrate, sample_rate, bit_depth, format FROM songs WHERE path = ?1").unwrap();
                         let db_song = stmt.query_row([&path_str], |row| {
-                            Ok(Song {
-                                name: path.file_name().unwrap().to_string_lossy().to_string(),
-                                path: path_str.clone(),
-                                title: row.get(0).unwrap_or_default(),
-                                artist: row.get(1).unwrap_or_default(),
-                                album: row.get(2).unwrap_or_default(),
-                                duration: row.get(3).unwrap_or_default(),
-                                cover: row.get(4).unwrap_or_default(),
-                            })
+                            Ok((
+                                Song {
+                                    name: path.file_name().unwrap().to_string_lossy().to_string(),
+                                    path: path_str.clone(),
+                                    title: row.get(0).unwrap_or_default(),
+                                    artist: row.get(1).unwrap_or_default(),
+                                    album: row.get(2).unwrap_or_default(),
+                                    duration: row.get(3).unwrap_or_default(),
+                                    cover: row.get(4).unwrap_or_default(),
+                                    bitrate: row.get(5).unwrap_or(0),
+                                    sample_rate: row.get(6).unwrap_or(0),
+                                    bit_depth: row.get::<_, Option<u8>>(7).unwrap_or(None),
+                                    format: row.get(8).unwrap_or_else(|_| format.clone()),
+                                },
+                                row.get::<_, Option<u32>>(5).unwrap_or(None), // bitrate for null check
+                            ))
                         }).optional().unwrap_or(None);
 
-                        if let Some(s) = db_song {
-                            songs.push(s);
+                        if let Some((mut song, db_bitrate)) = db_song {
+                            // Legacy data: if bitrate is NULL, re-extract metadata
+                            if db_bitrate.is_none() {
+                                if let Some(tagged_file) = Probe::open(path).ok().and_then(|p| p.read().ok()) {
+                                    let props = tagged_file.properties();
+                                    song.bitrate = props.audio_bitrate().unwrap_or(0);
+                                    song.sample_rate = props.sample_rate().unwrap_or(0);
+                                    song.bit_depth = props.bit_depth().map(|b| b as u8);
+                                    song.format = format.clone();
+                                    
+                                    // Update DB with new values
+                                    conn.execute(
+                                        "UPDATE songs SET bitrate = ?1, sample_rate = ?2, bit_depth = ?3, format = ?4 WHERE path = ?5",
+                                        (&song.bitrate, &song.sample_rate, &song.bit_depth, &song.format, &path_str),
+                                    ).ok();
+                                }
+                            }
+                            songs.push(song);
                         } else {
+                            // New file: extract all metadata
                             let mut artist = String::from("未知歌手");
                             let mut album = String::from("未知专辑");
                             let mut title = String::new();
-                            let mut duration = 0;
+                            let mut duration = 0u32;
+                            let mut bitrate = 0u32;
+                            let mut sample_rate = 0u32;
+                            let mut bit_depth: Option<u8> = None;
                             
                             if let Ok(tagged_file) = Probe::open(path).map_err(|e| e.to_string()).and_then(|p| p.read().map_err(|e| e.to_string())) {
-                                duration = tagged_file.properties().duration().as_secs() as u32;
+                                let props = tagged_file.properties();
+                                duration = props.duration().as_secs() as u32;
+                                bitrate = props.audio_bitrate().unwrap_or(0);
+                                sample_rate = props.sample_rate().unwrap_or(0);
+                                bit_depth = props.bit_depth().map(|b| b as u8);
+                                
                                 if let Some(tag) = tagged_file.primary_tag() {
                                     if let Some(art) = tag.artist() { artist = art.to_string(); }
                                     if let Some(alb) = tag.album() { album = alb.to_string(); }
@@ -266,11 +305,11 @@ pub async fn scan_music_folder(
                                 }
                             }
                             
-                            let cover_path = None;
+                            let cover_path: Option<String> = None;
                             
                             conn.execute(
-                                "INSERT INTO songs (path, title, artist, album, duration, cover_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                                (&path_str, &title, &artist, &album, &duration, &cover_path),
+                                "INSERT INTO songs (path, title, artist, album, duration, cover_path, bitrate, sample_rate, bit_depth, format) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                (&path_str, &title, &artist, &album, &duration, &cover_path, &bitrate, &sample_rate, &bit_depth, &format),
                             ).ok();
 
                             songs.push(Song {
@@ -281,6 +320,10 @@ pub async fn scan_music_folder(
                                 album,
                                 duration,
                                 cover: cover_path,
+                                bitrate,
+                                sample_rate,
+                                bit_depth,
+                                format,
                             });
                         }
                     }

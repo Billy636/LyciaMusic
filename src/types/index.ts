@@ -8,6 +8,11 @@ export interface Song {
   genre?: string;
   year?: string;
   cover?: string;
+  // Audio quality fields (v1.1.1)
+  bitrate?: number;
+  sample_rate?: number;
+  bit_depth?: number;
+  format?: string;
 }
 
 export interface HistoryItem { 
