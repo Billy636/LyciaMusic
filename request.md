@@ -1,51 +1,35 @@
-📝 发给程序员的需求单
-标题：UI 优化 - 替换原生弹窗为自定义组件 (Replace Native Dialogs with Custom UI)
+修复反馈：修复不完整 (Feedback: Incomplete Fix)
+标题：文件夹拖拽已修复，但歌单和歌手/专辑列表依然无效 (Folders Fixed, but Playlists & Artist Lists Still Broken)
 
-1. 痛点描述 (The Problem) 目前的弹窗使用了系统原生的 alert() / Tauri Dialog 和浏览器的 window.prompt()。
+1. 测试结果 (Test Results)
 
-视觉割裂： 风格与我们的 LyciaMusic UI 不统一。
+✅ 文件夹 (Folders): 修复成功！可以正常拖拽排序，且有 Ghost 效果。这证明你的 mousedown 自定义逻辑是可行的。
 
-体验极差： window.prompt 会显示 localhost:1420，暴露了 Webview 地址，显得不专业。
+❌ 我的歌单 (Sidebar Playlists): 失败。APP 左侧边栏的“我的歌单”依然无法拖动（鼠标无反应）。
 
-2. 需求一：实现全局“轻提示” (Toast Notification)
+❌ 歌手/专辑页面的列表 (Artist/Album List View): 失败。在“本地音乐 -> 歌手”页面中，左侧的歌手列表（List View Sidebar）依然无法拖动。
 
-场景： 用于替代 中的“已添加 18 个文件夹”这种成功提示。
+❌ 排序菜单 (Sort Menu): 失败。点击右上角的三个点 ...，依然没有出现“按名称/按数量/自定义”的排序选项。
 
-要求：
+2. 问题分析与修复要求 (Analysis & Request)
 
-不要使用系统弹窗，也不要阻断用户操作。
+A. 范围覆盖缺失 (Missing Scope in Sidebar.vue) 你可能只在“文件夹”组件上绑定了 mousedown 事件，但忘记了在“歌单”组件上绑定。
 
-样式： 做一个小巧的悬浮胶囊，出现在顶部中央或底部中央。
+要求： 请检查 Sidebar.vue（或 SongListSidebar.vue），将文件夹 (Folder) 上的那个成功的 @mousedown="startDrag(...)" 逻辑，完全复制应用到歌单 (Playlist) 的 <li> 或 <div> 元素上。
 
-动效： 淡入淡出 (Fade In/Out)，显示 2-3 秒后自动消失。
+B. 视图模式遗漏 (Missing Scope in Artists.vue/Albums.vue) 你可能只修复了歌手/专辑的“网格视图 (Grid View/Cards)”，但忽略了“列表视图 (List View)”。
 
-配色： 绿色（成功）、红色（错误）、蓝色（信息），带一点透明度和背景模糊。
+要求： 请检查 Artists.vue 和 Albums.vue。
 
-3. 需求二：实现自定义“模态输入框” (Custom Input Modal)
+用户指的是左侧的导航列表（即点击切换歌手的地方）。
 
-场景： 用于替代 中的“修改歌单名称”。
+请确保这个列表项 (List Items) 也绑定了 startDrag 事件，并支持拖拽。
 
-要求：
+C. 菜单渲染逻辑 (Menu Logic) 菜单依然不显示，说明这不仅仅是 z-index 的问题，可能是 v-if 条件判断错误。
 
-遮罩层 (Backdrop)： 全屏黑色半透明遮罩，带模糊效果 (Backdrop Blur)，让背景变暗，聚焦用户视线。
+要求： 请检查代码，确保“排序选项”的 v-if 条件在数据加载完成后为 true。如果逻辑太复杂，请暂时移除 v-if，让菜单先强制显示出来以便调试。
 
-居中卡片： 屏幕正中间显示一个圆角卡片（风格参考软件其他部分）。
-
-内容： * 标题：“重命名歌单”
-
-输入框：美化的 Input，默认填入旧名字。
-
-按钮组：右下角放置“取消”（灰色）和“确认”（主色调/红色）。
-
-交互： 支持按 Enter 键确认，按 Esc 键取消。
-
-4. 技术建议 (Tech Stack)
-
-既然我们用的是 Vue + Tailwind CSS，建议封装两个通用组件：
-
-<Toast /> (或者引入 vue-sonner 这种轻量库)。
-
-<BaseModal /> (使用 Vue 的 <Teleport to="body"> 传送门技术，确保层级最高)。
+总结： 请不要只改底层逻辑，必须把 UI 层面的事件绑定 (Event Binding) 覆盖到每一个需要拖拽的组件上。请参照“文件夹”的成功代码，把剩下两个地方补全。
 
 Important notes:
 it is Tauri v2.0 project,please remember it !

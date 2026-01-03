@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { usePlayer, dragSession } from '../../composables/player';
 import { useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
@@ -9,30 +9,114 @@ import ModernModal from '../common/ModernModal.vue';
 import ModernInputModal from '../common/ModernInputModal.vue';
 import PlaylistContextMenu from '../overlays/PlaylistContextMenu.vue';
 
-const { 
-  playlists, 
-  songList, 
-  switchViewToAll, 
-  switchToFolderView, 
-  switchToRecent, 
-  createPlaylist, 
-  deletePlaylist, 
+const {
+  playlists,
+  songList,
+  switchViewToAll,
+  switchToFolderView,
+  switchToRecent,
+  createPlaylist,
+  deletePlaylist,
   viewPlaylist,   
-  currentViewMode, 
+  currentViewMode,
   filterCondition,
   playSong,
   addSongsToQueue,
   getSongsFromPlaylist,
   clearQueue,
-  settings
+  settings,
+  reorderPlaylists // 🟢 引入排序函数
 } = usePlayer();
 
 const router = useRouter();
 
 const isPlaylistOpen = ref(true);
+const dragOverId = ref<string | null>(null);
+const dragPosition = ref<'top' | 'bottom' | null>(null);
 
-// --- Context Menu & Selection State ---
-const showContextMenu = ref(false);
+// --- Custom Drag & Drop for Playlists ---
+let mouseDownInfo: { x: number, y: number, index: number, playlist: any } | null = null;
+
+const handleMouseDown = (e: MouseEvent, index: number, playlist: any) => {
+  // Only left click
+  if (e.button !== 0) return;
+mousedownInfo = { x: e.clientX, y: e.clientY, index, playlist };
+};
+
+const handleGlobalMouseMove = (e: MouseEvent) => {
+  if (mouseDownInfo && !dragSession.active) {
+    const dist = Math.sqrt(Math.pow(e.clientX - mouseDownInfo.x, 2) + Math.pow(e.clientY - mouseDownInfo.y, 2));
+    if (dist > 5) {
+      dragSession.active = true;
+      dragSession.type = 'playlist';
+      dragSession.data = { index: mouseDownInfo.index, id: mouseDownInfo.playlist.id, name: mouseDownInfo.playlist.name };
+    }
+  }
+};
+
+const handleGlobalMouseUp = () => {
+  if (dragSession.active && dragSession.type === 'playlist') {
+    // Drop logic
+    if (dragOverId.value && mouseDownInfo) {
+      const fromIndex = mouseDownInfo.index;
+      const targetIndex = playlists.value.findIndex(p => p.id === dragOverId.value);
+      
+      if (targetIndex !== -1) {
+        let toIndex = targetIndex;
+        if (dragPosition.value === 'bottom') {
+          toIndex++;
+        }
+        // Adjust for removal
+        if (fromIndex < toIndex) {
+          toIndex--;
+        }
+        
+        if (fromIndex !== toIndex) {
+          reorderPlaylists(fromIndex, toIndex);
+        }
+      }
+    }
+  }
+  
+  // Reset
+  mouseDownInfo = null;
+  if (dragSession.type === 'playlist') {
+     dragSession.active = false;
+     dragSession.type = 'song';
+     dragSession.data = null;
+     dragOverId.value = null;
+     dragPosition.value = null;
+  }
+};
+
+const handleItemMouseMove = (e: MouseEvent, playlistId: string) => {
+  if (dragSession.active && dragSession.type === 'playlist') {
+    const target = e.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const mid = rect.top + rect.height / 2;
+    
+    dragOverId.value = playlistId;
+    dragPosition.value = e.clientY < mid ? 'top' : 'bottom';
+  }
+};
+
+const handleItemMouseLeave = () => {
+  // Optional: clear dragOverId if leaving the list entirely, but for items it causes flickering. 
+  // Better to keep it until drop or leaving the ul.
+};
+
+onMounted(() => {
+  window.addEventListener('mousemove', handleGlobalMouseMove);
+  window.addEventListener('mouseup', handleGlobalMouseUp);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('mousemove', handleGlobalMouseMove);
+  window.removeEventListener('mouseup', handleGlobalMouseUp);
+});
+// ---------------------------------
+
+// --- Context Menu & Selection State ---const showContextMenu = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
 const targetPlaylist = ref<{id: string, name: string} | null>(null);
@@ -293,16 +377,21 @@ watch([songList, playlists], () => {
           
           <ul v-show="isPlaylistOpen" class="space-y-0.5 mt-1">
             <li 
-              v-for="list in playlists" 
+              v-for="(list, index) in playlists" 
               :key="list.id"
+              @mousedown="handleMouseDown($event, index, list)"
+              @mousemove="handleItemMouseMove($event, list.id)"
               @click.stop="handlePlaylistClick($event, list.id)" 
               @contextmenu="handlePlaylistContextMenu($event, list)"
               :data-playlist-id="list.id"
               :data-playlist-name="list.name"
-              class="playlist-drop-target px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-all group relative"
+              class="playlist-drop-target px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-all group relative border-t-2 border-transparent border-b-2 select-none"
               :class="[
                 selectedPlaylistIds.has(list.id) ? 'bg-black/10 dark:bg-white/10 text-black dark:text-white font-medium shadow-sm' : 'hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-300',
-                (dragSession.active && dragSession.targetPlaylist?.id === list.id) ? '!bg-red-500/10 !ring-2 !ring-[#EC4141] ring-inset' : ''
+                (dragSession.active && dragSession.type === 'playlist' && dragSession.data?.id === list.id) ? 'opacity-50 bg-gray-100 dark:bg-white/5' : '',
+                (dragSession.active && dragSession.targetPlaylist?.id === list.id && dragSession.type === 'song') ? '!bg-red-500/10 !ring-2 !ring-[#EC4141] ring-inset' : '',
+                (dragSession.type === 'playlist' && dragOverId === list.id && dragPosition === 'top') ? '!border-t-[#EC4141]' : '',
+                (dragSession.type === 'playlist' && dragOverId === list.id && dragPosition === 'bottom') ? '!border-b-[#EC4141]' : ''
               ]"
             >
               <div class="w-9 h-9 rounded bg-gray-200/50 border border-gray-100/50 shrink-0 overflow-hidden mr-3 flex items-center justify-center">

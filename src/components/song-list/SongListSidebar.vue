@@ -14,10 +14,119 @@ const {
   playSong, openInFinder, createPlaylist, removeFolder,
   getSongsInFolder, moveFilesToFolder,
   refreshFolder,
-  addSongsToQueue
+  addSongsToQueue,
+  reorderWatchedFolders, // 🟢 引入排序函数
+  updateArtistOrder,
+  updateAlbumOrder
 } = usePlayer();
 
 const sidebarImageCache = ref<Map<string, string>>(new Map());
+const dragOverId = ref<string | null>(null);
+const dragPosition = ref<'top' | 'bottom' | null>(null);
+
+// --- Custom Drag & Drop for Folders/Artists/Albums ---
+let mouseDownInfo: { x: number, y: number, index: number, item: any, type: 'folder' | 'artist' | 'album' } | null = null;
+
+const handleMouseDown = (e: MouseEvent, index: number, item: any, type: 'folder' | 'artist' | 'album') => {
+  if (e.button !== 0) return;
+  mouseDownInfo = { x: e.clientX, y: e.clientY, index, item, type };
+};
+
+const handleGlobalMouseMove = (e: MouseEvent) => {
+  if (mouseDownInfo && !dragSession.active) {
+    const dist = Math.sqrt(Math.pow(e.clientX - mouseDownInfo.x, 2) + Math.pow(e.clientY - mouseDownInfo.y, 2));
+    if (dist > 5) {
+      dragSession.active = true;
+      dragSession.type = mouseDownInfo.type;
+      
+      if (mouseDownInfo.type === 'folder') {
+        dragSession.data = { index: mouseDownInfo.index, path: mouseDownInfo.item.path, name: mouseDownInfo.item.name };
+      } else {
+        dragSession.data = { index: mouseDownInfo.index, name: mouseDownInfo.item.name };
+      }
+    }
+  }
+};
+
+const handleGlobalMouseUp = () => {
+  if (!dragSession.active) {
+    mouseDownInfo = null;
+    return;
+  }
+
+  // Handle Drop based on Type
+  if (dragSession.type === 'folder') {
+    handleDropLogic(folderList.value, 'path', reorderWatchedFolders);
+  } else if (dragSession.type === 'artist') {
+    handleDropLogic(artistList.value, 'name', (from, to) => {
+        const list = [...artistList.value];
+        const [removed] = list.splice(from, 1);
+        list.splice(to, 0, removed);
+        updateArtistOrder(list.map(a => a.name));
+    });
+  } else if (dragSession.type === 'album') {
+    handleDropLogic(albumList.value, 'name', (from, to) => {
+        const list = [...albumList.value];
+        const [removed] = list.splice(from, 1);
+        list.splice(to, 0, removed);
+        updateAlbumOrder(list.map(a => a.name));
+    });
+  }
+  
+  // Reset
+  mouseDownInfo = null;
+  if (['folder', 'artist', 'album'].includes(dragSession.type)) {
+     dragSession.active = false;
+     dragSession.type = 'song';
+     dragSession.data = null;
+     dragOverId.value = null;
+     dragPosition.value = null;
+  }
+};
+
+const handleDropLogic = (list: any[], key: string, callback: (from: number, to: number) => void) => {
+    if (dragOverId.value && mouseDownInfo) {
+      const fromIndex = mouseDownInfo.index;
+      const targetIndex = list.findIndex(i => i[key] === dragOverId.value);
+      
+      if (targetIndex !== -1) {
+        let toIndex = targetIndex;
+        if (dragPosition.value === 'bottom') {
+          toIndex++;
+        }
+        if (fromIndex < toIndex) {
+          toIndex--;
+        }
+        
+        if (fromIndex !== toIndex) {
+          callback(fromIndex, toIndex);
+        }
+      }
+    }
+};
+
+const handleItemMouseMove = (e: MouseEvent, id: string, type: 'folder' | 'artist' | 'album') => {
+  if (dragSession.active && dragSession.type === type) {
+    const target = e.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const mid = rect.top + rect.height / 2;
+    
+    dragOverId.value = id;
+    dragPosition.value = e.clientY < mid ? 'top' : 'bottom';
+  }
+};
+
+onMounted(() => {
+  window.addEventListener('custom-drop-trigger', handleDropEvent);
+  window.addEventListener('mousemove', handleGlobalMouseMove);
+  window.addEventListener('mouseup', handleGlobalMouseUp);
+});
+onUnmounted(() => {
+  window.removeEventListener('custom-drop-trigger', handleDropEvent);
+  window.removeEventListener('mousemove', handleGlobalMouseMove);
+  window.removeEventListener('mouseup', handleGlobalMouseUp);
+});
+// ------------------------------
 
 // 🟢 2. 修改加载逻辑：路径 -> Asset URL
 const loadSidebarCover = async (path: string) => {
@@ -204,7 +313,20 @@ onUnmounted(() => {
   <aside v-if="(isLocalMusic && localMusicTab !== 'default') || isFolderMode" class="w-60 h-full border-r border-white/10 overflow-y-auto custom-scrollbar bg-transparent shrink-0 select-none">
     
     <ul v-if="isLocalMusic && localMusicTab === 'artist'" class="p-2 space-y-1">
-        <li v-for="item in artistList" :key="item.name" @click="currentArtistFilter = item.name" :class="currentArtistFilter === item.name ? 'bg-white/40 dark:bg-white/20 shadow-sm' : 'hover:bg-white/20 dark:hover:bg-white/10'" class="flex items-center p-2 rounded-lg cursor-pointer transition-all">
+        <li 
+          v-for="(item, index) in artistList" 
+          :key="item.name" 
+          @mousedown="handleMouseDown($event, index, item, 'artist')"
+          @mousemove="handleItemMouseMove($event, item.name, 'artist')"
+          @click="currentArtistFilter = item.name" 
+          :class="[
+            currentArtistFilter === item.name ? 'bg-white/40 dark:bg-white/20 shadow-sm' : 'hover:bg-white/20 dark:hover:bg-white/10',
+            (dragSession.active && dragSession.type === 'artist' && dragSession.data?.name === item.name) ? 'opacity-50' : '',
+            (dragSession.type === 'artist' && dragOverId === item.name && dragPosition === 'top') ? '!border-t-2 !border-t-[#EC4141]' : '',
+            (dragSession.type === 'artist' && dragOverId === item.name && dragPosition === 'bottom') ? '!border-b-2 !border-b-[#EC4141]' : ''
+          ]"
+          class="flex items-center p-2 rounded-lg cursor-pointer transition-all border-t-2 border-transparent border-b-2 select-none"
+        >
           <div class="w-10 h-10 rounded-full bg-white/30 dark:bg-white/10 flex items-center justify-center text-gray-500 dark:text-gray-400 font-bold mr-3 shrink-0 overflow-hidden relative">
             <img v-if="sidebarImageCache.get(item.firstSongPath)" :src="sidebarImageCache.get(item.firstSongPath)" class="w-full h-full object-cover" />
             <span v-else>{{ item.name.charAt(0).toUpperCase() }}</span>
@@ -214,7 +336,20 @@ onUnmounted(() => {
     </ul>
 
     <ul v-if="isLocalMusic && localMusicTab === 'album'" class="p-2 space-y-1">
-        <li v-for="item in albumList" :key="item.name" @click="currentAlbumFilter = item.name" :class="currentAlbumFilter === item.name ? 'bg-white/40 dark:bg-white/20 shadow-sm' : 'hover:bg-white/20 dark:hover:bg-white/10'" class="flex items-center p-2 rounded-lg cursor-pointer transition-all">
+        <li 
+          v-for="(item, index) in albumList" 
+          :key="item.name" 
+          @mousedown="handleMouseDown($event, index, item, 'album')"
+          @mousemove="handleItemMouseMove($event, item.name, 'album')"
+          @click="currentAlbumFilter = item.name" 
+          :class="[
+            currentAlbumFilter === item.name ? 'bg-white/40 dark:bg-white/20 shadow-sm' : 'hover:bg-white/20 dark:hover:bg-white/10',
+            (dragSession.active && dragSession.type === 'album' && dragSession.data?.name === item.name) ? 'opacity-50' : '',
+            (dragSession.type === 'album' && dragOverId === item.name && dragPosition === 'top') ? '!border-t-2 !border-t-[#EC4141]' : '',
+            (dragSession.type === 'album' && dragOverId === item.name && dragPosition === 'bottom') ? '!border-b-2 !border-b-[#EC4141]' : ''
+          ]"
+          class="flex items-center p-2 rounded-lg cursor-pointer transition-all border-t-2 border-transparent border-b-2 select-none"
+        >
           <div class="w-10 h-10 rounded bg-white/30 dark:bg-white/10 flex items-center justify-center text-gray-500 dark:text-gray-400 mr-3 shrink-0 overflow-hidden relative">
             <img v-if="sidebarImageCache.get(item.firstSongPath)" :src="sidebarImageCache.get(item.firstSongPath)" class="w-full h-full object-cover" />
             <span v-else>💿</span>
@@ -223,18 +358,23 @@ onUnmounted(() => {
         </li>
     </ul>
 
-    <ul v-if="isFolderMode" @click="handleBackgroundClick" class="p-2 space-y-1 transition-all duration-300 min-h-full">
+    <ul v-show="isFolderMode" @click="handleBackgroundClick" class="p-2 space-y-1 transition-all duration-300 min-h-full">
         <li 
-          v-for="item in folderList" 
+          v-for="(item, index) in folderList" 
           :key="item.path" 
+          @mousedown="handleMouseDown($event, index, item, 'folder')"
+          @mousemove="handleItemMouseMove($event, item.path, 'folder')"
           :data-folder-path="item.path"
           :data-folder-name="item.name"
           @click="handleFolderClick($event, item)" 
           @contextmenu="handleContextMenu($event, item)" 
-          class="folder-drop-target flex items-center p-2 rounded-lg cursor-pointer transition-all"
+          class="folder-drop-target flex items-center p-2 rounded-lg cursor-pointer transition-all border-t-2 border-transparent border-b-2 select-none"
           :class="[
             selectedFolderPaths.has(item.path) ? 'bg-white/40 dark:bg-white/20 shadow-sm' : 'hover:bg-white/20 dark:hover:bg-white/10',
-            (dragSession.active && dragSession.targetFolder?.path === item.path && currentFolderFilter !== item.path) ? 'ring-2 ring-[#EC4141] bg-red-50/50 dark:bg-red-500/10' : ''
+            (dragSession.active && dragSession.type === 'folder' && dragSession.data?.path === item.path) ? 'opacity-50 bg-gray-100 dark:bg-white/5' : '',
+            (dragSession.active && dragSession.targetFolder?.path === item.path && currentFolderFilter !== item.path && dragSession.type === 'song') ? 'ring-2 ring-[#EC4141] bg-red-50/50 dark:bg-red-500/10' : '',
+            (dragSession.type === 'folder' && dragOverId === item.path && dragPosition === 'top') ? '!border-t-[#EC4141]' : '',
+            (dragSession.type === 'folder' && dragOverId === item.path && dragPosition === 'bottom') ? '!border-b-[#EC4141]' : ''
           ]"
         >
           <div class="w-10 h-10 rounded bg-blue-50/50 dark:bg-blue-500/10 border border-blue-100/50 dark:border-blue-500/20 flex items-center justify-center text-blue-400 dark:text-blue-300 mr-3 shrink-0 overflow-hidden relative">

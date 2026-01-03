@@ -97,73 +97,279 @@ export function usePlayer() {
 
 
 
-  const artistList = computed(() => { 
-
-    const map = new Map<string, { count: number, firstSongPath: string }>(); 
-
-    librarySongs.value.forEach(s => { 
-
-      const k = s.artist || 'Unknown'; 
-
-      const existing = map.get(k); 
-
-      if (existing) { existing.count++; } 
-
-      else { map.set(k, { count: 1, firstSongPath: s.path }); } 
-
-    }); 
-
-    return Array.from(map).map(([n, v]) => ({ name: n, count: v.count, firstSongPath: v.firstSongPath })).sort((a,b)=>b.count-a.count); 
-
-  });
+    const artistList = computed(() => { 
 
 
 
-  const albumList = computed(() => { 
-
-    const map = new Map<string, { count: number, artist: string, firstSongPath: string }>(); 
-
-    librarySongs.value.forEach(s => { 
-
-      const k = s.album || 'Unknown'; 
-
-      const existing = map.get(k); 
-
-      if (existing) { existing.count++; } 
-
-      else { map.set(k, { count: 1, artist: s.artist, firstSongPath: s.path }); } 
-
-    }); 
-
-    return Array.from(map).map(([n, v]) => ({ name: n, count: v.count, artist: v.artist, firstSongPath: v.firstSongPath })).sort((a, b) => b.count - a.count); 
-
-  });
+      const map = new Map<string, { count: number, firstSongPath: string }>(); 
 
 
 
-  const folderList = computed(() => { 
+      librarySongs.value.forEach(s => { 
 
-    return State.watchedFolders.value.map(folderPath => { 
 
-      // 🟢 关键修改：仅统计直属该目录的歌曲 (非递归)
 
-      const songsInFolder = State.songList.value.filter(s => isDirectParent(folderPath, s.path)); 
+        const k = s.artist || 'Unknown'; 
 
-      return { 
 
-        path: folderPath, 
 
-        name: folderPath.split(/[/\\]/).pop() || folderPath, 
+        const existing = map.get(k); 
 
-        count: songsInFolder.length, 
 
-        firstSongPath: songsInFolder.length > 0 ? songsInFolder[0].path : '' 
 
-      }; 
+        if (existing) { existing.count++; } 
 
-    }); 
 
-  });
+
+        else { map.set(k, { count: 1, firstSongPath: s.path }); } 
+
+
+
+      }); 
+
+
+
+      
+
+
+
+      let list = Array.from(map).map(([n, v]) => ({ name: n, count: v.count, firstSongPath: v.firstSongPath }));
+
+
+
+  
+
+
+
+      // 🟢 排序逻辑
+
+
+
+      if (State.artistSortMode.value === 'name') {
+
+
+
+        list.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+
+
+
+      } else if (State.artistSortMode.value === 'custom') {
+
+
+
+        const orderMap = new Map(State.artistCustomOrder.value.map((n, i) => [n, i]));
+
+
+
+        list.sort((a, b) => {
+
+
+
+          const ia = orderMap.has(a.name) ? orderMap.get(a.name)! : 999999;
+
+
+
+          const ib = orderMap.has(b.name) ? orderMap.get(b.name)! : 999999;
+
+
+
+          return ia - ib;
+
+
+
+        });
+
+
+
+      } else {
+
+
+
+        // Default: count
+
+
+
+        list.sort((a, b) => b.count - a.count); 
+
+
+
+      }
+
+
+
+      return list;
+
+
+
+    });
+
+
+
+  
+
+
+
+    const albumList = computed(() => { 
+
+
+
+      const map = new Map<string, { count: number, artist: string, firstSongPath: string }>(); 
+
+
+
+      librarySongs.value.forEach(s => { 
+
+
+
+        const k = s.album || 'Unknown'; 
+
+
+
+        const existing = map.get(k); 
+
+
+
+        if (existing) { existing.count++; } 
+
+
+
+        else { map.set(k, { count: 1, artist: s.artist, firstSongPath: s.path }); } 
+
+
+
+      }); 
+
+
+
+      
+
+
+
+      let list = Array.from(map).map(([n, v]) => ({ name: n, count: v.count, artist: v.artist, firstSongPath: v.firstSongPath }));
+
+
+
+  
+
+
+
+      // 🟢 排序逻辑
+
+
+
+      if (State.albumSortMode.value === 'name') {
+
+
+
+        list.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+
+
+
+      } else if (State.albumSortMode.value === 'custom') {
+
+
+
+        const orderMap = new Map(State.albumCustomOrder.value.map((n, i) => [n, i]));
+
+
+
+        list.sort((a, b) => {
+
+
+
+          const ia = orderMap.has(a.name) ? orderMap.get(a.name)! : 999999;
+
+
+
+          const ib = orderMap.has(b.name) ? orderMap.get(b.name)! : 999999;
+
+
+
+          return ia - ib;
+
+
+
+        });
+
+
+
+      } else {
+
+
+
+        // Default: count
+
+
+
+        list.sort((a, b) => b.count - a.count); 
+
+
+
+      }
+
+
+
+      return list;
+
+
+
+    });
+
+
+
+  
+
+
+
+    const folderList = computed(() => { 
+
+
+
+      // folderList 顺序直接由 watchedFolders 数组顺序决定，因此支持手动排序
+
+
+
+      return State.watchedFolders.value.map(folderPath => { 
+
+
+
+        // 🟢 关键修改：仅统计直属该目录的歌曲 (非递归)
+
+
+
+        const songsInFolder = State.songList.value.filter(s => isDirectParent(folderPath, s.path)); 
+
+
+
+        return { 
+
+
+
+          path: folderPath, 
+
+
+
+          name: folderPath.split(/[/\\]/).pop() || folderPath, 
+
+
+
+          count: songsInFolder.length, 
+
+
+
+          firstSongPath: songsInFolder.length > 0 ? songsInFolder[0].path : '' 
+
+
+
+        }; 
+
+
+
+      }); 
+
+
+
+    });
 
   const favoriteSongList = computed(() => { return State.songList.value.filter(s => State.favoritePaths.value.includes(s.path)); });
 
@@ -740,6 +946,12 @@ export function usePlayer() {
     // 🟢 持久化 playQueue
     watch(State.playQueue, (v) => localStorage.setItem('player_queue', JSON.stringify(v)), { deep: true });
 
+    // 🟢 持久化排序状态
+    watch(State.artistSortMode, (v) => localStorage.setItem('player_artist_sort_mode', v));
+    watch(State.albumSortMode, (v) => localStorage.setItem('player_album_sort_mode', v));
+    watch(State.artistCustomOrder, (v) => localStorage.setItem('player_artist_custom_order', JSON.stringify(v)), { deep: true });
+    watch(State.albumCustomOrder, (v) => localStorage.setItem('player_album_custom_order', JSON.stringify(v)), { deep: true });
+
     watch(State.currentSong, (newSong) => {
       if (newSong) {
         localStorage.setItem('player_last_song', JSON.stringify(newSong));
@@ -773,6 +985,12 @@ export function usePlayer() {
         const sList = localStorage.getItem('player_playlist'); if (sList) try { State.songList.value = JSON.parse(sList); } catch(e) {}
         const sFavs = localStorage.getItem('player_favorites'); if (sFavs) try { State.favoritePaths.value = JSON.parse(sFavs); } catch(e) {}
         const sPlaylists = localStorage.getItem('player_custom_playlists'); if (sPlaylists) try { State.playlists.value = JSON.parse(sPlaylists); } catch(e) {}
+        
+        // 🟢 读取排序状态
+        const sArtistSort = localStorage.getItem('player_artist_sort_mode'); if (sArtistSort) State.artistSortMode.value = sArtistSort as any;
+        const sAlbumSort = localStorage.getItem('player_album_sort_mode'); if (sAlbumSort) State.albumSortMode.value = sAlbumSort as any;
+        const sArtistOrder = localStorage.getItem('player_artist_custom_order'); if (sArtistOrder) try { State.artistCustomOrder.value = JSON.parse(sArtistOrder); } catch(e) {}
+        const sAlbumOrder = localStorage.getItem('player_album_custom_order'); if (sAlbumOrder) try { State.albumCustomOrder.value = JSON.parse(sAlbumOrder); } catch(e) {}
         
         const sSettings = localStorage.getItem('player_settings'); 
         if (sSettings) {
@@ -858,6 +1076,26 @@ export function usePlayer() {
     refreshFolder,
     // 🟢 导出新函数
     clearQueue, removeSongFromQueue, addSongToQueue, toggleQueue,
-    addSongsToQueue, getSongsFromPlaylist
+    addSongsToQueue, getSongsFromPlaylist,
+    reorderWatchedFolders: (from: number, to: number) => {
+      const list = [...State.watchedFolders.value];
+      const [removed] = list.splice(from, 1);
+      list.splice(to, 0, removed);
+      State.watchedFolders.value = list;
+    },
+    reorderPlaylists: (from: number, to: number) => {
+      const list = [...State.playlists.value];
+      const [removed] = list.splice(from, 1);
+      list.splice(to, 0, removed);
+      State.playlists.value = list;
+    },
+    updateArtistOrder: (newOrder: string[]) => {
+      State.artistCustomOrder.value = newOrder;
+      if (State.artistSortMode.value !== 'custom') State.artistSortMode.value = 'custom';
+    },
+    updateAlbumOrder: (newOrder: string[]) => {
+      State.albumCustomOrder.value = newOrder;
+      if (State.albumSortMode.value !== 'custom') State.albumSortMode.value = 'custom';
+    }
   };
 }

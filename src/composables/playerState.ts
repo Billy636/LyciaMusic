@@ -16,7 +16,9 @@ export const AUDIO_DELAY = ref(0.45);
 // --- 自定义拖拽状态 ---
 export const dragSession = reactive({
   active: false,      
+  type: 'song' as 'song' | 'playlist' | 'folder' | 'artist' | 'album', // 🟢 新增：拖拽类型
   songs: [] as Song[], 
+  data: null as any, // 🟢 新增：通用数据载体 (用于存储正在拖拽的 folder/playlist/artist/album 对象)
   mouseX: 0,          
   mouseY: 0,          
   
@@ -41,6 +43,12 @@ export const watchedFolders = ref<string[]>([]);
 export const favoritePaths = ref<string[]>([]);
 export const playlists = ref<Playlist[]>([]);
 export const recentSongs = ref<HistoryItem[]>([]);
+
+// 🟢 新增：排序状态
+export const artistSortMode = ref<'count' | 'name' | 'custom'>('count');
+export const albumSortMode = ref<'count' | 'name' | 'custom'>('count');
+export const artistCustomOrder = ref<string[]>([]); // 存储歌手名字的顺序
+export const albumCustomOrder = ref<string[]>([]); // 存储专辑名字的顺序
 
 export const settings = ref<AppSettings>({ 
   organizeRoot: 'D:\\Music', 
