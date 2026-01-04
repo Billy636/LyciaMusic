@@ -34,15 +34,23 @@ const badgeType = computed(() => {
 
 // 2. 定义颜色样式
 const badgeColorClass = computed(() => {
-  // 统一使用实心背景风格 (Solid Style)
-  const common = 'text-white font-bold border border-transparent';
+  const common = 'font-bold px-[3px] rounded-[3px] border';
   switch (badgeType.value) {
     case 'HR':
-      return `${common} bg-[#EAB308]`; // 实心金色
+      // Premium Gold (Kobe Style) - Gradient for luxury feel
+      // Light: Gradient Amber-100 to Amber-200, Text Amber-800
+      // Dark: Gradient Amber-500/30 to Amber-600/30, Text Amber-300
+      return `${common} bg-gradient-to-br from-[#FEF3C7] to-[#FDE68A] text-[#92400E] border-transparent dark:from-amber-900/40 dark:to-amber-600/20 dark:text-[#FCD34D]`;
     case 'SQ':
-      return `${common} bg-sky-500`;   // 实心天蓝色 (原青色 -> 天蓝)
+      // Soft Filled Cyan (match image: light bg, dark text)
+      // Light: bg-cyan-100 text-cyan-600
+      // Dark: bg-cyan-500/20 text-cyan-300
+      return `${common} bg-cyan-100 text-cyan-600 border-transparent dark:bg-cyan-500/20 dark:text-cyan-300 dark:border-transparent`;
     case 'HQ':
-      return `${common} bg-gray-400`;   // 实心灰色
+      // Soft Filled Beige/Brown (match image)
+      // Light: bg-orange-100 text-orange-800
+      // Dark: bg-orange-500/20 text-orange-300
+      return `${common} bg-orange-100 text-orange-800 border-transparent dark:bg-orange-500/20 dark:text-orange-300 dark:border-transparent`;
     default:
       return '';
   }
