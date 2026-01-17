@@ -5,6 +5,7 @@ pub mod files;
 pub mod library;
 pub mod scanner;
 pub mod sidebar;
+pub mod tag_matcher;
 pub mod types;
 pub mod utils;
 
@@ -25,3 +26,4 @@ pub use scanner::{get_folder_first_song, scan_folder_as_playlists, scan_music_fo
 pub use sidebar::{
     add_sidebar_folder, get_sidebar_folders, get_sidebar_hierarchy, remove_sidebar_folder,
 };
+pub use tag_matcher::{search_online_tags, write_music_tags};

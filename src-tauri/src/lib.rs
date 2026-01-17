@@ -29,7 +29,9 @@ use music::{
     scan_folder_as_playlists,
     scan_library,
     scan_music_folder,
+    search_online_tags,
     show_in_folder,
+    write_music_tags,
     ImageConcurrencyLimit, // 引入新组件
 };
 use player::{
@@ -147,7 +149,10 @@ pub fn run() {
             record_play,
             get_behavior_stats,
             get_quality_distribution,
-            get_format_distribution
+            get_format_distribution,
+            // Tag Matcher
+            search_online_tags,
+            write_music_tags
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

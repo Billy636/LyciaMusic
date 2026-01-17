@@ -37,6 +37,11 @@ souvlaki = "0.7"
 raw-window-handle = "0.6"
 regex = "1"
 cpal = "0.15"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures = "0.3" # useful for stream handling
+aes = "0.8"
+cbc = "0.1"
+rand = "0.8"
 
 # ... 现有的内容 ...
 

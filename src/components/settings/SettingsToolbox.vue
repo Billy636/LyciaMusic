@@ -3,12 +3,13 @@ import { ref, onMounted } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import RenamePreviewModal, { RenamePreview } from './RenamePreviewModal.vue';
+import TagMatchModal from './TagMatchModal.vue';
 import { useToast } from '../../composables/toast';
 
 const toast = useToast();
 
 const targetPath = ref('');
-const mode = ref<'tags' | 'rules' | 'auto'>('auto');
+const mode = ref<'tags' | 'rules' | 'auto' | 'online'>('auto');
 const TOOLBOX_TEMPLATE_KEY = 'toolbox_default_template';
 const customTemplate = ref('');
 const removeTrackPrefix = ref(true);
@@ -16,7 +17,9 @@ const removeSourcePrefix = ref(false);
 
 const isScanning = ref(false);
 const showPreview = ref(false);
+const showOnlineMatch = ref(false);
 const previewItems = ref<RenamePreview[]>([]);
+const scannedFiles = ref<string[]>([]); // For online match
 
 const presets = [
   { label: '歌名 - 歌手', example: '七里香 - 周杰伦', value: '{title} - {artist}' },
@@ -43,18 +46,30 @@ const handleScan = async () => {
   if (!targetPath.value) return;
   isScanning.value = true;
   try {
-    const config = {
-      mode: mode.value,
-      template: customTemplate.value,
-      remove_track_prefix: removeTrackPrefix.value,
-      remove_source_prefix: removeSourcePrefix.value,
-    };
-    const res = await invoke<RenamePreview[]>('preview_rename', {
-      rootPath: targetPath.value,
-      config,
-    });
-    previewItems.value = res;
-    showPreview.value = true;
+     // If Online Mode, we just need file list
+     if (mode.value === 'online') {
+         // Re-use preview_rename to get file list easily (hacky but efficient reuse of backend walker)
+         // We use 'rules' mode to basically just get files without reading tags heavily
+        const res = await invoke<RenamePreview[]>('preview_rename', {
+            rootPath: targetPath.value,
+            config: { mode: 'rules', template: '', remove_track_prefix: false, remove_source_prefix: false }
+        });
+        scannedFiles.value = res.map(i => i.original_path);
+        showOnlineMatch.value = true;
+     } else {
+        const config = {
+          mode: mode.value,
+          template: customTemplate.value,
+          remove_track_prefix: removeTrackPrefix.value,
+          remove_source_prefix: removeSourcePrefix.value,
+        };
+        const res = await invoke<RenamePreview[]>('preview_rename', {
+          rootPath: targetPath.value,
+          config,
+        });
+        previewItems.value = res;
+        showPreview.value = true;
+     }
   } catch (e) {
     console.error(e);
     toast.showToast(`扫描失败: ${e}`, 'error');
@@ -77,6 +92,10 @@ const handleApply = async (validItems: RenamePreview[]) => {
     console.error(e);
     toast.showToast(`应用修改失败: ${e}`, 'error');
   }
+};
+
+const handleMatchComplete = () => {
+    // Refresh?
 };
 
 const insertVariable = (variable: string) => {
@@ -136,11 +155,22 @@ const setAsDefault = () => {
       <!-- 2. 操作模式 -->
       <section class="space-y-4">
         <h3 class="text-base font-bold text-gray-800 dark:text-gray-200 border-l-4 border-[#EC4141] pl-3">2. 操作模式</h3>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <label 
-            class="cursor-pointer border rounded-xl p-4 flex flex-col gap-2 transition-all relative overflow-hidden"
-            :class="mode === 'tags' ? 'border-[#EC4141] bg-red-50/50 dark:bg-red-500/10' : 'border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5'"
-          >
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          
+          <label class="cursor-pointer border rounded-xl p-4 flex flex-col gap-2 transition-all"
+             :class="mode === 'online' ? 'border-[#EC4141] bg-red-50/50 dark:bg-red-500/10' : 'border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5'">
+            <div class="flex items-center gap-2">
+              <input type="radio" v-model="mode" value="online" class="text-[#EC4141] focus:ring-[#EC4141]" />
+              <span class="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+                🎵 在线标签匹配 
+                <span class="bg-[#EC4141] text-white text-[10px] px-1.5 rounded-full py-0.5">NEW</span>
+              </span>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400 pl-6">通过网易云/QQ音乐自动匹配封面、歌手信息等元数据。</p>
+          </label>
+
+          <label class="cursor-pointer border rounded-xl p-4 flex flex-col gap-2 transition-all relative overflow-hidden"
+            :class="mode === 'tags' ? 'border-[#EC4141] bg-red-50/50 dark:bg-red-500/10' : 'border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5'">
             <div class="flex items-center gap-2">
               <input type="radio" v-model="mode" value="tags" class="text-[#EC4141] focus:ring-[#EC4141]" />
               <span class="font-bold text-gray-800 dark:text-gray-200">标准化重命名</span>
@@ -148,10 +178,8 @@ const setAsDefault = () => {
             <p class="text-xs text-gray-500 dark:text-gray-400 pl-6">读取标签元数据，按模板重命名。标签缺失则跳过。</p>
           </label>
 
-          <label 
-            class="cursor-pointer border rounded-xl p-4 flex flex-col gap-2 transition-all"
-            :class="mode === 'rules' ? 'border-[#EC4141] bg-red-50/50 dark:bg-red-500/10' : 'border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5'"
-          >
+          <label class="cursor-pointer border rounded-xl p-4 flex flex-col gap-2 transition-all"
+            :class="mode === 'rules' ? 'border-[#EC4141] bg-red-50/50 dark:bg-red-500/10' : 'border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5'">
             <div class="flex items-center gap-2">
               <input type="radio" v-model="mode" value="rules" class="text-[#EC4141] focus:ring-[#EC4141]" />
               <span class="font-bold text-gray-800 dark:text-gray-200">文件名修改</span>
@@ -159,10 +187,8 @@ const setAsDefault = () => {
             <p class="text-xs text-gray-500 dark:text-gray-400 pl-6">仅对当前文件名进行修剪（如去前缀），不依赖标签。</p>
           </label>
 
-          <label 
-            class="cursor-pointer border rounded-xl p-4 flex flex-col gap-2 transition-all"
-            :class="mode === 'auto' ? 'border-[#EC4141] bg-red-50/50 dark:bg-red-500/10' : 'border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5'"
-          >
+          <label class="cursor-pointer border rounded-xl p-4 flex flex-col gap-2 transition-all"
+            :class="mode === 'auto' ? 'border-[#EC4141] bg-red-50/50 dark:bg-red-500/10' : 'border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5'">
             <div class="flex items-center gap-2">
               <input type="radio" v-model="mode" value="auto" class="text-[#EC4141] focus:ring-[#EC4141]" />
               <span class="font-bold text-gray-800 dark:text-gray-200">智能自动 (推荐)</span>
@@ -173,7 +199,7 @@ const setAsDefault = () => {
       </section>
 
       <!-- 3. 命名模板 (仅 Tags/Auto 模式) -->
-      <section v-if="mode !== 'rules'" class="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+      <section v-if="mode !== 'rules' && mode !== 'online'" class="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
         <h3 class="text-base font-bold text-gray-800 dark:text-gray-200 border-l-4 border-[#EC4141] pl-3">3. 命名模板配置</h3>
         
         <div class="bg-gray-50 dark:bg-white/5 rounded-xl p-5 border border-gray-200 dark:border-white/10 space-y-5">
@@ -224,7 +250,7 @@ const setAsDefault = () => {
       </section>
 
       <!-- 4. 清洗规则 (仅 Rules/Auto 模式) -->
-      <section v-if="mode !== 'tags'" class="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+      <section v-if="mode !== 'tags' && mode !== 'online'" class="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
         <h3 class="text-base font-bold text-gray-800 dark:text-gray-200 border-l-4 border-[#EC4141] pl-3">
           {{ mode === 'auto' ? '4. 降级清洗规则 (当标签缺失时)' : '3. 清洗规则' }}
         </h3>
@@ -271,6 +297,14 @@ const setAsDefault = () => {
       :items="previewItems" 
       @update:visible="showPreview = $event"
       @confirm="handleApply"
+    />
+
+    <!-- 在线匹配弹窗 -->
+    <TagMatchModal
+      :visible="showOnlineMatch"
+      :files="scannedFiles"
+      @close="showOnlineMatch = false"
+      @complete="handleMatchComplete"
     />
   </div>
 </template>
