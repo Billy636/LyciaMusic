@@ -107,7 +107,7 @@ fn pick_optional_tag_value(current: &str, candidate: Option<&str>) -> Option<Str
 
 fn artist_split_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| Regex::new(r"(?i)[;,&/]|feat\.|\s+with\s+").expect("artist split regex"))
+    REGEX.get_or_init(|| Regex::new(r"(?i)[;,&/、]|feat\.|\s+with\s+").expect("artist split regex"))
 }
 
 pub(super) fn split_artist_names(artist: &str) -> Vec<String> {
@@ -437,5 +437,53 @@ mod tests {
         assert_eq!(remaining_songs, 0);
         assert_eq!(remaining_artists, 0);
         assert_eq!(remaining_links, 0);
+    }
+
+    #[test]
+    fn split_artist_names_chinese_enumeration_comma() {
+        let names = super::split_artist_names("周杰伦、林俊杰、王力宏");
+        assert_eq!(names, vec!["周杰伦", "林俊杰", "王力宏"]);
+    }
+
+    #[test]
+    fn split_artist_names_mixed_separators_with_chinese_comma() {
+        let names = super::split_artist_names("歌手A、歌手B & 歌手C");
+        assert_eq!(names, vec!["歌手A", "歌手B", "歌手C"]);
+    }
+
+    #[test]
+    fn split_artist_names_chinese_comma_with_spaces() {
+        let names = super::split_artist_names("アーティスト1 、 アーティスト2");
+        assert_eq!(names, vec!["アーティスト1", "アーティスト2"]);
+    }
+
+    #[test]
+    fn split_artist_names_preserves_existing_separators() {
+        let names = super::split_artist_names("Artist A, Artist B & Artist C");
+        assert_eq!(names, vec!["Artist A", "Artist B", "Artist C"]);
+
+        let names = super::split_artist_names("Artist A; Artist B");
+        assert_eq!(names, vec!["Artist A", "Artist B"]);
+
+        let names = super::split_artist_names("Artist A / Artist B");
+        assert_eq!(names, vec!["Artist A", "Artist B"]);
+
+        let names = super::split_artist_names("Artist A feat. Artist B");
+        assert_eq!(names, vec!["Artist A", "Artist B"]);
+
+        let names = super::split_artist_names("Artist A with Artist B");
+        assert_eq!(names, vec!["Artist A", "Artist B"]);
+    }
+
+    #[test]
+    fn split_artist_names_deduplicates_chinese_comma_separated() {
+        let names = super::split_artist_names("周杰伦、周杰伦、林俊杰");
+        assert_eq!(names, vec!["周杰伦", "林俊杰"]);
+    }
+
+    #[test]
+    fn split_artist_names_single_artist_without_separator() {
+        let names = super::split_artist_names("周杰伦");
+        assert_eq!(names, vec!["周杰伦"]);
     }
 }
