@@ -24,6 +24,24 @@
         </div>
       </button>
 
+      <div class="short-audio-filter">
+        <div class="short-audio-copy">
+          <div class="short-audio-title">排除短音频</div>
+          <div class="short-audio-desc">低于指定秒数的音频不会加入音乐库，0 表示关闭。</div>
+        </div>
+        <label class="short-audio-input-wrap">
+          <input
+            v-model.number="libraryMinDurationSeconds"
+            class="short-audio-input"
+            type="number"
+            min="0"
+            step="1"
+            inputmode="numeric"
+          />
+          <span>秒</span>
+        </label>
+      </div>
+
       <div v-if="libraryFolders.length > 0" class="library-list">
         <div v-for="folder in libraryFolders" :key="folder.path" class="library-item">
           <div class="folder-icon">
@@ -87,14 +105,26 @@ import { storeToRefs } from 'pinia';
 import { open } from '@tauri-apps/plugin-dialog';
 import { usePlayer } from '../../composables/player';
 import { useLibraryStore } from '../../features/library/store';
+import {
+  normalizeLibraryMinDurationSeconds,
+  useSettingsStore,
+} from '../../features/settings/store';
 import ConfirmModal from '../overlays/ConfirmModal.vue';
 
 const { addLibraryFolderLinked, removeLibraryFolderLinked } = usePlayer();
 const libraryStore = useLibraryStore();
+const settingsStore = useSettingsStore();
 const { libraryFolders, libraryScanProgress, lastLibraryScanError } = storeToRefs(libraryStore);
+const { settings } = storeToRefs(settingsStore);
 const isScanning = computed(() =>
   !!libraryScanProgress.value && !libraryScanProgress.value.done && !libraryScanProgress.value.failed
 );
+const libraryMinDurationSeconds = computed({
+  get: () => settings.value.libraryMinDurationSeconds,
+  set: value => {
+    settings.value.libraryMinDurationSeconds = normalizeLibraryMinDurationSeconds(value);
+  },
+});
 const scanStatusLabel = computed(() => {
   switch (libraryScanProgress.value?.phase) {
     case 'collecting':
@@ -215,6 +245,72 @@ const confirmRemove = async () => {
   flex-direction: column;
   gap: 10px;
   margin-bottom: 16px;
+}
+
+.short-audio-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.short-audio-copy {
+  min-width: 0;
+}
+
+.short-audio-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+
+.short-audio-desc {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.short-audio-input-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.short-audio-input {
+  width: 76px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: right;
+  padding: 0 10px;
+  outline: none;
+}
+
+.short-audio-input:focus {
+  border-color: rgba(236, 65, 65, 0.62);
+  box-shadow: 0 0 0 3px rgba(236, 65, 65, 0.14);
+}
+
+.short-audio-input::-webkit-outer-spin-button,
+.short-audio-input::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.short-audio-input[type="number"] {
+  appearance: textfield;
 }
 
 .library-item {

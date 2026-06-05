@@ -60,6 +60,12 @@ fn read_tagged_file_from_path_with_cover_mode(
         Err(original_err) if is_wav_path(path) => {
             read_salvaged_wav_tags(path, read_cover_art).map_err(|_| original_err)
         }
+        Err(original_err) if is_mpeg_path(path) => {
+            read_salvaged_id3_tags(path, read_cover_art).map_err(|_| original_err)
+        }
+        Err(original_err) if is_bad_timestamp_error(&original_err) => {
+            read_salvaged_id3_tags(path, read_cover_art).map_err(|_| original_err)
+        }
         Err(original_err) => Err(original_err),
     }
 }
@@ -318,6 +324,33 @@ fn is_wav_path(path: &Path) -> bool {
         .and_then(|ext| ext.to_str())
         .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "wav" | "wave"))
         .unwrap_or(false)
+}
+
+fn is_mpeg_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "mp3" | "mpeg" | "mpga"))
+        .unwrap_or(false)
+}
+
+fn is_bad_timestamp_error(error: &lofty::error::LoftyError) -> bool {
+    matches!(error.kind(), lofty::error::ErrorKind::BadTimestamp(_))
+}
+
+fn read_salvaged_id3_tags(path: &Path, read_cover_art: bool) -> Result<TaggedFile, ()> {
+    let file = File::open(path).map_err(|_| ())?;
+    let mut reader = BufReader::new(file);
+    let mut tags = Vec::new();
+
+    if read_leading_id3_tag(&mut reader, &mut tags, read_cover_art)?.is_none() || tags.is_empty() {
+        return Err(());
+    }
+
+    Ok(TaggedFile::new(
+        FileType::from_path(path).unwrap_or(FileType::Mpeg),
+        FileProperties::default(),
+        tags,
+    ))
 }
 
 fn read_salvaged_wav_tags(path: &Path, read_cover_art: bool) -> Result<TaggedFile, ()> {
@@ -932,7 +965,7 @@ mod tests {
         extract_detail_metadata, extract_embedded_lyrics, extract_text_metadata,
         find_embedded_picture, read_tagged_file_from_path, read_tagged_file_from_path_for_scan,
     };
-    use id3::frame::{Picture as Id3Picture, PictureType as Id3PictureType};
+    use id3::frame::{Frame, Picture as Id3Picture, PictureType as Id3PictureType};
     use id3::TagLike;
     use id3::Version;
     use lofty::file::{FileType, TaggedFile, TaggedFileExt};
@@ -1007,6 +1040,22 @@ mod tests {
         id3v1[33..39].copy_from_slice(&[0xD6, 0xDC, 0xBD, 0xDC, 0xC2, 0xD7]);
         id3v1[63..71].copy_from_slice(&[0xCC, 0xAB, 0xD1, 0xF4, 0xD6, 0xAE, 0xD7, 0xD3]);
         bytes.extend_from_slice(&id3v1);
+
+        bytes
+    }
+
+    fn create_mp3_with_non_ascii_id3_timestamp_bytes() -> Vec<u8> {
+        let mut id3_tag = id3::Tag::new();
+        id3_tag.set_title("Timestamp Demo");
+        id3_tag.set_artist("Artist");
+        id3_tag.add_frame(Frame::text("TDRC", "２０２４"));
+
+        let mut bytes = Vec::new();
+        id3_tag
+            .write_to(&mut bytes, Version::Id3v24)
+            .expect("id3v2 tag should serialize");
+        bytes.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x64]);
+        bytes.extend(std::iter::repeat(0).take(413));
 
         bytes
     }
@@ -1142,6 +1191,30 @@ mod tests {
         assert_eq!(metadata.title.as_deref(), Some("爱琴海"));
         assert_eq!(metadata.artist.as_deref(), Some("周杰伦"));
         assert_eq!(metadata.album.as_deref(), Some("太阳之子"));
+
+        let _ = fs::remove_file(temp_path);
+    }
+
+    #[test]
+    fn reads_mp3_text_when_id3_timestamp_contains_non_ascii_characters() {
+        let temp_name = format!(
+            "lycia_bad_timestamp_{}.mp3",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let temp_path = std::env::temp_dir().join(temp_name);
+
+        fs::write(&temp_path, create_mp3_with_non_ascii_id3_timestamp_bytes())
+            .expect("temp mp3 should be written");
+
+        let tagged_file = read_tagged_file_from_path_for_scan(&temp_path)
+            .expect("fallback parser should ignore the invalid timestamp frame");
+        let metadata = extract_text_metadata(&tagged_file);
+
+        assert_eq!(metadata.title.as_deref(), Some("Timestamp Demo"));
+        assert_eq!(metadata.artist.as_deref(), Some("Artist"));
 
         let _ = fs::remove_file(temp_path);
     }

@@ -1,4 +1,5 @@
 import { computed, ref, watch, type Ref } from 'vue';
+import { type ArtistTabId, getDefaultArtistTab } from '../utils/artistTabsOrder';
 
 interface UseHomeViewStateOptions {
   currentViewMode: Ref<string>;
@@ -13,7 +14,7 @@ export function useHomeViewState({
 }: UseHomeViewStateOptions) {
   const localViewMode = ref(currentViewMode.value);
   const localFilterCondition = ref(filterCondition.value);
-  const artistActiveTab = ref<'songs' | 'albums' | 'details'>('songs');
+  const artistActiveTab = ref<ArtistTabId>(getDefaultArtistTab());
 
   const viewTransitionKey = computed(
     () => `${localViewMode.value}:${localFilterCondition.value}`,
@@ -21,10 +22,10 @@ export function useHomeViewState({
 
   watch(
     currentViewMode,
-    newMode => {
+    (newMode, oldMode) => {
       localViewMode.value = newMode;
-      if (newMode !== 'artist') {
-        artistActiveTab.value = 'songs';
+      if (oldMode !== 'artist' && newMode === 'artist') {
+        artistActiveTab.value = getDefaultArtistTab();
       }
       if (newMode !== 'folder') {
         isManagementMode.value = false;
@@ -48,3 +49,4 @@ export function useHomeViewState({
     viewTransitionKey,
   };
 }
+

@@ -11,6 +11,7 @@ export const useUiStore = defineStore('ui', () => {
   const isMiniMode = ref(false);
   const showVolumePopover = ref(false);
   const skipNextPageTransition = ref(false);
+  const startupCompositionMaskVisible = ref(false);
   const dominantColors = ref<string[]>([...defaultDominantColors]);
 
   return {
@@ -21,6 +22,7 @@ export const useUiStore = defineStore('ui', () => {
     isMiniMode,
     showVolumePopover,
     skipNextPageTransition,
+    startupCompositionMaskVisible,
     dominantColors,
   };
 });

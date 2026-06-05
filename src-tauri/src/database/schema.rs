@@ -47,7 +47,8 @@ pub(crate) fn ensure_base_schema(conn: &Connection) -> Result<(), String> {
             cache_path TEXT,
             cue_source_path TEXT,
             cue_start_offset INTEGER,
-            cue_end_offset INTEGER
+            cue_end_offset INTEGER,
+            comment TEXT
         )",
         [],
     )
@@ -304,6 +305,43 @@ pub(crate) fn ensure_base_schema(conn: &Connection) -> Result<(), String> {
     .ok();
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_remote_files_source_id ON remote_files(source_id)",
+        [],
+    )
+    .ok();
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS song_loudness (
+            song_id INTEGER PRIMARY KEY,
+            song_path TEXT NOT NULL,
+            loudness_lufs REAL,
+            estimated_loudness_lufs REAL,
+            sample_peak REAL,
+            true_peak REAL,
+            tag_track_gain_db REAL,
+            tag_track_peak REAL,
+            tag_album_gain_db REAL,
+            tag_album_peak REAL,
+            tag_r128_track_gain_db REAL,
+            tag_r128_album_gain_db REAL,
+            file_size INTEGER NOT NULL,
+            file_modified_at INTEGER NOT NULL,
+            file_hash TEXT,
+            scan_source TEXT NOT NULL DEFAULT 'none',
+            analyzer_name TEXT,
+            analyzer_version INTEGER NOT NULL DEFAULT 1,
+            scan_status TEXT NOT NULL DEFAULT 'pending',
+            scanned_at INTEGER,
+            error_message TEXT,
+            FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE,
+            CONSTRAINT check_scan_source CHECK (scan_source IN ('none', 'tag_replaygain', 'tag_r128', 'file_analysis')),
+            CONSTRAINT check_scan_status CHECK (scan_status IN ('pending', 'scanning', 'scanned', 'failed'))
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_song_loudness_song_id ON song_loudness(song_id)",
         [],
     )
     .ok();

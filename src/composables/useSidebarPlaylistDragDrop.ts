@@ -21,21 +21,25 @@ export function useSidebarPlaylistDragDrop({
 }: UseSidebarPlaylistDragDropOptions) {
   const dragOverId = ref<string | null>(null);
   const dragPosition = ref<'top' | 'bottom' | null>(null);
-  let mouseDownInfo: { x: number; y: number; index: number; playlist: Playlist } | null = null;
+  let pointerDownInfo: { x: number; y: number; index: number; playlist: Playlist } | null = null;
 
-  const handleMouseDown = (event: MouseEvent, index: number, playlist: Playlist) => {
-    if (event.button !== 0) return;
-    mouseDownInfo = { x: event.clientX, y: event.clientY, index, playlist };
+  const handlePointerDown = (event: PointerEvent, index: number, playlist: Playlist) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    pointerDownInfo = { x: event.clientX, y: event.clientY, index, playlist };
   };
 
-  const handleGlobalMouseMove = (event: MouseEvent) => {
-    if (!mouseDownInfo || dragSession.active) {
+  const handleGlobalPointerMove = (event: PointerEvent) => {
+    if (!pointerDownInfo || dragSession.active) {
       return;
     }
 
+    if (event.pointerType !== 'mouse') {
+      event.preventDefault();
+    }
+
     const dist = Math.sqrt(
-      Math.pow(event.clientX - mouseDownInfo.x, 2) +
-      Math.pow(event.clientY - mouseDownInfo.y, 2),
+      Math.pow(event.clientX - pointerDownInfo.x, 2) +
+      Math.pow(event.clientY - pointerDownInfo.y, 2),
     );
     if (dist <= 5) {
       return;
@@ -44,15 +48,26 @@ export function useSidebarPlaylistDragDrop({
     dragSession.active = true;
     dragSession.type = 'playlist';
     dragSession.data = {
-      index: mouseDownInfo.index,
-      id: mouseDownInfo.playlist.id,
-      name: mouseDownInfo.playlist.name,
+      index: pointerDownInfo.index,
+      id: pointerDownInfo.playlist.id,
+      name: pointerDownInfo.playlist.name,
     };
   };
 
-  const handleGlobalMouseUp = () => {
-    if (dragSession.active && dragSession.type === 'playlist' && dragOverId.value && mouseDownInfo) {
-      const fromIndex = mouseDownInfo.index;
+  const resetPlaylistDrag = () => {
+    pointerDownInfo = null;
+    if (dragSession.type === 'playlist') {
+      dragSession.active = false;
+      dragSession.type = 'song';
+      dragSession.data = null;
+      dragOverId.value = null;
+      dragPosition.value = null;
+    }
+  };
+
+  const handleGlobalPointerEnd = (cancelled = false) => {
+    if (!cancelled && dragSession.active && dragSession.type === 'playlist' && dragOverId.value && pointerDownInfo) {
+      const fromIndex = pointerDownInfo.index;
       const targetIndex = playlists.value.findIndex(playlist => playlist.id === dragOverId.value);
 
       if (targetIndex !== -1) {
@@ -69,17 +84,13 @@ export function useSidebarPlaylistDragDrop({
       }
     }
 
-    mouseDownInfo = null;
-    if (dragSession.type === 'playlist') {
-      dragSession.active = false;
-      dragSession.type = 'song';
-      dragSession.data = null;
-      dragOverId.value = null;
-      dragPosition.value = null;
-    }
+    resetPlaylistDrag();
   };
 
-  const handleItemMouseMove = (event: MouseEvent, playlistId: string) => {
+  const handleGlobalPointerUp = () => handleGlobalPointerEnd(false);
+  const handleGlobalPointerCancel = () => handleGlobalPointerEnd(true);
+
+  const handleItemPointerMove = (event: PointerEvent, playlistId: string) => {
     if (!(dragSession.active && dragSession.type === 'playlist')) {
       return;
     }
@@ -93,19 +104,21 @@ export function useSidebarPlaylistDragDrop({
   };
 
   onMounted(() => {
-    window.addEventListener('mousemove', handleGlobalMouseMove);
-    window.addEventListener('mouseup', handleGlobalMouseUp);
+    window.addEventListener('pointermove', handleGlobalPointerMove);
+    window.addEventListener('pointerup', handleGlobalPointerUp);
+    window.addEventListener('pointercancel', handleGlobalPointerCancel);
   });
 
   onUnmounted(() => {
-    window.removeEventListener('mousemove', handleGlobalMouseMove);
-    window.removeEventListener('mouseup', handleGlobalMouseUp);
+    window.removeEventListener('pointermove', handleGlobalPointerMove);
+    window.removeEventListener('pointerup', handleGlobalPointerUp);
+    window.removeEventListener('pointercancel', handleGlobalPointerCancel);
   });
 
   return {
     dragOverId,
     dragPosition,
-    handleMouseDown,
-    handleItemMouseMove,
+    handlePointerDown,
+    handleItemPointerMove,
   };
 }

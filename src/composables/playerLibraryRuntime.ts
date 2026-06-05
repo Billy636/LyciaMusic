@@ -16,6 +16,7 @@ import { useLibraryAllSongPathCache } from './useLibraryAllSongPathCache';
 import { useLibraryCollectionSongPathCache } from './useLibraryCollectionSongPathCache';
 import { useLibraryDetailSongPathCache } from './useLibraryDetailSongPathCache';
 import { useLibraryFolderSongPathCache } from './useLibraryFolderSongPathCache';
+import { useSettingsStore } from '../features/settings/store';
 import { useLibraryStore } from '../features/library/store';
 
 let hasBootstrappedLibrary = false;
@@ -54,6 +55,7 @@ export const createPlayerLibraryRuntime = ({
   onSilentScanError,
 }: CreatePlayerLibraryRuntimeDeps) => {
   const libraryStore = useLibraryStore();
+  const settingsStore = useSettingsStore();
   const { clearLibraryAllSongPathCache } = useLibraryAllSongPathCache();
   const { clearLibraryCollectionSongPathCache } = useLibraryCollectionSongPathCache();
   const { clearLibraryDetailSongPathCache } = useLibraryDetailSongPathCache();
@@ -103,8 +105,12 @@ export const createPlayerLibraryRuntime = ({
     try {
       flushBufferedLibraryScanBatch();
       const songs = await invoke<LibrarySong[]>('get_library_songs_cached');
-      libraryStore.setLibrarySongs(songs);
-      libraryStore.setSourceSongs(songs);
+
+      // 使用增量 Patch 和极速路径覆盖，替代高开销的全量 normalize，加速启动
+      libraryStore.patchLibrarySongs({ songs, deleted_paths: [] });
+      const paths = songs.map(song => song.path);
+      libraryStore.setCanonicalSongOrder(paths);
+
       clearLibraryPathCaches();
       refreshStateSongReferences(songs);
       await fetchFolderTree();
@@ -174,10 +180,17 @@ export const createPlayerLibraryRuntime = ({
 
     libraryRefreshPromise = (async () => {
       try {
-        flushBufferedLibraryScanBatch();
-        const songs = await invoke<LibrarySong[]>('scan_library');
-        libraryStore.setLibrarySongs(songs);
-        libraryStore.setSourceSongs(songs);
+        const songs = await invoke<LibrarySong[]>('scan_library', {
+          minimumDurationSeconds: settingsStore.settings.libraryMinDurationSeconds,
+        });
+
+        // 1. 先进行最终的增量补全 patch，规避未 patch 到的空洞风险项
+        libraryStore.patchLibrarySongs({ songs, deleted_paths: [] });
+
+        // 2. 提取路径并使用独立的 setCanonicalSongOrder 极速重排覆盖，杜绝 setter 的全量 normalize
+        const paths = songs.map(song => song.path);
+        libraryStore.setCanonicalSongOrder(paths);
+
         clearLibraryPathCaches();
         refreshStateSongReferences(songs);
         await Promise.all([

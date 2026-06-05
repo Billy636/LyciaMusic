@@ -16,6 +16,6 @@ export const libraryApi = {
   getSidebarHierarchy: (): Promise<FolderNode[]> => tauriInvoke('get_sidebar_hierarchy'),
   createFolder: (parentPath: string, folderName: string) =>
     tauriInvoke('create_folder', { parentPath, folderName }),
-  refreshFolderSongs: (folderPath: string) =>
-    tauriInvoke('refresh_folder_songs', { folderPath }),
+  refreshFolderSongs: (folderPath: string, minimumDurationSeconds = 0) =>
+    tauriInvoke('refresh_folder_songs', { folderPath, minimumDurationSeconds }),
 };

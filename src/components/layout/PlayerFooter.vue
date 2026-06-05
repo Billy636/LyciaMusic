@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { AudioLines, Eye, EyeOff } from 'lucide-vue-next';
+import { AudioLines, Eye, EyeOff, SlidersHorizontal } from 'lucide-vue-next';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useLibraryCollections } from '../../features/collections/useLibraryCollections';
 import { useLyrics } from '../../composables/lyrics';
 import { usePlaybackController } from '../../features/playback/usePlaybackController';
 import AudioVisualizer from '../player/AudioVisualizer.vue';
 import FooterContextMenu from "../overlays/FooterContextMenu.vue";
-import { computed, ref, onMounted, onUnmounted } from 'vue';
+import EqualizerPanel from '../player/EqualizerPanel.vue';
+import { useSettings } from '../../features/settings/useSettings';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import type { RemoteDownloadProgress } from '../../types';
 import {
   FOOTER_PROGRESS_HIDDEN_KEY,
@@ -88,26 +90,31 @@ const progressTrackClass = computed(() => (
 const progressThumbClass = computed(() => (
   showPlayerDetail.value
     ? 'border-white/45 bg-white'
-    : 'border-white/55 bg-white'
+    : 'border-black/10 dark:border-white/20 bg-white'
 ));
 
 const progressVisualState = computed(() => getProgressVisualState(isProgressHidden.value, isDraggingProgress.value));
 
-const startProgressDrag = (e: MouseEvent) => { 
+const startProgressDrag = (e: PointerEvent) => { 
   if (!currentSong.value || currentSong.value.duration <= 0) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  e.preventDefault();
+  (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
   isDraggingProgress.value = true; 
   updateProgressFromEvent(e); 
 };
 
-const stopProgressDrag = async () => { 
+const stopProgressDrag = async (commit = true) => { 
   if (isDraggingProgress.value) { 
     const targetTime = dragTime.value;
     isDraggingProgress.value = false; 
-    await seekTo(targetTime); 
+    if (commit) {
+      await seekTo(targetTime);
+    }
   } 
 };
 
-const updateProgressFromEvent = (e: MouseEvent) => {
+const updateProgressFromEvent = (e: PointerEvent) => {
   if (!progressBarRef.value || !currentSong.value || currentSong.value.duration <= 0) return;
   const rect = progressBarRef.value.getBoundingClientRect();
   const offsetX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
@@ -144,17 +151,26 @@ const updateVolume = (clientY: number) => {
   handleVolume({ target: { value: newVol.toString() } } as any);
 };
 
-const startDrag = (e: MouseEvent) => { isDraggingVolume.value = true; updateVolume(e.clientY); };
+const startDrag = (e: PointerEvent) => {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  e.preventDefault();
+  (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
+  isDraggingVolume.value = true;
+  updateVolume(e.clientY);
+};
 
-const onGlobalMouseMove = (e: MouseEvent) => {
+const onGlobalPointerMove = (e: PointerEvent) => {
   if (isDraggingVolume.value) { e.preventDefault(); updateVolume(e.clientY); }
   if (isDraggingProgress.value) { e.preventDefault(); updateProgressFromEvent(e); }
 };
 
-const onGlobalMouseUp = () => {
+const onGlobalPointerEnd = (commitProgress = true) => {
   isDraggingVolume.value = false;
-  stopProgressDrag();
+  stopProgressDrag(commitProgress);
 };
+
+const onGlobalPointerUp = () => onGlobalPointerEnd(true);
+const onGlobalPointerCancel = () => onGlobalPointerEnd(false);
 
 // --- 音量滑块显示逻辑 ---
 const showVolumeSlider = ref(false);
@@ -174,6 +190,36 @@ const handleVolumeLeave = () => {
       startIdleTimer();
     }
   }, 300);
+};
+
+// --- EQ Panel State ---
+const showEqPanel = ref(false);
+const eqButtonRef = ref<HTMLElement | null>(null);
+const eqPanelRef = ref<HTMLElement | null>(null);
+
+const { settings } = useSettings();
+
+watch(
+  () => settings.value.audio.showEqualizerInFooter,
+  (show) => {
+    if (show === false) {
+      showEqPanel.value = false;
+    }
+  }
+);
+
+const toggleEqPanel = (e: MouseEvent) => {
+  e.stopPropagation();
+  showEqPanel.value = !showEqPanel.value;
+};
+
+const handleWindowClick = (e: MouseEvent) => {
+  if (showEqPanel.value && eqPanelRef.value && eqButtonRef.value) {
+    const target = e.target as HTMLElement;
+    if (!eqPanelRef.value.contains(target) && !eqButtonRef.value.contains(target)) {
+      showEqPanel.value = false;
+    }
+  }
 };
 
 // --- Idle State for Auto-Hide ---
@@ -217,16 +263,20 @@ const handleFooterMouseLeave = () => {
 };
 
 onMounted(async () => { 
-  window.addEventListener('mousemove', onGlobalMouseMove); 
-  window.addEventListener('mouseup', onGlobalMouseUp); 
+  window.addEventListener('pointermove', onGlobalPointerMove); 
+  window.addEventListener('pointerup', onGlobalPointerUp); 
+  window.addEventListener('pointercancel', onGlobalPointerCancel); 
+  window.addEventListener('click', handleWindowClick); 
   startIdleTimer(); // Start initial idle timer
   unlistenRemoteDownload = await listen<RemoteDownloadProgress>('remote-download-progress', event => {
     remoteDownloadProgress.value = event.payload;
   });
 });
 onUnmounted(() => { 
-  window.removeEventListener('mousemove', onGlobalMouseMove); 
-  window.removeEventListener('mouseup', onGlobalMouseUp); 
+  window.removeEventListener('pointermove', onGlobalPointerMove); 
+  window.removeEventListener('pointerup', onGlobalPointerUp); 
+  window.removeEventListener('pointercancel', onGlobalPointerCancel); 
+  window.removeEventListener('click', handleWindowClick); 
   if (idleTimer) clearTimeout(idleTimer);
   unlistenRemoteDownload?.();
   unlistenRemoteDownload = null;
@@ -255,8 +305,8 @@ onUnmounted(() => {
 
     <div 
       ref="progressBarRef"
-      class="absolute top-[-10px] left-0 w-full h-[22px] cursor-pointer group/progress z-50"
-      @mousedown="startProgressDrag"
+      class="absolute top-[-10px] left-0 w-full h-[22px] cursor-pointer group/progress z-50 [touch-action:none]"
+      @pointerdown="startProgressDrag"
     >
       <div class="absolute inset-y-0 left-0 right-0 flex items-center">
         <div
@@ -265,14 +315,32 @@ onUnmounted(() => {
         >
           <div class="absolute inset-0 rounded-full transition-colors duration-200" :class="progressTrackClass"></div>
           <div
-            class="absolute inset-y-0 left-0 rounded-full transition-[background-color,opacity] duration-200"
+            class="absolute inset-y-0 left-0 rounded-full transition-[background-color,opacity] duration-200 overflow-visible"
             :class="[progressFillClass, progressVisualState.trackClass]"
             :style="{ width: displayProgress + '%' }"
           >
+            <!-- 白色滑块圆球 (Thumb) -->
             <div
-              class="absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 translate-x-1/2 rounded-full transition-all duration-150"
+              class="absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 translate-x-1/2 rounded-full transition-all duration-150 z-40 border shadow-[0_2.5px_6px_rgba(0,0,0,0.15)]"
               :class="[progressThumbClass, isDraggingProgress && !isProgressHidden ? 'opacity-100 scale-100' : progressVisualState.thumbClass]"
             ></div>
+
+            <!-- 拖拽时间提示气泡的外层定位容器 (与白色滑块平级) -->
+            <div 
+              class="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-0 h-0 overflow-visible pointer-events-none z-50"
+            >
+              <!-- 内层负责 Vue transition 精致动画，物理定位通过 left-[-42px] 与 transform 解耦 -->
+              <transition name="fade-scale">
+                <div
+                  v-if="isDraggingProgress && !isProgressHidden"
+                  class="absolute bottom-4 left-[-42px] w-[84px] px-2 py-0.5 rounded-md bg-zinc-900/95 text-white text-[10px] font-semibold font-mono tracking-wider whitespace-nowrap shadow-lg border border-white/10 backdrop-blur-sm pointer-events-none select-none flex items-center justify-center text-center"
+                >
+                  {{ currentTimeStr }}/{{ totalTimeStr }}
+                  <!-- 气泡下方的微型三角指针 -->
+                  <div class="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-x-4 border-t-4 border-x-transparent border-t-zinc-900/95"></div>
+                </div>
+              </transition>
+            </div>
           </div>
         </div>
       </div>
@@ -415,9 +483,9 @@ onUnmounted(() => {
             <div class="text-[10px] font-bold select-none transition-colors"
               :class="showPlayerDetail ? 'text-white/60' : 'text-gray-500 dark:text-white/60'"
             >{{ volume }}%</div>
-            <div ref="volumeBarRef" class="relative flex-1 w-1.5 rounded-full cursor-pointer my-1 transition-colors" 
+            <div ref="volumeBarRef" class="relative flex-1 w-1.5 rounded-full cursor-pointer my-1 transition-colors [touch-action:none]" 
                  :class="showPlayerDetail ? 'bg-white/20' : 'bg-gray-200 dark:bg-white/20'"
-                 @mousedown="startDrag">
+                 @pointerdown="startDrag">
                <div class="absolute bottom-0 w-full bg-[#EC4141] rounded-full" :style="{ height: volume + '%' }"></div>
                <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-white rounded-full shadow-sm cursor-grab active:cursor-grabbing" :style="{ bottom: `calc(${volume}% - 7px)` }"></div>
             </div>
@@ -466,6 +534,34 @@ onUnmounted(() => {
         词
       </button>
 
+      <!-- 均衡器按钮与弹出面板 -->
+      <div v-if="settings.audio.showEqualizerInFooter !== false" class="relative flex items-center justify-center h-full z-[70]">
+        <button 
+          ref="eqButtonRef"
+          @click="toggleEqPanel"
+          :class="['transition-colors w-8 h-8 flex items-center justify-center rounded-full', showEqPanel ? 'text-[#EC4141] bg-[#EC4141]/10' : (showPlayerDetail ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10')]"
+          title="均衡器 (EQ)"
+        >
+          <SlidersHorizontal class="h-4 w-4" :stroke-width="2.2" />
+        </button>
+
+        <transition name="fade-scale">
+          <div 
+            v-if="showEqPanel"
+            ref="eqPanelRef"
+            class="absolute bottom-full right-[-10px] pb-4.5 z-[80] filter drop-shadow-[0_8px_20px_rgba(0,0,0,0.15)]"
+          >
+            <!-- 极富流动感、平滑贝塞尔圆弧的气泡指引尾巴 -->
+            <svg width="32" height="10" viewBox="0 0 32 10" class="absolute bottom-[9px] right-[10px] text-[#FFFFFF] dark:text-[#1E1E1E] fill-current z-[81] overflow-visible">
+              <path d="M0,0 C8,0 12,8 16,10 C20,8 24,0 32,0 Z" />
+              <path d="M0,0 C8,0 12,8 16,10 C20,8 24,0 32,0" fill="none" class="stroke-gray-100 dark:stroke-gray-800" stroke-width="1" />
+            </svg>
+            
+            <EqualizerPanel />
+          </div>
+        </transition>
+      </div>
+
       <button @click="togglePin"
         class="transition-colors w-8 h-8 flex items-center justify-center rounded-full"
         :class="showPlayerDetail ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'"
@@ -485,7 +581,7 @@ onUnmounted(() => {
 
           :y="contextMenuY" 
 
-          :path="currentSong?.path || ''"
+          :song="currentSong"
 
           @close="showContextMenu = false"
 
@@ -494,3 +590,17 @@ onUnmounted(() => {
       </footer>
 
     </template>
+
+<style scoped>
+/* 拖拽气泡进入与离开的动画过渡 */
+.fade-scale-enter-active,
+.fade-scale-leave-active {
+  transition: opacity 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.fade-scale-enter-from,
+.fade-scale-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.85);
+}
+</style>

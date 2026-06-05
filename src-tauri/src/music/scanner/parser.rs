@@ -4,7 +4,8 @@ use super::super::types::Song;
 use super::super::utils::{is_supported_library_extension, normalize_path};
 use super::{
     build_album_key, fill_text_fields_from_tags, normalize_album_key_part, primary_artist_name,
-    split_artist_names, UNKNOWN_ALBUM, UNKNOWN_ARTIST, VARIOUS_ARTISTS, VARIOUS_ARTISTS_THRESHOLD,
+    split_artist_names, ScanOptions, UNKNOWN_ALBUM, UNKNOWN_ARTIST, VARIOUS_ARTISTS,
+    VARIOUS_ARTISTS_THRESHOLD,
 };
 use lofty::file::FileType;
 use lofty::prelude::*;
@@ -107,6 +108,7 @@ pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) ->
     let mut file_modified_at: Option<u64> = None;
     let mut track_number: Option<String> = None;
     let mut disc_number: Option<String> = None;
+    let mut comment: Option<String> = None;
     let mut container = Some(normalize_container_from_extension(format));
     let mut codec = None;
 
@@ -140,6 +142,7 @@ pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) ->
         let detail_metadata = extract_detail_metadata(&tagged_file);
         track_number = detail_metadata.track_number;
         disc_number = detail_metadata.disc_number;
+        comment = detail_metadata.comment;
     }
 
     if duration == 0 || sample_rate == 0 || bit_depth.is_none() {
@@ -207,10 +210,11 @@ pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) ->
         cue_source_path: None,
         cue_start_offset: None,
         cue_end_offset: None,
+        comment,
     })
 }
 
-pub(super) fn parse_audio_files_internal(paths: Vec<String>) -> Vec<Song> {
+pub(super) fn parse_audio_files_internal(paths: Vec<String>, options: ScanOptions) -> Vec<Song> {
     let mut songs = Vec::new();
     let mut seen_paths = HashSet::new();
 
@@ -239,6 +243,12 @@ pub(super) fn parse_audio_files_internal(paths: Vec<String>) -> Vec<Song> {
         }
 
         if let Some(song) = parse_song_from_file(&path, &normalized_path, &extension) {
+            if options.minimum_duration_seconds > 0
+                && song.duration < options.minimum_duration_seconds
+            {
+                continue;
+            }
+
             songs.push(song);
         }
     }
@@ -503,6 +513,7 @@ pub(crate) fn build_cue_track_song(
         cue_source_path: Some(flac_path.to_string()),
         cue_start_offset: Some(track.index01_start_ms as u32),
         cue_end_offset: Some(end_ms as u32),
+        comment: None,
     })
 }
 
@@ -525,7 +536,13 @@ fn probe_flac_for_cue_metadata(
         .map(|b| b as u8);
     let codec_name = None;
 
-    (cover_thumb_path, bitrate, sample_rate, bit_depth, codec_name)
+    (
+        cover_thumb_path,
+        bitrate,
+        sample_rate,
+        bit_depth,
+        codec_name,
+    )
 }
 
 pub(super) fn enrich_album_groups(songs: &mut [Song]) {

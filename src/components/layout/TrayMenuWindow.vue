@@ -118,6 +118,12 @@ const handleKeydown = (event: KeyboardEvent) => {
 };
 
 onMounted(async () => {
+  try {
+    await appWindow.setBackgroundColor([0, 0, 0, 0]);
+  } catch (error) {
+    console.warn('Failed to force transparent background for tray menu window:', error);
+  }
+
   await appWindow.setAlwaysOnTop(true);
   window.addEventListener('keydown', handleKeydown);
 
@@ -159,6 +165,7 @@ onUnmounted(() => {
       { 'tray-menu-shell--light': !isDarkTheme },
       `tray-menu-shell--submenu-${submenuPlacement}`,
     ]"
+    @pointerdown.self="hideWindow"
   >
     <div class="tray-menu-panel">
       <section class="track-row">
@@ -254,7 +261,7 @@ onUnmounted(() => {
   --hover-bg: rgba(255, 255, 255, 0.075);
 
   width: 330px;
-  height: 268px;
+  height: 276px;
   padding: 0;
   overflow: hidden;
   background: transparent;
@@ -278,7 +285,9 @@ onUnmounted(() => {
   top: 0;
   width: 190px;
   height: 100%;
+  box-sizing: border-box;
   overflow: hidden;
+  padding-bottom: 8px;
   border: 0;
   border-radius: 10px;
   background: var(--panel-bg);

@@ -2,7 +2,7 @@ import { emitTo, listen } from '@tauri-apps/api/event';
 import { PhysicalPosition, PhysicalSize } from '@tauri-apps/api/dpi';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { availableMonitors, getCurrentWindow } from '@tauri-apps/api/window';
-import { onMounted, onUnmounted, watch } from 'vue';
+import { onMounted, onUnmounted, watch, toRaw } from 'vue';
 import { storeToRefs } from 'pinia';
 
 import { useLyrics } from './lyrics';
@@ -11,11 +11,16 @@ import { usePlaybackStore } from '../features/playback/store';
 import { useSettingsStore } from '../features/settings/store';
 import { useUiStore } from '../shared/stores/ui';
 import {
+  applyDesktopLyricsVisibilityPreference,
+  persistDesktopLyricsVisibilityPreference,
+} from '../features/desktopLyrics/visibilityPreference';
+import {
   createDesktopLyricsSongSnapshot,
   DESKTOP_LYRICS_ACTION_EVENT,
   DESKTOP_LYRICS_BOUNDS_EVENT,
   DESKTOP_LYRICS_BOUNDS_KEY,
   DESKTOP_LYRICS_PLAYBACK_EVENT,
+  DESKTOP_LYRICS_READY_EVENT,
   DESKTOP_LYRICS_RESET_BOUNDS_EVENT,
   DESKTOP_LYRICS_REVEAL_SURFACE_EVENT,
   DESKTOP_LYRICS_REQUEST_STATE_EVENT,
@@ -36,6 +41,89 @@ import {
 
 let desktopLyricsWindowPromise: Promise<WebviewWindow> | null = null;
 const DESKTOP_LYRICS_PLAYBACK_SYNC_INTERVAL_MS = 400;
+const DESKTOP_LYRICS_READY_TIMEOUT_MS = 1200;
+
+function logDesktopLyricsBridgeError(action: string, error: unknown) {
+  console.warn(`Failed to ${action} desktop lyrics window:`, error);
+}
+
+export function createDesktopLyricsPlaybackClockTracker(now = () => Date.now()) {
+  let sampledPlaybackTime: number | null = null;
+  let sampledAt = now();
+
+  const markPlaybackTimeSample = (playbackTime: number) => {
+    if (!Number.isFinite(playbackTime)) return;
+
+    sampledPlaybackTime = Math.max(0, playbackTime);
+    sampledAt = now();
+  };
+
+  const resolveSyncedAt = (playbackTime: number) => {
+    if (
+      sampledPlaybackTime === null
+      || !Number.isFinite(playbackTime)
+      || Math.abs(playbackTime - sampledPlaybackTime) > 0.000_001
+    ) {
+      markPlaybackTimeSample(playbackTime);
+    }
+
+    return sampledAt;
+  };
+
+  return {
+    markPlaybackTimeSample,
+    resolveSyncedAt,
+  };
+}
+
+export function createDesktopLyricsReadyGate(timeoutMs = DESKTOP_LYRICS_READY_TIMEOUT_MS) {
+  let isReady = false;
+  let readyPromise: Promise<void> | null = null;
+  let resolveReady: (() => void) | null = null;
+  let readyTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  const resolve = () => {
+    resolveReady?.();
+    resolveReady = null;
+    readyPromise = null;
+    if (readyTimeout) {
+      clearTimeout(readyTimeout);
+      readyTimeout = null;
+    }
+  };
+
+  return {
+    markReady() {
+      isReady = true;
+      resolve();
+    },
+    reset() {
+      isReady = false;
+      resolveReady = null;
+      readyPromise = null;
+      if (readyTimeout) {
+        clearTimeout(readyTimeout);
+        readyTimeout = null;
+      }
+    },
+    wait() {
+      if (isReady) {
+        return Promise.resolve();
+      }
+
+      if (!readyPromise) {
+        readyPromise = new Promise<void>((resolvePromise) => {
+          resolveReady = resolvePromise;
+          readyTimeout = setTimeout(resolve, timeoutMs);
+        });
+      }
+
+      return readyPromise;
+    },
+  };
+}
+
+const desktopLyricsReadyGate = createDesktopLyricsReadyGate();
 
 function readDesktopLyricsBounds(): DesktopLyricsWindowBounds | null {
   if (typeof localStorage === 'undefined') return null;
@@ -116,28 +204,43 @@ async function getDesktopLyricsWindow() {
   return WebviewWindow.getByLabel(DESKTOP_LYRICS_WINDOW_LABEL);
 }
 
+export function createDesktopLyricsWindowOptions({
+  alwaysOnTop,
+  hasStoredBounds,
+}: {
+  alwaysOnTop: boolean;
+  hasStoredBounds: boolean;
+}) {
+  return {
+    url: '/',
+    title: 'Lycia Desktop Lyrics',
+    width: DESKTOP_LYRICS_WINDOW_DEFAULT_WIDTH,
+    height: DESKTOP_LYRICS_WINDOW_DEFAULT_HEIGHT,
+    minWidth: DESKTOP_LYRICS_WINDOW_MIN_WIDTH,
+    minHeight: DESKTOP_LYRICS_WINDOW_MIN_HEIGHT,
+    visible: false,
+    decorations: false,
+    transparent: true,
+    shadow: false,
+    skipTaskbar: true,
+    alwaysOnTop,
+    focus: false,
+    focusable: true,
+    center: !hasStoredBounds,
+  };
+}
+
 async function ensureDesktopLyricsWindow(alwaysOnTop: boolean) {
   const existing = await getDesktopLyricsWindow();
   if (existing) return existing;
 
   if (!desktopLyricsWindowPromise) {
+    desktopLyricsReadyGate.reset();
     const bounds = await resolveDesktopLyricsBounds();
-    const windowInstance = new WebviewWindow(DESKTOP_LYRICS_WINDOW_LABEL, {
-      url: '/',
-      title: 'Lycia Desktop Lyrics',
-      width: DESKTOP_LYRICS_WINDOW_DEFAULT_WIDTH,
-      height: DESKTOP_LYRICS_WINDOW_DEFAULT_HEIGHT,
-      minWidth: DESKTOP_LYRICS_WINDOW_MIN_WIDTH,
-      minHeight: DESKTOP_LYRICS_WINDOW_MIN_HEIGHT,
-      visible: false,
-      decorations: false,
-      transparent: true,
-      shadow: false,
-      skipTaskbar: true,
+    const windowInstance = new WebviewWindow(DESKTOP_LYRICS_WINDOW_LABEL, createDesktopLyricsWindowOptions({
       alwaysOnTop,
-      focusable: true,
-      center: !bounds,
-    });
+      hasStoredBounds: !!bounds,
+    }));
 
     desktopLyricsWindowPromise = new Promise<WebviewWindow>((resolve, reject) => {
       let settled = false;
@@ -190,6 +293,7 @@ export function useDesktopLyricsWindowBridge() {
   const { currentSong, currentTime, isPlaying } = storeToRefs(playbackStore);
   const { audioDelay } = storeToRefs(settingsStore);
   const { dominantColors } = storeToRefs(uiStore);
+  const playbackClockTracker = createDesktopLyricsPlaybackClockTracker();
 
   let isMainWindowClosing = false;
   let syncIntervalId: ReturnType<typeof setInterval> | null = null;
@@ -197,11 +301,11 @@ export function useDesktopLyricsWindowBridge() {
 
   const createStatePayload = (): DesktopLyricsStatePayload => ({
     song: createDesktopLyricsSongSnapshot(currentSong.value),
-    parsedLyrics: JSON.parse(JSON.stringify(parsedLyrics.value)) as DesktopLyricsStatePayload['parsedLyrics'],
+    parsedLyrics: toRaw(parsedLyrics.value) as DesktopLyricsStatePayload['parsedLyrics'],
     lyricsStatus: lyricsStatus.value,
     fallbackText: currentLyricLine.value.text,
     playbackTime: currentTime.value,
-    syncedAt: Date.now(),
+    syncedAt: playbackClockTracker.resolveSyncedAt(currentTime.value),
     isPlaying: isPlaying.value,
     audioDelay: audioDelay.value,
     settings: {
@@ -210,6 +314,7 @@ export function useDesktopLyricsWindowBridge() {
       isAlwaysOnTop: desktopLyricsSettings.isAlwaysOnTop,
       alwaysShowShadowBackground: desktopLyricsSettings.alwaysShowShadowBackground,
       autoHideWhenFullscreen: desktopLyricsSettings.autoHideWhenFullscreen,
+      autoHideWhenPaused: desktopLyricsSettings.autoHideWhenPaused,
       showDoubleLine: desktopLyricsSettings.showDoubleLine,
       enableWordEffect: desktopLyricsSettings.enableWordEffect,
       isLocked: desktopLyricsSettings.isLocked,
@@ -217,6 +322,8 @@ export function useDesktopLyricsWindowBridge() {
       colorScheme: desktopLyricsSettings.colorScheme,
       customPlayedColor: desktopLyricsSettings.customPlayedColor,
       customUnplayedColor: desktopLyricsSettings.customUnplayedColor,
+      customRomajiPlayedColor: desktopLyricsSettings.customRomajiPlayedColor,
+      customRomajiUnplayedColor: desktopLyricsSettings.customRomajiUnplayedColor,
       customRomajiColor: desktopLyricsSettings.customRomajiColor,
       customTranslationColor: desktopLyricsSettings.customTranslationColor,
       textOpacity: desktopLyricsSettings.textOpacity,
@@ -230,25 +337,61 @@ export function useDesktopLyricsWindowBridge() {
       playerAlignment: desktopLyricsSettings.playerAlignment,
       playerFontPreset: desktopLyricsSettings.playerFontPreset,
     },
+    customLyricsFonts: [...settingsStore.settings.customLyricsFonts],
     themeColors: [...dominantColors.value],
   });
 
   const createPlaybackPayload = (): DesktopLyricsPlaybackPayload => ({
     playbackTime: currentTime.value,
-    syncedAt: Date.now(),
+    syncedAt: playbackClockTracker.resolveSyncedAt(currentTime.value),
     isPlaying: isPlaying.value,
     audioDelay: audioDelay.value,
   });
 
-  const emitStateToDesktopLyrics = async () => {
+  let isEmitStateThrottled = false;
+  let hasPendingEmitState = false;
+  let throttleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const emitStateToDesktopLyrics = async (immediate = false) => {
     const targetWindow = await getDesktopLyricsWindow();
     if (!targetWindow) return;
 
-    await emitTo<DesktopLyricsStatePayload>(
-      DESKTOP_LYRICS_WINDOW_LABEL,
-      DESKTOP_LYRICS_STATE_EVENT,
-      createStatePayload(),
-    );
+    if (immediate) {
+      if (throttleTimer) {
+        clearTimeout(throttleTimer);
+        throttleTimer = null;
+      }
+      isEmitStateThrottled = false;
+      hasPendingEmitState = false;
+    }
+
+    if (isEmitStateThrottled) {
+      hasPendingEmitState = true;
+      return;
+    }
+
+    if (!immediate) {
+      isEmitStateThrottled = true;
+    }
+
+    try {
+      await emitTo<DesktopLyricsStatePayload>(
+        DESKTOP_LYRICS_WINDOW_LABEL,
+        DESKTOP_LYRICS_STATE_EVENT,
+        createStatePayload(),
+      );
+    } finally {
+      if (!immediate) {
+        throttleTimer = setTimeout(() => {
+          isEmitStateThrottled = false;
+          throttleTimer = null;
+          if (hasPendingEmitState) {
+            hasPendingEmitState = false;
+            void emitStateToDesktopLyrics(false);
+          }
+        }, 30);
+      }
+    }
   };
 
   const emitPlaybackToDesktopLyrics = async () => {
@@ -278,8 +421,9 @@ export function useDesktopLyricsWindowBridge() {
 
   const openDesktopLyricsWindow = async () => {
     const targetWindow = await ensureDesktopLyricsWindow(desktopLyricsSettings.isAlwaysOnTop);
+    await desktopLyricsReadyGate.wait();
     await syncWindowFlags();
-    await emitStateToDesktopLyrics();
+    await emitStateToDesktopLyrics(true);
     await emitPlaybackToDesktopLyrics();
     await targetWindow.show();
     await revealDesktopLyricsSurface();
@@ -297,7 +441,9 @@ export function useDesktopLyricsWindowBridge() {
     stopSyncLoop();
     syncIntervalId = setInterval(() => {
       if (!showDesktopLyrics.value) return;
-      void emitPlaybackToDesktopLyrics();
+      void emitPlaybackToDesktopLyrics().catch((error) => {
+        logDesktopLyricsBridgeError('sync playback to', error);
+      });
     }, DESKTOP_LYRICS_PLAYBACK_SYNC_INTERVAL_MS);
   };
 
@@ -354,6 +500,7 @@ export function useDesktopLyricsWindowBridge() {
       console.warn('Failed to destroy desktop lyrics window during shutdown:', error);
     } finally {
       desktopLyricsWindowPromise = null;
+      desktopLyricsReadyGate.reset();
     }
   };
 
@@ -363,6 +510,7 @@ export function useDesktopLyricsWindowBridge() {
     }
 
     unlisteners.push(await mainWindow.onCloseRequested(async (event) => {
+      if (settingsStore.settings.closeToTray) return;
       if (isMainWindowClosing) return;
 
       isMainWindowClosing = true;
@@ -373,15 +521,26 @@ export function useDesktopLyricsWindowBridge() {
     }));
 
     unlisteners.push(await listen(DESKTOP_LYRICS_REQUEST_STATE_EVENT, () => {
-      void emitStateToDesktopLyrics();
-      void emitPlaybackToDesktopLyrics();
+      void emitStateToDesktopLyrics(true).catch((error) => {
+        logDesktopLyricsBridgeError('sync state to', error);
+      });
+      void emitPlaybackToDesktopLyrics().catch((error) => {
+        logDesktopLyricsBridgeError('sync playback to', error);
+      });
+    }));
+
+    unlisteners.push(await listen(DESKTOP_LYRICS_READY_EVENT, () => {
+      desktopLyricsReadyGate.markReady();
     }));
 
     unlisteners.push(await listen<DesktopLyricsAction>(DESKTOP_LYRICS_ACTION_EVENT, (event) => {
-      void handleAction(event.payload);
+      void handleAction(event.payload).catch((error) => {
+        logDesktopLyricsBridgeError('handle action from', error);
+      });
     }));
 
     unlisteners.push(await listen<{ visible: boolean }>(DESKTOP_LYRICS_VISIBILITY_EVENT, (event) => {
+      if (isMainWindowClosing) return;
       showDesktopLyrics.value = event.payload.visible;
     }));
 
@@ -398,7 +557,10 @@ export function useDesktopLyricsWindowBridge() {
 
       stopSyncLoop();
       await destroyDesktopLyricsWindow();
-      await openDesktopLyricsWindow();
+      await openDesktopLyricsWindow().catch((error) => {
+        logDesktopLyricsBridgeError('reopen', error);
+        showDesktopLyrics.value = false;
+      });
     }));
   });
 
@@ -408,14 +570,44 @@ export function useDesktopLyricsWindowBridge() {
   });
 
   watch(showDesktopLyrics, async (visible) => {
+    persistDesktopLyricsVisibilityPreference(
+      settingsStore.settings,
+      settingsStore.patchSettings,
+      visible,
+    );
+
     if (visible) {
-      await openDesktopLyricsWindow();
+      try {
+        await openDesktopLyricsWindow();
+      } catch (error) {
+        logDesktopLyricsBridgeError('open', error);
+        stopSyncLoop();
+        desktopLyricsWindowPromise = null;
+        desktopLyricsReadyGate.reset();
+        showDesktopLyrics.value = false;
+      }
       return;
     }
 
     stopSyncLoop();
     await destroyDesktopLyricsWindow();
   });
+
+  watch(
+    currentTime,
+    (time) => {
+      playbackClockTracker.markPlaybackTimeSample(time);
+    },
+    { immediate: true },
+  );
+
+  watch(
+    () => settingsStore.settings.showDesktopLyrics,
+    (preferredVisible) => {
+      applyDesktopLyricsVisibilityPreference(showDesktopLyrics, preferredVisible);
+    },
+    { immediate: true },
+  );
 
   watch(
     [
@@ -433,6 +625,7 @@ export function useDesktopLyricsWindowBridge() {
       () => desktopLyricsSettings.isAlwaysOnTop,
       () => desktopLyricsSettings.alwaysShowShadowBackground,
       () => desktopLyricsSettings.autoHideWhenFullscreen,
+      () => desktopLyricsSettings.autoHideWhenPaused,
       () => desktopLyricsSettings.showDoubleLine,
       () => desktopLyricsSettings.enableWordEffect,
       () => desktopLyricsSettings.isLocked,
@@ -440,6 +633,8 @@ export function useDesktopLyricsWindowBridge() {
       () => desktopLyricsSettings.colorScheme,
       () => desktopLyricsSettings.customPlayedColor,
       () => desktopLyricsSettings.customUnplayedColor,
+      () => desktopLyricsSettings.customRomajiPlayedColor,
+      () => desktopLyricsSettings.customRomajiUnplayedColor,
       () => desktopLyricsSettings.customRomajiColor,
       () => desktopLyricsSettings.customTranslationColor,
       () => desktopLyricsSettings.textOpacity,
@@ -452,13 +647,29 @@ export function useDesktopLyricsWindowBridge() {
       () => desktopLyricsSettings.playerOffsetY,
       () => desktopLyricsSettings.playerAlignment,
       () => desktopLyricsSettings.playerFontPreset,
+      () => settingsStore.settings.customLyricsFonts,
       dominantColors,
     ],
-    () => {
+    (newValue, oldValue) => {
       if (!showDesktopLyrics.value) return;
-      void emitStateToDesktopLyrics();
-      void emitPlaybackToDesktopLyrics();
-      void syncWindowFlags();
+
+      let isImmediateChange = false;
+      if (oldValue) {
+        const keyIndices = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+        isImmediateChange = keyIndices.some(idx => newValue[idx] !== oldValue[idx]);
+      } else {
+        isImmediateChange = true;
+      }
+
+      void emitStateToDesktopLyrics(isImmediateChange).catch((error) => {
+        logDesktopLyricsBridgeError('sync state to', error);
+      });
+      void emitPlaybackToDesktopLyrics().catch((error) => {
+        logDesktopLyricsBridgeError('sync playback to', error);
+      });
+      void syncWindowFlags().catch((error) => {
+        logDesktopLyricsBridgeError('sync flags for', error);
+      });
     },
     { deep: true },
   );

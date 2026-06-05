@@ -6,6 +6,7 @@ import { loadSystemLyricsFonts } from './lyrics';
 import {
   DESKTOP_LYRICS_BOUNDS_EVENT,
   DESKTOP_LYRICS_PLAYBACK_EVENT,
+  DESKTOP_LYRICS_READY_EVENT,
   DESKTOP_LYRICS_REVEAL_SURFACE_EVENT,
   DESKTOP_LYRICS_REQUEST_STATE_EVENT,
   DESKTOP_LYRICS_STATE_EVENT,
@@ -19,6 +20,27 @@ import { windowApi } from '../services/tauri/windowApi';
 
 const FULLSCREEN_POLL_INTERVAL_MS = 300;
 const RESIZE_VISIBILITY_HOLD_MS = 1200;
+
+export function shouldAutoHideDesktopLyrics({
+  autoHideWhenFullscreen,
+  autoHideWhenPaused,
+  isForegroundFullscreen,
+  isPlaying,
+  isResizeInteractionActive,
+}: {
+  autoHideWhenFullscreen: boolean;
+  autoHideWhenPaused: boolean;
+  isForegroundFullscreen: boolean;
+  isPlaying: boolean;
+  isResizeInteractionActive: boolean;
+}) {
+  if (isResizeInteractionActive) {
+    return false;
+  }
+
+  return (autoHideWhenFullscreen && isForegroundFullscreen)
+    || (autoHideWhenPaused && !isPlaying);
+}
 
 export function useDesktopLyricsWindowController(options: {
   showDragShadow: Ref<boolean>;
@@ -42,6 +64,13 @@ export function useDesktopLyricsWindowController(options: {
   const isHoverDimmed = ref(false);
   const isToolbarVisible = ref(false);
   const isResizeInteractionActive = ref(false);
+  const isAutoHidden = computed(() => shouldAutoHideDesktopLyrics({
+    autoHideWhenFullscreen: settings.value.autoHideWhenFullscreen,
+    autoHideWhenPaused: settings.value.autoHideWhenPaused,
+    isForegroundFullscreen: isSystemHidden.value,
+    isPlaying: isPlaying.value,
+    isResizeInteractionActive: isResizeInteractionActive.value,
+  }));
 
   let hoverDimTimer: ReturnType<typeof setTimeout> | null = null;
   let toolbarHideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -116,7 +145,7 @@ export function useDesktopLyricsWindowController(options: {
   }
 
   async function applyTransientWindowFlags() {
-    const shouldIgnoreCursor = settings.value.isLocked || isSystemHidden.value;
+    const shouldIgnoreCursor = settings.value.isLocked || isAutoHidden.value;
     await appWindow.setIgnoreCursorEvents(shouldIgnoreCursor);
     await appWindow.setFocusable(!shouldIgnoreCursor);
   }
@@ -174,7 +203,7 @@ export function useDesktopLyricsWindowController(options: {
   function revealToolbar() {
     clearToolbarHideTimer();
 
-    if (settings.value.isLocked || isSystemHidden.value) {
+    if (settings.value.isLocked || isAutoHidden.value) {
       isToolbarVisible.value = false;
       return;
     }
@@ -207,7 +236,7 @@ export function useDesktopLyricsWindowController(options: {
   function queueHoverDim() {
     clearHoverDimTimer();
 
-    if (settings.value.isLocked || isSystemHidden.value || isResizeInteractionActive.value) {
+    if (settings.value.isLocked || isAutoHidden.value || isResizeInteractionActive.value) {
       return;
     }
 
@@ -244,7 +273,7 @@ export function useDesktopLyricsWindowController(options: {
   }
 
   async function startWindowDrag(event: MouseEvent) {
-    if (settings.value.isLocked || isSystemHidden.value) return;
+    if (settings.value.isLocked || isAutoHidden.value) return;
     if ((event.target as HTMLElement).closest('button, .settings-menu')) return;
 
     revealDragShadow();
@@ -256,9 +285,9 @@ export function useDesktopLyricsWindowController(options: {
   }
 
   const widgetShellStyle = computed<CSSProperties>(() => ({
-    opacity: !isResizeInteractionActive.value && isSystemHidden.value ? '0' : (isHoverDimmed.value ? '0.34' : '1'),
-    transform: !isResizeInteractionActive.value && isSystemHidden.value ? 'scale(0.96)' : 'scale(1)',
-    pointerEvents: !isResizeInteractionActive.value && isSystemHidden.value ? 'none' : 'auto',
+    opacity: isAutoHidden.value ? '0' : (isHoverDimmed.value ? '0.34' : '1'),
+    transform: isAutoHidden.value ? 'scale(0.96)' : 'scale(1)',
+    pointerEvents: isAutoHidden.value ? 'none' : 'auto',
   }));
 
   onMounted(async () => {
@@ -316,7 +345,12 @@ export function useDesktopLyricsWindowController(options: {
       });
     });
 
-    await emitTo('main', DESKTOP_LYRICS_REQUEST_STATE_EVENT);
+    try {
+      await emitTo('main', DESKTOP_LYRICS_READY_EVENT);
+      await emitTo('main', DESKTOP_LYRICS_REQUEST_STATE_EVENT);
+    } catch (error) {
+      console.warn('Failed to notify main window that desktop lyrics is ready:', error);
+    }
   });
 
   onUnmounted(() => {
@@ -340,9 +374,9 @@ export function useDesktopLyricsWindowController(options: {
   });
 
   watch(
-    () => [settings.value.isLocked, isSystemHidden.value],
+    () => [settings.value.isLocked, isAutoHidden.value],
     () => {
-      if (settings.value.isLocked || isSystemHidden.value) {
+      if (settings.value.isLocked || isAutoHidden.value) {
         clearToolbarHideTimer();
         isToolbarVisible.value = false;
       }

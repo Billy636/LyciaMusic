@@ -2,12 +2,13 @@
 import { ref, watch } from 'vue';
 import { artistHeaderCache } from '../../caches/imageCaches';
 import { useCoverCache } from '../../composables/useCoverCache';
+import { type ArtistTabId, getOrderedArtistTabs, saveTabsOrder } from '../../utils/artistTabsOrder';
 
 const props = defineProps<{
   artistName: string;
   isBatchMode: boolean;
   selectedCount?: number;
-  activeTab: string;
+  activeTab: ArtistTabId;
   songs?: any[];
 }>();
 
@@ -20,6 +21,134 @@ const emit = defineEmits([
   'batchDelete',
   'batchMove'
 ]);
+
+const tabs = ref(getOrderedArtistTabs());
+const draggedTabId = ref<ArtistTabId | null>(null);
+const suppressClick = ref<boolean>(false);
+
+const handleTabClick = (id: ArtistTabId) => {
+  if (suppressClick.value) return;
+  emit('update:activeTab', id);
+};
+
+const startX = ref(0);
+const startY = ref(0);
+const isDragging = ref(false);
+const targetInsertIndex = ref<number | null>(null);
+let pressTimer: number | null = null;
+
+const onPointerDown = (tabId: ArtistTabId, event: PointerEvent) => {
+  if (event.button !== 0) return;
+  
+  draggedTabId.value = tabId;
+  startX.value = event.clientX;
+  startY.value = event.clientY;
+  isDragging.value = false;
+  targetInsertIndex.value = null;
+  
+  // 阻止默认机制避免触屏手势干扰
+  event.preventDefault();
+  
+  // 300ms 定时长按判定
+  pressTimer = window.setTimeout(() => {
+    isDragging.value = true;
+    suppressClick.value = true;
+    document.body.style.cursor = 'grabbing';
+  }, 300);
+  
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+};
+
+const onPointerMove = (event: PointerEvent) => {
+  if (draggedTabId.value === null) return;
+  
+  const clientX = event.clientX;
+  const clientY = event.clientY;
+  
+  const distanceX = Math.abs(clientX - startX.value);
+  const distanceY = Math.abs(clientY - startY.value);
+  
+  // 长按触发前如果移动位移超过了 6px，取消长按判定，退回普通状态
+  if (!isDragging.value && (distanceX > 6 || distanceY > 6)) {
+    if (pressTimer !== null) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+    onPointerUp();
+    return;
+  }
+  
+  if (isDragging.value) {
+    const elements = document.elementsFromPoint(clientX, clientY);
+    let hoveredTabId: ArtistTabId | null = null;
+    let hoveredElement: HTMLElement | null = null;
+    
+    for (const el of elements) {
+      const tabIdAttr = el.getAttribute('data-artist-tab-id');
+      if (tabIdAttr && (tabIdAttr === 'songs' || tabIdAttr === 'albums' || tabIdAttr === 'details')) {
+        hoveredTabId = tabIdAttr as ArtistTabId;
+        hoveredElement = el as HTMLElement;
+        break;
+      }
+    }
+    
+    if (hoveredTabId !== null && hoveredElement !== null) {
+      const rect = hoveredElement.getBoundingClientRect();
+      const index = tabs.value.findIndex(t => t.id === hoveredTabId);
+      
+      if (index !== -1) {
+        // 根据 clientX 是否超过元素宽度的中点来动态确定插入在该元素左侧还是右侧
+        if (clientX < rect.left + rect.width / 2) {
+          targetInsertIndex.value = index;
+        } else {
+          targetInsertIndex.value = index + 1;
+        }
+      }
+    } else {
+      targetInsertIndex.value = null;
+    }
+  }
+};
+
+const onPointerUp = () => {
+  if (pressTimer !== null) {
+    clearTimeout(pressTimer);
+    pressTimer = null;
+  }
+  
+  window.removeEventListener('pointermove', onPointerMove);
+  window.removeEventListener('pointerup', onPointerUp);
+  
+  document.body.style.cursor = '';
+  
+  if (draggedTabId.value === null) return;
+  
+  if (isDragging.value && targetInsertIndex.value !== null) {
+    const sourceIndex = tabs.value.findIndex(t => t.id === draggedTabId.value);
+    let insertIndex = targetInsertIndex.value;
+    
+    if (sourceIndex !== -1 && sourceIndex !== insertIndex) {
+      const [movedTab] = tabs.value.splice(sourceIndex, 1);
+      
+      // 插入点在被拖拽元素右侧时的微调修正
+      if (insertIndex > sourceIndex) {
+        insertIndex--;
+      }
+      
+      tabs.value.splice(insertIndex, 0, movedTab);
+      saveTabsOrder(tabs.value.map(t => t.id));
+    }
+  }
+  
+  draggedTabId.value = null;
+  isDragging.value = false;
+  targetInsertIndex.value = null;
+  
+  setTimeout(() => {
+    suppressClick.value = false;
+  }, 50);
+};
 
 const coverUrl = ref<string>('');
 const isLoading = ref<boolean>(false);
@@ -175,33 +304,57 @@ const handlePlayAll = () => {
     </div>
 
     <!-- 标签页导航 (Tabs) -->
-    <div class="flex gap-8 text-[15px] font-medium mt-auto w-full">
-      <button 
-        class="pb-1.5 transition-colors relative"
-        :class="activeTab === 'songs' ? 'text-gray-900 dark:text-white font-bold' : 'text-black/60 dark:text-white/60 hover:text-black/90 dark:hover:text-white/90'"
-        @click="emit('update:activeTab', 'songs')"
+    <TransitionGroup 
+      name="tabs-list" 
+      tag="div" 
+      class="flex gap-8 text-[15px] font-medium mt-auto w-full select-none touch-none"
+    >
+      <div 
+        v-for="(tab, index) in tabs" 
+        :key="tab.id"
+        class="relative flex items-center shrink-0"
       >
-        歌曲
-        <div v-if="activeTab === 'songs'" class="absolute bottom-0 left-1/2 -translate-x-1/2 w-3/4 h-[3px] bg-[#EC4141] rounded-t-full"></div>
-      </button>
+        <!-- 插入指示线 (左侧) -->
+        <div 
+          v-if="isDragging && targetInsertIndex === index" 
+          class="absolute left-[-16px] w-[3px] h-5 bg-[#EC4141] rounded-full animate-pulse transition-all z-20 pointer-events-none"
+        ></div>
 
-      <button 
-        class="pb-1.5 transition-colors relative"
-        :class="activeTab === 'albums' ? 'text-gray-900 dark:text-white font-bold' : 'text-black/60 dark:text-white/60 hover:text-black/90 dark:hover:text-white/90'"
-        @click="emit('update:activeTab', 'albums')"
-      >
-        专辑
-        <div v-if="activeTab === 'albums'" class="absolute bottom-0 left-1/2 -translate-x-1/2 w-3/4 h-[3px] bg-[#EC4141] rounded-t-full"></div>
-      </button>
+        <button 
+          :data-artist-tab-id="tab.id"
+          class="pb-1.5 transition-all relative cursor-pointer select-none touch-none no-user-drag"
+          :class="[
+            activeTab === tab.id 
+              ? 'text-gray-900 dark:text-white font-bold' 
+              : 'text-black/60 dark:text-white/60 hover:text-black/90 dark:hover:text-white/90',
+            draggedTabId === tab.id ? 'opacity-60 scale-95 cursor-grabbing' : ''
+          ]"
+          @pointerdown="onPointerDown(tab.id, $event)"
+          @click="handleTabClick(tab.id)"
+        >
+          <span class="pointer-events-none">{{ tab.name }}</span>
+          <div 
+            v-if="activeTab === tab.id" 
+            class="absolute bottom-0 left-1/2 -translate-x-1/2 w-3/4 h-[3px] bg-[#EC4141] rounded-t-full pointer-events-none"
+          ></div>
+        </button>
 
-      <button 
-        class="pb-1.5 transition-colors relative"
-        :class="activeTab === 'details' ? 'text-gray-900 dark:text-white font-bold' : 'text-black/60 dark:text-white/60 hover:text-black/90 dark:hover:text-white/90'"
-        @click="emit('update:activeTab', 'details')"
-      >
-        歌手详情
-        <div v-if="activeTab === 'details'" class="absolute bottom-0 left-1/2 -translate-x-1/2 w-3/4 h-[3px] bg-[#EC4141] rounded-t-full"></div>
-      </button>
-    </div>
+        <!-- 插入指示线 (右侧，仅针对最后一个元素的右侧插入) -->
+        <div 
+          v-if="isDragging && targetInsertIndex === tabs.length && index === tabs.length - 1" 
+          class="absolute right-[-16px] w-[3px] h-5 bg-[#EC4141] rounded-full animate-pulse transition-all z-20 pointer-events-none"
+        ></div>
+      </div>
+    </TransitionGroup>
   </div>
 </template>
+
+<style scoped>
+.tabs-list-move {
+  transition: transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.no-user-drag {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+</style>

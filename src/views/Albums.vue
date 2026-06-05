@@ -480,34 +480,48 @@ watch(
   { immediate: true, flush: 'post' },
 );
 
-let mouseDownInfo: { x: number; y: number; index: number; album: AlbumListItem } | null = null;
+let pointerDownInfo: { x: number; y: number; index: number; album: AlbumListItem } | null = null;
 
-const handleMouseDown = (event: MouseEvent, index: number, album: AlbumListItem) => {
-  if (isSearchActive.value || event.button !== 0) {
+const handlePointerDown = (event: PointerEvent, index: number, album: AlbumListItem) => {
+  if (isSearchActive.value || (event.pointerType === 'mouse' && event.button !== 0)) {
     return;
   }
 
-  mouseDownInfo = { x: event.clientX, y: event.clientY, index, album };
+  pointerDownInfo = { x: event.clientX, y: event.clientY, index, album };
 };
 
-const handleGlobalMouseMove = (event: MouseEvent) => {
-  if (!mouseDownInfo || dragSession.active) {
+const handleGlobalPointerMove = (event: PointerEvent) => {
+  if (!pointerDownInfo || dragSession.active) {
     return;
   }
 
-  const dist = Math.hypot(event.clientX - mouseDownInfo.x, event.clientY - mouseDownInfo.y);
+  if (event.pointerType !== 'mouse') {
+    event.preventDefault();
+  }
+
+  const dist = Math.hypot(event.clientX - pointerDownInfo.x, event.clientY - pointerDownInfo.y);
   if (dist <= 5) {
     return;
   }
 
   dragSession.active = true;
   dragSession.type = 'album';
-  dragSession.data = { index: mouseDownInfo.index, key: mouseDownInfo.album.key };
+  dragSession.data = { index: pointerDownInfo.index, key: pointerDownInfo.album.key };
 };
 
-const handleGlobalMouseUp = () => {
-  if (dragSession.active && dragSession.type === 'album' && dragOverKey.value && mouseDownInfo) {
-    const fromIndex = mouseDownInfo.index;
+const resetAlbumDrag = () => {
+  pointerDownInfo = null;
+  if (dragSession.type === 'album') {
+    dragSession.active = false;
+    dragSession.type = 'song';
+    dragSession.data = null;
+    dragOverKey.value = null;
+  }
+};
+
+const handleGlobalPointerEnd = (cancelled = false) => {
+  if (!cancelled && dragSession.active && dragSession.type === 'album' && dragOverKey.value && pointerDownInfo) {
+    const fromIndex = pointerDownInfo.index;
     const toIndex = filteredAlbumList.value.findIndex((album) => album.key === dragOverKey.value);
 
     if (toIndex !== -1 && fromIndex !== toIndex) {
@@ -520,16 +534,13 @@ const handleGlobalMouseUp = () => {
     }
   }
 
-  mouseDownInfo = null;
-  if (dragSession.type === 'album') {
-    dragSession.active = false;
-    dragSession.type = 'song';
-    dragSession.data = null;
-    dragOverKey.value = null;
-  }
+  resetAlbumDrag();
 };
 
-const handleItemMouseMove = (_event: MouseEvent, albumKey: string) => {
+const handleGlobalPointerUp = () => handleGlobalPointerEnd(false);
+const handleGlobalPointerCancel = () => handleGlobalPointerEnd(true);
+
+const handleItemPointerMove = (_event: PointerEvent, albumKey: string) => {
   if (dragSession.active && dragSession.type === 'album') {
     dragOverKey.value = albumKey;
   }
@@ -544,8 +555,9 @@ const closeMenu = (event: MouseEvent) => {
 
 onMounted(() => {
   updateViewportMetrics();
-  window.addEventListener('mousemove', handleGlobalMouseMove);
-  window.addEventListener('mouseup', handleGlobalMouseUp);
+  window.addEventListener('pointermove', handleGlobalPointerMove);
+  window.addEventListener('pointerup', handleGlobalPointerUp);
+  window.addEventListener('pointercancel', handleGlobalPointerCancel);
   window.addEventListener('click', closeMenu);
   window.addEventListener('resize', updateViewportMetrics);
   if (containerRef.value) {
@@ -566,8 +578,9 @@ onBeforeUnmount(() => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener('mousemove', handleGlobalMouseMove);
-  window.removeEventListener('mouseup', handleGlobalMouseUp);
+  window.removeEventListener('pointermove', handleGlobalPointerMove);
+  window.removeEventListener('pointerup', handleGlobalPointerUp);
+  window.removeEventListener('pointercancel', handleGlobalPointerCancel);
   window.removeEventListener('click', closeMenu);
   window.removeEventListener('resize', updateViewportMetrics);
   if (containerResizeObserver) {
@@ -684,13 +697,13 @@ onUnmounted(() => {
               v-for="item in row.items"
               :key="item.album.key"
               data-album-card
-              class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5"
+              class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5 [touch-action:none]"
               :class="[
                 dragSession.active && dragSession.type === 'album' && dragSession.data?.key === item.album.key ? 'opacity-50' : '',
                 { 'ring-2 ring-[#EC4141] bg-red-50 dark:bg-red-900/20': dragSession.active && dragSession.type === 'album' && dragOverKey === item.album.key && dragSession.data?.key !== item.album.key },
               ]"
-              @mousedown="handleMouseDown($event, item.index, item.album)"
-              @mousemove="handleItemMouseMove($event, item.album.key)"
+              @pointerdown="handlePointerDown($event, item.index, item.album)"
+              @pointermove="handleItemPointerMove($event, item.album.key)"
               @click="handleAlbumClick(item.album.key)"
             >
               <div class="relative w-full aspect-square mb-3 mt-1" :data-cover-path="item.album.firstSongPath">
@@ -745,13 +758,13 @@ onUnmounted(() => {
           v-for="item in flatAlbumVirtualState.items"
           :key="item.album.key"
           data-album-card
-          class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5"
+          class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5 [touch-action:none]"
           :class="[
             dragSession.active && dragSession.type === 'album' && dragSession.data?.key === item.album.key ? 'opacity-50' : '',
             { 'ring-2 ring-[#EC4141] bg-red-50 dark:bg-red-900/20': dragSession.active && dragSession.type === 'album' && dragOverKey === item.album.key && dragSession.data?.key !== item.album.key },
           ]"
-          @mousedown="handleMouseDown($event, item.index, item.album)"
-          @mousemove="handleItemMouseMove($event, item.album.key)"
+          @pointerdown="handlePointerDown($event, item.index, item.album)"
+          @pointermove="handleItemPointerMove($event, item.album.key)"
           @click="handleAlbumClick(item.album.key)"
         >
           <div class="relative w-full aspect-square mb-3 mt-1" :data-cover-path="item.album.firstSongPath">

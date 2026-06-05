@@ -1,3 +1,4 @@
+use crate::player::equalizer::EqualizerSettings;
 use rodio::source::SeekError;
 use rodio::Source;
 use serde::{Deserialize, Serialize};
@@ -147,8 +148,10 @@ pub enum AudioCommand {
         source: AudioSource,
         output_mode: AudioOutputMode,
         start_offset_ms: Option<u64>,
+        volume_balance_gain: f32,
     },
     Pause,
+    Stop,
     Resume,
     Seek {
         time: f64,
@@ -156,6 +159,13 @@ pub enum AudioCommand {
         request_id: u64,
     },
     SetVolume(f32),
+    SetVolumeBalance {
+        enabled: bool,
+        target_gain: f32,
+    },
+    SetEqualizerSettings {
+        settings: EqualizerSettings,
+    },
     SetDevice(Option<String>),
     SetOutputMode(AudioOutputMode),
 }

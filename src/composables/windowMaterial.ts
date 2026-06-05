@@ -90,6 +90,18 @@ function getTransparentWindowColor(): Color {
   return [0, 0, 0, 0];
 }
 
+function waitForCompositorFrame(): Promise<void> {
+  if (typeof requestAnimationFrame !== 'function') {
+    return new Promise(resolve => setTimeout(resolve, 16));
+  }
+
+  return new Promise(resolve => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 async function trySetWindowBackgroundColor(color: Color): Promise<void> {
   const appWindow = getCurrentWindow();
 
@@ -189,6 +201,37 @@ export async function applyWindowMaterial(
   return activeWindowMaterial.value;
 }
 
+interface RebuildWindowMaterialDeps {
+  clearEffects: () => Promise<unknown>;
+  waitForRepaint: () => Promise<unknown>;
+  applyMaterial: (mode: WindowMaterialMode, isDark: boolean, blurTint: number) => Promise<ResolvedWindowMaterial>;
+}
+
+export async function rebuildWindowMaterialForCompositor(
+  mode: WindowMaterialMode,
+  isDark: boolean,
+  blurTint = 50,
+  deps?: Partial<RebuildWindowMaterialDeps>,
+): Promise<ResolvedWindowMaterial> {
+  const clearEffects = deps?.clearEffects ?? (() => getCurrentWindow().clearEffects());
+  const waitForRepaint = deps?.waitForRepaint ?? waitForCompositorFrame;
+  const applyMaterial = deps?.applyMaterial ?? applyWindowMaterial;
+
+  if (mode === 'none') {
+    return applyMaterial(mode, isDark, blurTint);
+  }
+
+  try {
+    await clearEffects();
+    activeWindowMaterial.value = 'none';
+    await waitForRepaint();
+  } catch (error) {
+    console.warn('Failed to rebuild window material compositor:', error);
+  }
+
+  return applyMaterial(mode, isDark, blurTint);
+}
+
 export function useWindowMaterial() {
   return {
     capabilities,
@@ -196,5 +239,6 @@ export function useWindowMaterial() {
     isWindowMaterialReady,
     loadWindowMaterialCapabilities,
     applyWindowMaterial,
+    rebuildWindowMaterialForCompositor,
   };
 }

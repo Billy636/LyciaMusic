@@ -266,7 +266,10 @@ export const createPlayerFileManager = ({
   };
 
   const refreshFolder = async (folderPath: string) => {
-    const newSongs = await fileApi.scanMusicFolder(folderPath);
+    const newSongs = await fileApi.scanMusicFolder(
+      folderPath,
+      settingsStore.settings.libraryMinDurationSeconds,
+    );
     const removedPaths = canonicalSongs.value
       .filter(song => isSongInFolderScope(folderPath, song.path))
       .map(song => song.path)

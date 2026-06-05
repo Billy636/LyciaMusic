@@ -58,6 +58,7 @@ pub struct Song {
     pub cue_source_path: Option<String>,
     pub cue_start_offset: Option<u32>,
     pub cue_end_offset: Option<u32>,
+    pub comment: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]
@@ -108,6 +109,7 @@ pub struct LibrarySong {
     pub cue_source_path: Option<String>,
     pub cue_start_offset: Option<u32>,
     pub cue_end_offset: Option<u32>,
+    pub comment: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug, Default)]

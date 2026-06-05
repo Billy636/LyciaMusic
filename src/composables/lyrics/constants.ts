@@ -1,9 +1,11 @@
 import type {
   DesktopLyricsSettings,
+  ImportedLyricsFont,
   DesktopLyricsPlayerAlignment,
   LyricsColorScheme,
   LyricsFontPreset,
   LyricsPlayerAlignment,
+  LyricsPlayerRenderMode,
   LyricsSettings,
 } from '../../types';
 
@@ -12,10 +14,10 @@ export const LEGACY_DESKTOP_LYRICS_SETTINGS_KEY = 'desktop_lyrics_settings';
 
 export const DEFAULT_PLAYER_FONT_SCALE = 1;
 export const MIN_PLAYER_FONT_SCALE = 0.5;
-export const MAX_PLAYER_FONT_SCALE = 1.5;
+export const MAX_PLAYER_FONT_SCALE = 3.0;
 export const DEFAULT_PLAYER_LINE_GAP = 1;
 export const MIN_PLAYER_LINE_GAP = 0.5;
-export const MAX_PLAYER_LINE_GAP = 1.5;
+export const MAX_PLAYER_LINE_GAP = 3.0;
 export const DEFAULT_PLAYER_OFFSET_X = 0;
 export const MIN_PLAYER_OFFSET_X = -30;
 export const MAX_PLAYER_OFFSET_X = 30;
@@ -25,8 +27,11 @@ export const MAX_PLAYER_OFFSET_Y = 25;
 export const DEFAULT_PLAYER_ALIGNMENT: LyricsPlayerAlignment = 'left';
 export const DEFAULT_DESKTOP_PLAYER_ALIGNMENT: DesktopLyricsPlayerAlignment = 'center';
 export const DEFAULT_PLAYER_FONT_PRESET: LyricsFontPreset = 'system';
+export const DEFAULT_PLAYER_RENDER_MODE: LyricsPlayerRenderMode = 'amll';
 export const DEFAULT_DESKTOP_CUSTOM_PLAYED_COLOR = '#EC4141';
 export const DEFAULT_DESKTOP_CUSTOM_UNPLAYED_COLOR = '#FFFFFF';
+export const DEFAULT_DESKTOP_CUSTOM_ROMAJI_PLAYED_COLOR = '#BFDBFE';
+export const DEFAULT_DESKTOP_CUSTOM_ROMAJI_UNPLAYED_COLOR = '#FFFFFF';
 export const DEFAULT_DESKTOP_CUSTOM_ROMAJI_COLOR = '#BFDBFE';
 export const DEFAULT_DESKTOP_CUSTOM_TRANSLATION_COLOR = '#FBCFE8';
 export const DEFAULT_DESKTOP_TEXT_OPACITY = 1;
@@ -42,6 +47,7 @@ export interface LyricsFontOption {
   label: string;
   fontFamily: string;
   isSystem?: boolean;
+  isImported?: boolean;
 }
 
 export const LYRICS_FONT_OPTIONS = [
@@ -95,6 +101,7 @@ export const LYRICS_FONT_OPTIONS = [
 export const defaultLyricsSettings: LyricsSettings = {
   showTranslation: true,
   showRomaji: false,
+  playerRenderMode: DEFAULT_PLAYER_RENDER_MODE,
   playerFontScale: DEFAULT_PLAYER_FONT_SCALE,
   playerLineGap: DEFAULT_PLAYER_LINE_GAP,
   playerOffsetX: DEFAULT_PLAYER_OFFSET_X,
@@ -107,6 +114,7 @@ export const defaultDesktopLyricsSettings: DesktopLyricsSettings = {
   isAlwaysOnTop: false,
   alwaysShowShadowBackground: false,
   autoHideWhenFullscreen: true,
+  autoHideWhenPaused: false,
   showDoubleLine: false,
   enableWordEffect: true,
   isLocked: false,
@@ -114,6 +122,8 @@ export const defaultDesktopLyricsSettings: DesktopLyricsSettings = {
   colorScheme: 'auto',
   customPlayedColor: DEFAULT_DESKTOP_CUSTOM_PLAYED_COLOR,
   customUnplayedColor: DEFAULT_DESKTOP_CUSTOM_UNPLAYED_COLOR,
+  customRomajiPlayedColor: DEFAULT_DESKTOP_CUSTOM_ROMAJI_PLAYED_COLOR,
+  customRomajiUnplayedColor: DEFAULT_DESKTOP_CUSTOM_ROMAJI_UNPLAYED_COLOR,
   customRomajiColor: DEFAULT_DESKTOP_CUSTOM_ROMAJI_COLOR,
   customTranslationColor: DEFAULT_DESKTOP_CUSTOM_TRANSLATION_COLOR,
   textOpacity: DEFAULT_DESKTOP_TEXT_OPACITY,
@@ -212,6 +222,33 @@ export function normalizeCustomFontName(value: string): string {
   return value.trim().replace(/\s+/g, ' ').slice(0, 160);
 }
 
+export function normalizeImportedLyricsFonts(value: unknown): ImportedLyricsFont[] {
+  if (!Array.isArray(value)) return [];
+
+  const seenFamilies = new Set<string>();
+  const fonts: ImportedLyricsFont[] = [];
+
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const font = item as Partial<ImportedLyricsFont>;
+    const id = typeof font.id === 'string' ? normalizeCustomFontName(font.id) : '';
+    const name = typeof font.name === 'string' ? normalizeCustomFontName(font.name) : '';
+    const family = typeof font.family === 'string' ? normalizeCustomFontName(font.family) : '';
+    const filePath = typeof font.filePath === 'string' ? font.filePath.trim() : '';
+    const importedAt = typeof font.importedAt === 'number' && Number.isFinite(font.importedAt)
+      ? font.importedAt
+      : Date.now();
+    const format = font.format === 'opentype' ? 'opentype' : 'truetype';
+    const familyKey = family.toLocaleLowerCase();
+
+    if (!id || !name || !family || !filePath || seenFamilies.has(familyKey)) continue;
+    seenFamilies.add(familyKey);
+    fonts.push({ id, name, family, filePath, importedAt, format });
+  }
+
+  return fonts;
+}
+
 export function escapeFontFamilyName(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
@@ -223,6 +260,10 @@ export function normalizeLyricsFontPreset(value: unknown): LyricsFontPreset {
   if (!normalized) return DEFAULT_PLAYER_FONT_PRESET;
 
   return normalized;
+}
+
+export function normalizeLyricsPlayerRenderMode(value: unknown): LyricsPlayerRenderMode {
+  return value === 'light' || value === 'amll' ? value : DEFAULT_PLAYER_RENDER_MODE;
 }
 
 export function extractPrimaryFontFamily(fontFamily: string): string {
@@ -243,6 +284,7 @@ export function normalizeLyricsSettingsPatch(patch: Partial<LyricsSettings>): Ly
     showRomaji: typeof patch.showRomaji === 'boolean'
       ? patch.showRomaji
       : defaultLyricsSettings.showRomaji,
+    playerRenderMode: normalizeLyricsPlayerRenderMode(patch.playerRenderMode),
     playerFontScale: clampPlayerFontScale(patch.playerFontScale ?? DEFAULT_PLAYER_FONT_SCALE),
     playerLineGap: clampPlayerLineGap(patch.playerLineGap ?? DEFAULT_PLAYER_LINE_GAP),
     playerOffsetX: clampPlayerOffsetX(patch.playerOffsetX ?? DEFAULT_PLAYER_OFFSET_X),
@@ -255,8 +297,12 @@ export function normalizeLyricsSettingsPatch(patch: Partial<LyricsSettings>): Ly
 export function normalizeDesktopLyricsSettingsPatch(
   patch: Partial<DesktopLyricsSettings>,
 ): DesktopLyricsSettings {
-  const legacyPatch = patch as Partial<DesktopLyricsSettings> & { textShadowStrength?: number };
+  const legacyPatch = patch as Partial<DesktopLyricsSettings> & {
+    textShadowStrength?: number;
+    customRomajiColor?: string;
+  };
   const legacyTextShadowStrength = legacyPatch.textShadowStrength;
+  const legacyRomajiColor = legacyPatch.customRomajiColor;
 
   return {
     ...defaultDesktopLyricsSettings,
@@ -270,6 +316,9 @@ export function normalizeDesktopLyricsSettingsPatch(
     autoHideWhenFullscreen: typeof patch.autoHideWhenFullscreen === 'boolean'
       ? patch.autoHideWhenFullscreen
       : defaultDesktopLyricsSettings.autoHideWhenFullscreen,
+    autoHideWhenPaused: typeof patch.autoHideWhenPaused === 'boolean'
+      ? patch.autoHideWhenPaused
+      : defaultDesktopLyricsSettings.autoHideWhenPaused,
     showDoubleLine: typeof patch.showDoubleLine === 'boolean'
       ? patch.showDoubleLine
       : defaultDesktopLyricsSettings.showDoubleLine,
@@ -290,6 +339,14 @@ export function normalizeDesktopLyricsSettingsPatch(
     customUnplayedColor: normalizeHexColor(
       patch.customUnplayedColor,
       defaultDesktopLyricsSettings.customUnplayedColor,
+    ),
+    customRomajiPlayedColor: normalizeHexColor(
+      patch.customRomajiPlayedColor ?? legacyRomajiColor,
+      defaultDesktopLyricsSettings.customRomajiPlayedColor,
+    ),
+    customRomajiUnplayedColor: normalizeHexColor(
+      patch.customRomajiUnplayedColor ?? legacyRomajiColor,
+      defaultDesktopLyricsSettings.customRomajiUnplayedColor,
     ),
     customRomajiColor: normalizeHexColor(
       patch.customRomajiColor,

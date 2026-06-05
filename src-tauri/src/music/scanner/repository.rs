@@ -7,6 +7,16 @@ use crate::music::types::Song;
 use rusqlite::{params, params_from_iter};
 use std::collections::HashMap;
 
+const FIRST_LARGE_IMPORT_BATCH_SIZE: usize = 900;
+
+pub(super) fn scan_change_chunk_size(existing_song_count: i64, to_add_count: usize) -> usize {
+    if existing_song_count == 0 && to_add_count >= 500 {
+        FIRST_LARGE_IMPORT_BATCH_SIZE
+    } else {
+        DB_PROGRESS_BATCH
+    }
+}
+
 fn ensure_artist_id(
     conn: &rusqlite::Transaction<'_>,
     artist_cache: &mut HashMap<String, i64>,
@@ -66,14 +76,21 @@ fn sync_song_artists_batch(
     songs: &[Song],
     song_ids: &HashMap<String, i64>,
     artist_cache: &mut HashMap<String, i64>,
+    skip_delete: bool,
 ) -> Result<(), String> {
     if songs.is_empty() || song_ids.is_empty() {
         return Ok(());
     }
 
-    let mut delete_stmt = conn
-        .prepare("DELETE FROM song_artists WHERE song_id = ?1")
-        .map_err(|error| error.to_string())?;
+    let mut delete_stmt = if !skip_delete {
+        Some(
+            conn.prepare("DELETE FROM song_artists WHERE song_id = ?1")
+                .map_err(|error| error.to_string())?,
+        )
+    } else {
+        None
+    };
+
     let mut insert_stmt = conn
         .prepare(
             "INSERT INTO song_artists (song_id, artist_id, sort_order)
@@ -86,9 +103,10 @@ fn sync_song_artists_batch(
             continue;
         };
 
-        delete_stmt
-            .execute(params![song_id])
-            .map_err(|error| error.to_string())?;
+        if let Some(ref mut stmt) = delete_stmt {
+            stmt.execute(params![song_id])
+                .map_err(|error| error.to_string())?;
+        }
 
         let normalized_names = if song.artist_names.is_empty() {
             vec![UNKNOWN_ARTIST.to_string()]
@@ -107,13 +125,20 @@ fn sync_song_artists_batch(
     Ok(())
 }
 
-fn apply_insert_batch(conn: &mut rusqlite::Connection, songs: &[Song]) -> Result<(), String> {
+fn apply_insert_batch(
+    conn: &mut rusqlite::Connection,
+    songs: &[Song],
+    artist_cache: &mut HashMap<String, i64>,
+    skip_delete: bool,
+) -> Result<(), String> {
     if songs.is_empty() {
         return Ok(());
     }
 
+    #[cfg(debug_assertions)]
+    let start_time = std::time::Instant::now();
+
     let tx = conn.transaction().map_err(|error| error.to_string())?;
-    let mut artist_cache = HashMap::new();
     {
         let mut insert_stmt = tx
             .prepare(
@@ -143,9 +168,10 @@ fn apply_insert_batch(conn: &mut rusqlite::Connection, songs: &[Song]) -> Result
                 file_modified_at,
                 cue_source_path,
                 cue_start_offset,
-                cue_end_offset
+                cue_end_offset,
+                comment
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
              ON CONFLICT(path) DO UPDATE SET
                 title = excluded.title,
                 artist = excluded.artist,
@@ -171,7 +197,8 @@ fn apply_insert_batch(conn: &mut rusqlite::Connection, songs: &[Song]) -> Result
                 file_modified_at = excluded.file_modified_at,
                 cue_source_path = excluded.cue_source_path,
                 cue_start_offset = excluded.cue_start_offset,
-                cue_end_offset = excluded.cue_end_offset",
+                cue_end_offset = excluded.cue_end_offset,
+                comment = excluded.comment",
             )
             .map_err(|error| error.to_string())?;
 
@@ -208,26 +235,42 @@ fn apply_insert_batch(conn: &mut rusqlite::Connection, songs: &[Song]) -> Result
                     mtime_i64,
                     &song.cue_source_path,
                     song.cue_start_offset.map(|v| v as i64),
-                    song.cue_end_offset.map(|v| v as i64)
+                    song.cue_end_offset.map(|v| v as i64),
+                    &song.comment
                 ])
                 .map_err(|error| format!("insert failed for '{}': {}", song.path, error))?;
         }
 
         let song_paths: Vec<String> = songs.iter().map(|song| song.path.clone()).collect();
         let song_ids = load_song_ids_by_paths(&tx, &song_paths)?;
-        sync_song_artists_batch(&tx, songs, &song_ids, &mut artist_cache)?;
+        sync_song_artists_batch(&tx, songs, &song_ids, artist_cache, skip_delete)?;
     }
 
-    tx.commit().map_err(|error| error.to_string())
+    tx.commit().map_err(|error| error.to_string())?;
+
+    #[cfg(debug_assertions)]
+    {
+        let duration = start_time.elapsed();
+        println!(
+            "[Profiling] apply_insert_batch took {:?} (chunk size: {})",
+            duration,
+            songs.len()
+        );
+    }
+
+    Ok(())
 }
 
-fn apply_update_batch(conn: &mut rusqlite::Connection, songs: &[Song]) -> Result<(), String> {
+fn apply_update_batch(
+    conn: &mut rusqlite::Connection,
+    songs: &[Song],
+    artist_cache: &mut HashMap<String, i64>,
+) -> Result<(), String> {
     if songs.is_empty() {
         return Ok(());
     }
 
     let tx = conn.transaction().map_err(|error| error.to_string())?;
-    let mut artist_cache = HashMap::new();
     {
         let mut update_stmt = tx
             .prepare(
@@ -256,7 +299,8 @@ fn apply_update_batch(conn: &mut rusqlite::Connection, songs: &[Song]) -> Result
                   file_modified_at = ?22,
                   cue_source_path = ?24,
                   cue_start_offset = ?25,
-                  cue_end_offset = ?26
+                  cue_end_offset = ?26,
+                  comment = ?27
               WHERE path = ?23",
             )
             .map_err(|error| error.to_string())?;
@@ -294,14 +338,15 @@ fn apply_update_batch(conn: &mut rusqlite::Connection, songs: &[Song]) -> Result
                     &song.path,
                     &song.cue_source_path,
                     song.cue_start_offset.map(|v| v as i64),
-                    song.cue_end_offset.map(|v| v as i64)
+                    song.cue_end_offset.map(|v| v as i64),
+                    &song.comment
                 ])
                 .map_err(|error| format!("update failed for '{}': {}", song.path, error))?;
         }
 
         let song_paths: Vec<String> = songs.iter().map(|song| song.path.clone()).collect();
         let song_ids = load_song_ids_by_paths(&tx, &song_paths)?;
-        sync_song_artists_batch(&tx, songs, &song_ids, &mut artist_cache)?;
+        sync_song_artists_batch(&tx, songs, &song_ids, artist_cache, false)?;
     }
 
     tx.commit().map_err(|error| error.to_string())
@@ -351,14 +396,28 @@ pub(crate) fn apply_scan_changes(
         return Ok(());
     }
 
+    #[cfg(debug_assertions)]
+    let start_time = std::time::Instant::now();
+
+    // 智能判定首次导入高载环境（数据为空且本批次新增歌曲量 >= 500）
+    let existing_song_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM songs", [], |row| row.get(0))
+        .unwrap_or(0);
+    let is_first_large_import = existing_song_count == 0 && to_add.len() >= 500;
+
+    let chunk_size = scan_change_chunk_size(existing_song_count, to_add.len());
+
+    // 声明跨 Chunk 复用的 artist_cache，规避高频重复 SELECT 磁盘查找
+    let mut artist_cache = std::collections::HashMap::new();
+
     let total_operations = to_add.len() + to_update.len() + to_delete.len();
     let mut written_operations = 0usize;
     if let Some(reporter) = reporter {
         reporter.emit_writing(0, total_operations);
     }
 
-    for chunk in to_add.chunks(DB_PROGRESS_BATCH) {
-        apply_insert_batch(conn, chunk)?;
+    for chunk in to_add.chunks(chunk_size) {
+        apply_insert_batch(conn, chunk, &mut artist_cache, is_first_large_import)?;
         written_operations += chunk.len();
         if let Some(reporter) = reporter {
             reporter.emit_writing(written_operations, total_operations);
@@ -366,8 +425,8 @@ pub(crate) fn apply_scan_changes(
         }
     }
 
-    for chunk in to_update.chunks(DB_PROGRESS_BATCH) {
-        apply_update_batch(conn, chunk)?;
+    for chunk in to_update.chunks(chunk_size) {
+        apply_update_batch(conn, chunk, &mut artist_cache)?;
         written_operations += chunk.len();
         if let Some(reporter) = reporter {
             reporter.emit_writing(written_operations, total_operations);
@@ -375,7 +434,7 @@ pub(crate) fn apply_scan_changes(
         }
     }
 
-    for chunk in to_delete.chunks(DB_PROGRESS_BATCH) {
+    for chunk in to_delete.chunks(chunk_size) {
         apply_delete_batch(conn, chunk)?;
         written_operations += chunk.len();
         if let Some(reporter) = reporter {
@@ -385,5 +444,18 @@ pub(crate) fn apply_scan_changes(
     }
 
     cleanup_unused_artists(conn);
+
+    #[cfg(debug_assertions)]
+    {
+        let duration = start_time.elapsed();
+        println!(
+            "[Profiling] apply_scan_changes took {:?} (to_add: {}, to_update: {}, to_delete: {})",
+            duration,
+            to_add.len(),
+            to_update.len(),
+            to_delete.len()
+        );
+    }
+
     Ok(())
 }

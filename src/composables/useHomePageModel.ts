@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import type { Song } from '../types';
@@ -9,6 +9,7 @@ import { useHomeBatchActions } from './useHomeBatchActions';
 import { useHomeFolderManagement } from './useHomeFolderManagement';
 import { useHomeNavigation } from './useHomeNavigation';
 import { useHomePlaylistRename } from './useHomePlaylistRename';
+import { useScopedBatchSelection } from './useScopedBatchSelection';
 
 import { useHomeViewState } from './useHomeViewState';
 import { usePlayerViewState } from './usePlayerViewState';
@@ -71,9 +72,7 @@ export function useHomePageModel() {
   } = useLibraryCollections();
   const { coverCache, loadingSet, preloadCovers } = useCoverCache();
 
-  const isBatchMode = ref(false);
   const isManagementMode = ref(false);
-  const selectedPaths = ref<Set<string>>(new Set());
   const songTableRef = ref<any>(null);
   const setSongTableRef = (instance: any | null) => {
     songTableRef.value = instance;
@@ -92,6 +91,18 @@ export function useHomePageModel() {
 
   const localSongList = computed(() => displaySongList.value);
   const selectedAlbumSong = computed(() => localSongList.value[0] || null);
+  const batchSelectionScopeKey = computed(() =>
+    [
+      route.path,
+      currentViewMode.value,
+      filterCondition.value,
+      currentFolderFilter.value,
+    ].join('::'),
+  );
+  const {
+    isBatchMode,
+    selectedPaths,
+  } = useScopedBatchSelection(batchSelectionScopeKey);
 
   const { handleTableDragStart } = useSongDrag(
     localSongList,
@@ -113,12 +124,6 @@ export function useHomePageModel() {
   } = useSongContextActions({
     isBatchMode,
     deleteFromDisk,
-  });
-
-  watch(isBatchMode, value => {
-    if (!value) {
-      selectedPaths.value.clear();
-    }
   });
 
   const {

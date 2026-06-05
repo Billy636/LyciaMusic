@@ -1,35 +1,15 @@
 import { open } from '@tauri-apps/plugin-dialog';
-import { onMounted, ref, watch } from 'vue';
+import { ref } from 'vue';
 
 import { normalizeForegroundStyle } from '../features/settings/store';
 import { useThemeSettings } from './useThemeSettings';
-import type { ThemeSettings } from '../types';
-
-const cloneTheme = (value: ThemeSettings): ThemeSettings => JSON.parse(JSON.stringify(value)) as ThemeSettings;
 
 export function useCustomThemeModal() {
-  const { theme, patchTheme, replaceTheme, updateCustomBackground } = useThemeSettings();
-  const originalTheme = ref<ThemeSettings | null>(null);
+  const { theme, patchTheme } = useThemeSettings();
   const preview = ref({
     ...theme.value.customBackground,
     foregroundStyle: normalizeForegroundStyle(theme.value.customBackground.foregroundStyle),
   });
-
-  onMounted(() => {
-    originalTheme.value = cloneTheme(theme.value);
-  });
-
-  watch(preview, (nextPreview) => {
-    updateCustomBackground({ ...nextPreview });
-
-    if (nextPreview.imagePath) {
-      patchTheme({
-        mode: 'custom',
-        dynamicBgType: 'none',
-        windowMaterial: 'none',
-      });
-    }
-  }, { deep: true });
 
   const handleSelectImage = async () => {
     try {
@@ -46,15 +26,23 @@ export function useCustomThemeModal() {
     }
   };
 
-  const handleCancel = () => {
-    if (originalTheme.value) {
-      replaceTheme(originalTheme.value);
+  const handleSave = () => {
+    if (!preview.value.imagePath) {
+      return;
     }
+
+    patchTheme({
+      mode: 'custom',
+      dynamicBgType: 'none',
+      windowMaterial: 'none',
+      customBackground: { ...preview.value },
+    });
   };
 
   return {
     preview,
     handleSelectImage,
-    handleCancel,
+    handleCancel: () => undefined,
+    handleSave,
   };
 }

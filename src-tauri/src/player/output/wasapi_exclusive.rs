@@ -1,13 +1,15 @@
+use crate::player::equalizer::{EqualizerHandle, EqualizerSettings};
 use crate::player::output::OutputError;
 use crate::player::types::{SharedProgress, SharedVisualizer};
 use rodio::{Decoder, Source};
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+
 use wasapi::{
     deinitialize, initialize_mta, DeviceEnumerator, Direction, SampleType, StreamMode, WaveFormat,
 };
@@ -29,6 +31,9 @@ pub(crate) struct ExclusivePlayRequest {
     pub is_playing: bool,
     pub progress: Arc<SharedProgress>,
     pub start_time: Duration,
+    pub volume_balance_gain: f32,
+    pub equalizer_handle: Arc<EqualizerHandle>,
+    pub user_volume: Arc<AtomicU32>,
 }
 
 enum ExclusiveCommand {
@@ -36,14 +41,15 @@ enum ExclusiveCommand {
     Resume,
     Seek { time: Duration, is_playing: bool },
     Stop,
-    SetVolume(f32),
+    SetVolumeBalance { enabled: bool, target_gain: f32 },
+    SetEqualizerSettings { settings: EqualizerSettings },
 }
 
 impl WasapiExclusivePlayback {
     pub(crate) fn start(request: ExclusivePlayRequest) -> Result<Self, OutputError> {
         let (command_tx, command_rx) = channel::<ExclusiveCommand>();
         let (init_tx, init_rx) = sync_channel::<Result<String, String>>(1);
-        let (result_tx, result_rx) = channel::<Result<(), String>>();
+        let (result_tx, result_rx) = channel::<Result<(), String>>(); // 独占模式的退出消息类型
 
         let join_handle = thread::spawn(move || {
             let result = run_exclusive_playback(request, command_rx, init_tx);
@@ -97,8 +103,17 @@ impl WasapiExclusivePlayback {
         let _ = self.tx.send(ExclusiveCommand::Seek { time, is_playing });
     }
 
-    pub(crate) fn set_volume(&self, volume: f32) {
-        let _ = self.tx.send(ExclusiveCommand::SetVolume(volume));
+    pub(crate) fn set_volume_balance(&self, enabled: bool, target_gain: f32) {
+        let _ = self.tx.send(ExclusiveCommand::SetVolumeBalance {
+            enabled,
+            target_gain,
+        });
+    }
+
+    pub(crate) fn set_equalizer_settings(&self, settings: EqualizerSettings) {
+        let _ = self
+            .tx
+            .send(ExclusiveCommand::SetEqualizerSettings { settings });
     }
 
     pub(crate) fn stop(&mut self) {
@@ -132,12 +147,14 @@ struct ExclusiveSource {
     channels: u16,
     channel_sum: f32,
     channel_samples: u16,
+    normalizer_handle: crate::player::loudness::VolumeNormalizerHandle,
 }
 
 #[derive(Clone, Copy)]
 enum ExclusiveSampleFormat {
     Float32,
     Int32,
+    Int32Valid24,
     Int24,
     Int16,
 }
@@ -153,6 +170,9 @@ impl ExclusiveSource {
         path: &str,
         start_time: Duration,
         progress: Arc<SharedProgress>,
+        volume_balance_gain: f32,
+        equalizer_handle: Arc<EqualizerHandle>,
+        user_volume: Arc<AtomicU32>,
     ) -> Result<(Self, u32, u16), String> {
         let file = File::open(path).map_err(|error| error.to_string())?;
         let reader = BufReader::with_capacity(512 * 1024, file);
@@ -169,14 +189,26 @@ impl ExclusiveSource {
             .store(samples_at_target, Ordering::Relaxed);
         progress.visualizer.reset();
 
+        // 按照管线顺序装配: Decoder -> VolumeNormalizer -> Equalizer -> UserVolumeSource -> ClipGuardSource
+        let decoded = decoder.convert_samples::<f32>().skip_duration(start_time);
+        let (normalized, normalizer_handle) = crate::player::loudness::VolumeNormalizer::new(
+            decoded,
+            volume_balance_gain,
+            100, // ramp 100ms
+        );
+        let eq_source = crate::player::equalizer::Equalizer::new(normalized, equalizer_handle);
+        let vol_source = crate::player::equalizer::UserVolumeSource::new(eq_source, user_volume);
+        let clip_source = crate::player::equalizer::ClipGuardSource::new(vol_source);
+
         Ok((
             Self {
-                source: Box::new(decoder.convert_samples::<f32>().skip_duration(start_time)),
+                source: Box::new(clip_source),
                 visualizer: progress.visualizer.clone(),
                 progress,
                 channels,
                 channel_sum: 0.0,
                 channel_samples: 0,
+                normalizer_handle,
             },
             sample_rate,
             channels,
@@ -186,37 +218,39 @@ impl ExclusiveSource {
     fn read_frames_into(
         &mut self,
         frame_count: usize,
-        volume: f32,
         sample_format: ExclusiveSampleFormat,
         output: &mut Vec<u8>,
     ) -> bool {
-        let sample_count = frame_count.saturating_mul(self.channels as usize);
         let mut ended = false;
         output.clear();
 
-        for _ in 0..sample_count {
-            let sample = match self.source.next() {
-                Some(sample) => {
-                    self.progress.samples_played.fetch_add(1, Ordering::Relaxed);
-                    self.channel_sum += sample;
-                    self.channel_samples += 1;
+        for _ in 0..frame_count {
+            for _ in 0..self.channels {
+                let sample = match self.source.next() {
+                    Some(sample) => {
+                        self.progress.samples_played.fetch_add(1, Ordering::Relaxed);
+                        self.channel_sum += sample;
+                        self.channel_samples += 1;
 
-                    if self.channel_samples >= self.channels {
-                        self.visualizer
-                            .push_sample(self.channel_sum / self.channel_samples as f32);
-                        self.channel_sum = 0.0;
-                        self.channel_samples = 0;
+                        if self.channel_samples >= self.channels {
+                            self.visualizer
+                                .push_sample(self.channel_sum / self.channel_samples as f32);
+                            self.channel_sum = 0.0;
+                            self.channel_samples = 0;
+                        }
+
+                        sample
                     }
+                    None => {
+                        ended = true;
+                        0.0
+                    }
+                };
 
-                    sample
-                }
-                None => {
-                    ended = true;
-                    0.0
-                }
-            };
-
-            push_sample_bytes(output, sample * volume, sample_format);
+                // 音量平衡（VolumeNormalizer）已被移至管线最前端，
+                // 在这里我们无需再做任何额外乘以 volume_balance_gain 的操作，直接将样本安全写入 WASAPI
+                push_sample_bytes(output, sample, sample_format);
+            }
         }
 
         ended
@@ -232,6 +266,10 @@ fn push_sample_bytes(output: &mut Vec<u8>, sample: f32, sample_format: Exclusive
             let value = (sample * i32::MAX as f32).round() as i32;
             output.extend_from_slice(&value.to_le_bytes());
         }
+        ExclusiveSampleFormat::Int32Valid24 => {
+            let value = ((sample * 8_388_607.0).round() as i32) << 8;
+            output.extend_from_slice(&value.to_le_bytes());
+        }
         ExclusiveSampleFormat::Int24 => {
             let value = (sample * 8_388_607.0).round() as i32;
             output.extend_from_slice(&value.to_le_bytes()[..3]);
@@ -243,19 +281,22 @@ fn push_sample_bytes(output: &mut Vec<u8>, sample: f32, sample_format: Exclusive
     }
 }
 
+fn exclusive_format_candidates() -> [(usize, usize, SampleType, ExclusiveSampleFormat); 5] {
+    [
+        (32, 32, SampleType::Float, ExclusiveSampleFormat::Float32),
+        (32, 24, SampleType::Int, ExclusiveSampleFormat::Int32Valid24),
+        (24, 24, SampleType::Int, ExclusiveSampleFormat::Int24),
+        (32, 32, SampleType::Int, ExclusiveSampleFormat::Int32),
+        (16, 16, SampleType::Int, ExclusiveSampleFormat::Int16),
+    ]
+}
+
 fn negotiate_exclusive_format(
     audio_client: &wasapi::AudioClient,
     sample_rate: u32,
     channels: u16,
 ) -> Result<ExclusiveOutputFormat, String> {
-    let candidates = [
-        (32, 32, SampleType::Float, ExclusiveSampleFormat::Float32),
-        (32, 32, SampleType::Int, ExclusiveSampleFormat::Int32),
-        (24, 24, SampleType::Int, ExclusiveSampleFormat::Int24),
-        (16, 16, SampleType::Int, ExclusiveSampleFormat::Int16),
-    ];
-
-    for (store_bits, valid_bits, sample_type, sample_format) in candidates {
+    for (store_bits, valid_bits, sample_type, sample_format) in exclusive_format_candidates() {
         let requested_format = WaveFormat::new(
             store_bits,
             valid_bits,
@@ -289,8 +330,20 @@ fn run_exclusive_playback(
         .ok()
         .map_err(|error| format!("COM initialization failed: {error}"))?;
 
-    let (mut source, sample_rate, channels) =
-        ExclusiveSource::open(&request.path, request.start_time, request.progress.clone())?;
+    // 初始化主音量原子浮点数快照
+    request
+        .user_volume
+        .store(request.volume.to_bits(), Ordering::Relaxed);
+
+    let mut current_volume_balance_gain = request.volume_balance_gain;
+    let (mut source, sample_rate, channels) = ExclusiveSource::open(
+        &request.path,
+        request.start_time,
+        request.progress.clone(),
+        current_volume_balance_gain,
+        request.equalizer_handle.clone(),
+        request.user_volume.clone(),
+    )?;
 
     let enumerator = DeviceEnumerator::new().map_err(|error| error.to_string())?;
     let device = if let Some(name) = request.device_name.as_deref() {
@@ -313,7 +366,11 @@ fn run_exclusive_playback(
         .map_err(|error| error.to_string())?;
     let exclusive_format = negotiate_exclusive_format(&audio_client, sample_rate, channels)?;
     let period_hns = audio_client
-        .calculate_aligned_period_near(EXCLUSIVE_PERIOD_HNS, None, &exclusive_format.wave_format)
+        .calculate_aligned_period_near(
+            EXCLUSIVE_PERIOD_HNS,
+            Some(128),
+            &exclusive_format.wave_format,
+        )
         .unwrap_or(EXCLUSIVE_PERIOD_HNS);
     let mode = StreamMode::PollingExclusive {
         buffer_duration_hns: period_hns * EXCLUSIVE_BUFFER_MULTIPLIER,
@@ -330,12 +387,10 @@ fn run_exclusive_playback(
         .get_buffer_size()
         .map_err(|error| error.to_string())? as usize;
 
-    let volume = request.volume.clamp(0.0, 1.0);
     let mut write_buffer =
         Vec::with_capacity(buffer_size.saturating_mul(exclusive_format.bytes_per_frame));
     let _ = source.read_frames_into(
         buffer_size,
-        volume,
         exclusive_format.sample_format,
         &mut write_buffer,
     );
@@ -352,7 +407,6 @@ fn run_exclusive_playback(
     let _ = init_tx.send(Ok(active_device_name));
 
     let mut is_playing = request.is_playing;
-    let mut volume = volume;
 
     loop {
         while let Ok(command) = command_rx.try_recv() {
@@ -381,11 +435,17 @@ fn run_exclusive_playback(
                     audio_client
                         .reset_stream()
                         .map_err(|error| error.to_string())?;
-                    source =
-                        ExclusiveSource::open(&request.path, time, request.progress.clone())?.0;
+                    source = ExclusiveSource::open(
+                        &request.path,
+                        time,
+                        request.progress.clone(),
+                        current_volume_balance_gain,
+                        request.equalizer_handle.clone(),
+                        request.user_volume.clone(),
+                    )?
+                    .0;
                     let _ = source.read_frames_into(
                         buffer_size,
-                        volume,
                         exclusive_format.sample_format,
                         &mut write_buffer,
                     );
@@ -404,8 +464,16 @@ fn run_exclusive_playback(
                     let _ = audio_client.reset_stream();
                     return Ok(());
                 }
-                ExclusiveCommand::SetVolume(next_volume) => {
-                    volume = next_volume.clamp(0.0, 1.0);
+                ExclusiveCommand::SetVolumeBalance {
+                    enabled,
+                    target_gain,
+                } => {
+                    let next_gain = if enabled { target_gain } else { 1.0 };
+                    current_volume_balance_gain = next_gain;
+                    source.normalizer_handle.set_target_gain(next_gain);
+                }
+                ExclusiveCommand::SetEqualizerSettings { settings } => {
+                    request.equalizer_handle.set_settings(settings);
                 }
             }
         }
@@ -425,7 +493,6 @@ fn run_exclusive_playback(
 
         let ended = source.read_frames_into(
             available_frames,
-            volume,
             exclusive_format.sample_format,
             &mut write_buffer,
         );
@@ -437,5 +504,31 @@ fn run_exclusive_playback(
             let _ = audio_client.stop_stream();
             return Ok(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn int32_valid24_samples_are_left_aligned_in_32_bit_container() {
+        let mut output = Vec::new();
+
+        push_sample_bytes(&mut output, 0.5, ExclusiveSampleFormat::Int32Valid24);
+
+        assert_eq!(output, vec![0x00, 0x00, 0x00, 0x40]);
+    }
+
+    #[test]
+    fn format_candidates_prefer_32_bit_container_with_24_valid_bits() {
+        let candidates = exclusive_format_candidates();
+
+        assert_eq!(candidates[1].0, 32);
+        assert_eq!(candidates[1].1, 24);
+        assert!(matches!(
+            candidates[1].3,
+            ExclusiveSampleFormat::Int32Valid24
+        ));
     }
 }

@@ -4,12 +4,6 @@ import { onMounted, onScopeDispose, watch, type Ref } from 'vue';
 import { storeToRefs } from 'pinia';
 
 import { clearPaletteCache, extractDominantColors } from './colorExtraction';
-import {
-  LEGACY_DESKTOP_LYRICS_SETTINGS_KEY,
-  LEGACY_LYRICS_SETTINGS_KEY,
-  normalizeDesktopLyricsSettingsPatch,
-  normalizeLyricsSettingsPatch,
-} from './lyrics/constants';
 import type { LibraryScanProgress, Song } from '../types';
 import {
   playerStorage,
@@ -21,14 +15,13 @@ import {
   type LocalSortMode,
   type PlaylistSortMode,
 } from '../services/storage/playerStorage';
-import { playbackApi } from '../services/tauri/playbackApi';
+import { playbackApi, createEqualizerSignature } from '../services/tauri/playbackApi';
 import { remoteLibraryApi } from '../services/tauri/remoteLibraryApi';
 import { useCollectionsStore } from '../features/collections/store';
 import { useLibraryStore } from '../features/library/store';
 import { usePlaybackStore } from '../features/playback/store';
-import { mergeAppSettings, useSettingsStore } from '../features/settings/store';
+import { useSettingsStore } from '../features/settings/store';
 import { defaultDominantColors, useUiStore } from '../shared/stores/ui';
-import type { AppSettings } from '../types';
 import { isRemoteSong } from '../utils/remoteSong';
 
 interface SeekCompletedPayload {
@@ -173,106 +166,6 @@ const restoreSortSettings = ({
   }
 };
 
-const readLegacyLyricsSettings = <T extends object>(key: string): Partial<T> | null => {
-  if (typeof localStorage === 'undefined') {
-    return null;
-  }
-
-  const raw = localStorage.getItem(key);
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<T>;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-
-    return parsed;
-  } catch {
-    return null;
-  }
-};
-
-const resolveLegacyLyricsSettingsPatch = (
-  saved: Partial<AppSettings>,
-): Partial<Pick<AppSettings, 'lyrics' | 'desktopLyrics'>> => {
-  const patch: Partial<Pick<AppSettings, 'lyrics' | 'desktopLyrics'>> = {};
-
-  if (!saved.lyrics) {
-    const legacyLyrics = readLegacyLyricsSettings<AppSettings['lyrics']>(LEGACY_LYRICS_SETTINGS_KEY);
-    if (legacyLyrics) {
-      patch.lyrics = normalizeLyricsSettingsPatch(legacyLyrics);
-    }
-  }
-
-  if (!saved.desktopLyrics) {
-    const legacyDesktopLyrics = readLegacyLyricsSettings<AppSettings['desktopLyrics']>(LEGACY_DESKTOP_LYRICS_SETTINGS_KEY)
-      ?? readLegacyLyricsSettings<AppSettings['desktopLyrics']>(LEGACY_LYRICS_SETTINGS_KEY);
-    if (legacyDesktopLyrics) {
-      patch.desktopLyrics = normalizeDesktopLyricsSettingsPatch(legacyDesktopLyrics);
-    }
-  }
-
-  return patch;
-};
-
-const restoreAppSettings = (
-  currentSettings: AppSettings,
-  replaceSettings: (settings: AppSettings) => void,
-) => {
-  const storedSettings = playerStorage.readSettings();
-  if (!storedSettings) return;
-
-  try {
-    const saved = storedSettings as Partial<typeof currentSettings>;
-    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return;
-    type SavedThemeShape = Partial<typeof currentSettings.theme> & {
-      enableDynamicBg?: boolean;
-      dynamicBgType?: string;
-      windowMaterial?: string;
-    };
-
-    const savedTheme =
-      (saved.theme && typeof saved.theme === 'object' ? saved.theme : {}) as SavedThemeShape;
-    const savedSidebar =
-      (saved.sidebar && typeof saved.sidebar === 'object' ? saved.sidebar : {}) as Partial<typeof currentSettings.sidebar>;
-    const savedCustomBackground =
-      savedTheme.customBackground && typeof savedTheme.customBackground === 'object'
-        ? savedTheme.customBackground
-        : {} as Partial<typeof currentSettings.theme.customBackground>;
-    const legacyLyricsSettingsPatch = resolveLegacyLyricsSettingsPatch(saved);
-
-    let dynamicBgType = savedTheme.dynamicBgType;
-    if (dynamicBgType === undefined && savedTheme.enableDynamicBg !== undefined) {
-      dynamicBgType = savedTheme.enableDynamicBg ? 'flow' : 'none';
-    }
-
-    const savedWindowMaterial = typeof savedTheme.windowMaterial === 'string'
-      && ['none', 'mica', 'acrylic', 'blur'].includes(savedTheme.windowMaterial)
-      ? savedTheme.windowMaterial as typeof currentSettings.theme.windowMaterial
-      : currentSettings.theme.windowMaterial;
-
-    replaceSettings(mergeAppSettings(currentSettings, {
-      ...saved,
-      ...legacyLyricsSettingsPatch,
-      theme: {
-        ...savedTheme,
-        windowMaterial: savedWindowMaterial,
-        dynamicBgType:
-          savedWindowMaterial !== 'none'
-            ? 'none'
-            : (dynamicBgType || currentSettings.theme.dynamicBgType),
-        customBackground: savedCustomBackground,
-      },
-      sidebar: savedSidebar,
-    }));
-  } catch (error) {
-    console.error('Failed to parse settings:', error);
-  }
-};
-
 export const createPlayerLifecycle = ({
   bootstrapLibrary,
   togglePlay,
@@ -328,6 +221,48 @@ export const createPlayerLifecycle = ({
   const { dominantColors } = storeToRefs(uiStore);
   const scheduleStatePersistence = () => {
     schedulePersistedState();
+  };
+  const syncLoudnessSettings = async () => {
+    const volumeBalance = settings.value.audio.volumeBalance;
+    const song = currentSong.value;
+    await playbackApi.updateLoudnessSettings({
+      enabled: volumeBalance.enabled,
+      songId: song?.id ?? null,
+      songPath: song ? (song.cue_source_path || song.path) : null,
+      gainOffsetDb: volumeBalance.gainOffsetDb,
+      preventClipping: volumeBalance.preventClipping,
+    }).catch(err => {
+      console.warn('Failed to update loudness settings:', err);
+    });
+  };
+
+  const syncEqualizerSettings = async () => {
+    const eq = settings.value.audio.equalizer;
+    
+    // 生成当前即将写入的规范化高精度参数签名
+    const currentParamsSignature = createEqualizerSignature(eq.enabled, eq.preamp, eq.gains);
+    
+    // 从底层查询最后一次成功同步过的签名缓存
+    const lastSynced = playbackApi.getLastSyncedParams();
+    
+    if (currentParamsSignature === lastSynced) {
+      if (import.meta.env.DEV) {
+        console.log(`[playerLifecycle] EQ params already synced (${currentParamsSignature}), skipping duplicate IPC.`);
+      }
+      return;
+    }
+    
+    if (import.meta.env.DEV) {
+      console.log(`[playerLifecycle] EQ params changed from store. Triggering IPC. Signature: ${currentParamsSignature}`);
+    }
+
+    await playbackApi.setEqualizerSettings(
+      eq.enabled,
+      eq.preamp,
+      eq.gains
+    ).catch(err => {
+      console.warn('Failed to update equalizer settings:', err);
+    });
   };
 
   onMounted(async () => {
@@ -404,6 +339,20 @@ export const createPlayerLifecycle = ({
     watch(favoritePaths, scheduleStatePersistence, { deep: true });
     watch(playlists, scheduleStatePersistence, { deep: true });
     watch(settings, scheduleStatePersistence, { deep: true });
+    watch(
+      () => settings.value.audio.volumeBalance,
+      () => {
+        void syncLoudnessSettings();
+      },
+      { deep: true }
+    );
+    watch(
+      () => settings.value.audio.equalizer,
+      () => {
+        void syncEqualizerSettings();
+      },
+      { deep: true }
+    );
     watch(artistCustomOrder, scheduleStatePersistence, { deep: true });
     watch(albumCustomOrder, scheduleStatePersistence, { deep: true });
     watch(folderCustomOrder, scheduleStatePersistence, { deep: true });
@@ -450,7 +399,10 @@ export const createPlayerLifecycle = ({
     };
 
     const updateDominantColors = async (cover: string) => {
-      if (settings.value.theme.dynamicBgType !== 'flow' || !cover) {
+      const needsCoverPalette = settings.value.theme.dynamicBgType === 'flow'
+        || settings.value.desktopLyrics.colorScheme === 'auto';
+
+      if (!needsCoverPalette || !cover) {
         dominantColorTaskId += 1;
         dominantColorSignature = '';
         dominantColors.value = [...defaultDominantColors];
@@ -524,8 +476,18 @@ export const createPlayerLifecycle = ({
       }
     };
 
-    // 流光参数微调时 debounce 延迟重提取主色，避免拖动滑块时频繁触发层切换闪烁
+    // 流光/桌面歌词封面取色共用主色，参数微调时 debounce 延迟重提取，避免拖动滑块时频繁触发层切换闪烁
     let flowTweakTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastPersistedPlaybackTime = Number.NaN;
+
+    const persistCurrentPlaybackTime = () => {
+      if (!currentSong.value) return;
+      const nextTime = Math.max(0, currentTime.value);
+      if (Math.abs(nextTime - lastPersistedPlaybackTime) < 0.5) return;
+      lastPersistedPlaybackTime = nextTime;
+      playerStorage.writeNumber(playerStorageKeys.lastTime, nextTime);
+    };
+
     watch([
       () => settings.value.theme.flowColorBoost,
       () => settings.value.theme.flowDepth,
@@ -541,7 +503,7 @@ export const createPlayerLifecycle = ({
       (dynamicBgType) => {
         if (dynamicBgType !== 'flow') {
           clearPaletteCache();
-          void updateDominantColors('');
+          void updateDominantColors(currentCover.value);
           return;
         }
 
@@ -549,15 +511,24 @@ export const createPlayerLifecycle = ({
       },
     );
 
+    watch(
+      () => settings.value.desktopLyrics.colorScheme,
+      () => {
+        void updateDominantColors(currentCover.value);
+      },
+    );
+
     watch(isPlaying, playing => {
       if (!playing) {
-        playerStorage.writeNumber(playerStorageKeys.lastTime, currentTime.value);
+        persistCurrentPlaybackTime();
       }
     });
 
+    const playbackTimePersistTimer = setInterval(persistCurrentPlaybackTime, 2000);
+
     const beforeUnloadHandler = () => {
       flushPersistedState();
-      playerStorage.writeNumber(playerStorageKeys.lastTime, currentTime.value);
+      persistCurrentPlaybackTime();
     };
 
     onMounted(async () => {
@@ -596,10 +567,14 @@ export const createPlayerLifecycle = ({
         localCustomOrder,
         playlistSortMode,
       });
-      restoreAppSettings(settings.value, settingsStore.replaceSettings);
       await playbackApi.setAudioOutputMode(settings.value.audio.outputMode).catch(error => {
         console.warn('Failed to restore audio output mode:', error);
       });
+      const vb = settings.value.audio.volumeBalance;
+      if (vb) {
+        await syncLoudnessSettings();
+      }
+      await syncEqualizerSettings();
 
       await restorePathBackedState();
       await restoreRecentHistory();
@@ -622,6 +597,8 @@ export const createPlayerLifecycle = ({
       if (remoteAutoSyncTimer) {
         clearInterval(remoteAutoSyncTimer);
       }
+      persistCurrentPlaybackTime();
+      clearInterval(playbackTimePersistTimer);
       dominantColorTaskId += 1;
       dominantColorSignature = '';
       void Promise.all(listenerRegistrations).then(unlisteners => {

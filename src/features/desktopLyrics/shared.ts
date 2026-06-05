@@ -1,5 +1,6 @@
 import type {
   DesktopLyricsSettings,
+  ImportedLyricsFont,
   LyricsStatus,
   LyricLine,
 } from '../../composables/lyrics';
@@ -8,6 +9,7 @@ import type { Song } from '../../types';
 export const DESKTOP_LYRICS_WINDOW_LABEL = 'desktop-lyrics';
 export const DESKTOP_LYRICS_STATE_EVENT = 'desktop-lyrics:state';
 export const DESKTOP_LYRICS_PLAYBACK_EVENT = 'desktop-lyrics:playback';
+export const DESKTOP_LYRICS_READY_EVENT = 'desktop-lyrics:ready';
 export const DESKTOP_LYRICS_REQUEST_STATE_EVENT = 'desktop-lyrics:request-state';
 export const DESKTOP_LYRICS_ACTION_EVENT = 'desktop-lyrics:action';
 export const DESKTOP_LYRICS_VISIBILITY_EVENT = 'desktop-lyrics:visibility';
@@ -70,6 +72,7 @@ export interface DesktopLyricsStatePayload {
   isPlaying: boolean;
   audioDelay: number;
   settings: DesktopLyricsWindowSettings;
+  customLyricsFonts: ImportedLyricsFont[];
   themeColors: string[];
 }
 

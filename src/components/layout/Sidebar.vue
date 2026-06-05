@@ -114,8 +114,8 @@ const {
 const {
   dragOverId,
   dragPosition,
-  handleMouseDown,
-  handleItemMouseMove,
+  handlePointerDown,
+  handleItemPointerMove,
 } = useSidebarPlaylistDragDrop({
   playlists,
   dragSession,
@@ -197,8 +197,8 @@ const handleOpenStatisticsView = () => {
         :dragOverId="dragOverId"
         :dragPosition="dragPosition"
         @createPlaylist="handleCreatePlaylist"
-        @mouseDown="handleMouseDown"
-        @itemMouseMove="handleItemMouseMove"
+        @pointerDown="handlePointerDown"
+        @itemPointerMove="handleItemPointerMove"
         @playlistClick="handlePlaylistClick"
         @playlistContextMenu="handlePlaylistContextMenu"
         @deletePlaylist="handleDeletePlaylist"

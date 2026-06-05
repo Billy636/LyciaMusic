@@ -197,7 +197,7 @@ defineExpose({ detailCoverRef });
       :visible="showContextMenu" 
       :x="contextMenuX" 
       :y="contextMenuY" 
-      :path="currentSong?.path || ''"
+      :song="currentSong"
       @close="showContextMenu = false"
     />
 

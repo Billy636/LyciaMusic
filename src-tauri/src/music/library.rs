@@ -1,5 +1,6 @@
 // music/library.rs - 音乐库管理命令
 
+use super::scanner::ScanOptions;
 use super::scanner::{scan_folder_recursive, scan_single_directory_internal};
 use super::types::{AlbumCatalogItem, ArtistCatalogItem, FolderNode, LibraryFolder, LibrarySong};
 use super::utils::{descendant_like_patterns, normalize_path};
@@ -217,7 +218,7 @@ fn folder_song_matches_query(row: &FolderViewSongRow, query: &str) -> bool {
 fn load_cached_songs(conn: &rusqlite::Connection) -> Result<Vec<LibrarySong>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, path, title, artist, artist_names, effective_artist_names, album, album_artist, album_key, is_various_artists_album, collapse_artist_credits, duration, cover_thumb_path, bitrate, sample_rate, bit_depth, format, container, codec, file_size, track_number, disc_number, added_at, file_modified_at, cue_source_path, cue_start_offset, cue_end_offset, source_type, remote_source_id
+            "SELECT id, path, title, artist, artist_names, effective_artist_names, album, album_artist, album_key, is_various_artists_album, collapse_artist_credits, duration, cover_thumb_path, bitrate, sample_rate, bit_depth, format, container, codec, file_size, track_number, disc_number, added_at, file_modified_at, cue_source_path, cue_start_offset, cue_end_offset, source_type, remote_source_id, comment
              FROM songs",
         )
         .map_err(|e| e.to_string())?;
@@ -272,6 +273,7 @@ fn load_cached_songs(conn: &rusqlite::Connection) -> Result<Vec<LibrarySong>, St
                     .get::<_, Option<String>>(27)?
                     .unwrap_or_else(|| "local".to_string()),
                 remote_source_id: row.get::<_, Option<String>>(28)?,
+                comment: row.get::<_, Option<String>>(29)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -800,10 +802,12 @@ pub async fn get_library_song_paths_for_folder_view(
 
 #[tauri::command]
 pub async fn scan_library(
+    minimum_duration_seconds: Option<u32>,
     app: AppHandle,
     db_state: State<'_, DbState>,
 ) -> Result<Vec<LibrarySong>, String> {
     let db_conn = db_state.conn.clone();
+    let options = ScanOptions::from_minimum_duration_seconds(minimum_duration_seconds);
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let folder_paths: Vec<String> = {
@@ -827,6 +831,7 @@ pub async fn scan_library(
                 Some(app.clone()),
                 index + 1,
                 folder_total.max(1),
+                options,
             );
         }
 
@@ -944,6 +949,45 @@ mod tests {
         .expect("create songs");
     }
 
+    fn create_cached_song_schema(conn: &Connection) {
+        conn.execute(
+            "CREATE TABLE songs (
+                id INTEGER PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                title TEXT,
+                artist TEXT,
+                artist_names TEXT,
+                effective_artist_names TEXT,
+                album TEXT,
+                album_artist TEXT,
+                album_key TEXT,
+                is_various_artists_album INTEGER,
+                collapse_artist_credits INTEGER,
+                duration INTEGER,
+                cover_thumb_path TEXT,
+                bitrate INTEGER,
+                sample_rate INTEGER,
+                bit_depth INTEGER,
+                format TEXT,
+                container TEXT,
+                codec TEXT,
+                file_size INTEGER,
+                track_number TEXT,
+                disc_number TEXT,
+                added_at INTEGER,
+                file_modified_at INTEGER,
+                cue_source_path TEXT,
+                cue_start_offset INTEGER,
+                cue_end_offset INTEGER,
+                source_type TEXT,
+                remote_source_id TEXT,
+                comment TEXT
+            )",
+            [],
+        )
+        .expect("create cached song schema");
+    }
+
     fn insert_song(conn: &Connection, path: &str) {
         conn.execute(
             "INSERT INTO songs (path, title, artist, album) VALUES (?1, 'Title', 'Artist', 'Album')",
@@ -984,5 +1028,22 @@ mod tests {
 
         assert_eq!(remaining, vec!["/library/ab/kept.flac"]);
         assert_eq!(folders, vec!["/library/ab"]);
+    }
+
+    #[test]
+    fn cached_library_songs_include_comment() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        create_cached_song_schema(&conn);
+        conn.execute(
+            "INSERT INTO songs (path, title, artist, album, comment)
+             VALUES (?1, 'Title', 'Artist', 'Album', 'Live version')",
+            ["/library/song.flac"],
+        )
+        .expect("insert cached song");
+
+        let songs = load_cached_songs(&conn).expect("load cached songs");
+
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].comment.as_deref(), Some("Live version"));
     }
 }

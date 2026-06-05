@@ -1,4 +1,5 @@
 use crate::player::device::{default_output_device_name, emit_output_status};
+use crate::player::loudness::{VolumeNormalizer, VolumeNormalizerHandle};
 use crate::player::output::shared::progress_seconds_from_samples;
 use crate::player::output::shared::{restore_current_playback, SharedOutputBackend};
 #[cfg(target_os = "windows")]
@@ -40,6 +41,15 @@ fn reset_playback_progress(progress: &Arc<SharedProgress>) {
     progress.visualizer.reset();
 }
 
+fn should_restore_for_default_device_change(
+    selected_device_name: &Option<String>,
+    last_default_device_name: &Option<String>,
+    next_default_device_name: &Option<String>,
+    _active_device_name: &Option<String>,
+) -> bool {
+    selected_device_name.is_none() && next_default_device_name != last_default_device_name
+}
+
 #[cfg(target_os = "windows")]
 fn stop_exclusive_playback(exclusive_playback: &mut Option<WasapiExclusivePlayback>) {
     if let Some(mut playback) = exclusive_playback.take() {
@@ -55,6 +65,9 @@ fn start_exclusive_playback(
     is_playing: bool,
     start_time: Duration,
     progress: &Arc<SharedProgress>,
+    volume_balance_gain: f32,
+    equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
+    user_volume: Arc<std::sync::atomic::AtomicU32>,
 ) -> Result<WasapiExclusivePlayback, String> {
     WasapiExclusivePlayback::start(ExclusivePlayRequest {
         path,
@@ -63,6 +76,9 @@ fn start_exclusive_playback(
         is_playing,
         progress: progress.clone(),
         start_time,
+        volume_balance_gain,
+        equalizer_handle,
+        user_volume,
     })
     .map_err(|error| error.to_string())
 }
@@ -82,6 +98,9 @@ fn restore_preferred_output(
     current_volume: f32,
     is_playing_flag: bool,
     progress: &Arc<SharedProgress>,
+    volume_balance_gain: f32,
+    equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
+    user_volume: Arc<std::sync::atomic::AtomicU32>,
 ) {
     *output = SharedOutputBackend::open(host, selected_device_name.as_deref()).ok();
     *active_device_name = output
@@ -97,6 +116,9 @@ fn restore_preferred_output(
             is_playing_flag,
             progress_duration(progress),
             progress,
+            volume_balance_gain,
+            equalizer_handle.clone(),
+            user_volume.clone(),
         ) {
             Ok(playback) => {
                 *active_device_name = Some(playback.active_device_name().to_string());
@@ -129,9 +151,10 @@ fn restore_preferred_output(
         output,
         current_sink,
         current_path,
-        current_volume,
         is_playing_flag,
         progress,
+        equalizer_handle,
+        user_volume,
     );
 }
 
@@ -142,9 +165,10 @@ fn restore_shared_output(
     current_sink: &mut Option<Sink>,
     active_device_name: &mut Option<String>,
     current_path: &str,
-    current_volume: f32,
     is_playing_flag: bool,
     progress: &Arc<SharedProgress>,
+    equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
+    user_volume: Arc<std::sync::atomic::AtomicU32>,
 ) {
     *output = SharedOutputBackend::open(host, selected_device_name.as_deref()).ok();
     *active_device_name = output
@@ -154,9 +178,10 @@ fn restore_shared_output(
         output,
         current_sink,
         current_path,
-        current_volume,
         is_playing_flag,
         progress,
+        equalizer_handle,
+        user_volume,
     );
 }
 
@@ -366,9 +391,12 @@ fn append_decoded_source<R>(
     reader: R,
     output: &Option<SharedOutputBackend>,
     current_sink: &mut Option<Sink>,
-    current_volume: f32,
     progress: &Arc<SharedProgress>,
     start_offset: Option<Duration>,
+    volume_balance_gain: f32,
+    current_normalizer_handle: &mut Option<VolumeNormalizerHandle>,
+    equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
+    user_volume: Arc<std::sync::atomic::AtomicU32>,
 ) where
     R: Read + Seek + Send + Sync + 'static,
 {
@@ -392,19 +420,37 @@ fn append_decoded_source<R>(
                 progress.visualizer.reset();
             }
 
-            let skipped_source = source
-                .convert_samples::<f32>()
-                .skip_duration(offset);
+            let skipped_source = source.convert_samples::<f32>().skip_duration(offset);
 
-            let timed_source = TimedSource::new(
+            // 1. VolumeNormalizer 音量平衡节点
+            let (normalized_source, handle) = VolumeNormalizer::new(
                 skipped_source,
+                volume_balance_gain,
+                100, // ramp 100ms
+            );
+            *current_normalizer_handle = Some(handle);
+
+            // 2. Equalizer 10段级联滤波器组
+            let eq_source =
+                crate::player::equalizer::Equalizer::new(normalized_source, equalizer_handle);
+
+            // 3. UserVolumeSource 自定义主音量节点
+            let vol_source =
+                crate::player::equalizer::UserVolumeSource::new(eq_source, user_volume);
+
+            // 4. ClipGuardSource 最终安全限幅源
+            let clip_source = crate::player::equalizer::ClipGuardSource::new(vol_source);
+
+            // 5. TimedSource 可视化进度节点
+            let timed_source = TimedSource::new(
+                clip_source,
                 progress.samples_played.clone(),
                 progress.visualizer.clone(),
             );
 
             if let Some(sink) = current_sink {
                 sink.append(timed_source);
-                sink.set_volume(current_volume);
+                sink.set_volume(1.0); // 必须固定共享模式 Sink 自身音量恒为 1.0，由 UserVolumeSource 接管主音量
                 sink.play();
             }
         }
@@ -416,10 +462,13 @@ fn handle_play(
     output: &Option<SharedOutputBackend>,
     current_sink: &mut Option<Sink>,
     current_path: &mut String,
-    current_volume: f32,
     is_playing_flag: &mut bool,
     progress: &Arc<SharedProgress>,
     start_offset_ms: Option<u64>,
+    volume_balance_gain: f32,
+    current_normalizer_handle: &mut Option<VolumeNormalizerHandle>,
+    equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
+    user_volume: Arc<std::sync::atomic::AtomicU32>,
 ) {
     *current_path = source.display_path();
     *is_playing_flag = true;
@@ -438,9 +487,12 @@ fn handle_play(
                     file,
                     output,
                     current_sink,
-                    current_volume,
                     progress,
                     start_offset,
+                    volume_balance_gain,
+                    current_normalizer_handle,
+                    equalizer_handle,
+                    user_volume,
                 );
             }
         }
@@ -450,9 +502,12 @@ fn handle_play(
                     reader,
                     output,
                     current_sink,
-                    current_volume,
                     progress,
                     start_offset,
+                    volume_balance_gain,
+                    current_normalizer_handle,
+                    equalizer_handle,
+                    user_volume,
                 );
             }
         }
@@ -466,10 +521,13 @@ fn handle_seek(
     output: &Option<SharedOutputBackend>,
     current_sink: &mut Option<Sink>,
     current_path: &str,
-    current_volume: f32,
     is_playing_flag: &mut bool,
     progress: &Arc<SharedProgress>,
     app: &AppHandle,
+    volume_balance_gain: f32,
+    current_normalizer_handle: &mut Option<VolumeNormalizerHandle>,
+    equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
+    user_volume: Arc<std::sync::atomic::AtomicU32>,
 ) {
     let clamped_time = time.max(0.0);
     let jump_target = Duration::from_secs_f64(clamped_time);
@@ -510,14 +568,42 @@ fn handle_seek(
                                     .samples_played
                                     .store(samples_to_skip, Ordering::Relaxed);
 
+                                let skipped_source =
+                                    source.convert_samples::<f32>().skip_duration(jump_target);
+
+                                // 1. VolumeNormalizer 音量平衡节点
+                                let (normalized_source, handle) = VolumeNormalizer::new(
+                                    skipped_source,
+                                    volume_balance_gain,
+                                    100, // ramp 100ms
+                                );
+                                *current_normalizer_handle = Some(handle);
+
+                                // 2. Equalizer 10段级联滤波器组
+                                let eq_source = crate::player::equalizer::Equalizer::new(
+                                    normalized_source,
+                                    equalizer_handle,
+                                );
+
+                                // 3. UserVolumeSource 自定义主音量节点
+                                let vol_source = crate::player::equalizer::UserVolumeSource::new(
+                                    eq_source,
+                                    user_volume,
+                                );
+
+                                // 4. ClipGuardSource 最终安全限幅源
+                                let clip_source =
+                                    crate::player::equalizer::ClipGuardSource::new(vol_source);
+
+                                // 5. TimedSource 可视化进度节点
                                 let timed_source = TimedSource::new(
-                                    source.convert_samples::<f32>().skip_duration(jump_target),
+                                    clip_source,
                                     progress.samples_played.clone(),
                                     progress.visualizer.clone(),
                                 );
 
                                 if let Some(new_sink) = current_sink {
-                                    new_sink.set_volume(current_volume);
+                                    new_sink.set_volume(1.0); // 必须固定为 1.0
                                     new_sink.append(timed_source);
                                     if is_playing {
                                         new_sink.play();
@@ -556,6 +642,12 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
     let output_status = Arc::new(Mutex::new(AudioOutputStatus::default()));
     let thread_output_status = output_status.clone();
 
+    // 在起播时创建非阻塞的 Equalizer 和 UserVolume 快照句柄
+    let thread_eq_handle = Arc::new(crate::player::equalizer::EqualizerHandle::new(
+        crate::player::equalizer::EqualizerSettings::default(),
+    ));
+    let thread_user_volume = Arc::new(AtomicU32::new(1.0_f32.to_bits()));
+
     thread::spawn(move || {
         let host = cpal::default_host();
         let mut selected_device_name: Option<String> = None;
@@ -569,9 +661,12 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
         let mut requested_output_mode = AudioOutputMode::Shared;
         let mut active_output_mode = AudioOutputMode::Shared;
         let mut fallback_reason: Option<String> = None;
+        let mut last_default_device_name = default_output_device_name(&host);
         let mut active_device_name = output
             .as_ref()
             .map(|output| output.active_device_name().to_string());
+        let mut current_normalizer_handle: Option<VolumeNormalizerHandle> = None;
+        let mut current_volume_balance_gain = 1.0;
 
         if let Some(output) = &output {
             current_sink = output.create_sink().ok();
@@ -594,8 +689,10 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         source,
                         output_mode,
                         start_offset_ms,
+                        volume_balance_gain,
                     } => {
                         requested_output_mode = output_mode;
+                        current_volume_balance_gain = volume_balance_gain;
                         let source_is_remote = source.is_remote();
                         let display_path = source.display_path();
 
@@ -608,8 +705,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
 
                         #[cfg(target_os = "windows")]
                         if output_mode == AudioOutputMode::WasapiExclusive && !source_is_remote {
-                            let exclusive_start = start_offset_ms
-                                .map_or(Duration::ZERO, Duration::from_millis);
+                            let exclusive_start =
+                                start_offset_ms.map_or(Duration::ZERO, Duration::from_millis);
                             match start_exclusive_playback(
                                 display_path.clone(),
                                 selected_device_name.clone(),
@@ -617,8 +714,15 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                                 true,
                                 exclusive_start,
                                 &thread_progress,
+                                current_volume_balance_gain,
+                                thread_eq_handle.clone(),
+                                thread_user_volume.clone(),
                             ) {
                                 Ok(playback) => {
+                                    if selected_device_name.is_none() {
+                                        last_default_device_name =
+                                            default_output_device_name(&host);
+                                    }
                                     active_device_name =
                                         Some(playback.active_device_name().to_string());
                                     active_output_mode = AudioOutputMode::WasapiExclusive;
@@ -665,6 +769,9 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             output =
                                 SharedOutputBackend::open(&host, selected_device_name.as_deref())
                                     .ok();
+                            if selected_device_name.is_none() {
+                                last_default_device_name = default_output_device_name(&host);
+                            }
                             active_device_name = output
                                 .as_ref()
                                 .map(|output| output.active_device_name().to_string());
@@ -685,10 +792,13 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             &output,
                             &mut current_sink,
                             &mut current_path,
-                            current_volume,
                             &mut is_playing_flag,
                             &thread_progress,
                             start_offset_ms,
+                            current_volume_balance_gain,
+                            &mut current_normalizer_handle,
+                            thread_eq_handle.clone(),
+                            thread_user_volume.clone(),
                         )
                     }
                     AudioCommand::Pause => {
@@ -703,6 +813,17 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         if let Some(sink) = &current_sink {
                             sink.pause();
                         }
+                    }
+                    AudioCommand::Stop => {
+                        is_playing_flag = false;
+                        current_path.clear();
+                        reset_playback_progress(&thread_progress);
+                        if let Some(sink) = &current_sink {
+                            sink.stop();
+                        }
+                        current_sink = None;
+                        #[cfg(target_os = "windows")]
+                        stop_exclusive_playback(&mut exclusive_playback);
                     }
                     AudioCommand::Resume => {
                         is_playing_flag = true;
@@ -744,24 +865,18 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             &output,
                             &mut current_sink,
                             &current_path,
-                            current_volume,
                             &mut is_playing_flag,
                             &thread_progress,
                             &thread_app_handle,
+                            current_volume_balance_gain,
+                            &mut current_normalizer_handle,
+                            thread_eq_handle.clone(),
+                            thread_user_volume.clone(),
                         )
                     }
                     AudioCommand::SetVolume(vol) => {
                         current_volume = vol;
-                        #[cfg(target_os = "windows")]
-                        if let Some(playback) = &exclusive_playback {
-                            playback.set_volume(vol);
-                        } else if let Some(sink) = &current_sink {
-                            sink.set_volume(vol);
-                        }
-                        #[cfg(not(target_os = "windows"))]
-                        if let Some(sink) = &current_sink {
-                            sink.set_volume(vol);
-                        }
+                        thread_user_volume.store(vol.to_bits(), Ordering::Relaxed);
                     }
                     AudioCommand::SetDevice(device_name) => {
                         selected_device_name = device_name;
@@ -788,7 +903,13 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             current_volume,
                             is_playing_flag,
                             &thread_progress,
+                            current_volume_balance_gain,
+                            thread_eq_handle.clone(),
+                            thread_user_volume.clone(),
                         );
+                        if selected_device_name.is_none() {
+                            last_default_device_name = default_output_device_name(&host);
+                        }
 
                         emit_output_status(
                             &thread_app_handle,
@@ -825,7 +946,13 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             current_volume,
                             is_playing_flag,
                             &thread_progress,
+                            current_volume_balance_gain,
+                            thread_eq_handle.clone(),
+                            thread_user_volume.clone(),
                         );
+                        if selected_device_name.is_none() {
+                            last_default_device_name = default_output_device_name(&host);
+                        }
 
                         emit_output_status(
                             &thread_app_handle,
@@ -836,6 +963,29 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             active_output_mode,
                             fallback_reason.clone(),
                         );
+                    }
+                    AudioCommand::SetVolumeBalance {
+                        enabled,
+                        target_gain,
+                    } => {
+                        let next_gain = if enabled { target_gain } else { 1.0 };
+                        current_volume_balance_gain = next_gain;
+
+                        if let Some(ref handle) = current_normalizer_handle {
+                            handle.set_target_gain(next_gain);
+                        }
+
+                        #[cfg(target_os = "windows")]
+                        if let Some(ref playback) = exclusive_playback {
+                            playback.set_volume_balance(enabled, target_gain);
+                        }
+                    }
+                    AudioCommand::SetEqualizerSettings { settings } => {
+                        thread_eq_handle.set_settings(settings.clone());
+                        #[cfg(target_os = "windows")]
+                        if let Some(ref playback) = exclusive_playback {
+                            playback.set_equalizer_settings(settings);
+                        }
                     }
                 },
                 Err(RecvTimeoutError::Timeout) => {
@@ -856,10 +1006,14 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                                 &mut current_sink,
                                 &mut active_device_name,
                                 &current_path,
-                                current_volume,
                                 is_playing_flag,
                                 &thread_progress,
+                                thread_eq_handle.clone(),
+                                thread_user_volume.clone(),
                             );
+                            if selected_device_name.is_none() {
+                                last_default_device_name = default_output_device_name(&host);
+                            }
 
                             emit_output_status(
                                 &thread_app_handle,
@@ -875,7 +1029,13 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
 
                     if selected_device_name.is_none() {
                         let next_default_name = default_output_device_name(&host);
-                        if next_default_name != active_device_name {
+                        if should_restore_for_default_device_change(
+                            &selected_device_name,
+                            &last_default_device_name,
+                            &next_default_name,
+                            &active_device_name,
+                        ) {
+                            last_default_device_name = next_default_name;
                             if let Some(sink) = &current_sink {
                                 sink.stop();
                             }
@@ -897,6 +1057,9 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                                 current_volume,
                                 is_playing_flag,
                                 &thread_progress,
+                                current_volume_balance_gain,
+                                thread_eq_handle.clone(),
+                                thread_user_volume.clone(),
                             );
 
                             emit_output_status(
@@ -948,18 +1111,42 @@ mod tests {
         let mut current_sink = None;
         let mut current_path = String::new();
         let mut is_playing_flag = false;
+        let mut current_normalizer_handle = None;
+
+        let eq_handle = Arc::new(crate::player::equalizer::EqualizerHandle::new(
+            crate::player::equalizer::EqualizerSettings::default(),
+        ));
+        let user_volume = Arc::new(std::sync::atomic::AtomicU32::new(1.0_f32.to_bits()));
 
         handle_play(
             AudioSource::LocalFile("Z:\\missing\\song.flac".to_string()),
             &None,
             &mut current_sink,
             &mut current_path,
-            1.0,
             &mut is_playing_flag,
             &progress,
             None,
+            1.0,
+            &mut current_normalizer_handle,
+            eq_handle,
+            user_volume,
         );
 
         assert_eq!(progress.samples_played.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn default_device_monitor_ignores_active_output_display_name() {
+        let selected_device_name = None;
+        let last_default_device_name = Some("CPAL default device".to_string());
+        let next_default_device_name = Some("CPAL default device".to_string());
+        let active_device_name = Some("WASAPI friendly device".to_string());
+
+        assert!(!should_restore_for_default_device_change(
+            &selected_device_name,
+            &last_default_device_name,
+            &next_default_device_name,
+            &active_device_name,
+        ));
     }
 }

@@ -6,6 +6,8 @@ import SortModeIcon from '../common/SortModeIcon.vue';
 import { useToast } from '../../composables/toast';
 import { usePlayerViewState } from '../../composables/usePlayerViewState';
 import { dragSession } from '../../composables/dragState';
+import { useAddToPlaylistDialog } from '../../features/collections/addToPlaylistDialog';
+import { useLibraryRuntimeActions } from '../../features/library/useLibraryRuntimeActions';
 
 const { folderSortMode, setFolderSortMode } = usePlayerViewState();
 
@@ -118,6 +120,24 @@ const emitRootCreatePlaylist = () => {
   emit('rootCreatePlaylist', rootNode.path, rootNode.name);
 };
 
+const emitRootAddToPlaylist = () => {
+  const rootNode = props.folderTree.find(node => node.path === targetRootPath.value);
+  if (!rootNode) {
+    showRootMenu.value = false;
+    return;
+  }
+
+  showRootMenu.value = false;
+  const { getSongsInFolder } = useLibraryRuntimeActions();
+  const { openAddToPlaylistDialog } = useAddToPlaylistDialog();
+  const songs = getSongsInFolder(rootNode.path);
+  if (songs.length === 0) {
+    toast.showToast('该文件夹下没有可用于添加到歌单的歌曲', 'info');
+    return;
+  }
+  openAddToPlaylistDialog(songs.map(song => song.path));
+};
+
 onMounted(() => window.addEventListener('click', handleGlobalClick));
 onUnmounted(() => {
   window.removeEventListener('click', handleGlobalClick);
@@ -166,6 +186,7 @@ onUnmounted(() => {
           :isManagementMode="isManagementMode"
           @close="showRootMenu = false"
           @create-playlist="emitRootCreatePlaylist"
+          @add-to-playlist="emitRootAddToPlaylist"
           @remove="path => emit('removeFolder', path)"
           @new-folder="showRootMenu = false; emit('newFolder', targetRootPath)"
           @delete-disk="showRootMenu = false; emit('deleteFolderDisk', targetRootPath)"

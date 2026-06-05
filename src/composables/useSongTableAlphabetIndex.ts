@@ -350,12 +350,12 @@ export function useSongTableAlphabetIndex({
 
   const navigateToIndexKey = (targetKey: AlphabetIndexKey) => {
     const resolvedKey = resolveNearestIndexKey(targetKey);
-    if (!resolvedKey) {
+    if (!resolvedKey || !firstSongIndexByKey.value.has(resolvedKey)) {
       return;
     }
 
     const songIndex = firstSongIndexByKey.value.get(resolvedKey);
-    if (songIndex !== undefined) {
+    if (songIndex !== undefined && songIndex >= 0 && songIndex < songs.value.length) {
       jumpToSongIndex(songIndex);
     }
   };
@@ -434,6 +434,7 @@ export function useSongTableAlphabetIndex({
 
   return {
     showAlphabetIndex,
+    firstSongIndexByKey,
     activeIndexKey,
     indexBarRef,
     isIndexDragging,

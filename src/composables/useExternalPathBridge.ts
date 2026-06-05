@@ -7,9 +7,35 @@ type ExternalPathSource = 'drop' | 'open';
 
 interface UseExternalPathBridgeOptions {
   handleExternalPaths: (paths: string[], options?: { source?: ExternalPathSource }) => Promise<void>;
+  beforeWindowShow?: () => Promise<unknown>;
+  afterWindowShow?: () => Promise<unknown> | void;
 }
 
-export function useExternalPathBridge({ handleExternalPaths }: UseExternalPathBridgeOptions) {
+interface StartupWindow {
+  show: () => Promise<unknown>;
+  setFocus: () => Promise<unknown>;
+}
+
+interface StartupWindowHooks {
+  beforeShow?: () => Promise<unknown>;
+  afterShow?: () => Promise<unknown> | void;
+}
+
+export async function showMainWindowAfterStartup(
+  appWindow: StartupWindow,
+  hooks: StartupWindowHooks = {},
+) {
+  await hooks.beforeShow?.();
+  await appWindow.show();
+  await appWindow.setFocus();
+  await hooks.afterShow?.();
+}
+
+export function useExternalPathBridge({
+  handleExternalPaths,
+  beforeWindowShow,
+  afterWindowShow,
+}: UseExternalPathBridgeOptions) {
   const isExternalDragActive = ref(false);
   let externalPathTask: Promise<void> = Promise.resolve();
   let unlistenDragDrop: (() => void) | null = null;
@@ -56,8 +82,10 @@ export function useExternalPathBridge({ handleExternalPaths }: UseExternalPathBr
 
     try {
       const appWindow = getCurrentWindow();
-      await appWindow.show();
-      await appWindow.setFocus();
+      await showMainWindowAfterStartup(appWindow, {
+        beforeShow: beforeWindowShow,
+        afterShow: afterWindowShow,
+      });
     } catch (error) {
       console.error('Failed to show window on startup:', error);
     }

@@ -1,18 +1,22 @@
 import type {
   DesktopLyricsSettings,
   DesktopLyricsPlayerAlignment,
+  ImportedLyricsFont,
   LyricsColorScheme,
   LyricsFontPreset,
   LyricsPlayerAlignment,
+  LyricsPlayerRenderMode,
   LyricsSettings,
 } from '../../types';
 
 export type {
   DesktopLyricsSettings,
   DesktopLyricsPlayerAlignment,
+  ImportedLyricsFont,
   LyricsColorScheme,
   LyricsFontPreset,
   LyricsPlayerAlignment,
+  LyricsPlayerRenderMode,
   LyricsSettings,
 };
 
@@ -23,6 +27,7 @@ export interface LyricLine {
   translation: string;
   romaji: string;
   words?: LyricWord[];
+  romajiWords?: LyricWord[];
   secondary?: string[];
 }
 

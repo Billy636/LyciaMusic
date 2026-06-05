@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import ModernModal from '../common/ModernModal.vue';
+import SponsorModal from './SponsorModal.vue';
 import { compareVersions, fetchLatestRelease, fetchOfficialLatestRelease } from '../../utils/update';
 
 const REPO_OWNER = 'Billy636';
@@ -15,6 +16,7 @@ const appVersion = ref('');
 const isCheckingUpdate = ref(false);
 
 const dialogVisible = ref(false);
+const sponsorVisible = ref(false);
 const dialogTitle = ref('');
 const dialogContent = ref('');
 const dialogConfirmText = ref('确定');
@@ -240,10 +242,21 @@ onMounted(() => {
         <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm1-11a1 1 0 1 0-2 0v2H7a1 1 0 1 0 0 2h2v2a1 1 0 1 0 2 0v-2h2a1 1 0 1 0 0-2h-2V7Z" clip-rule="evenodd" /></svg>
         {{ isCheckingUpdate ? '检查中...' : '检查更新' }}
       </button>
+
+      <button
+        type="button"
+        @click="sponsorVisible = true"
+        class="flex cursor-pointer items-center gap-2 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 px-5 py-2.5 font-medium text-white shadow-lg shadow-rose-500/20 transition active:scale-95 hover:from-pink-600 hover:to-rose-600"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd" />
+        </svg>
+        支持作者
+      </button>
     </div>
 
     <div class="mt-8 text-xs text-gray-400 dark:text-gray-600">
-      Copyright © 2026 LyciaPlayer Developer. All Rights Reserved.
+      Copyright © 2026 LyciaPlayer Developer. Licensed under AGPL-3.0-only.
     </div>
 
     <ModernModal
@@ -253,6 +266,10 @@ onMounted(() => {
       :confirm-text="dialogConfirmText"
       :cancel-text="dialogCancelText"
       @confirm="handleDialogConfirm"
+    />
+
+    <SponsorModal
+      v-model:visible="sponsorVisible"
     />
 
     <Teleport to="body">

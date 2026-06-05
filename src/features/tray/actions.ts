@@ -10,7 +10,7 @@ export const TRAY_MENU_PANEL_WIDTH = 190;
 export const TRAY_MENU_SUBMENU_WIDTH = 132;
 export const TRAY_MENU_SUBMENU_GAP = 8;
 export const TRAY_MENU_WINDOW_WIDTH = TRAY_MENU_PANEL_WIDTH + TRAY_MENU_SUBMENU_WIDTH + TRAY_MENU_SUBMENU_GAP;
-export const TRAY_MENU_WINDOW_HEIGHT = 268;
+export const TRAY_MENU_WINDOW_HEIGHT = 276;
 
 export type TrayMenuSubmenuPlacement = 'left' | 'right';
 

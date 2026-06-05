@@ -235,6 +235,7 @@ pub fn open_external_program(path: String, args: Vec<String>) -> Result<(), Stri
 #[tauri::command]
 pub fn refresh_folder_songs(
     folder_path: String,
+    minimum_duration_seconds: Option<u32>,
     db_state: tauri::State<'_, crate::database::DbState>,
 ) -> Result<Vec<crate::music::types::Song>, String> {
     // 复用现有的扫描逻辑
@@ -244,5 +245,104 @@ pub fn refresh_folder_songs(
         None,
         1,
         1,
+        crate::music::scanner::ScanOptions::from_minimum_duration_seconds(minimum_duration_seconds),
     )
 }
+
+#[tauri::command]
+pub fn file_exists(path: String) -> bool {
+    std::path::Path::new(&path).is_file()
+}
+
+const APP_IDENTIFIER: &str = "com.lover.lyciaplayer";
+const GPU_CONFIG_FILE: &str = "gpu_config.json";
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GpuConfig {
+    gpu_acceleration: bool,
+}
+
+#[cfg(target_os = "windows")]
+pub fn gpu_config_path() -> Result<PathBuf, String> {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .map(|dir| dir.join(APP_IDENTIFIER).join(GPU_CONFIG_FILE))
+        .ok_or_else(|| "APPDATA environment variable not found".to_string())
+}
+
+#[cfg(target_os = "windows")]
+pub fn should_disable_gpu_for_startup() -> bool {
+    let Ok(path) = gpu_config_path() else {
+        return false;
+    };
+
+    if !path.exists() {
+        return false;
+    }
+
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+
+    match serde_json::from_str::<GpuConfig>(&content) {
+        Ok(config) => !config.gpu_acceleration,
+        Err(_) => false,
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn append_webview2_browser_arg(arg: &str) {
+    const KEY: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
+
+    let current = std::env::var(KEY).unwrap_or_default();
+
+    if current.split_whitespace().any(|item| item == arg) {
+        return;
+    }
+
+    let next = if current.trim().is_empty() {
+        arg.to_string()
+    } else {
+        format!("{} {}", current.trim(), arg)
+    };
+
+    std::env::set_var(KEY, next);
+}
+
+#[tauri::command]
+pub fn set_gpu_acceleration(
+    app_handle: tauri::AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    #[cfg(not(target_os = "windows"))]
+    use tauri::Manager;
+
+    #[cfg(target_os = "windows")]
+    let path = {
+        let _ = app_handle;
+        gpu_config_path()?
+    };
+    
+    #[cfg(not(target_os = "windows"))]
+    let path = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(GPU_CONFIG_FILE);
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let config = GpuConfig {
+        gpu_acceleration: enabled,
+    };
+
+    let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+
+    std::fs::write(path, content).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+

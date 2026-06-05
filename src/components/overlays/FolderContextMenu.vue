@@ -21,6 +21,7 @@ const emit = defineEmits([
   'play',
   'addToQueue',
   'createPlaylist',
+  'addToPlaylist',
   'openFolder',
   'remove',
   'refresh',
@@ -178,7 +179,16 @@ const motionDelay = (index: number): CSSProperties => ({
           <span>创建为歌单</span>
         </div>
 
-        <div :class="itemClass" :style="motionDelay(4)" @click="emit('openFolder')">
+        <div :class="itemClass" :style="motionDelay(4)" @click="emit('addToPlaylist')">
+          <div class="mr-3 flex h-5 w-5 items-center justify-center text-gray-500 group-hover:text-gray-800">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <span>添加到歌单</span>
+        </div>
+
+        <div :class="itemClass" :style="motionDelay(5)" @click="emit('openFolder')">
           <div class="mr-3 flex h-5 w-5 items-center justify-center text-gray-500 group-hover:text-gray-800">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
@@ -187,9 +197,9 @@ const motionDelay = (index: number): CSSProperties => ({
           <span>打开所在目录</span>
         </div>
 
-        <div class="song-menu-divider" :style="motionDelay(5)"></div>
+        <div class="song-menu-divider" :style="motionDelay(6)"></div>
 
-        <div :class="itemClass" :style="motionDelay(6)" @click="emit('refresh')">
+        <div :class="itemClass" :style="motionDelay(7)" @click="emit('refresh')">
           <div class="mr-3 flex h-5 w-5 items-center justify-center text-gray-500 group-hover:text-gray-800">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -199,13 +209,13 @@ const motionDelay = (index: number): CSSProperties => ({
         </div>
 
         <template v-if="showManagementActions">
-          <div class="song-menu-divider" :style="motionDelay(7)"></div>
-          <div :class="sectionTitleClass" :style="motionDelay(8)">仅管理模式可用</div>
+          <div class="song-menu-divider" :style="motionDelay(8)"></div>
+          <div :class="sectionTitleClass" :style="motionDelay(9)">仅管理模式可用</div>
 
           <button
             type="button"
             :class="canRemoveFromLibrary ? enabledItemClass : disabledItemClass"
-            :style="motionDelay(9)"
+            :style="motionDelay(10)"
             :disabled="!canRemoveFromLibrary"
             @click="emitIfAllowed('remove', canRemoveFromLibrary)"
           >
@@ -220,7 +230,7 @@ const motionDelay = (index: number): CSSProperties => ({
           <button
             type="button"
             :class="enabledItemClass"
-            :style="motionDelay(10)"
+            :style="motionDelay(11)"
             @click="emitIfAllowed('new-folder', showManagementActions)"
           >
             <div class="mr-3 flex h-5 w-5 items-center justify-center text-gray-500 group-hover:text-gray-800">
@@ -234,7 +244,7 @@ const motionDelay = (index: number): CSSProperties => ({
           <button
             type="button"
             :class="enabledItemClass"
-            :style="motionDelay(11)"
+            :style="motionDelay(12)"
             @click="emitIfAllowed('delete-disk', showManagementActions)"
           >
             <div class="mr-3 flex h-5 w-5 items-center justify-center text-[#EC4141]">

@@ -11,6 +11,7 @@ import FolderTreeItem from '../common/FolderTreeItem.vue';
 import ModernInputModal from '../common/ModernInputModal.vue';
 import ModernModal from '../common/ModernModal.vue';
 import FolderContextMenu from '../overlays/FolderContextMenu.vue';
+import { useAddToPlaylistDialog } from '../../features/collections/addToPlaylistDialog';
 
 const props = withDefaults(defineProps<{
   isManagementMode?: boolean;
@@ -317,6 +318,22 @@ const createPlaylistFromFolder = async () => {
   showMenu.value = false;
 };
 
+const addFolderToPlaylist = async () => {
+  if (!targetFolder.value) {
+    return;
+  }
+
+  const songs = await resolveFolderMenuSongs(targetFolder.value.path);
+  if (songs.length > 0) {
+    const { openAddToPlaylistDialog } = useAddToPlaylistDialog();
+    openAddToPlaylistDialog(songs.map(song => song.path));
+  } else {
+    toast.showToast('No songs found in folder', 'info');
+  }
+
+  showMenu.value = false;
+};
+
 const openFolder = () => {
   if (!targetFolder.value) {
     return;
@@ -578,6 +595,7 @@ onUnmounted(() => {
       @play="playFolder"
       @add-to-queue="addToQueue"
       @create-playlist="createPlaylistFromFolder"
+      @add-to-playlist="addFolderToPlaylist"
       @open-folder="openFolder"
       @refresh="handleRefreshFolder"
       @remove="removeFolderItem"

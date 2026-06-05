@@ -449,34 +449,48 @@ const getGradientForArtist = (name: string) => {
   return gradients[Math.abs(hash) % gradients.length];
 };
 
-let mouseDownInfo: { x: number; y: number; index: number; artist: ArtistListItem } | null = null;
+let pointerDownInfo: { x: number; y: number; index: number; artist: ArtistListItem } | null = null;
 
-const handleMouseDown = (event: MouseEvent, index: number, artist: ArtistListItem) => {
-  if (isSearchActive.value || event.button !== 0) {
+const handlePointerDown = (event: PointerEvent, index: number, artist: ArtistListItem) => {
+  if (isSearchActive.value || (event.pointerType === 'mouse' && event.button !== 0)) {
     return;
   }
 
-  mouseDownInfo = { x: event.clientX, y: event.clientY, index, artist };
+  pointerDownInfo = { x: event.clientX, y: event.clientY, index, artist };
 };
 
-const handleGlobalMouseMove = (event: MouseEvent) => {
-  if (!mouseDownInfo || dragSession.active) {
+const handleGlobalPointerMove = (event: PointerEvent) => {
+  if (!pointerDownInfo || dragSession.active) {
     return;
   }
 
-  const dist = Math.hypot(event.clientX - mouseDownInfo.x, event.clientY - mouseDownInfo.y);
+  if (event.pointerType !== 'mouse') {
+    event.preventDefault();
+  }
+
+  const dist = Math.hypot(event.clientX - pointerDownInfo.x, event.clientY - pointerDownInfo.y);
   if (dist <= 5) {
     return;
   }
 
   dragSession.active = true;
   dragSession.type = 'artist';
-  dragSession.data = { index: mouseDownInfo.index, name: mouseDownInfo.artist.name };
+  dragSession.data = { index: pointerDownInfo.index, name: pointerDownInfo.artist.name };
 };
 
-const handleGlobalMouseUp = () => {
-  if (dragSession.active && dragSession.type === 'artist' && dragOverName.value && mouseDownInfo) {
-    const fromIndex = mouseDownInfo.index;
+const resetArtistDrag = () => {
+  pointerDownInfo = null;
+  if (dragSession.type === 'artist') {
+    dragSession.active = false;
+    dragSession.type = 'song';
+    dragSession.data = null;
+    dragOverName.value = null;
+  }
+};
+
+const handleGlobalPointerEnd = (cancelled = false) => {
+  if (!cancelled && dragSession.active && dragSession.type === 'artist' && dragOverName.value && pointerDownInfo) {
+    const fromIndex = pointerDownInfo.index;
     const toIndex = filteredArtistList.value.findIndex((artist) => artist.name === dragOverName.value);
 
     if (toIndex !== -1 && fromIndex !== toIndex) {
@@ -489,16 +503,13 @@ const handleGlobalMouseUp = () => {
     }
   }
 
-  mouseDownInfo = null;
-  if (dragSession.type === 'artist') {
-    dragSession.active = false;
-    dragSession.type = 'song';
-    dragSession.data = null;
-    dragOverName.value = null;
-  }
+  resetArtistDrag();
 };
 
-const handleItemMouseMove = (_event: MouseEvent, artistName: string) => {
+const handleGlobalPointerUp = () => handleGlobalPointerEnd(false);
+const handleGlobalPointerCancel = () => handleGlobalPointerEnd(true);
+
+const handleItemPointerMove = (_event: PointerEvent, artistName: string) => {
   if (dragSession.active && dragSession.type === 'artist') {
     dragOverName.value = artistName;
   }
@@ -513,8 +524,9 @@ const closeMenu = (event: MouseEvent) => {
 
 onMounted(() => {
   updateViewportMetrics();
-  window.addEventListener('mousemove', handleGlobalMouseMove);
-  window.addEventListener('mouseup', handleGlobalMouseUp);
+  window.addEventListener('pointermove', handleGlobalPointerMove);
+  window.addEventListener('pointerup', handleGlobalPointerUp);
+  window.addEventListener('pointercancel', handleGlobalPointerCancel);
   window.addEventListener('click', closeMenu);
   window.addEventListener('resize', updateViewportMetrics);
   if (containerRef.value) {
@@ -533,8 +545,9 @@ onBeforeUnmount(() => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener('mousemove', handleGlobalMouseMove);
-  window.removeEventListener('mouseup', handleGlobalMouseUp);
+  window.removeEventListener('pointermove', handleGlobalPointerMove);
+  window.removeEventListener('pointerup', handleGlobalPointerUp);
+  window.removeEventListener('pointercancel', handleGlobalPointerCancel);
   window.removeEventListener('click', closeMenu);
   window.removeEventListener('resize', updateViewportMetrics);
   if (containerResizeObserver) {
@@ -638,12 +651,12 @@ onUnmounted(() => {
             <div
               v-for="item in row.items"
               :key="item.artist.name"
-              class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/5 p-2 rounded-lg transition-colors relative select-none"
+              class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/5 p-2 rounded-lg transition-colors relative select-none [touch-action:none]"
               :class="[
                 dragSession.active && dragSession.type === 'artist' && dragSession.data?.name === item.artist.name ? 'opacity-50' : '',
               ]"
-              @mousedown="handleMouseDown($event, item.index, item.artist)"
-              @mousemove="handleItemMouseMove($event, item.artist.name)"
+              @pointerdown="handlePointerDown($event, item.index, item.artist)"
+              @pointermove="handleItemPointerMove($event, item.artist.name)"
               @click="handleArtistClick(item.artist.name, item.artist.firstSongPath)"
             >
               <div
@@ -678,12 +691,12 @@ onUnmounted(() => {
         <div
           v-for="item in flatArtistVirtualState.items"
           :key="item.artist.name"
-          class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/5 p-2 rounded-lg transition-colors relative select-none"
+          class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/5 p-2 rounded-lg transition-colors relative select-none [touch-action:none]"
           :class="[
             dragSession.active && dragSession.type === 'artist' && dragSession.data?.name === item.artist.name ? 'opacity-50' : '',
           ]"
-          @mousedown="handleMouseDown($event, item.index, item.artist)"
-          @mousemove="handleItemMouseMove($event, item.artist.name)"
+          @pointerdown="handlePointerDown($event, item.index, item.artist)"
+          @pointermove="handleItemPointerMove($event, item.artist.name)"
           @click="handleArtistClick(item.artist.name, item.artist.firstSongPath)"
         >
           <div

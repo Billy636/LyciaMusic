@@ -21,6 +21,7 @@ import { useSongTableLibraryState } from '../../features/library/useSongTableLib
 import { useLibraryStore } from '../../features/library/store';
 import { DEFAULT_SCROLLBAR_HOT_ZONE_PX, isPointerNearVerticalScrollbar } from '../../utils/scrollbarActivity';
 import { isRemoteSong } from '../../utils/remoteSong';
+import { useSongDetailCache } from '../../composables/useSongDetailCache';
 
 const { settings } = useSettings();
 const libraryStore = useLibraryStore();
@@ -38,7 +39,7 @@ const emit = defineEmits<{
   (e: 'play', song: Song): void;
   (e: 'contextmenu', event: MouseEvent, song: Song): void;
   (e: 'update:selectedPaths', newSet: Set<string>): void;
-  (e: 'drag-start', payload: { event: MouseEvent; song: Song; index: number }): void;
+  (e: 'drag-start', payload: { event: PointerEvent; song: Song; index: number }): void;
 }>();
 
 const {
@@ -64,6 +65,7 @@ const router = useRouter();
 const route = useRoute();
 const { openHomeArtist } = useHomeNavigation(router);
 const { coverCache, loadCover, touchCoverPaths, preloadPriorityCovers, primeCoverPath } = useCoverCache();
+const { loadSongDetail } = useSongDetailCache();
 
 const ROW_HEIGHT = 72;
 const OVERSCAN = 20;
@@ -76,6 +78,8 @@ const isScrollbarHot = ref(false);
 const isScrollbarScrolling = ref(false);
 const isScrollbarActive = computed(() => isScrollbarHot.value || isScrollbarScrolling.value);
 const displayedCoverUrls = reactive(new Map<string, string>());
+const songCommentCache = reactive(new Map<string, string>());
+const loadingSongCommentPaths = new Set<string>();
 let visibleCoverPaths = new Set<string>();
 let scrollbarActiveTimer: ReturnType<typeof window.setTimeout> | null = null;
 const resolveListRoutePath = (path: string) =>
@@ -110,6 +114,36 @@ const getDisplayedCoverUrl = (path: string | undefined) => {
   }
 
   return displayedCoverUrls.get(path) ?? coverCache.get(path) ?? '';
+};
+
+const getSongComment = (song: Song) => (
+  song.comment?.trim() || songCommentCache.get(song.path)?.trim() || ''
+);
+
+const hasVisibleSongComment = (song: Song) => settings.value.showSongComments && getSongComment(song).length > 0;
+
+const loadVisibleSongComments = (songs: Song[]) => {
+  if (!settings.value.showSongComments) {
+    return;
+  }
+
+  songs.forEach((song) => {
+    if (!song.path || song.comment?.trim() || songCommentCache.has(song.path) || loadingSongCommentPaths.has(song.path)) {
+      return;
+    }
+
+    loadingSongCommentPaths.add(song.path);
+    void loadSongDetail(song.path)
+      .then((detail) => {
+        songCommentCache.set(song.path, detail?.comment?.trim() ?? '');
+      })
+      .catch(() => {
+        songCommentCache.set(song.path, '');
+      })
+      .finally(() => {
+        loadingSongCommentPaths.delete(song.path);
+      });
+  });
 };
 
 const syncScrollTopFromContainer = () => {
@@ -286,7 +320,7 @@ const showScrollbarDuringScroll = () => {
   }, 900);
 };
 
-const syncScrollbarHotZone = (event: MouseEvent) => {
+const syncScrollbarHotZone = (event: MouseEvent | PointerEvent) => {
   if (!containerRef.value) {
     isScrollbarHot.value = false;
     return;
@@ -296,7 +330,7 @@ const syncScrollbarHotZone = (event: MouseEvent) => {
   isScrollbarHot.value = isPointerNearVerticalScrollbar(event.clientX, rect, DEFAULT_SCROLLBAR_HOT_ZONE_PX);
 };
 
-const handleSongTableMouseMove = (event: MouseEvent) => {
+const handleSongTablePointerMove = (event: PointerEvent) => {
   handleRootMouseMove(event);
   syncScrollbarHotZone(event);
 };
@@ -315,6 +349,7 @@ const onScroll = (event: Event) => {
 
 const {
   showAlphabetIndex,
+  firstSongIndexByKey,
   activeIndexKey,
   indexBarRef,
   isIndexDragging,
@@ -356,8 +391,18 @@ watch(
     syncVisibleCoverUrls(newItems);
     const paths = newItems.map(song => song.path);
     preloadPriorityCovers(paths);
+    loadVisibleSongComments(newItems);
   },
   { immediate: true },
+);
+
+watch(
+  () => settings.value.showSongComments,
+  (showSongComments) => {
+    if (showSongComments) {
+      loadVisibleSongComments(virtualItems.value);
+    }
+  },
 );
 
 watch(
@@ -372,8 +417,8 @@ watch(
   { immediate: true },
 );
 
-const handleMouseDown = (event: MouseEvent, song: Song, index: number) => {
-  if (event.button !== 0) {
+const handlePointerDown = (event: PointerEvent, song: Song, index: number) => {
+  if (event.pointerType === 'mouse' && event.button !== 0) {
     return;
   }
   emit('drag-start', { event, song, index });
@@ -498,6 +543,8 @@ onBeforeUnmount(() => {
   saveViewportCoverSnapshot();
   clearScrollbarActiveTimer();
   displayedCoverUrls.clear();
+  songCommentCache.clear();
+  loadingSongCommentPaths.clear();
   visibleCoverPaths = new Set<string>();
 });
 
@@ -561,7 +608,7 @@ const getRowStyle = (songIndex: number, songPath: string) => {
   <div
     ref="rootRef"
     class="flex-1 min-h-0 min-w-0 relative overflow-x-hidden"
-    @mousemove="handleSongTableMouseMove"
+    @pointermove="handleSongTablePointerMove"
     @mouseleave="handleSongTableMouseLeave"
   >
     <div
@@ -577,11 +624,11 @@ const getRowStyle = (songIndex: number, songPath: string) => {
           v-for="song in virtualItems"
           :key="song.path"
           :data-index="song.virtualIndex"
-          @mousedown="handleMouseDown($event, song, song.virtualIndex)"
+          @pointerdown="handlePointerDown($event, song, song.virtualIndex)"
           @dblclick="!isBatchMode && emit('play', song)"
           @contextmenu.prevent="emit('contextmenu', $event, song)"
           @dragstart.prevent
-          class="group w-full min-w-0 border-b border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5 select-none cursor-default relative flex items-center px-2 gap-3"
+          class="group w-full min-w-0 border-b border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5 select-none cursor-default relative flex items-center px-2 gap-3 [touch-action:none]"
           :class="{ 'bg-red-500/10 dark:bg-red-500/20': selectedPaths.has(song.path) }"
           :style="getRowStyle(song.virtualIndex, song.path)"
         >
@@ -626,7 +673,14 @@ const getRowStyle = (songIndex: number, songPath: string) => {
           </div>
 
           <div class="flex-[0_1_40%] min-w-0 flex flex-col justify-center gap-0.5">
-            <span class="text-[15px] text-gray-900 dark:text-gray-100 font-semibold truncate leading-snug">{{ song.title || song.name.replace(/\.[^/.]+$/, '') }}</span>
+            <div class="min-w-0 flex items-baseline gap-1.5 leading-snug">
+              <span class="min-w-0 truncate text-[15px] text-gray-900 dark:text-gray-100 font-semibold">{{ song.title || song.name.replace(/\.[^/.]+$/, '') }}</span>
+              <span
+                v-if="hasVisibleSongComment(song)"
+                class="max-w-[42%] shrink-0 truncate text-xs font-medium text-gray-500 dark:text-white/45"
+                :title="getSongComment(song)"
+              >（{{ getSongComment(song) }}）</span>
+            </div>
             <div class="flex items-center gap-1.5 text-xs text-gray-900 dark:text-gray-100 leading-snug">
               <QualityBadge
                 v-if="settings.showQualityBadges"
@@ -748,32 +802,34 @@ const getRowStyle = (songIndex: number, songPath: string) => {
 
     <div
       v-if="showAlphabetIndex"
-      class="absolute inset-y-0 right-0 z-20 flex items-center justify-end w-12 pr-1.5"
-      @mouseenter="handleIndexHotspotEnter"
-      @mousemove="handleIndexHotspotMove"
-      @mouseleave="handleIndexHotspotLeave"
+      class="absolute inset-y-0 right-0 z-20 flex items-center justify-end w-16 pr-3 pointer-events-none"
     >
       <div
         class="flex flex-col items-center gap-2 transition-all duration-300 ease-out"
         :class="isIndexBarVisible ? 'opacity-100 translate-x-0 pointer-events-auto' : 'opacity-0 translate-x-2 pointer-events-none'"
+        @mouseenter="handleIndexHotspotEnter"
+        @mousemove="handleIndexHotspotMove"
+        @mouseleave="handleIndexHotspotLeave"
       >
         <div
           ref="indexBarRef"
           class="flex flex-col items-center gap-[1px] rounded-full bg-white px-1 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.08)] dark:bg-black"
         >
-        <button
-          v-for="key in INDEX_KEYS"
-          :key="key"
-          type="button"
-          class="index-nav-item"
-          :class="{
-            'index-nav-item-active': activeIndexKey === key,
-            'index-nav-item-hover': hoverIndexKey === key && activeIndexKey !== key && dragIndexKey !== key,
-            'index-nav-item-drag': dragIndexKey === key && activeIndexKey !== key,
-          }"
-          @mouseenter="hoverIndexKey = key; showIndexBar()"
-          @mouseleave="hoverIndexKey = null"
-          @pointerdown="handleIndexPointerDown($event, key)"
+          <button
+            v-for="key in INDEX_KEYS"
+            :key="key"
+            type="button"
+            class="index-nav-item"
+            :class="{
+              'index-nav-item-active': activeIndexKey === key,
+              'index-nav-item-hover': hoverIndexKey === key && activeIndexKey !== key && dragIndexKey !== key,
+              'index-nav-item-drag': dragIndexKey === key && activeIndexKey !== key,
+              'index-nav-item-disabled': !firstSongIndexByKey.has(key),
+            }"
+            :disabled="!firstSongIndexByKey.has(key)"
+            @mouseenter="hoverIndexKey = key; showIndexBar()"
+            @mouseleave="hoverIndexKey = null"
+            @pointerdown="handleIndexPointerDown($event, key)"
           >
             {{ key }}
           </button>
@@ -1099,6 +1155,12 @@ const getRowStyle = (songIndex: number, songPath: string) => {
   background: rgba(15, 23, 42, 0.12);
   color: rgb(17, 24, 39);
   transform: scale(1.04);
+}
+
+.index-nav-item-disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 

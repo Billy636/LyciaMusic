@@ -101,6 +101,29 @@ export interface StatisticsImportResult {
   duplicateImportSkipped: boolean;
 }
 
+export interface LoudnessRecord {
+  songId: number;
+  songPath: string;
+  loudnessLufs: number | null;
+  estimatedLoudnessLufs: number | null;
+  samplePeak: number | null;
+  truePeak: number | null;
+  tagTrackGainDb: number | null;
+  tagTrackPeak: number | null;
+  tagAlbumGainDb: number | null;
+  tagAlbumPeak: number | null;
+  tagR128TrackGainDb: number | null;
+  tagR128AlbumGainDb: number | null;
+  fileSize: number;
+  fileModifiedAt: number;
+  scanSource: string;
+  analyzerName: string | null;
+  analyzerVersion: number;
+  scanStatus: string;
+  scannedAt: number | null;
+  errorMessage: string | null;
+}
+
 export interface PlayAudioOptions {
   path: string;
   title: string;
@@ -110,6 +133,18 @@ export interface PlayAudioOptions {
   duration: number;
   outputMode: AudioOutputMode;
   startOffsetMs?: number;
+  songId?: number | null;
+  volumeBalanceEnabled?: boolean | null;
+  gainOffsetDb?: number | null;
+  preventClipping?: boolean | null;
+}
+
+export interface UpdateLoudnessSettingsOptions {
+  enabled: boolean;
+  songId?: number | null;
+  songPath?: string | null;
+  gainOffsetDb: number;
+  preventClipping: boolean;
 }
 
 export interface UpdatePlaybackMetadataOptions {
@@ -184,7 +219,10 @@ export interface TauriCommandMap {
   // Deprecated compat command. Main folder-tree flow must use get_library_hierarchy.
   get_sidebar_hierarchy: { payload: undefined; response: FolderNode[] };
   create_folder: { payload: { parentPath: string; folderName: string }; response: string };
-  refresh_folder_songs: { payload: { folderPath: string }; response: void };
+  refresh_folder_songs: {
+    payload: { folderPath: string; minimumDurationSeconds?: number };
+    response: void;
+  };
   delete_folder: { payload: { path: string }; response: void };
   move_file_to_folder: {
     payload: { sourcePath: string; targetFolder: string };
@@ -198,12 +236,18 @@ export interface TauriCommandMap {
     payload: { folderPath: string };
     response: string | null;
   };
-  scan_music_folder: { payload: { folderPath: string }; response: Song[] };
+  scan_music_folder: {
+    payload: { folderPath: string; minimumDurationSeconds?: number };
+    response: Song[];
+  };
   move_music_file: { payload: { oldPath: string; newPath: string }; response: void };
   show_in_folder: { payload: { path: string }; response: void };
   delete_music_file: { payload: { path: string }; response: void };
   is_directory: { payload: { path: string }; response: boolean };
-  parse_audio_files: { payload: { paths: string[] }; response: Song[] };
+  parse_audio_files: {
+    payload: { paths: string[]; minimumDurationSeconds?: number };
+    response: Song[];
+  };
   set_volume: { payload: { volume: number }; response: void };
   get_playback_progress: { payload: undefined; response: number };
   get_audio_visualizer_samples: { payload: undefined; response: number[] };
@@ -246,6 +290,7 @@ export interface TauriCommandMap {
   play_audio: { payload: PlayAudioOptions; response: void };
   update_playback_metadata: { payload: UpdatePlaybackMetadataOptions; response: void };
   pause_audio: { payload: undefined; response: void };
+  stop_audio: { payload: undefined; response: void };
   resume_audio: { payload: undefined; response: void };
   seek_audio: { payload: SeekAudioOptions; response: void };
   set_audio_output_mode: { payload: { outputMode: AudioOutputMode }; response: void };
@@ -254,6 +299,7 @@ export interface TauriCommandMap {
   get_current_output_device: { payload: undefined; response: AudioOutputStatus };
   add_to_history: { payload: { songPath: string }; response: void };
   remove_from_recent_history: { payload: { songPaths: string[] }; response: void };
+  remove_songs_from_history_and_statistics: { payload: { songPaths: string[] }; response: void };
   clear_recent_history: { payload: undefined; response: void };
   get_recent_history: { payload: { limit: number }; response: RecentHistoryRecord[] };
   get_favorite_artist_catalog: { payload: { favoritePaths: string[] }; response: ArtistCatalogItem[] };
@@ -332,6 +378,7 @@ export interface TauriCommandMap {
     payload: { enabled: boolean };
     response: void;
   };
+  refresh_taskbar_window_topmost: { payload: undefined; response: boolean };
   start_topmost_guard: { payload: undefined; response: void };
   stop_topmost_guard: { payload: undefined; response: void };
   clear_all_app_data: { payload: undefined; response: void };
@@ -340,4 +387,20 @@ export interface TauriCommandMap {
     response: void;
   };
   consume_pending_open_paths: { payload: undefined; response: string[] };
+  get_track_loudness_info: {
+    payload: { songId: number };
+    response: LoudnessRecord | null;
+  };
+  update_loudness_settings: {
+    payload: UpdateLoudnessSettingsOptions;
+    response: void;
+  };
+  set_equalizer_settings: {
+    payload: { enabled: boolean; preamp: number; gains: number[] };
+    response: void;
+  };
+  file_exists: {
+    payload: { path: string };
+    response: boolean;
+  };
 }

@@ -7,8 +7,10 @@ import {
   mergeAppSettings,
   useSettingsStore,
 } from './store';
+import { restorePersistedAppSettings } from './restore';
 
 let didMigrateLegacySettings = false;
+const restoredSettingsStores = new WeakSet<ReturnType<typeof useSettingsStore>>();
 
 const migrateLegacySettings = (mergeSettings: (partialSettings: Partial<typeof defaultAppSettings>) => void) => {
   if (didMigrateLegacySettings) {
@@ -37,6 +39,10 @@ export function useSettings() {
   const { settings, audioDelay, theme, sidebar } = storeToRefs(settingsStore);
 
   migrateLegacySettings(settingsStore.patchSettings);
+  if (!restoredSettingsStores.has(settingsStore)) {
+    restoredSettingsStores.add(settingsStore);
+    restorePersistedAppSettings(settings.value, settingsStore.replaceSettings);
+  }
 
   return {
     settings,

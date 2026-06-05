@@ -9,7 +9,7 @@ import {
   shortcutActionOrder,
   toGlobalShortcutAccelerator,
 } from '../features/settings/shortcuts';
-import type { ShortcutActionId } from '../types';
+import type { ShortcutActionId, ShortcutSettings } from '../types';
 import { useLyrics } from './lyrics';
 import { useUiStore } from '../shared/stores/ui';
 import { useToast } from './toast';
@@ -46,11 +46,21 @@ export function useGlobalShortcutStatus() {
   };
 }
 
+export function createGlobalShortcutSyncKey(shortcuts: ShortcutSettings) {
+  const parts = [shortcuts.globalEnabled ? 'enabled' : 'disabled'];
+
+  for (const actionId of shortcutActionOrder) {
+    parts.push(`${actionId}:${toGlobalShortcutAccelerator(shortcuts.global[actionId]) ?? ''}`);
+  }
+
+  return parts.join('\u001F');
+}
+
 export function useKeyboardShortcuts() {
   const { settings } = useSettings();
   const { currentSong, volume, togglePlay, nextSong, prevSong, handleVolume } = usePlaybackController();
   const { toggleFavorite } = useLibraryCollections();
-  const { showDesktopLyrics, lyricsSettings } = useLyrics();
+  const { showDesktopLyrics, desktopLyricsSettings } = useLyrics();
   const uiStore = useUiStore();
   const { showToast } = useToast();
 
@@ -80,8 +90,8 @@ export function useKeyboardShortcuts() {
     toggleDesktopLyrics: () => {
       showDesktopLyrics.value = !showDesktopLyrics.value;
     },
-    toggleLyricTranslation: () => {
-      lyricsSettings.showTranslation = !lyricsSettings.showTranslation;
+    toggleDesktopLyricsLock: () => {
+      desktopLyricsSettings.isLocked = !desktopLyricsSettings.isLocked;
     },
   };
 
@@ -198,17 +208,9 @@ export function useKeyboardShortcuts() {
   });
 
   watch(
-    () => settings.value.shortcuts.globalEnabled,
+    () => createGlobalShortcutSyncKey(settings.value.shortcuts),
     () => {
       void syncGlobalShortcuts();
     },
-  );
-
-  watch(
-    () => settings.value.shortcuts.global,
-    () => {
-      void syncGlobalShortcuts();
-    },
-    { deep: true },
   );
 }

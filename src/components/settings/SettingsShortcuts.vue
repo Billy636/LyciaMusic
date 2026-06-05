@@ -9,6 +9,7 @@ import {
   createDefaultShortcutSettings,
   formatShortcutBinding,
   getShortcutBindingFromEvent,
+  isSystemReservedShortcutEvent,
   shortcutActionLabels,
   shortcutActionOrder,
 } from '../../features/settings/shortcuts';
@@ -77,6 +78,11 @@ const handleShortcutCapture = (scope: ShortcutScope, actionId: ShortcutActionId,
   if (event.key === 'Backspace' || event.key === 'Delete') {
     updateShortcut(scope, actionId, null);
     stopCapture();
+    return;
+  }
+
+  if (isSystemReservedShortcutEvent(event)) {
+    showToast('Win 组合键由系统保留，不能作为快捷键', 'error');
     return;
   }
 

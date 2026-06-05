@@ -1,16 +1,19 @@
 import { storeToRefs } from 'pinia';
+import { watch } from 'vue';
 import type { Song } from '../types';
 import { playbackApi } from '../services/tauri/playbackApi';
 import { usePlaybackStore } from '../features/playback/store';
 import { useSettingsStore } from '../features/settings/store';
 import { useUiStore } from '../shared/stores/ui';
 import { useCoverCache } from './useCoverCache';
+import { useRenderingPower } from './renderingPower';
 
 interface PlaySongOptions {
   updateShuffleHistory?: boolean;
   clearShuffleFuture?: boolean;
   preserveQueue?: boolean;
   insertAfterCurrent?: boolean;
+  startTime?: number;
 }
 
 interface SeekCompletedPayload {
@@ -27,6 +30,7 @@ interface CreatePlayerPlaybackDeps {
 }
 
 let progressFrameId: number | null = null;
+let progressTimerId: ReturnType<typeof setTimeout> | null = null;
 let syncIntervalId: ReturnType<typeof setInterval> | null = null;
 let playRequestId = 0;
 let latestSeekRequestId = 0;
@@ -37,6 +41,7 @@ let accumulatedTime = 0;
 let isSeeking = false;
 
 const getSmtcTitle = (song: Song) => song.title?.trim() || song.name.replace(/\.[^/.]+$/, '');
+const LOW_POWER_PROGRESS_UPDATE_MS = 1000;
 
 export const createPlayerPlayback = ({
   getDisplaySongList,
@@ -48,6 +53,7 @@ export const createPlayerPlayback = ({
   const playbackStore = usePlaybackStore();
   const settingsStore = useSettingsStore();
   const uiStore = useUiStore();
+  const { isMainWindowLowPower } = useRenderingPower();
   const {
     loadCover,
     loadCoverPath,
@@ -165,6 +171,10 @@ export const createPlayerPlayback = ({
       cancelAnimationFrame(progressFrameId);
       progressFrameId = null;
     }
+    if (progressTimerId !== null) {
+      clearTimeout(progressTimerId);
+      progressTimerId = null;
+    }
     if (syncIntervalId !== null) {
       clearInterval(syncIntervalId);
       syncIntervalId = null;
@@ -181,6 +191,18 @@ export const createPlayerPlayback = ({
     stopPlaybackRuntime();
     reanchorPlaybackClock(currentTime.value);
 
+    const scheduleUpdate = (update: FrameRequestCallback) => {
+      if (isMainWindowLowPower.value) {
+        progressTimerId = setTimeout(() => {
+          progressTimerId = null;
+          update(performance.now());
+        }, LOW_POWER_PROGRESS_UPDATE_MS);
+        return;
+      }
+
+      progressFrameId = requestAnimationFrame(update);
+    };
+
     const update = () => {
       if (!currentSong.value || !isPlaying.value) return;
 
@@ -193,10 +215,10 @@ export const createPlayerPlayback = ({
         return;
       }
 
-      progressFrameId = requestAnimationFrame(update);
+      scheduleUpdate(update);
     };
 
-    progressFrameId = requestAnimationFrame(update);
+    scheduleUpdate(update);
     syncIntervalId = setInterval(async () => {
       if (!isPlaying.value || isSeeking) return;
 
@@ -314,15 +336,19 @@ export const createPlayerPlayback = ({
     if (retainedFullCoverPaths.length > 1) {
       preloadFullCovers(retainedFullCoverPaths.filter(path => path !== song.path));
     }
+    const cueStartOffset = song.cue_start_offset || 0;
+    const requestedStartTime = Number.isFinite(options.startTime) ? (options.startTime as number) : 0;
+    const resumeTime = Math.max(0, Math.min(requestedStartTime, song.duration || requestedStartTime));
+
     stopPlaybackRuntime();
-    reanchorPlaybackClock(0);
+    reanchorPlaybackClock(resumeTime);
     accumulatedTime = 0;
     sessionStartTime = null;
 
     addToHistory(song);
 
     const audioFilePath = song.cue_source_path || song.path;
-    const cueStartOffset = song.cue_start_offset || 0;
+    const startOffsetMs = cueStartOffset + Math.round(resumeTime * 1000);
 
     try {
       await playbackApi.playAudio({
@@ -333,7 +359,11 @@ export const createPlayerPlayback = ({
         cover: cachedCoverPath,
         duration: Math.floor(song.duration),
         outputMode: settingsStore.settings.audio.outputMode,
-        startOffsetMs: cueStartOffset || undefined,
+        startOffsetMs: startOffsetMs || undefined,
+        songId: song.id,
+        volumeBalanceEnabled: settingsStore.settings.audio.volumeBalance?.enabled,
+        gainOffsetDb: settingsStore.settings.audio.volumeBalance?.gainOffsetDb,
+        preventClipping: settingsStore.settings.audio.volumeBalance?.preventClipping,
       });
       if (requestId !== playRequestId || currentSong.value?.path !== song.path) return;
 
@@ -402,7 +432,7 @@ export const createPlayerPlayback = ({
     }
 
     if (!isSongLoaded.value) {
-      await playSong(currentSong.value);
+      await playSong(currentSong.value, { startTime: currentTime.value });
     } else {
       await playbackApi.resumeAudio();
       sessionStartTime = Date.now();
@@ -476,12 +506,21 @@ export const createPlayerPlayback = ({
     if (payload.request_id !== latestSeekRequestId) return;
 
     isSeeking = false;
-    reanchorPlaybackClock(payload.time);
+    const offsetSec = (currentSong.value?.cue_start_offset || 0) / 1000;
+    const trackTime = Math.max(0, payload.time - offsetSec);
+    reanchorPlaybackClock(trackTime);
   };
 
   const dispose = () => {
     stopPlaybackRuntime();
+    stopPowerModeWatcher();
   };
+
+  const stopPowerModeWatcher = watch(isMainWindowLowPower, () => {
+    if (currentSong.value && isPlaying.value && !isSeeking) {
+      startPlaybackRuntime();
+    }
+  });
 
   return {
     flushPlaySession,

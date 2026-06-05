@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onScopeDispose, ref } from 'vue';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { Check, ChevronDown, CircleAlert } from 'lucide-vue-next';
 import { useSettings } from '../../features/settings/useSettings';
 import { usePlayer } from '../../composables/player';
@@ -27,8 +28,23 @@ const {
 const { showToast } = useToast();
 
 const launchOnStartup = ref(false);
-const gpuAcceleration = ref(true);
 const autoPlay = ref(true);
+
+async function handleGpuAccelerationChange() {
+  const previous = settings.value.gpuAcceleration;
+  const next = !previous;
+
+  settings.value.gpuAcceleration = next;
+
+  try {
+    await invoke('set_gpu_acceleration', { enabled: next });
+    showToast('GPU 加速设置已更新，重启软件后生效', 'success');
+  } catch (error) {
+    settings.value.gpuAcceleration = previous;
+    showToast('GPU 加速设置保存失败', 'error');
+    console.error('Failed to update GPU acceleration setting:', error);
+  }
+}
 const showLyricsSyncOffsetPanel = ref(false);
 const showClearAllDataConfirm = ref(false);
 const isClearingAllData = ref(false);
@@ -260,14 +276,14 @@ onScopeDispose(() => {
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">GPU 加速</div>
           </div>
-          <button @click="gpuAcceleration = !gpuAcceleration" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="gpuAcceleration ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="gpuAcceleration ? 'translate-x-6' : 'translate-x-1'" />
+          <button @click="handleGpuAccelerationChange" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none shrink-0" :class="settings.gpuAcceleration ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.gpuAcceleration ? 'translate-x-6' : 'translate-x-1'" />
           </button>
         </div>
 
         <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">关闭主面板时最小化到托盘</div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">关闭时最小化至托盘</div>
           </div>
           <button @click="settings.closeToTray = !settings.closeToTray" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.closeToTray ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
             <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.closeToTray ? 'translate-x-6' : 'translate-x-1'" />
@@ -285,10 +301,28 @@ onScopeDispose(() => {
 
         <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">显示歌曲注释</div>
+          </div>
+          <button @click="settings.showSongComments = !settings.showSongComments" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.showSongComments ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.showSongComments ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
+        </div>
+
+        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+          <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">打开一键回顶按钮</div>
           </div>
           <button @click="settings.enableScrollToTopButton = !settings.enableScrollToTopButton" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.enableScrollToTopButton ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
             <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.enableScrollToTopButton ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
+        </div>
+
+        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+          <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">启用任务栏快捷播控</div>
+          </div>
+          <button @click="settings.showTaskbarPlayer = !settings.showTaskbarPlayer" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.showTaskbarPlayer ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.showTaskbarPlayer ? 'translate-x-6' : 'translate-x-1'" />
           </button>
         </div>
       </div>

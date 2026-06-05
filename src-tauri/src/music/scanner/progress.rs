@@ -45,6 +45,9 @@ pub(crate) struct ScanProgressReporter {
     folder_total: usize,
     parse_processed: Arc<AtomicUsize>,
     last_emit_ms: Arc<AtomicU64>,
+    buffered_songs: Arc<std::sync::Mutex<Vec<Song>>>,
+    buffered_deleted: Arc<std::sync::Mutex<Vec<String>>>,
+    last_batch_emit_ms: Arc<AtomicU64>,
 }
 
 impl ScanProgressReporter {
@@ -61,6 +64,9 @@ impl ScanProgressReporter {
             folder_total,
             parse_processed: Arc::new(AtomicUsize::new(0)),
             last_emit_ms: Arc::new(AtomicU64::new(0)),
+            buffered_songs: Arc::new(std::sync::Mutex::new(Vec::new())),
+            buffered_deleted: Arc::new(std::sync::Mutex::new(Vec::new())),
+            last_batch_emit_ms: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -139,25 +145,21 @@ impl ScanProgressReporter {
         );
     }
 
-    pub(super) fn emit_complete(&self, total_songs: usize) {
-        self.emit(
-            "complete",
-            total_songs,
-            total_songs,
-            Some(format!("已完成扫描，共 {} 首歌曲", total_songs)),
-            true,
-            false,
-        );
-    }
+    fn flush_batch_internal(&self, now: u64) {
+        let (songs, deleted_paths) = {
+            let mut songs_guard = self.buffered_songs.lock().ok();
+            let mut deleted_guard = self.buffered_deleted.lock().ok();
 
-    pub(super) fn emit_error(&self, message: String) {
-        self.emit("error", 0, 0, Some(message), true, true);
-    }
+            let songs = songs_guard.as_mut().map(|g| std::mem::take(&mut **g)).unwrap_or_default();
+            let deleted = deleted_guard.as_mut().map(|g| std::mem::take(&mut **g)).unwrap_or_default();
+            (songs, deleted)
+        };
 
-    pub(super) fn emit_batch(&self, songs: Vec<Song>, deleted_paths: Vec<String>) {
         if songs.is_empty() && deleted_paths.is_empty() {
             return;
         }
+
+        self.last_batch_emit_ms.store(now, Ordering::Relaxed);
 
         let _ = self.app.emit(
             LIBRARY_SCAN_BATCH_EVENT,
@@ -169,5 +171,43 @@ impl ScanProgressReporter {
                 folder_total: self.folder_total,
             },
         );
+    }
+
+    pub(super) fn emit_complete(&self, total_songs: usize) {
+        self.flush_batch_internal(now_millis());
+        self.emit(
+            "complete",
+            total_songs,
+            total_songs,
+            Some(format!("已完成扫描，共 {} 首歌曲", total_songs)),
+            true,
+            false,
+        );
+    }
+
+    pub(super) fn emit_error(&self, message: String) {
+        self.flush_batch_internal(now_millis());
+        self.emit("error", 0, 0, Some(message), true, true);
+    }
+
+    pub(super) fn emit_batch(&self, songs: Vec<Song>, deleted_paths: Vec<String>) {
+        if songs.is_empty() && deleted_paths.is_empty() {
+            return;
+        }
+
+        {
+            if let Ok(mut buf_songs) = self.buffered_songs.lock() {
+                buf_songs.extend(songs);
+            }
+            if let Ok(mut buf_deleted) = self.buffered_deleted.lock() {
+                buf_deleted.extend(deleted_paths);
+            }
+        }
+
+        let now = now_millis();
+        let last = self.last_batch_emit_ms.load(Ordering::Relaxed);
+        if now.saturating_sub(last) >= PROGRESS_EMIT_INTERVAL_MS {
+            self.flush_batch_internal(now);
+        }
     }
 }

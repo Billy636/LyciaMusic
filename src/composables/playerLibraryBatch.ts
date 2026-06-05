@@ -51,25 +51,26 @@ export const createPlayerLibraryBatch = ({
       return;
     }
 
-    const merged = new Map<string, Song>();
-    for (const song of canonicalSongs.value) {
-      if (!pendingLibraryScanDeletedPaths.has(song.path)) {
-        merged.set(song.path, song);
-      }
-    }
+    const startTime = import.meta.env.DEV ? performance.now() : 0;
+    const pendingSongsCount = pendingLibraryScanSongs.size;
+    const pendingDeletedCount = pendingLibraryScanDeletedPaths.size;
 
-    for (const [path, song] of pendingLibraryScanSongs) {
-      if (!pendingLibraryScanDeletedPaths.has(path)) {
-        merged.set(path, song);
-      }
-    }
+    // 局部增量 Patch 写入，避免 O(N^2) 的全量重建
+    libraryStore.patchLibrarySongs({
+      songs: Array.from(pendingLibraryScanSongs.values()),
+      deleted_paths: Array.from(pendingLibraryScanDeletedPaths.values()),
+    });
 
-    canonicalSongs.value = Array.from(merged.values());
     refreshStateSongReferences(Array.from(pendingLibraryScanFallbackSongs.values()));
 
     pendingLibraryScanSongs.clear();
     pendingLibraryScanDeletedPaths.clear();
     pendingLibraryScanFallbackSongs.clear();
+
+    if (import.meta.env.DEV) {
+      const duration = performance.now() - startTime;
+      console.log(`[Profiling] flushBufferedLibraryScanBatch took ${duration.toFixed(2)}ms (added/updated batch: ${pendingSongsCount}, deleted: ${pendingDeletedCount}, total canonical: ${canonicalSongs.value.length})`);
+    }
   };
 
   const scheduleLibraryScanBatchFlush = () => {

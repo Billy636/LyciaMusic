@@ -44,6 +44,7 @@ import { usePlaybackStore } from '../features/playback/store';
 import { playbackApi } from '../services/tauri/playbackApi';
 import { createPlayerPlayback } from './playerPlayback';
 import { useUiStore } from '../shared/stores/ui';
+import { setMainWindowRenderingSnapshot } from './renderingPower';
 
 const makeSong = (overrides: Partial<Song> = {}): Song => ({
   path: '/music/demo.flac',
@@ -75,6 +76,13 @@ describe('player playback domain', () => {
     preloadPriorityCoversMock.mockReset();
     retainFullCoverPathsMock.mockReset();
     primeCoverPathMock.mockReturnValue('');
+    setMainWindowRenderingSnapshot({
+      documentHidden: false,
+      windowFocused: true,
+      windowVisible: true,
+      windowMinimized: false,
+      miniMode: false,
+    });
   });
 
   it('rebuilds the queue from the display song list order when playback starts', async () => {
@@ -167,6 +175,67 @@ describe('player playback domain', () => {
 
     playerPlayback.dispose();
     vi.unstubAllGlobals();
+  });
+
+  it('updates playback progress with a low-frequency timer while main window rendering is low power', async () => {
+    const song = makeSong({ duration: 180 });
+    const handleAutoNext = vi.fn();
+    const requestAnimationFrameMock = vi.fn();
+    const setTimeoutMock = vi.fn().mockReturnValue(7);
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock);
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('setTimeout', setTimeoutMock);
+    vi.stubGlobal('clearTimeout', vi.fn());
+    setMainWindowRenderingSnapshot({ windowVisible: false });
+
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext,
+    });
+
+    await playerPlayback.playSong(song);
+
+    expect(requestAnimationFrameMock).not.toHaveBeenCalled();
+    expect(setTimeoutMock).toHaveBeenCalledWith(expect.any(Function), 1000);
+
+    playerPlayback.dispose();
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps cue track time relative when the backend confirms an absolute seek position', async () => {
+    const playbackStore = usePlaybackStore();
+    const song = makeSong({
+      path: '/music/album.cue::track02',
+      cue_source_path: '/music/album.flac',
+      cue_start_offset: 180_000,
+      cue_end_offset: 300_000,
+      duration: 120,
+    });
+    playbackStore.currentSong = song;
+
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext: vi.fn(),
+    });
+
+    await playerPlayback.seekTo(10);
+
+    const seekRequest = vi.mocked(playbackApi.seekAudio).mock.calls[0]?.[0];
+    expect(seekRequest).toEqual(expect.objectContaining({
+      time: 190,
+    }));
+
+    playerPlayback.handleSeekCompleted({
+      request_id: seekRequest.requestId,
+      time: seekRequest.time,
+    });
+
+    expect(playbackStore.currentTime).toBe(10);
+    playerPlayback.dispose();
   });
 
   it('strips the file extension when title metadata is missing', async () => {

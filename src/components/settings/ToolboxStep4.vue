@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import { useToast } from '../../composables/toast';
+import { useSettingsStore } from '../../features/settings/store';
 import { libraryApi } from '../../services/tauri/libraryApi';
 
 const toast = useToast();
+const settingsStore = useSettingsStore();
 
 const props = defineProps<{
   targetPath: string;
@@ -44,7 +46,10 @@ const handleRefresh = async () => {
   isRefreshing.value = true;
 
   try {
-    await libraryApi.refreshFolderSongs(props.targetPath);
+    await libraryApi.refreshFolderSongs(
+      props.targetPath,
+      settingsStore.settings.libraryMinDurationSeconds,
+    );
     toast.showToast('歌曲信息已刷新', 'success');
     refreshed.value = true;
   } catch (error) {

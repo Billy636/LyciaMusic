@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { playbackApi } from '../../services/tauri/playbackApi';
+import { useRenderingPower } from '../../composables/renderingPower';
 import { smoothVisualizerLevel } from './audioVisualizerMath';
 
 const props = defineProps<{
@@ -13,6 +14,7 @@ const BAR_COUNT = 48;
 const DISPLAY_BAR_COUNT = 112;
 const FETCH_INTERVAL_MS = 33;
 const MIN_BAR_HEIGHT = 3;
+const { isMainWindowLowPower } = useRenderingPower();
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const levels = ref<number[]>(Array(BAR_COUNT).fill(0));
@@ -56,10 +58,12 @@ const getDisplayLevel = (index: number) => {
 };
 
 const shouldAnimate = () =>
-  props.active && (
+  props.active && !isMainWindowLowPower.value && (
     props.isPlaying
     || renderedLevels.value.some(level => level > 0.012)
   );
+
+const shouldFetchSamples = () => props.active && props.isPlaying && !isMainWindowLowPower.value;
 
 const draw = () => {
   const canvas = canvasRef.value;
@@ -134,7 +138,7 @@ const scheduleDraw = () => {
 };
 
 const fetchSamples = async () => {
-  if (!props.active || !props.isPlaying) return;
+  if (!shouldFetchSamples()) return;
 
   try {
     const nextLevels = await playbackApi.getAudioVisualizerSamples();
@@ -147,7 +151,7 @@ const fetchSamples = async () => {
 
 const syncFetchTimer = () => {
   stopFetchTimer();
-  if (!props.active || !props.isPlaying) {
+  if (!shouldFetchSamples()) {
     scheduleDraw();
     return;
   }
@@ -158,7 +162,7 @@ const syncFetchTimer = () => {
   }, FETCH_INTERVAL_MS);
 };
 
-watch(() => [props.active, props.isPlaying] as const, syncFetchTimer);
+watch(() => [props.active, props.isPlaying, isMainWindowLowPower.value] as const, syncFetchTimer);
 
 watch(() => props.songPath, () => {
   levels.value = Array(BAR_COUNT).fill(0);

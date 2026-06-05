@@ -5,6 +5,7 @@ import type { Song } from '../types';
 import { useCollectionsStore } from '../features/collections/store';
 import { useLibraryStore } from '../features/library/store';
 import { usePlaybackStore } from '../features/playback/store';
+import { useSettingsStore } from '../features/settings/store';
 import { createPlayerFileManager } from './playerFileManager';
 
 const scanMusicFolderMock = vi.fn();
@@ -126,6 +127,24 @@ describe('playerFileManager.refreshFolder', () => {
     expect(playbackStore.tempQueue).toEqual([]);
     expect(playbackStore.currentSong).toBeNull();
     expect(removeFromHistory).toHaveBeenCalledWith([removedSong.path]);
+  });
+
+  it('passes the configured short audio threshold when refreshing a folder', async () => {
+    const settingsStore = useSettingsStore();
+    settingsStore.patchSettings({
+      libraryMinDurationSeconds: 60,
+    });
+    scanMusicFolderMock.mockResolvedValue([]);
+
+    const fileManager = createPlayerFileManager({
+      removeLibraryFolderLinked: vi.fn(),
+      removeFromHistory: vi.fn(),
+      showToast: vi.fn(),
+    });
+
+    await fileManager.refreshFolder('c:/music/a');
+
+    expect(scanMusicFolderMock).toHaveBeenCalledWith('c:/music/a', 60);
   });
 });
 

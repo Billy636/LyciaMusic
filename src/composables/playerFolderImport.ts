@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia';
 
 import type { Song } from '../types';
 import { useLibraryStore } from '../features/library/store';
+import { useSettingsStore } from '../features/settings/store';
 
 interface GeneratedFolder {
   name: string;
@@ -29,6 +30,7 @@ export const createPlayerFolderImport = ({
   showToast,
 }: CreatePlayerFolderImportDeps) => {
   const libraryStore = useLibraryStore();
+  const settingsStore = useSettingsStore();
   const { songList, watchedFolders } = storeToRefs(libraryStore);
 
   const addFoldersFromStructure = async () => {
@@ -43,6 +45,7 @@ export const createPlayerFolderImport = ({
 
       const newFolders = await invoke<GeneratedFolder[]>('scan_folder_as_playlists', {
         rootPath: selectedPath,
+        minimumDurationSeconds: settingsStore.settings.libraryMinDurationSeconds,
       });
 
       if (newFolders.length === 0) {
@@ -85,6 +88,7 @@ export const createPlayerFolderImport = ({
 
       const newFolders = await invoke<GeneratedFolder[]>('scan_folder_as_playlists', {
         rootPath: selected,
+        minimumDurationSeconds: settingsStore.settings.libraryMinDurationSeconds,
       });
 
       if (newFolders.length === 0) {
@@ -92,7 +96,10 @@ export const createPlayerFolderImport = ({
           watchedFolders.value.push(selected);
         }
 
-        const songs = await invoke<Song[]>('scan_music_folder', { folderPath: selected });
+        const songs = await invoke<Song[]>('scan_music_folder', {
+          folderPath: selected,
+          minimumDurationSeconds: settingsStore.settings.libraryMinDurationSeconds,
+        });
         const existingPaths = new Set(songList.value.map(song => song.path));
         const uniqueSongs = songs.filter(song => !existingPaths.has(song.path));
         songList.value = [...songList.value, ...uniqueSongs];

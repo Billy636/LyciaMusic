@@ -52,3 +52,9 @@ body {
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
 }
+
+/* 🟢 全局清除按钮聚焦时的默认实线外边框，防止偶发轮廓线破坏视觉体验 */
+button:focus {
+  outline: none !important;
+}
+

@@ -6,6 +6,7 @@ import { syncAmlLyricSeekLayout } from './amllSeekLayout';
 
 const props = withDefaults(defineProps<{
   disabled?: boolean;
+  lowPower?: boolean;
   playing?: boolean;
   alignAnchor?: 'top' | 'bottom' | 'center';
   alignPosition?: number;
@@ -20,6 +21,7 @@ const props = withDefaults(defineProps<{
   layoutVersion?: string | number;
 }>(), {
   disabled: false,
+  lowPower: false,
   playing: true,
   alignAnchor: 'center',
   alignPosition: 0.5,
@@ -44,6 +46,10 @@ let player: PatchedLyricPlayer | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let frameId = 0;
 let recoveryFrameId = 0;
+let queueRecoveryMaxAttempts = 0;
+let queueRecoveryAttempts = 0;
+let queueRecoveryReason = '';
+let pendingLowPowerRecoveryReason = '';
 
 function stopAnimationLoop() {
   if (frameId !== 0) {
@@ -55,13 +61,13 @@ function stopAnimationLoop() {
 function startAnimationLoop() {
   stopAnimationLoop();
 
-  if (props.disabled) {
+  if (props.disabled || props.lowPower) {
     return;
   }
 
   let lastTime = -1;
   const onFrame = (time: number) => {
-    if (!player || props.disabled) {
+    if (!player || props.disabled || props.lowPower) {
       frameId = 0;
       return;
     }
@@ -89,12 +95,7 @@ function applyPlayerProps() {
   player.setHidePassedLines(props.hidePassedLines);
   player.setWordFadeWidth(props.wordFadeWidth);
   player.setLineGap(props.lineGap);
-
-  if (props.playing) {
-    player.resume();
-  } else {
-    player.pause();
-  }
+  player.setPlaybackPaused(!props.playing);
 }
 
 function attachPlayer(nextPlayer: PatchedLyricPlayer) {
@@ -120,23 +121,37 @@ function detachPlayer() {
   player = null;
 }
 
-function queueRecovery(reason: string) {
+function queueRecovery(reason: string, options: { maxAttempts?: number } = {}) {
   if (!player) return;
 
-  if (recoveryFrameId !== 0) {
-    cancelAnimationFrame(recoveryFrameId);
+  if (props.lowPower) {
+    pendingLowPowerRecoveryReason = reason;
+    return;
   }
 
-  let attempts = 0;
-  const runRecovery = () => {
-    if (!player) return;
+  const maxAttempts = options.maxAttempts ?? 12;
+  queueRecoveryReason = reason;
+  queueRecoveryMaxAttempts = Math.max(queueRecoveryMaxAttempts, maxAttempts);
 
-    player.recoverLayout(`${reason}:${attempts}`);
-    if (attempts < 12) {
-      attempts += 1;
+  if (recoveryFrameId !== 0) return;
+
+  queueRecoveryAttempts = 0;
+  const runRecovery = () => {
+    if (!player) {
+      recoveryFrameId = 0;
+      queueRecoveryMaxAttempts = 0;
+      queueRecoveryAttempts = 0;
+      return;
+    }
+
+    player.recoverLayout(`${queueRecoveryReason}:${queueRecoveryAttempts}`);
+    if (queueRecoveryAttempts < queueRecoveryMaxAttempts) {
+      queueRecoveryAttempts += 1;
       recoveryFrameId = requestAnimationFrame(runRecovery);
     } else {
       recoveryFrameId = 0;
+      queueRecoveryMaxAttempts = 0;
+      queueRecoveryAttempts = 0;
     }
   };
 
@@ -177,7 +192,10 @@ onBeforeUnmount(() => {
   if (recoveryFrameId !== 0) {
     cancelAnimationFrame(recoveryFrameId);
     recoveryFrameId = 0;
+    queueRecoveryMaxAttempts = 0;
+    queueRecoveryAttempts = 0;
   }
+  pendingLowPowerRecoveryReason = '';
 
   resizeObserver?.disconnect();
   resizeObserver = null;
@@ -197,14 +215,27 @@ watch(() => props.disabled, (disabled) => {
   queueRecovery('disabled-toggle');
 });
 
+watch(() => props.lowPower, (lowPower) => {
+  if (lowPower) {
+    stopAnimationLoop();
+    if (recoveryFrameId !== 0) {
+      cancelAnimationFrame(recoveryFrameId);
+      recoveryFrameId = 0;
+      queueRecoveryMaxAttempts = 0;
+      queueRecoveryAttempts = 0;
+    }
+    return;
+  }
+
+  startAnimationLoop();
+  queueRecovery(pendingLowPowerRecoveryReason || 'low-power-toggle');
+  pendingLowPowerRecoveryReason = '';
+});
+
 watch(() => props.playing, (playing) => {
   if (!player) return;
 
-  if (playing) {
-    player.resume();
-  } else {
-    player.pause();
-  }
+  player.setPlaybackPaused(!playing);
 });
 
 watch(() => props.alignAnchor, (value) => {
@@ -244,7 +275,7 @@ watch(() => props.wordFadeWidth, (value) => {
 
 watch(() => props.lineGap, (value) => {
   player?.setLineGap(value);
-  queueRecovery('line-gap');
+  queueRecovery('line-gap', { maxAttempts: 0 });
 });
 
 watch(() => props.layoutVersion, () => {

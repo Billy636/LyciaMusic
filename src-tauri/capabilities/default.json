@@ -6,7 +6,8 @@
     "main",
     "desktop-lyrics",
     "mini-player",
-    "tray-menu"
+    "tray-menu",
+    "taskbar-player"
   ],
   "permissions": [
     "core:default",
@@ -36,6 +37,7 @@
     "core:window:allow-set-skip-taskbar",
     "core:window:allow-set-focusable",
     "core:window:allow-set-focus",
+    "core:window:allow-is-minimized",
     "core:window:allow-set-ignore-cursor-events",
     "core:window:allow-set-background-color",
     "core:window:allow-set-effects",
@@ -46,6 +48,8 @@
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-unregister-all",
     "opener:default",
-    "dialog:default"
+    "dialog:default",
+    "window-state:default",
+    "allow-app-commands"
   ]
 }

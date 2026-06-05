@@ -140,6 +140,7 @@ fn song_from_remote_file(source: &RemoteSourceCredentials, file: &RemoteFileEntr
         cue_source_path: None,
         cue_start_offset: None,
         cue_end_offset: None,
+        comment: None,
     };
     apply_filename_metadata_fallback(&mut song, file);
     song
@@ -322,7 +323,8 @@ fn load_remote_song_snapshots(
                 s.track_number,
                 s.disc_number,
                 s.added_at,
-                s.file_modified_at
+                s.file_modified_at,
+                s.comment
              FROM remote_files rf
              LEFT JOIN songs s ON s.path = rf.remote_uri
              WHERE rf.source_id = ?1 AND rf.is_audio = 1",
@@ -372,6 +374,7 @@ fn load_remote_song_snapshots(
                         cue_source_path: None,
                         cue_start_offset: None,
                         cue_end_offset: None,
+                        comment: row.get::<_, Option<String>>(28)?,
                     })
                 }
                 None => None,

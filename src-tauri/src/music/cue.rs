@@ -61,18 +61,24 @@ fn parse_cue_timestamp(raw: &str, line_number: usize) -> Result<u64, CueParseErr
             raw: raw.to_string(),
         });
     }
-    let minutes: u64 = parts[0].parse().map_err(|_| CueParseError::InvalidTimestamp {
-        line: line_number,
-        raw: raw.to_string(),
-    })?;
-    let seconds: u64 = parts[1].parse().map_err(|_| CueParseError::InvalidTimestamp {
-        line: line_number,
-        raw: raw.to_string(),
-    })?;
-    let frames: u64 = parts[2].parse().map_err(|_| CueParseError::InvalidTimestamp {
-        line: line_number,
-        raw: raw.to_string(),
-    })?;
+    let minutes: u64 = parts[0]
+        .parse()
+        .map_err(|_| CueParseError::InvalidTimestamp {
+            line: line_number,
+            raw: raw.to_string(),
+        })?;
+    let seconds: u64 = parts[1]
+        .parse()
+        .map_err(|_| CueParseError::InvalidTimestamp {
+            line: line_number,
+            raw: raw.to_string(),
+        })?;
+    let frames: u64 = parts[2]
+        .parse()
+        .map_err(|_| CueParseError::InvalidTimestamp {
+            line: line_number,
+            raw: raw.to_string(),
+        })?;
     Ok(minutes * 60_000 + seconds * 1_000 + (frames * 1_000) / 75)
 }
 
@@ -142,8 +148,7 @@ fn parse_cue_content(content: &str, cue_path: &Path) -> Result<CueSheet, CuePars
 
         if let Some(index01_raw) = extract_index01(trimmed) {
             if let Some(ref mut track) = current_track {
-                track.index01_start_ms =
-                    Some(parse_cue_timestamp(&index01_raw, line_index + 1)?);
+                track.index01_start_ms = Some(parse_cue_timestamp(&index01_raw, line_index + 1)?);
             }
         }
     }
@@ -184,10 +189,7 @@ fn resolve_audio_path(file_path: &str, cue_dir: &Path) -> Result<PathBuf, CuePar
     };
 
     if candidate.exists() {
-        return Ok(crate::music::utils::normalize_path(
-            &candidate.to_string_lossy(),
-        )
-        .into());
+        return Ok(crate::music::utils::normalize_path(&candidate.to_string_lossy()).into());
     }
 
     if let Some(parent) = candidate.parent() {
@@ -200,10 +202,9 @@ fn resolve_audio_path(file_path: &str, cue_dir: &Path) -> Result<PathBuf, CuePar
                 if entry.file_name().to_string_lossy().to_lowercase() == file_name_lower {
                     let found = entry.path();
                     if found.is_file() {
-                        return Ok(crate::music::utils::normalize_path(
-                            &found.to_string_lossy(),
-                        )
-                        .into());
+                        return Ok(
+                            crate::music::utils::normalize_path(&found.to_string_lossy()).into(),
+                        );
                     }
                 }
             }
@@ -263,7 +264,12 @@ fn extract_track_number(line: &str) -> Option<u32> {
     if !line.starts_with(prefix) {
         return None;
     }
-    line[prefix.len()..].trim().split_whitespace().next()?.parse().ok()
+    line[prefix.len()..]
+        .trim()
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
 }
 
 fn extract_index01(line: &str) -> Option<String> {
@@ -342,7 +348,7 @@ mod tests {
     #[test]
     fn decode_gbk_cue() {
         let gbk_bytes: &[u8] = &[
-            0x54, 0x49, 0x54, 0x4c, 0x45, 0x20, 0x22, 0xca, 0xd4, 0xb8, 0xc8, 0x22, 0x0a,
+            0x54, 0x49, 0x54, 0x4c, 0x45, 0x20, 0x22, 0xc0, 0xc7, 0x22, 0x0a,
         ];
         let decoded = decode_cue_bytes(gbk_bytes);
         assert!(decoded.contains("狼"));

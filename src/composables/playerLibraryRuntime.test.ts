@@ -186,4 +186,45 @@ describe('playerLibraryRuntime.scanLibrary', () => {
     expect(refreshStateSongReferences).toHaveBeenCalledWith([]);
     expect(invokeMock).not.toHaveBeenCalledWith('scan_library');
   });
+
+  it('passes the configured short audio threshold to library scans', async () => {
+    const { useLibraryStore } = await import('../features/library/store');
+    const { useSettingsStore } = await import('../features/settings/store');
+    const { createPlayerLibraryRuntime } = await import('./playerLibraryRuntime');
+
+    const libraryStore = useLibraryStore();
+    const settingsStore = useSettingsStore();
+    libraryStore.setLibraryFolders([
+      {
+        path: 'C:\\Music',
+        song_count: 1,
+      },
+    ]);
+    settingsStore.patchSettings({
+      libraryMinDurationSeconds: 9,
+    });
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'scan_library') {
+        return [];
+      }
+
+      return [];
+    });
+
+    const runtime = createPlayerLibraryRuntime({
+      fetchLibraryFolders: vi.fn(async () => {}),
+      fetchFolderTree: vi.fn(async () => {}),
+      flushBufferedLibraryScanBatch: vi.fn(),
+      refreshStateSongReferences: vi.fn(),
+      finalizeLibraryScanProgress: vi.fn(),
+      onSilentScanError: vi.fn(),
+    });
+
+    await runtime.scanLibrary({ trigger: 'manual-rescan', visibility: 'inline' });
+
+    expect(invokeMock).toHaveBeenCalledWith('scan_library', {
+      minimumDurationSeconds: 9,
+    });
+  });
 });

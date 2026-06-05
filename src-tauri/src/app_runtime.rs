@@ -205,3 +205,6 @@ pub(crate) fn consume_pending_open_paths(
 pub(crate) fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
+
+
+

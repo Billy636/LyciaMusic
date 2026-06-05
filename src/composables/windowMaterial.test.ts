@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveWindowMaterial, type WindowMaterialCapabilities } from './windowMaterial';
+import {
+  rebuildWindowMaterialForCompositor,
+  resolveWindowMaterial,
+  type WindowMaterialCapabilities,
+} from './windowMaterial';
 
 const createCapabilities = (
   patch: Partial<WindowMaterialCapabilities>,
@@ -45,5 +49,42 @@ describe('window material resolver', () => {
     expect(resolveWindowMaterial('blur', capabilities)).toBe('none');
     expect(resolveWindowMaterial('acrylic', capabilities)).toBe('none');
     expect(resolveWindowMaterial('mica', capabilities)).toBe('none');
+  });
+
+  it('rebuilds a selected material by clearing effects before reapplying it', async () => {
+    const calls: string[] = [];
+    const result = await rebuildWindowMaterialForCompositor('acrylic', true, 50, {
+      clearEffects: async () => {
+        calls.push('clear');
+      },
+      waitForRepaint: async () => {
+        calls.push('repaint');
+      },
+      applyMaterial: async () => {
+        calls.push('apply');
+        return 'acrylic';
+      },
+    });
+
+    expect(result).toBe('acrylic');
+    expect(calls).toEqual(['clear', 'repaint', 'apply']);
+  });
+
+  it('does not clear effects when no window material is selected', async () => {
+    const calls: string[] = [];
+    await rebuildWindowMaterialForCompositor('none', false, 50, {
+      clearEffects: async () => {
+        calls.push('clear');
+      },
+      waitForRepaint: async () => {
+        calls.push('repaint');
+      },
+      applyMaterial: async () => {
+        calls.push('apply');
+        return 'none';
+      },
+    });
+
+    expect(calls).toEqual(['apply']);
   });
 });

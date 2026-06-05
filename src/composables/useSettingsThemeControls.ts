@@ -174,6 +174,7 @@ export function useSettingsThemeControls() {
     hasWindowMaterialSelected,
     isWindowMaterialDisabled,
     isWindowMaterialButtonDisabled,
+    getWindowMaterialModeDisabledReason,
     windowMaterialDisabledReason,
     isDynamicBgDisabled,
     showFlowTuning,

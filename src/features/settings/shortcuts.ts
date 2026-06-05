@@ -14,7 +14,7 @@ export const shortcutActionOrder: ShortcutActionId[] = [
   'toggleMiniMode',
   'toggleFavorite',
   'toggleDesktopLyrics',
-  'toggleLyricTranslation',
+  'toggleDesktopLyricsLock',
 ];
 
 export const shortcutActionLabels: Record<ShortcutActionId, string> = {
@@ -26,7 +26,7 @@ export const shortcutActionLabels: Record<ShortcutActionId, string> = {
   toggleMiniMode: 'mini/完整模式',
   toggleFavorite: '喜欢歌曲',
   toggleDesktopLyrics: '打开/关闭歌词',
-  toggleLyricTranslation: '翻译当前歌词',
+  toggleDesktopLyricsLock: '锁定/解锁桌面歌词',
 };
 
 const createShortcutBinding = (
@@ -53,7 +53,7 @@ const createShortcutBindingMap = (bindings: ShortcutBindingMap): ShortcutBinding
   toggleMiniMode: cloneShortcutBinding(bindings.toggleMiniMode),
   toggleFavorite: cloneShortcutBinding(bindings.toggleFavorite),
   toggleDesktopLyrics: cloneShortcutBinding(bindings.toggleDesktopLyrics),
-  toggleLyricTranslation: cloneShortcutBinding(bindings.toggleLyricTranslation),
+  toggleDesktopLyricsLock: cloneShortcutBinding(bindings.toggleDesktopLyricsLock),
 });
 
 export const defaultLocalShortcutBindings: ShortcutBindingMap = {
@@ -65,7 +65,7 @@ export const defaultLocalShortcutBindings: ShortcutBindingMap = {
   toggleMiniMode: createShortcutBinding('KeyM', { ctrl: true }),
   toggleFavorite: createShortcutBinding('KeyL', { ctrl: true }),
   toggleDesktopLyrics: createShortcutBinding('KeyD', { ctrl: true }),
-  toggleLyricTranslation: createShortcutBinding('KeyT', { ctrl: true }),
+  toggleDesktopLyricsLock: createShortcutBinding('KeyD', { ctrl: true, shift: true }),
 };
 
 export const defaultGlobalShortcutBindings: ShortcutBindingMap = {
@@ -77,7 +77,7 @@ export const defaultGlobalShortcutBindings: ShortcutBindingMap = {
   toggleMiniMode: createShortcutBinding('KeyM', { ctrl: true, alt: true }),
   toggleFavorite: createShortcutBinding('KeyL', { ctrl: true, alt: true }),
   toggleDesktopLyrics: createShortcutBinding('KeyD', { ctrl: true, alt: true }),
-  toggleLyricTranslation: null,
+  toggleDesktopLyricsLock: null,
 };
 
 export const createDefaultShortcutSettings = (): ShortcutSettings => ({
@@ -201,6 +201,8 @@ const modifierCodes = new Set([
   'MetaRight',
 ]);
 
+export const isSystemReservedShortcutEvent = (event: KeyboardEvent) => event.metaKey;
+
 export const formatShortcutCode = (code: string) => {
   if (shortcutCodeLabels[code]) {
     return shortcutCodeLabels[code];
@@ -236,7 +238,7 @@ export const formatShortcutBinding = (binding: ShortcutBinding | null, emptyLabe
 };
 
 export const toGlobalShortcutAccelerator = (binding: ShortcutBinding | null) => {
-  if (!binding) {
+  if (!binding || binding.meta) {
     return null;
   }
 
@@ -244,7 +246,6 @@ export const toGlobalShortcutAccelerator = (binding: ShortcutBinding | null) => 
   if (binding.shift) parts.push('shift');
   if (binding.ctrl) parts.push('control');
   if (binding.alt) parts.push('alt');
-  if (binding.meta) parts.push('super');
   parts.push(binding.code);
 
   return parts.join('+');
@@ -270,7 +271,7 @@ export const areShortcutBindingsEqual = (
 };
 
 export const getShortcutBindingFromEvent = (event: KeyboardEvent): ShortcutBinding | null => {
-  if (!event.code || modifierCodes.has(event.code)) {
+  if (!event.code || isSystemReservedShortcutEvent(event) || modifierCodes.has(event.code)) {
     return null;
   }
 
@@ -278,12 +279,12 @@ export const getShortcutBindingFromEvent = (event: KeyboardEvent): ShortcutBindi
     ctrl: event.ctrlKey,
     alt: event.altKey,
     shift: event.shiftKey,
-    meta: event.metaKey,
+    meta: false,
   });
 };
 
 export const matchesShortcutEvent = (binding: ShortcutBinding | null, event: KeyboardEvent) => {
-  if (!binding) {
+  if (!binding || binding.meta || isSystemReservedShortcutEvent(event)) {
     return false;
   }
 

@@ -1,4 +1,5 @@
 mod app_runtime;
+mod custom_fonts;
 mod database;
 pub mod error;
 mod foreground_window;
@@ -7,13 +8,16 @@ mod player;
 mod remote;
 mod statistics;
 mod system_fonts;
+mod taskbar;
 mod toolbox;
 mod window_boundary;
 mod window_material;
 mod window_theme;
 mod window_z_order;
 
+use tauri::Manager;
 use app_runtime::{consume_pending_open_paths, exit_app, handle_single_instance, setup_app};
+use custom_fonts::{import_lyrics_font, read_lyrics_font_data_url};
 use database::clear_all_app_data;
 use foreground_window::get_foreground_fullscreen_state;
 use music::{
@@ -30,8 +34,9 @@ use music::{
 };
 use player::{
     get_audio_visualizer_samples, get_current_output_device, get_output_devices,
-    get_playback_progress, pause_audio, play_audio, resume_audio, seek_audio,
-    set_audio_output_mode, set_output_device, set_volume, update_playback_metadata,
+    get_playback_progress, get_track_loudness_info, pause_audio, play_audio, resume_audio,
+    seek_audio, set_audio_output_mode, set_equalizer_settings, set_output_device, set_volume,
+    stop_audio, update_loudness_settings, update_playback_metadata,
 };
 use remote::{
     add_remote_source, clear_remote_cache, get_remote_cache_usage, get_remote_sources,
@@ -44,10 +49,20 @@ use statistics::{
     get_format_distribution, get_library_stats, get_quality_distribution, get_recent_album_catalog,
     get_recent_history, get_recent_playlist_catalog, get_recent_song_paths_view,
     import_recent_history, import_statistics_file, preview_statistics_import, record_play,
-    remove_from_recent_history,
+    remove_from_recent_history, remove_songs_from_history_and_statistics,
 };
 use system_fonts::get_system_fonts;
-use toolbox::{apply_rename, open_external_program, preview_rename, refresh_folder_songs};
+use taskbar::{
+    get_taskbar_tray_geometry, install_taskbar_zorder_guard, refresh_taskbar_window_topmost,
+    setup_taskbar_window, uninstall_taskbar_zorder_guard,
+};
+use toolbox::{
+    apply_rename, file_exists, open_external_program, preview_rename, refresh_folder_songs,
+    set_gpu_acceleration,
+};
+
+#[cfg(target_os = "windows")]
+use toolbox::{append_webview2_browser_arg, should_disable_gpu_for_startup};
 use window_boundary::set_mini_boundary_enabled;
 use window_material::get_window_material_capabilities;
 use window_theme::set_dark_mode_for_window;
@@ -55,10 +70,29 @@ use window_z_order::{refresh_current_window_topmost, start_topmost_guard, stop_t
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "windows")]
+    {
+        if should_disable_gpu_for_startup() {
+            append_webview2_browser_arg("--disable-gpu");
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             handle_single_instance(app, argv);
         }))
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Destroyed = event {
+                    window.app_handle().exit(0);
+                }
+            }
+        })
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&["desktop-lyrics", "mini-player", "taskbar-player", "tray-menu"])
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
@@ -83,11 +117,15 @@ pub fn run() {
             play_audio,
             update_playback_metadata,
             pause_audio,
+            stop_audio,
             resume_audio,
             seek_audio,
             set_volume,
             get_playback_progress,
             get_audio_visualizer_samples,
+            get_track_loudness_info,
+            update_loudness_settings,
+            set_equalizer_settings,
             preview_rename,
             apply_rename,
             get_output_devices,
@@ -142,12 +180,14 @@ pub fn run() {
             preview_statistics_import,
             import_statistics_file,
             remove_from_recent_history,
+            remove_songs_from_history_and_statistics,
             clear_recent_history,
             get_behavior_stats,
             get_quality_distribution,
             get_format_distribution,
             clear_all_app_data,
             open_external_program,
+            file_exists,
             refresh_folder_songs,
             set_mini_boundary_enabled,
             get_window_material_capabilities,
@@ -158,7 +198,15 @@ pub fn run() {
             stop_topmost_guard,
             consume_pending_open_paths,
             get_system_fonts,
-            exit_app
+            import_lyrics_font,
+            read_lyrics_font_data_url,
+            setup_taskbar_window,
+            get_taskbar_tray_geometry,
+            install_taskbar_zorder_guard,
+            refresh_taskbar_window_topmost,
+            uninstall_taskbar_zorder_guard,
+            exit_app,
+            set_gpu_acceleration
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

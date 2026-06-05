@@ -73,7 +73,7 @@ export function useSongDrag(
     };
 
 
-    let isMouseDown = false;
+    let isPointerDown = false;
     let startX = 0;
     let startY = 0;
     const ROW_HEIGHT = 72;
@@ -86,7 +86,7 @@ export function useSongDrag(
         if (!container) return;
 
         const scroll = () => {
-            if (!isMouseDown) { stopAutoScroll(); return; }
+            if (!isPointerDown) { stopAutoScroll(); return; }
             const speed = 15;
             if (direction === 'up') container.scrollTop -= speed;
             else container.scrollTop += speed;
@@ -103,9 +103,16 @@ export function useSongDrag(
     const isSelectionDragging = ref(false);
     const dragSelectAction = ref<'select' | 'deselect' | null>(null);
 
-    // 1. MouseDown 处理项
-    const handleTableDragStart = ({ event, song, index }: { event: MouseEvent; song: Song; index: number }) => {
-        isMouseDown = true;
+    const isPrimaryDragPointer = (event: PointerEvent) =>
+        event.isPrimary !== false && (event.pointerType !== 'mouse' || event.button === 0);
+
+    // 1. PointerDown 处理项
+    const handleTableDragStart = ({ event, song, index }: { event: PointerEvent; song: Song; index: number }) => {
+        if (!isPrimaryDragPointer(event)) {
+            return;
+        }
+
+        isPointerDown = true;
         startX = event.clientX;
         startY = event.clientY;
 
@@ -154,9 +161,12 @@ export function useSongDrag(
         }
     };
 
-    // 2. MouseMove
-    const onGlobalMouseMove = (e: MouseEvent) => {
-        if (!isMouseDown) return;
+    // 2. PointerMove
+    const onGlobalPointerMove = (e: PointerEvent) => {
+        if (!isPointerDown) return;
+        if (e.pointerType !== 'mouse') {
+            e.preventDefault();
+        }
 
         // 滑动框选逻辑
         if (isBatchMode.value && isSelectionDragging.value) {
@@ -292,12 +302,25 @@ export function useSongDrag(
         }
     };
 
-    // 3. MouseUp
-    const onGlobalMouseUp = () => {
-        isMouseDown = false;
+    // 3. PointerUp / PointerCancel
+    const resetDragState = () => {
+        dragSession.showGhost = false;
+        dragSession.active = false;
+        dragSession.insertIndex = -1;
+        dragSession.targetFolder = null;
+        dragSession.targetPlaylist = null;
+    };
+
+    const onGlobalPointerEnd = (cancelled = false) => {
+        isPointerDown = false;
         stopAutoScroll();
         isSelectionDragging.value = false;
         dragSelectAction.value = null;
+
+        if (cancelled) {
+            resetDragState();
+            return;
+        }
 
         if (dragSession.active) {
             if (dragSession.targetFolder) {
@@ -380,15 +403,20 @@ export function useSongDrag(
         }
     };
 
+    const onGlobalPointerUp = () => onGlobalPointerEnd(false);
+    const onGlobalPointerCancel = () => onGlobalPointerEnd(true);
+
     onMounted(() => {
-        window.addEventListener('mousemove', onGlobalMouseMove);
-        window.addEventListener('mouseup', onGlobalMouseUp);
+        window.addEventListener('pointermove', onGlobalPointerMove);
+        window.addEventListener('pointerup', onGlobalPointerUp);
+        window.addEventListener('pointercancel', onGlobalPointerCancel);
     });
 
     onUnmounted(() => {
         stopAutoScroll();
-        window.removeEventListener('mousemove', onGlobalMouseMove);
-        window.removeEventListener('mouseup', onGlobalMouseUp);
+        window.removeEventListener('pointermove', onGlobalPointerMove);
+        window.removeEventListener('pointerup', onGlobalPointerUp);
+        window.removeEventListener('pointercancel', onGlobalPointerCancel);
     });
 
     return {

@@ -5,6 +5,8 @@ import {
   DEFAULT_DESKTOP_PLAYER_ALIGNMENT,
   DEFAULT_DESKTOP_CUSTOM_PLAYED_COLOR,
   DEFAULT_DESKTOP_CUSTOM_ROMAJI_COLOR,
+  DEFAULT_DESKTOP_CUSTOM_ROMAJI_PLAYED_COLOR,
+  DEFAULT_DESKTOP_CUSTOM_ROMAJI_UNPLAYED_COLOR,
   DEFAULT_DESKTOP_CUSTOM_TRANSLATION_COLOR,
   DEFAULT_DESKTOP_CUSTOM_UNPLAYED_COLOR,
   DEFAULT_DESKTOP_TEXT_OPACITY,
@@ -28,15 +30,18 @@ import {
   MIN_PLAYER_OFFSET_Y,
   MIN_DESKTOP_TEXT_OPACITY,
   MIN_DESKTOP_TEXT_SHADOW_STRENGTH,
+  buildImportedLyricsFontOptions,
   getLyricsFontFamily,
   normalizeHexColor,
   normalizeDesktopPlayerAlignment,
   normalizeLyricsFontPreset,
+  registerImportedLyricsFonts,
   systemLyricsFontOptions,
   type LyricsStatus,
   type LyricLine,
   type LyricWord,
 } from './lyrics';
+import type { ImportedLyricsFont } from '../types';
 import {
   DESKTOP_LYRICS_ACTION_EVENT,
   type DesktopLyricsAction,
@@ -58,10 +63,9 @@ const FIXED_PALETTES = {
 const PSEUDO_WORD_FINISH_LEAD_SECONDS = 0.08;
 const DEFAULT_PSEUDO_WORD_DURATION_SECONDS = 3;
 const DEFAULT_SHADOW_RGB = '0 0 0';
-const FIRST_LINE_TEXT_SHADOW = [
-  '0 1px 2px rgb(var(--desktop-text-shadow-color) / calc(var(--desktop-first-line-text-shadow-alpha) * 0.55))',
-  '0 0 var(--desktop-first-line-text-shadow-blur) rgb(var(--desktop-text-shadow-color) / var(--desktop-first-line-text-shadow-alpha))',
-].join(', ');
+const LATIN_WORD_CHARACTER_PATTERN = /[\p{Script=Latin}\p{Number}'’_-]/u;
+const WHITESPACE_PATTERN = /\s/u;
+
 
 export const DESKTOP_LYRICS_ALIGNMENT_OPTIONS: Array<{
   value: DesktopLyricsWindowSettings['playerAlignment'];
@@ -79,6 +83,7 @@ interface DesktopLyricDisplayLine {
   lineIndex: number;
   active: boolean;
   words: LyricWord[];
+  hasAlignedRomaji: boolean;
   secondaryLines: DesktopLyricSecondaryLine[];
 }
 
@@ -90,6 +95,7 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
   const lyricsStatus = ref<LyricsStatus>('idle');
   const fallbackText = ref('Instrumental / No lyrics');
   const themeColors = ref<string[]>([]);
+  const customLyricsFonts = ref<ImportedLyricsFont[]>([]);
   const songDuration = ref<number | null>(null);
   const doubleLinePageStartIndex = ref(-1);
   const settings = ref<DesktopLyricsWindowSettings>({
@@ -98,6 +104,7 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     isAlwaysOnTop: false,
     alwaysShowShadowBackground: false,
     autoHideWhenFullscreen: true,
+    autoHideWhenPaused: false,
     showDoubleLine: false,
     enableWordEffect: true,
     isLocked: false,
@@ -105,6 +112,8 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     colorScheme: 'auto',
     customPlayedColor: DEFAULT_DESKTOP_CUSTOM_PLAYED_COLOR,
     customUnplayedColor: DEFAULT_DESKTOP_CUSTOM_UNPLAYED_COLOR,
+    customRomajiPlayedColor: DEFAULT_DESKTOP_CUSTOM_ROMAJI_PLAYED_COLOR,
+    customRomajiUnplayedColor: DEFAULT_DESKTOP_CUSTOM_ROMAJI_UNPLAYED_COLOR,
     customRomajiColor: DEFAULT_DESKTOP_CUSTOM_ROMAJI_COLOR,
     customTranslationColor: DEFAULT_DESKTOP_CUSTOM_TRANSLATION_COLOR,
     textOpacity: DEFAULT_DESKTOP_TEXT_OPACITY,
@@ -123,10 +132,41 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     await emitTo<DesktopLyricsAction>('main', DESKTOP_LYRICS_ACTION_EVENT, action);
   }
 
+  // 允许本地时钟领先远端同步时间的最大偏差（超过此值视为本地时钟漂移过大，强制对齐）
+  const SYNC_FORWARD_TOLERANCE_SECONDS = 0.5;
+  // 允许远端时间领先本地时钟的最大偏差（超过此值视为发生 seek 或跳转，强制对齐）
+  const SYNC_BACKWARD_TOLERANCE_SECONDS = 0.3;
+
   function syncPlaybackClock(nextTime: number, nextIsPlaying: boolean, nextSyncedAt: number) {
     const elapsed = nextIsPlaying ? Math.max(0, (Date.now() - nextSyncedAt) / 1000) : 0;
-    playbackTime.value = Math.max(0, nextTime + elapsed);
+    const remoteProjectedTime = Math.max(0, nextTime + elapsed);
+    const wasPlaying = isPlaying.value;
+
     isPlaying.value = nextIsPlaying;
+
+    // 播放状态改变（暂停/播放切换）时直接对齐
+    if (nextIsPlaying !== wasPlaying) {
+      playbackTime.value = remoteProjectedTime;
+      return;
+    }
+
+    const localTime = playbackTime.value;
+    const drift = remoteProjectedTime - localTime;
+
+    // 远端时间落后本地时钟：本地 rAF 时钟已领先，忽略此次同步以防回退
+    // 但若本地时钟漂移过大（领先超过阈值），说明本地时钟累积误差，需要对齐
+    if (drift < 0 && Math.abs(drift) <= SYNC_FORWARD_TOLERANCE_SECONDS) {
+      return;
+    }
+
+    // 远端时间超前本地时钟（可能是 seek 或网络波动），或本地漂移超出容忍范围，强制对齐
+    if (drift > SYNC_BACKWARD_TOLERANCE_SECONDS || drift < -SYNC_FORWARD_TOLERANCE_SECONDS) {
+      playbackTime.value = remoteProjectedTime;
+      return;
+    }
+
+    // 在容忍范围内的正向偏差，直接采用远端值（轻微修正本地时钟）
+    playbackTime.value = remoteProjectedTime;
   }
 
   function patchSettings(patch: DesktopLyricsSettingsPatch) {
@@ -221,6 +261,8 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
       ...settings.value,
       ...payload.settings,
     };
+    customLyricsFonts.value = [...payload.customLyricsFonts];
+    registerImportedLyricsFonts(payload.customLyricsFonts);
     syncPlaybackClock(payload.playbackTime, payload.isPlaying, payload.syncedAt);
   }
 
@@ -261,9 +303,16 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     return answer;
   }
 
-  function getSecondaryLines(line: LyricLine): DesktopLyricSecondaryLine[] {
+  function hasCompleteWordRomaji(words: LyricWord[]): boolean {
+    if (words.length === 0) return false;
+    const relevantWords = words.filter((word) => word.text.trim().length > 0 && word.end > word.start);
+    return relevantWords.length > 0
+      && relevantWords.every((word) => Boolean(word.romaji && word.romaji.trim().length > 0));
+  }
+
+  function getSecondaryLines(line: LyricLine, hasAlignedRomaji: boolean): DesktopLyricSecondaryLine[] {
     const secondary: DesktopLyricSecondaryLine[] = [];
-    if (settings.value.showRomaji && line.romaji) {
+    if (settings.value.showRomaji && line.romaji && !hasAlignedRomaji) {
       secondary.push({ kind: 'romaji', text: line.romaji });
     }
     if (settings.value.showTranslation && line.translation) {
@@ -289,6 +338,59 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     return parsedEnd;
   }
 
+  function getPseudoWordSegments(text: string): string[] {
+    const segments: string[] = [];
+    let latinWord = '';
+
+    const flushLatinWord = () => {
+      if (!latinWord) return;
+      segments.push(latinWord);
+      latinWord = '';
+    };
+
+    for (const character of Array.from(text)) {
+      if (LATIN_WORD_CHARACTER_PATTERN.test(character)) {
+        latinWord += character;
+        continue;
+      }
+
+      flushLatinWord();
+
+      if (WHITESPACE_PATTERN.test(character) && segments.length > 0) {
+        segments[segments.length - 1] += character;
+        continue;
+      }
+
+      segments.push(character);
+    }
+
+    flushLatinWord();
+
+    return segments;
+  }
+
+  function createPseudoWords(text: string, start: number, end: number): LyricWord[] {
+    const segments = getPseudoWordSegments(text);
+    if (segments.length === 0) return [];
+
+    const duration = Math.max(0.001, end - start);
+    const segmentDuration = duration / segments.length;
+
+    return segments.map((segment, index) => {
+      const segmentStart = start + segmentDuration * index;
+      const segmentEnd = index === segments.length - 1
+        ? end
+        : start + segmentDuration * (index + 1);
+
+      return {
+        text: segment,
+        start: segmentStart,
+        end: segmentEnd,
+        romaji: '',
+      };
+    });
+  }
+
   function getMainDisplayWords(line: LyricLine, lineIndex: number): LyricWord[] {
     if (!settings.value.enableWordEffect) {
       return [];
@@ -308,12 +410,7 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     const start = Number.isFinite(line.time) ? line.time : 0;
     const end = Math.max(start + 0.001, getPseudoWordEnd(line, lineIndex, start));
 
-    return [{
-      text,
-      start,
-      end,
-      romaji: '',
-    }];
+    return createPseudoWords(text, start, end);
   }
 
   function formatOffset(value: number) {
@@ -345,6 +442,7 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     return `lyrics-align-${settings.value.playerAlignment}`;
   });
   const availableFontOptions = computed(() => [
+    ...buildImportedLyricsFontOptions(customLyricsFonts.value),
     ...LYRICS_FONT_OPTIONS,
     ...systemLyricsFontOptions.value,
   ]);
@@ -405,8 +503,14 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
       '--desktop-text-secondary': 'rgba(255, 255, 255, 0.88)',
       '--desktop-text-tertiary': 'rgba(255, 255, 255, 0.76)',
       '--desktop-romaji-color': settings.value.colorScheme === 'custom'
-        ? settings.value.customRomajiColor
+        ? settings.value.customRomajiUnplayedColor
         : 'color-mix(in srgb, var(--desktop-accent-d) 42%, var(--desktop-text-secondary))',
+      '--desktop-romaji-played-color': settings.value.colorScheme === 'custom'
+        ? settings.value.customRomajiPlayedColor
+        : 'color-mix(in srgb, var(--desktop-accent-b) 58%, var(--desktop-romaji-color))',
+      '--desktop-romaji-unplayed-color': settings.value.colorScheme === 'custom'
+        ? settings.value.customRomajiUnplayedColor
+        : 'var(--desktop-romaji-color)',
       '--desktop-translation-color': settings.value.colorScheme === 'custom'
         ? settings.value.customTranslationColor
         : 'color-mix(in srgb, var(--desktop-accent-c) 28%, var(--desktop-text-tertiary))',
@@ -490,12 +594,16 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
       const line = parsedLyrics.value[lineIndex];
       if (!line) continue;
 
+      const words = getMainDisplayWords(line, lineIndex);
+      const hasAlignedRomaji = settings.value.showRomaji && hasCompleteWordRomaji(words);
+
       lines.push({
         line,
         lineIndex,
         active: activeLyricIndex.value >= 0 ? lineIndex === activeLyricIndex.value : lineIndex === 0,
-        words: getMainDisplayWords(line, lineIndex),
-        secondaryLines: getSecondaryLines(line),
+        words,
+        hasAlignedRomaji,
+        secondaryLines: getSecondaryLines(line, hasAlignedRomaji),
       });
     }
 
@@ -512,7 +620,7 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     if (progress <= 0) {
       return {
         color: 'var(--desktop-text-primary)',
-        textShadow: FIRST_LINE_TEXT_SHADOW,
+        textShadow: 'none',
       };
     }
 
@@ -524,11 +632,55 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
       backgroundClip: 'text',
       color: 'transparent',
       WebkitTextFillColor: 'transparent',
-      textShadow: progress >= 1
-        ? `${FIRST_LINE_TEXT_SHADOW}, 0 0 14px color-mix(in srgb, var(--desktop-accent-b) 45%, transparent)`
-        : FIRST_LINE_TEXT_SHADOW,
-      filter: progress > 0 && progress < 1 ? 'drop-shadow(0 0 10px color-mix(in srgb, var(--desktop-accent-a) 30%, transparent))' : 'none',
-      transition: 'filter 120ms linear, text-shadow 120ms linear',
+      textShadow: 'none',
+    };
+  }
+
+  function getRomajiWordStyle(start: number, end: number): CSSProperties {
+    const duration = Math.max(0.001, end - start);
+    const progress = Math.max(0, Math.min(1, (syncedCurrentTime.value - start) / duration));
+
+    if (progress <= 0) {
+      return {
+        color: 'var(--desktop-romaji-unplayed-color)',
+        textShadow: 'none',
+      };
+    }
+
+    const highlightStop = `${Math.round(progress * 100)}%`;
+
+    return {
+      backgroundImage: `linear-gradient(90deg, var(--desktop-romaji-played-color) 0%, var(--desktop-romaji-played-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) 100%)`,
+      WebkitBackgroundClip: 'text',
+      backgroundClip: 'text',
+      color: 'transparent',
+      WebkitTextFillColor: 'transparent',
+      textShadow: 'none',
+    };
+  }
+
+  function getRomajiLineStyle(line: LyricLine, lineIndex: number): CSSProperties {
+    const start = Number.isFinite(line.time) ? line.time : 0;
+    const end = Math.max(start + 0.001, getPseudoWordEnd(line, lineIndex, start));
+    const duration = Math.max(0.001, end - start);
+    const progress = Math.max(0, Math.min(1, (syncedCurrentTime.value - start) / duration));
+
+    if (progress <= 0) {
+      return {
+        color: 'var(--desktop-romaji-unplayed-color)',
+        textShadow: 'none',
+      };
+    }
+
+    const highlightStop = `${Math.round(progress * 100)}%`;
+
+    return {
+      backgroundImage: `linear-gradient(90deg, var(--desktop-romaji-played-color) 0%, var(--desktop-romaji-played-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) 100%)`,
+      WebkitBackgroundClip: 'text',
+      backgroundClip: 'text',
+      color: 'transparent',
+      WebkitTextFillColor: 'transparent',
+      textShadow: 'none',
     };
   }
 
@@ -556,5 +708,7 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     patchSettings,
     emitAction,
     getWordStyle,
+    getRomajiWordStyle,
+    getRomajiLineStyle,
   };
 }

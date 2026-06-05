@@ -15,6 +15,7 @@ type SongMenuAction =
   | 'play'
   | 'playNext'
   | 'addToQueueTail'
+  | 'addAlbumToQueueTail'
   | 'addToPlaylist'
   | 'viewArtist'
   | 'viewAlbum'
@@ -56,7 +57,7 @@ const emit = defineEmits(['close', 'add-to-playlist', 'delete-disk']);
 const route = useRoute();
 const router = useRouter();
 const { showToast } = useToast();
-const { playSong, playNext, addSongToQueue, removeSongFromList, openInFinder, currentViewMode } = usePlayer();
+const { playSong, playNext, addSongToQueue, addAlbumToQueueTail, removeSongFromList, openInFinder, currentViewMode } = usePlayer();
 const { removeFromPlaylist } = useLibraryCollections();
 const { filterCondition } = usePlayerViewState();
 const { openSongInfo } = useSongInfoDialog();
@@ -99,6 +100,19 @@ const menuIcons: Record<SongMenuAction, SongMenuIcon> = {
       { d: 'M5 16.5h14' },
     ],
   },
+addAlbumToQueueTail: {
+  fill: false,
+  viewBox: '0 0 24 24',
+  paths: [
+    { d: 'M 2,12 a 5,5 0 1,0 10,0 a 5,5 0 1,0 -10,0' },
+    { d: 'M 5.5,12 a 1.5,1.5 0 1,0 3,0 a 1.5,1.5 0 1,0 -3,0' },
+
+    // 队列线条：轻微递增，整体不超过 x≈21.2
+    { d: 'M14.75 8.5H19.25' },
+    { d: 'M14.75 12H20.25' },
+    { d: 'M14.75 15.5H21.25' },
+  ],
+},
   addToPlaylist: {
     fill: false,
     viewBox: '0 0 24 24',
@@ -166,6 +180,13 @@ const menuEntries = computed<SongMenuEntry[]>(() => {
     { type: 'action', key: 'play', label: '播放' },
     { type: 'action', key: 'playNext', label: '下一首播放' },
     { type: 'action', key: 'addToQueueTail', label: '添加到队尾' },
+  ];
+
+  if (props.song && hasAlbumMetadata(props.song)) {
+    entries.push({ type: 'action', key: 'addAlbumToQueueTail', label: '整张专辑添加到队尾' });
+  }
+
+  entries.push(
     { type: 'divider', key: 'divider-primary' },
     { type: 'action', key: 'addToPlaylist', label: '收藏到歌单' },
     { type: 'action', key: 'viewArtist', label: '查看歌手' },
@@ -175,7 +196,7 @@ const menuEntries = computed<SongMenuEntry[]>(() => {
     { type: 'action', key: 'viewSongInfo', label: '查看歌曲信息' },
     { type: 'divider', key: 'divider-danger' },
     { type: 'action', key: 'removeFromList', label: '从列表移除' },
-  ];
+  );
 
   if (showDeleteFromDisk.value) {
     entries.push({ type: 'action', key: 'deleteFromDisk', label: '从本地移除', danger: true });
@@ -413,6 +434,9 @@ const handleAction = (action: SongMenuAction) => {
       break;
     case 'addToQueueTail':
       addSongToQueue(props.song);
+      break;
+    case 'addAlbumToQueueTail':
+      addAlbumToQueueTail(props.song);
       break;
     case 'addToPlaylist':
       emit('add-to-playlist');

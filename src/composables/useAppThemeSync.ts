@@ -5,7 +5,12 @@ import { useWindowMaterial } from './windowMaterial';
 import { useThemeSettings } from './useThemeSettings';
 
 export function useAppThemeSync() {
-  const { activeWindowMaterial, applyWindowMaterial, loadWindowMaterialCapabilities } = useWindowMaterial();
+  const {
+    activeWindowMaterial,
+    applyWindowMaterial,
+    rebuildWindowMaterialForCompositor,
+    loadWindowMaterialCapabilities,
+  } = useWindowMaterial();
   const { theme, isDarkTheme } = useThemeSettings();
   const appWindow = getCurrentWindow();
 
@@ -13,6 +18,17 @@ export function useAppThemeSync() {
   const isMicaWindowMaterial = computed(() => activeWindowMaterial.value === 'mica');
   let restoreSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let unlistenFocusChanged: UnlistenFn | null = null;
+  let syncGeneration = 0;
+  let skipNextFocusRestore = false;
+  let resolveInitialThemeSync: (() => void) | null = null;
+  const initialThemeSync = new Promise<void>((resolve) => {
+    resolveInitialThemeSync = resolve;
+  });
+
+  const markInitialThemeSynced = () => {
+    resolveInitialThemeSync?.();
+    resolveInitialThemeSync = null;
+  };
 
   const applyTheme = async () => {
     if (isDarkTheme.value) {
@@ -43,11 +59,24 @@ export function useAppThemeSync() {
   };
 
   const syncThemeAndMaterial = async () => {
-    await applyTheme();
-    await syncWindowMaterial();
+    const gen = ++syncGeneration;
+    try {
+      await applyTheme();
+      if (gen !== syncGeneration) return;
+      await syncWindowMaterial();
+    } finally {
+      if (gen === syncGeneration) {
+        markInitialThemeSynced();
+      }
+    }
   };
 
   const scheduleRestoreMaterialSync = () => {
+    if (skipNextFocusRestore) {
+      skipNextFocusRestore = false;
+      return;
+    }
+
     if (restoreSyncTimer) {
       clearTimeout(restoreSyncTimer);
       restoreSyncTimer = null;
@@ -62,12 +91,67 @@ export function useAppThemeSync() {
     }, 120);
   };
 
+  const rebuildMaterialComposition = async () => {
+    const gen = ++syncGeneration;
+    try {
+      await applyTheme();
+      if (gen !== syncGeneration) return;
+      await nextTick();
+      await rebuildWindowMaterialForCompositor(
+        theme.value.windowMaterial,
+        document.documentElement.classList.contains('dark'),
+        theme.value.windowBlurTint,
+      );
+    } finally {
+      if (gen === syncGeneration) {
+        markInitialThemeSynced();
+      }
+    }
+  };
+
+  const scheduleStartupMaterialRebuild = () => {
+    if (theme.value.windowMaterial === 'none') {
+      return;
+    }
+
+    if (restoreSyncTimer) {
+      clearTimeout(restoreSyncTimer);
+      restoreSyncTimer = null;
+    }
+
+    restoreSyncTimer = setTimeout(() => {
+      restoreSyncTimer = null;
+      void rebuildMaterialComposition();
+    }, 180);
+  };
+
+  const rebuildStartupMaterialBeforeShow = async () => {
+    if (theme.value.windowMaterial === 'none') {
+      return;
+    }
+
+    if (restoreSyncTimer) {
+      clearTimeout(restoreSyncTimer);
+      restoreSyncTimer = null;
+    }
+
+    await rebuildMaterialComposition();
+    skipNextFocusRestore = true;
+  };
+
   void loadWindowMaterialCapabilities();
 
   watch(
-    theme,
-    syncThemeAndMaterial,
-    { deep: true, immediate: true },
+    [
+      () => theme.value.mode,
+      () => theme.value.windowMaterial,
+      () => theme.value.windowBlurTint,
+      () => theme.value.customBackground.foregroundStyle,
+    ],
+    () => {
+      void syncThemeAndMaterial();
+    },
+    { immediate: true },
   );
 
   onMounted(() => {
@@ -97,5 +181,8 @@ export function useAppThemeSync() {
     hasWindowMaterial,
     isMicaWindowMaterial,
     syncWindowMaterial,
+    whenInitialThemeSynced: () => initialThemeSync,
+    restoreMaterialAfterShow: scheduleStartupMaterialRebuild,
+    rebuildStartupMaterialBeforeShow,
   };
 }

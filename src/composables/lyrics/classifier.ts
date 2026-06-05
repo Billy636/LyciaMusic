@@ -282,15 +282,22 @@ export function classifyGroupLines(group: ParsedLine[]): ClassifiedGroupResult {
   };
 }
 
+function normalizeRomanText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
 function mergeAlignedRomanWords(main: ParsedLine, romajiLine: ParsedLine | null): SemanticLine['romanWords'] {
   const mainWords = main.words ?? [];
 
   if (mainWords.some((word) => word.romanText)) {
-    return mainWords.map((word) => ({
-      text: word.romanText || '',
+    const nativeRomanWords = mainWords.map((word) => ({
+      text: normalizeRomanText(word.romanText || ''),
       startMs: word.startMs,
       endMs: word.endMs,
-    })).filter((word) => word.text.length > 0);
+    }));
+    return nativeRomanWords.every((word) => word.text.length > 0)
+      ? nativeRomanWords
+      : undefined;
   }
 
   const romajiWords = romajiLine?.words ?? [];
@@ -302,7 +309,16 @@ function mergeAlignedRomanWords(main: ParsedLine, romajiLine: ParsedLine | null)
         && Math.abs(word.endMs - romajiWord.endMs) <= ROMAN_ALIGNMENT_TOLERANCE_MS;
     });
 
-    if (allAligned) return romajiWords;
+    if (allAligned) {
+      const alignedRomanWords = romajiWords.map((word) => ({
+        text: normalizeRomanText(word.text),
+        startMs: word.startMs,
+        endMs: word.endMs,
+      }));
+      return alignedRomanWords.every((word) => word.text.length > 0)
+        ? alignedRomanWords
+        : undefined;
+    }
   }
 
   const mergedTexts = mainWords.map(() => '');
@@ -336,15 +352,15 @@ function mergeAlignedRomanWords(main: ParsedLine, romajiLine: ParsedLine | null)
     }
   }
 
-  const mergedRomanWords = mainWords
-    .map((word, index) => ({
-      text: mergedTexts[index],
-      startMs: word.startMs,
-      endMs: word.endMs,
-    }))
-    .filter((word) => word.text.trim().length > 0);
+  const mergedRomanWords = mainWords.map((word, index) => ({
+    text: normalizeRomanText(mergedTexts[index]),
+    startMs: word.startMs,
+    endMs: word.endMs,
+  }));
 
-  return mergedRomanWords.length > 0 ? mergedRomanWords : undefined;
+  return mergedRomanWords.every((word) => word.text.length > 0)
+    ? mergedRomanWords
+    : undefined;
 }
 
 export function buildSemanticLines(lines: ParsedLine[]): SemanticLine[] {

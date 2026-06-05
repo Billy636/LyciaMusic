@@ -21,6 +21,7 @@ const TEXT = {
   windowMaterialUnsupportedHint: '\u4ec5 Windows 10 / 11 \u652f\u6301\u3002',
   windowMaterialTransparencyHint: '\u9700\u5728\u7cfb\u7edf\u8bbe\u7f6e\u4e2d\u5f00\u542f\u900f\u660e\u6548\u679c\u540e\u624d\u53ef\u7528\u3002',
   windowMaterialConflictHint: '\u5173\u95ed\u52a8\u6001\u80cc\u666f\u6216\u81ea\u5b9a\u4e49\u76ae\u80a4\u540e\u53ef\u7528\u3002',
+  windowMaterialWin11Only: '\u4ec5 Windows 11 \u652f\u6301',
 };
 
 const FLOW_TEXT = {
@@ -55,6 +56,7 @@ const {
   materialMode,
   isWindowMaterialDisabled,
   isWindowMaterialButtonDisabled,
+  getWindowMaterialModeDisabledReason,
   windowMaterialDisabledReason,
   isDynamicBgDisabled,
   showFlowTuning,
@@ -323,6 +325,7 @@ const {
             ]"
             :disabled="isWindowMaterialButtonDisabled('acrylic')"
             :aria-disabled="isWindowMaterialButtonDisabled('acrylic')"
+            :title="getWindowMaterialModeDisabledReason('acrylic') === 'windows11' ? TEXT.windowMaterialWin11Only : ''"
             @click="toggleWindowMaterial('acrylic')"
           >
             <div class="flex items-center justify-between gap-3">
@@ -341,6 +344,7 @@ const {
             ]"
             :disabled="isWindowMaterialButtonDisabled('mica')"
             :aria-disabled="isWindowMaterialButtonDisabled('mica')"
+            :title="getWindowMaterialModeDisabledReason('mica') === 'windows11' ? TEXT.windowMaterialWin11Only : ''"
             @click="toggleWindowMaterial('mica')"
           >
             <div class="flex items-center justify-between gap-3">

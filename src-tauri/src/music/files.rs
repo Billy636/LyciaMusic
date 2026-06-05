@@ -48,11 +48,18 @@ fn read_sidecar_lrc_with_path(path_obj: &Path) -> Option<(String, PathBuf)> {
     let stem = path_obj.file_stem()?.to_string_lossy().to_string();
     let parent = path_obj.parent()?;
 
-    let exact_path = parent.join(format!("{}.lrc", stem));
-    if let Ok(content) = fs::read_to_string(&exact_path) {
-        return Some((content, exact_path));
+    // 支持的侧边歌词文件后缀，按照优先级排序
+    let extensions = ["lrc", "ttml", "qrc", "yrc", "lys", "txt"];
+
+    // 1. 优先尝试精确匹配
+    for ext in &extensions {
+        let exact_path = parent.join(format!("{}.{}", stem, ext));
+        if let Ok(content) = fs::read_to_string(&exact_path) {
+            return Some((content, exact_path));
+        }
     }
 
+    // 2. 如果没有精确匹配到，进行目录遍历（不区分后缀大小写）
     let entries = fs::read_dir(parent).ok()?;
     for entry in entries.flatten() {
         let candidate = entry.path();
@@ -60,12 +67,14 @@ fn read_sidecar_lrc_with_path(path_obj: &Path) -> Option<(String, PathBuf)> {
             continue;
         }
 
-        let ext_is_lrc = candidate
+        let is_valid_ext = candidate
             .extension()
             .and_then(|ext| ext.to_str())
-            .map(|ext| ext.eq_ignore_ascii_case("lrc"))
+            .map(|ext| {
+                extensions.iter().any(|&valid_ext| ext.eq_ignore_ascii_case(valid_ext))
+            })
             .unwrap_or(false);
-        if !ext_is_lrc {
+        if !is_valid_ext {
             continue;
         }
 

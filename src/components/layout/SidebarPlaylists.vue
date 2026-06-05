@@ -26,8 +26,8 @@ const props = defineProps<Props>();
 const emit = defineEmits<{
   (event: 'update:isOpen', value: boolean): void;
   (event: 'createPlaylist'): void;
-  (event: 'mouseDown', nativeEvent: MouseEvent, index: number, playlist: Playlist): void;
-  (event: 'itemMouseMove', nativeEvent: MouseEvent, playlistId: string): void;
+  (event: 'pointerDown', nativeEvent: PointerEvent, index: number, playlist: Playlist): void;
+  (event: 'itemPointerMove', nativeEvent: PointerEvent, playlistId: string): void;
   (event: 'playlistClick', nativeEvent: MouseEvent, id: string): void;
   (event: 'playlistContextMenu', nativeEvent: MouseEvent, playlist: Playlist): void;
   (event: 'deletePlaylist', id: string, name: string): void;
@@ -61,13 +61,13 @@ const getPlaylistCover = (playlistId: string) => {
           <li
             v-for="(list, index) in playlists"
             :key="list.id"
-            @mousedown="$emit('mouseDown', $event, index, list)"
-            @mousemove="$emit('itemMouseMove', $event, list.id)"
+            @pointerdown="$emit('pointerDown', $event, index, list)"
+            @pointermove="$emit('itemPointerMove', $event, list.id)"
             @click.stop="$emit('playlistClick', $event, list.id)"
             @contextmenu="$emit('playlistContextMenu', $event, list)"
             :data-playlist-id="list.id"
             :data-playlist-name="list.name"
-            class="playlist-drop-target px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-all duration-300 group relative border-t-2 border-transparent border-b-2 select-none active:scale-[0.98]"
+            class="playlist-drop-target px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-all duration-300 group relative border-t-2 border-transparent border-b-2 select-none active:scale-[0.98] [touch-action:none]"
             :class="[
               selectedPlaylistIds.has(list.id) ? 'bg-black/10 dark:bg-white/10 text-black dark:text-white font-medium shadow-sm translate-x-1' : 'hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-300 hover:translate-x-1',
               (dragState.active && dragState.type === 'playlist' && dragState.data?.id === list.id) ? 'opacity-50 bg-gray-100 dark:bg-white/5' : '',

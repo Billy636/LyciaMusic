@@ -35,6 +35,10 @@ let isTrayMenuReady = false;
 let trayMenuReadyPromise: Promise<void> | null = null;
 let resolveTrayMenuReady: (() => void) | null = null;
 let trayMenuSubmenuPlacement: TrayMenuSubmenuPlacement = 'left';
+let isTrayMenuSizeApplied = false;
+let trayMenuSizePromise: Promise<void> | null = null;
+
+const TRAY_MENU_PREWARM_DELAY_MS = 1_600;
 
 async function getTrayMenuWindow() {
   return WebviewWindow.getByLabel(TRAY_MENU_WINDOW_LABEL);
@@ -46,6 +50,8 @@ async function ensureTrayMenuWindow() {
 
   if (!trayMenuWindowPromise) {
     isTrayMenuReady = false;
+    isTrayMenuSizeApplied = false;
+    trayMenuSizePromise = null;
     trayMenuReadyPromise = null;
     resolveTrayMenuReady = null;
     const windowInstance = new WebviewWindow(TRAY_MENU_WINDOW_LABEL, {
@@ -113,11 +119,26 @@ function waitForTrayMenuReady(timeoutMs = 600) {
   return trayMenuReadyPromise;
 }
 
-async function applyTrayMenuSize(targetWindow: WebviewWindow) {
+async function ensureTrayMenuSize(targetWindow: WebviewWindow) {
+  if (isTrayMenuSizeApplied) {
+    return;
+  }
+
+  if (trayMenuSizePromise) {
+    return trayMenuSizePromise;
+  }
+
   const size = new LogicalSize(TRAY_MENU_WINDOW_WIDTH, TRAY_MENU_WINDOW_HEIGHT);
-  await targetWindow.setMinSize(size);
-  await targetWindow.setMaxSize(size);
-  await targetWindow.setSize(size);
+  trayMenuSizePromise = (async () => {
+    await targetWindow.setMinSize(size);
+    await targetWindow.setMaxSize(size);
+    await targetWindow.setSize(size);
+    isTrayMenuSizeApplied = true;
+  })().finally(() => {
+    trayMenuSizePromise = null;
+  });
+
+  return trayMenuSizePromise;
 }
 
 async function resolveTrayMenuPosition(payload: TrayMenuOpenPayload): Promise<{
@@ -149,7 +170,7 @@ async function resolveTrayMenuPosition(payload: TrayMenuOpenPayload): Promise<{
   const clickX = payload.x / scaleFactor;
   const clickY = payload.y / scaleFactor;
 
-  const margin = 10;
+  const margin = 0;
   const maxX = workAreaPosition.x + workAreaSize.width - TRAY_MENU_WINDOW_WIDTH - margin;
   const minX = workAreaPosition.x + margin;
   const maxY = workAreaPosition.y + workAreaSize.height - TRAY_MENU_WINDOW_HEIGHT - margin;
@@ -194,6 +215,7 @@ export function useTrayMenuEvents(router: Router) {
   let unlistenTrayMenu: UnlistenFn | null = null;
   let unlistenTrayMenuOpen: UnlistenFn | null = null;
   let unlistenTrayMenuReady: UnlistenFn | null = null;
+  let trayMenuPrewarmTimer: ReturnType<typeof window.setTimeout> | null = null;
 
   const createTrayMenuState = (): TrayMenuStatePayload => ({
     currentSong: currentSong.value,
@@ -233,10 +255,21 @@ export function useTrayMenuEvents(router: Router) {
     }
   };
 
+  const prewarmTrayMenu = async () => {
+    try {
+      const targetWindow = await ensureTrayMenuWindow();
+      await waitForTrayMenuReady();
+      await ensureTrayMenuSize(targetWindow);
+      await targetWindow.setAlwaysOnTop(true);
+    } catch (error) {
+      console.warn('Failed to prewarm tray menu window:', error);
+    }
+  };
+
   const openTrayMenu = async (payload: TrayMenuOpenPayload) => {
     const targetWindow = await ensureTrayMenuWindow();
     await waitForTrayMenuReady();
-    await applyTrayMenuSize(targetWindow);
+    await ensureTrayMenuSize(targetWindow);
     const { position, submenuPlacement } = await resolveTrayMenuPosition(payload);
     trayMenuSubmenuPlacement = submenuPlacement;
     await targetWindow.setAlwaysOnTop(true);
@@ -277,9 +310,19 @@ export function useTrayMenuEvents(router: Router) {
     unlistenTrayMenuReady = await listen(TRAY_MENU_READY_EVENT, () => {
       markTrayMenuReady();
     });
+
+    trayMenuPrewarmTimer = window.setTimeout(() => {
+      trayMenuPrewarmTimer = null;
+      void prewarmTrayMenu();
+    }, TRAY_MENU_PREWARM_DELAY_MS);
   });
 
   onUnmounted(() => {
+    if (trayMenuPrewarmTimer !== null) {
+      window.clearTimeout(trayMenuPrewarmTimer);
+      trayMenuPrewarmTimer = null;
+    }
+
     unlistenTrayMenu?.();
     unlistenTrayMenuOpen?.();
     unlistenTrayMenuReady?.();

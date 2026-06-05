@@ -1,82 +1,116 @@
-const ALPHABET_KEYS = ['0', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), '#'] as const;
+import { pinyin } from 'pinyin-pro';
 
-export type AlphabetIndexKey = typeof ALPHABET_KEYS[number];
+export const ALPHABET_INDEX_KEYS = [
+  '0',
+  'A', 'B', 'C', 'D', 'E', 'F', 'G',
+  'H', 'I', 'J', 'K', 'L', 'M', 'N',
+  'O', 'P', 'Q', 'R', 'S', 'T',
+  'U', 'V', 'W', 'X', 'Y', 'Z',
+  '#',
+] as const;
 
-export const INDEX_KEYS = [...ALPHABET_KEYS];
+export type AlphabetIndexKey = typeof ALPHABET_INDEX_KEYS[number];
 
-const INDEX_ORDER = new Map<AlphabetIndexKey, number>(
-  ALPHABET_KEYS.map((key, index) => [key, index]),
+export const INDEX_KEYS = [...ALPHABET_INDEX_KEYS];
+
+export const INDEX_ORDER = new Map<AlphabetIndexKey, number>(
+  ALPHABET_INDEX_KEYS.map((key, index) => [key, index]),
 );
 
-const PINYIN_BOUNDARIES: Array<{ key: AlphabetIndexKey; boundary: string }> = [
-  { key: 'A', boundary: '阿' },
-  { key: 'B', boundary: '芭' },
-  { key: 'C', boundary: '擦' },
-  { key: 'D', boundary: '搭' },
-  { key: 'E', boundary: '蛾' },
-  { key: 'F', boundary: '发' },
-  { key: 'G', boundary: '噶' },
-  { key: 'H', boundary: '哈' },
-  { key: 'J', boundary: '击' },
-  { key: 'K', boundary: '喀' },
-  { key: 'L', boundary: '垃' },
-  { key: 'M', boundary: '妈' },
-  { key: 'N', boundary: '拿' },
-  { key: 'O', boundary: '哦' },
-  { key: 'P', boundary: '啪' },
-  { key: 'Q', boundary: '期' },
-  { key: 'R', boundary: '然' },
-  { key: 'S', boundary: '撒' },
-  { key: 'T', boundary: '塌' },
-  { key: 'W', boundary: '挖' },
-  { key: 'X', boundary: '昔' },
-  { key: 'Y', boundary: '压' },
-  { key: 'Z', boundary: '匝' },
-];
+const toHalfWidth = (text: string): string => {
+  return text
+    .replace(/[\uFF01-\uFF5E]/g, (char) =>
+      String.fromCharCode(char.charCodeAt(0) - 0xFEE0)
+    )
+    .replace(/\u3000/g, ' ');
+};
 
-const pinyinCollator = new Intl.Collator('zh-CN-u-co-pinyin', {
-  numeric: true,
-  sensitivity: 'base',
-});
+export const normalizeTitleForIndex = (title: string | null | undefined): string => {
+  let clean = toHalfWidth((title || '').trim());
+  const WRAP_SYMBOLS = /^[《》【】\[\]\(\)（）「」『』]/;
+  while (WRAP_SYMBOLS.test(clean)) {
+    clean = clean.substring(1).trim();
+  }
+  return clean;
+};
 
-const isAsciiLetter = (value: string) => /^[A-Za-z]$/.test(value);
-const isDigit = (value: string) => /^\d$/.test(value);
-const isCjk = (value: string) =>
-  /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(value);
-
-const getLeadingChar = (value: string) => value.trimStart().charAt(0);
-
-const getChineseInitial = (value: string): AlphabetIndexKey => {
-  for (let index = PINYIN_BOUNDARIES.length - 1; index >= 0; index -= 1) {
-    const item = PINYIN_BOUNDARIES[index];
-    if (pinyinCollator.compare(value, item.boundary) >= 0) {
-      return item.key;
+export const normalizeTitleForSort = (title: string | null | undefined): string => {
+  let clean = normalizeTitleForIndex(title);
+  const PAIR_SYMBOLS = [
+    { start: '《', end: '》' },
+    { start: '【', end: '】' },
+    { start: '[', end: ']' },
+    { start: '(', end: ')' },
+    { start: '（', end: '）' },
+    { start: '「', end: '」' },
+    { start: '『', end: '』' },
+  ];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const len = clean.length;
+    if (len >= 2) {
+      for (const pair of PAIR_SYMBOLS) {
+        if (clean.startsWith(pair.start) && clean.endsWith(pair.end)) {
+          clean = clean.substring(1, len - 1).trim();
+          changed = true;
+          break;
+        }
+      }
     }
+  }
+  // 替换所有中间残留的包裹符号，转为干净的空格分隔，避免排序干扰
+  clean = clean.replace(/[《》【】\[\]\(\)（）「」『』]/g, ' ').replace(/\s+/g, ' ').trim();
+  return clean.toLowerCase();
+};
+
+export const getAlphabetIndexKey = (
+  title: string | null | undefined,
+): AlphabetIndexKey => {
+  const clean = normalizeTitleForIndex(title);
+  if (!clean) return '#';
+
+  // 使用 Array.from 保证对 4 字节的 Emoji、生僻汉字等进行 Unicode 安全截取，防止代理对截断
+  const firstChar = Array.from(clean)[0];
+  if (!firstChar) return '#';
+
+  if (/^\d$/.test(firstChar)) return '0';
+
+  if (/^[A-Za-z]$/.test(firstChar)) {
+    return firstChar.toUpperCase() as AlphabetIndexKey;
+  }
+
+  try {
+    const py = pinyin(firstChar, {
+      pattern: 'first',
+      toneType: 'none',
+      type: 'string',
+    }).trim();
+
+    const firstLetter = py[0]?.toUpperCase();
+
+    if (firstLetter && /^[A-Z]$/.test(firstLetter)) {
+      return firstLetter as AlphabetIndexKey;
+    }
+  } catch {
+    // fallback to #
   }
 
   return '#';
 };
 
-export const getAlphabetIndexKey = (value: string | null | undefined): AlphabetIndexKey => {
-  const char = getLeadingChar(value || '');
-
-  if (!char) {
-    return '#';
+export const getAlphabetSortKey = (title: string | null | undefined): string => {
+  const normalized = normalizeTitleForSort(title);
+  try {
+    const result = pinyin(normalized, {
+      toneType: 'none',
+      nonZh: 'consecutive',
+      type: 'string',
+    });
+    return result.toLowerCase().trim();
+  } catch {
+    return normalized.toLowerCase().trim();
   }
-
-  if (isDigit(char)) {
-    return '0';
-  }
-
-  if (isAsciiLetter(char)) {
-    return char.toUpperCase() as AlphabetIndexKey;
-  }
-
-  if (isCjk(char)) {
-    return getChineseInitial(char);
-  }
-
-  return '#';
 };
 
 export const compareByAlphabetIndex = (left: string, right: string) => {
@@ -88,14 +122,46 @@ export const compareByAlphabetIndex = (left: string, right: string) => {
     return orderDiff;
   }
 
-  return pinyinCollator.compare(left.trim(), right.trim());
+  // 配置 numeric: true 精确兼顾含有数字标题的自然排序排列
+  return getAlphabetSortKey(left).localeCompare(getAlphabetSortKey(right), 'en', {
+    numeric: true,
+    sensitivity: 'base',
+  });
 };
 
 export const sortItemsByAlphabetIndex = <T>(
   items: T[],
-  getLabel: (item: T) => string,
-) => {
-  return [...items].sort((left, right) =>
-    compareByAlphabetIndex(getLabel(left) || '', getLabel(right) || ''),
-  );
+  getTitle: (item: T) => string,
+): T[] => {
+  if (!items || items.length === 0) return [];
+  
+  // 1. 预计算每个 item 的 key，每首歌仅在排序触发时处理一次
+  const keyedItems = items.map((item, index) => {
+    const title = getTitle(item);
+    return {
+      item,
+      index,
+      indexKey: getAlphabetIndexKey(title),
+      sortKey: getAlphabetSortKey(title),
+    };
+  });
+
+  // 2. 稳定排序逻辑比较
+  keyedItems.sort((a, b) => {
+    // 组顺序 (0 -> A-Z -> #)
+    if (a.indexKey !== b.indexKey) {
+      const orderA = INDEX_ORDER.get(a.indexKey) ?? 999;
+      const orderB = INDEX_ORDER.get(b.indexKey) ?? 999;
+      return orderA - orderB;
+    }
+    // 配置 numeric: true 精确兼顾含有数字标题的自然排序排列
+    const cmp = a.sortKey.localeCompare(b.sortKey, 'en', {
+      numeric: true,
+      sensitivity: 'base',
+    });
+    if (cmp !== 0) return cmp;
+    return a.index - b.index;
+  });
+
+  return keyedItems.map(k => k.item);
 };

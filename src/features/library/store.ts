@@ -37,6 +37,7 @@ const resolveSharedPaths = (paths: string[], existing: string[], sibling: string
 export const useLibraryStore = defineStore('library', () => {
   const songPool = new Map<string, LibrarySong>();
   const songCatalogVersion = ref(0);
+  const libraryDataVersion = ref(0);
   const stringPool = new Map<string, string>();
   const arrayPool = new Map<string, string[]>();
   const rebuildInternPools = () => {
@@ -104,6 +105,7 @@ export const useLibraryStore = defineStore('library', () => {
     'name',
     'title',
     'path',
+    'comment',
     'artist',
     'artist_names',
     'effective_artist_names',
@@ -162,6 +164,7 @@ export const useLibraryStore = defineStore('library', () => {
     ...song,
     name: internString(song.name) ?? '',
     title: internString(song.title),
+    comment: internString(song.comment),
     path: internString(song.path) ?? '',
     artist: internString(song.artist) ?? '',
     artist_names: internStringArray(song.artist_names),
@@ -221,6 +224,7 @@ export const useLibraryStore = defineStore('library', () => {
   };
 
   const normalizeSongCollection = (songs: LibrarySong[]) => {
+    const startTime = import.meta.env.DEV ? performance.now() : 0;
     const nextPaths: string[] = [];
     const seenPaths = new Set<string>();
     let changed = false;
@@ -238,6 +242,11 @@ export const useLibraryStore = defineStore('library', () => {
         changed = true;
       }
     });
+
+    if (import.meta.env.DEV) {
+      const duration = performance.now() - startTime;
+      console.log(`[Profiling] normalizeSongCollection took ${duration.toFixed(2)}ms (input songs: ${songs.length}, changed: ${changed})`);
+    }
 
     return { paths: nextPaths, changed };
   };
@@ -271,12 +280,16 @@ export const useLibraryStore = defineStore('library', () => {
 
   const updateCanonicalSongPaths = (paths: string[], didChangeSongPool = false) => {
     const nextPaths = resolveSharedPaths(paths, canonicalSongPaths.value, sourceSongPaths.value);
-    if (canonicalSongPaths.value !== nextPaths) {
+    const didChangePaths = canonicalSongPaths.value !== nextPaths;
+    if (didChangePaths) {
       canonicalSongPaths.value = nextPaths;
     }
 
     if (didChangeSongPool) {
       songCatalogVersion.value += 1;
+    }
+    if (didChangePaths || didChangeSongPool) {
+      libraryDataVersion.value += 1;
     }
 
     pruneSongPool();
@@ -407,7 +420,105 @@ export const useLibraryStore = defineStore('library', () => {
     watchedFolders.value = list;
   };
 
+  const patchLibrarySongs = (payload: { songs: LibrarySong[]; deleted_paths: string[] }) => {
+    const startTime = import.meta.env.DEV ? performance.now() : 0;
+    const incomingSongs = payload.songs ?? [];
+    const incomingDeleted = payload.deleted_paths ?? [];
+
+    if (incomingSongs.length === 0 && incomingDeleted.length === 0) {
+      return;
+    }
+
+    let didChange = false;
+
+    // 1. 处理删除：直接在路径数组和 Map 中局部剔除，不引发全量重建
+    if (incomingDeleted.length > 0) {
+      const deletedSet = new Set(incomingDeleted);
+      const nextCanonical = canonicalSongPaths.value.filter(path => !deletedSet.has(path));
+      if (nextCanonical.length !== canonicalSongPaths.value.length) {
+        canonicalSongPaths.value = nextCanonical;
+        didChange = true;
+      }
+
+      const nextSource = sourceSongPaths.value.filter(path => !deletedSet.has(path));
+      if (nextSource.length !== sourceSongPaths.value.length) {
+        sourceSongPaths.value = nextSource;
+        didChange = true;
+      }
+
+      incomingDeleted.forEach((path) => {
+        if (songPool.delete(path)) {
+          didChange = true;
+        }
+      });
+    }
+
+    // 2. 处理新增或局部更新（原地更新以保留外部播放引用）
+    if (incomingSongs.length > 0) {
+      const addedPaths: string[] = [];
+
+      incomingSongs.forEach((song) => {
+        if (!song?.path) {
+          return;
+        }
+
+        const path = song.path;
+        const existing = songPool.has(path);
+
+        // 原地同步或新增
+        const interned = internSong(song);
+        if (interned.changed) {
+          didChange = true;
+        }
+
+        if (!existing) {
+          addedPaths.push(path);
+        }
+      });
+
+      if (addedPaths.length > 0) {
+        canonicalSongPaths.value = [...canonicalSongPaths.value, ...addedPaths];
+        sourceSongPaths.value = [...sourceSongPaths.value, ...addedPaths];
+        didChange = true;
+      }
+    }
+
+    if (didChange) {
+      songCatalogVersion.value += 1;
+      libraryDataVersion.value += 1;
+    }
+
+    if (import.meta.env.DEV) {
+      const duration = performance.now() - startTime;
+      console.log(`[Profiling] patchLibrarySongs took ${duration.toFixed(2)}ms (added/updated payload: ${incomingSongs.length}, deleted: ${incomingDeleted.length})`);
+    }
+  };
+
+  const setCanonicalSongOrder = (paths: string[]) => {
+    const startTime = import.meta.env.DEV ? performance.now() : 0;
+    if (!Array.isArray(paths)) {
+      return;
+    }
+
+    // 安全边界：只接收已在前端缓存的路径项，排掉空洞风险项
+    const validPaths = paths.filter(path => songPool.has(path));
+
+    if (areSamePaths(canonicalSongPaths.value, validPaths)) {
+      return;
+    }
+
+    canonicalSongPaths.value = validPaths;
+    songCatalogVersion.value += 1;
+    libraryDataVersion.value += 1;
+
+    if (import.meta.env.DEV) {
+      const duration = performance.now() - startTime;
+      console.log(`[Profiling] setCanonicalSongOrder took ${duration.toFixed(2)}ms (input order paths: ${paths.length}, filtered valid: ${validPaths.length})`);
+    }
+  };
+
   return {
+    libraryDataVersion,
     canonicalSongs,
     canonicalSongPaths,
     sourceSongs,
@@ -450,5 +561,7 @@ export const useLibraryStore = defineStore('library', () => {
     setLastLibraryScanError,
     setWatchedFolders,
     reorderWatchedFolders,
+    patchLibrarySongs,
+    setCanonicalSongOrder,
   };
 });

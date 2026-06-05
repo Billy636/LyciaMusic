@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { storeToRefs } from 'pinia';
 import { usePlayer } from '../../composables/player';
@@ -7,17 +7,90 @@ import { useThemeSettings } from '../../composables/useThemeSettings';
 import { useCoverCache } from '../../composables/useCoverCache';
 import { usePlaybackStore } from '../../features/playback/store';
 import { useWindowMaterial } from '../../composables/windowMaterial';
+import { getPreblurredBackgroundUrl } from '../../composables/preblurredBackgroundCache';
+import { useRenderingPower } from '../../composables/renderingPower';
+import { calculateCoverGeometry } from '../../composables/useThemeBackgroundGeometry';
 
 const { currentCover, currentCoverFull, dominantColors, showPlayerDetail } = usePlayer();
-const { theme, isDarkTheme } = useThemeSettings();
+const { theme, isDarkTheme, patchTheme } = useThemeSettings();
 const { activeWindowMaterial } = useWindowMaterial();
 const { loadFullCover } = useCoverCache();
+const { isMainWindowLowPower } = useRenderingPower();
 const playbackStore = usePlaybackStore();
 const { currentSongPath } = storeToRefs(playbackStore);
 
+// --- 大背景物理尺寸动态测量 ---
+const containerWidth = ref(window.innerWidth);
+const containerHeight = ref(window.innerHeight);
+
+const updateContainerSize = () => {
+  const bgEl = document.querySelector('[data-global-background]');
+  if (bgEl) {
+    const rect = bgEl.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      containerWidth.value = rect.width;
+      containerHeight.value = rect.height;
+      return;
+    }
+  }
+  containerWidth.value = window.innerWidth;
+  containerHeight.value = window.innerHeight;
+};
+
+// --- 图片物理原始宽高元数据管理 ---
+const imageNaturalWidth = ref(theme.value.customBackground?.imageWidth || 0);
+const imageNaturalHeight = ref(theme.value.customBackground?.imageHeight || 0);
+
+// 监听自定义背景图片路径及尺寸
+watch(
+  [
+    () => theme.value.customBackground?.imagePath,
+    () => theme.value.customBackground?.imageWidth,
+    () => theme.value.customBackground?.imageHeight
+  ],
+  async ([path, w, h]) => {
+    if (!path) {
+      imageNaturalWidth.value = 0;
+      imageNaturalHeight.value = 0;
+      return;
+    }
+
+    // 如果配置中已经带有尺寸，直接使用
+    if (w && h) {
+      imageNaturalWidth.value = w;
+      imageNaturalHeight.value = h;
+      return;
+    }
+
+    // 否则为旧版配置，需要异步加载元数据并写回
+    try {
+      const img = new Image();
+      img.src = convertFileSrc(path);
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+      imageNaturalWidth.value = img.naturalWidth;
+      imageNaturalHeight.value = img.naturalHeight;
+      
+      // 回写补齐配置
+      patchTheme({
+        customBackground: {
+          ...theme.value.customBackground,
+          imageWidth: img.naturalWidth,
+          imageHeight: img.naturalHeight
+        }
+      });
+    } catch (err) {
+      console.error('Failed to load old custom theme background image size', err);
+    }
+  },
+  { immediate: true }
+);
+
 const hasWindowMaterial = computed(() => activeWindowMaterial.value !== 'none');
 const isMicaWindowMaterial = computed(() => activeWindowMaterial.value === 'mica');
-const reduceDynamicEffects = computed(() => showPlayerDetail.value);
+const reduceDynamicEffects = computed(() => showPlayerDetail.value || isMainWindowLowPower.value);
 const flowFallbackPalette = ['hsl(220, 28%, 34%)', 'hsl(196, 58%, 56%)', 'hsl(340, 52%, 58%)', 'hsl(42, 72%, 60%)'];
 const FLOW_SCENE_TRANSITION_MS = 1180;
 
@@ -52,6 +125,8 @@ const activeBackgroundInfo = computed(() => {
       maskColor: currentTheme.customBackground.maskColor,
       maskAlpha: currentTheme.customBackground.maskAlpha,
       scale: currentTheme.customBackground.scale,
+      translateX: currentTheme.customBackground.translateX,
+      translateY: currentTheme.customBackground.translateY,
       isDynamic: false,
       type: 'custom' as const,
     };
@@ -70,7 +145,7 @@ const activeBackgroundInfo = computed(() => {
   if (currentTheme.dynamicBgType === 'blur') {
     return {
       src: currentCoverFull.value || currentCover.value,
-      blur: 40,
+      blur: 32,
       opacity: 0.75,
       scale: 1.25,
       isDynamic: false,
@@ -198,11 +273,14 @@ const flowScene = computed(() => {
 });
 
 const flowLayers = ref<FlowLayerSnapshot[]>([]);
+const preblurredStaticBgSrc = ref('');
+const isStaticBgPreblurred = ref(false);
 
 let flowLayerId = 0;
 let flowTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 let flowEnterAnimationFrame: number | null = null;
 let fullCoverRequestId = 0;
+let preblurRequestId = 0;
 
 function clearFlowTransitionTimer() {
   if (flowTransitionTimer) {
@@ -347,10 +425,61 @@ watch(
   { immediate: true },
 );
 
+const staticBlurAmount = computed(() => {
+  const info = activeBackgroundInfo.value;
+  if (info?.type !== 'blur') {
+    return 0;
+  }
+
+  return isMicaWindowMaterial.value ? Math.min(info.blur, 26) : info.blur;
+});
+
+const staticBrightness = computed(() => {
+  const info = activeBackgroundInfo.value;
+  return info?.type === 'blur' ? info.opacity : 1;
+});
+
+watch(
+  [() => activeBackgroundInfo.value?.type, bgImageSrc, staticBlurAmount, staticBrightness],
+  async ([backgroundType, src, blur, brightness]) => {
+    const requestId = ++preblurRequestId;
+    preblurredStaticBgSrc.value = '';
+    isStaticBgPreblurred.value = false;
+
+    if (backgroundType !== 'blur' || !src) {
+      return;
+    }
+
+    const preblurredUrl = await getPreblurredBackgroundUrl(src, {
+      blur,
+      brightness,
+    });
+
+    if (
+      requestId !== preblurRequestId
+      || activeBackgroundInfo.value?.type !== 'blur'
+      || bgImageSrc.value !== src
+    ) {
+      return;
+    }
+
+    preblurredStaticBgSrc.value = preblurredUrl;
+    isStaticBgPreblurred.value = preblurredUrl !== src;
+  },
+  { immediate: true },
+);
+
+onMounted(() => {
+  updateContainerSize();
+  window.addEventListener('resize', updateContainerSize);
+});
+
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateContainerSize);
   clearFlowTransitionTimer();
   clearFlowEnterAnimationFrame();
   fullCoverRequestId += 1;
+  preblurRequestId += 1;
 });
 
 const staticMaskClass = computed(() => {
@@ -375,10 +504,39 @@ const materialScrimStyle = computed(() => {
     backgroundColor: isMicaWindowMaterial.value ? 'rgba(248, 249, 251, 0.62)' : 'rgba(250, 250, 252, 0.5)',
   };
 });
+
+const customBgGeometry = computed(() => {
+  if (activeBackgroundInfo.value?.type !== 'custom') return null;
+  return calculateCoverGeometry(
+    containerWidth.value,
+    containerHeight.value,
+    imageNaturalWidth.value,
+    imageNaturalHeight.value
+  );
+});
+
+const customBgTransform = computed(() => {
+  const info = activeBackgroundInfo.value;
+  if (!info || info.type !== 'custom') {
+    return { tx: 0, ty: 0, scale: 1.0 };
+  }
+
+  const blurComp = Math.min(0.08, (info.blur || 0) * 0.002);
+  const renderScale = (info.scale || 1.0) + blurComp;
+  const tx = (info.translateX || 0) * containerWidth.value;
+  const ty = (info.translateY || 0) * containerHeight.value;
+
+  return {
+    tx,
+    ty,
+    scale: renderScale
+  };
+});
 </script>
 
 <template>
   <div
+    data-global-background
     class="fixed inset-0 z-0 overflow-hidden pointer-events-none transition-colors duration-500"
     :class="[
       theme.mode === 'custom'
@@ -386,6 +544,7 @@ const materialScrimStyle = computed(() => {
         : hasWindowMaterial
           ? 'bg-transparent'
           : 'bg-[#fafafa] dark:bg-[#121212]',
+      isMainWindowLowPower ? 'global-background--low-power' : '',
     ]"
   >
     <div
@@ -460,10 +619,10 @@ const materialScrimStyle = computed(() => {
       >
         <div class="absolute inset-0 z-10 transition-colors duration-500" :class="staticMaskClass"></div>
         <img
-          :src="bgImageSrc"
-          class="w-full h-full object-cover transition-all duration-1000 z-0"
+          :src="preblurredStaticBgSrc || bgImageSrc"
+          class="w-full h-full object-cover transition-opacity duration-1000 z-0"
           :style="{
-            filter: `blur(${isMicaWindowMaterial ? Math.min(activeBackgroundInfo.blur, 26) : activeBackgroundInfo.blur}px) brightness(${activeBackgroundInfo.opacity})`,
+            filter: isStaticBgPreblurred ? 'none' : `blur(${staticBlurAmount}px) brightness(${staticBrightness})`,
             transform: `scale(${activeBackgroundInfo.scale})`,
             opacity: staticImageOpacity,
           }"
@@ -472,24 +631,42 @@ const materialScrimStyle = computed(() => {
     </transition>
 
     <transition name="fade">
-      <div v-if="activeBackgroundInfo?.type === 'custom' && bgImageSrc" class="absolute inset-0">
+      <div v-if="activeBackgroundInfo?.type === 'custom' && bgImageSrc" class="absolute inset-0 global-background-container overflow-hidden">
         <div
           v-if="activeBackgroundInfo.maskAlpha !== undefined && activeBackgroundInfo.maskAlpha > 0"
-          class="absolute inset-0 z-10 transition-all duration-300"
+          class="absolute inset-0 z-10 transition-all duration-300 pointer-events-none"
           :style="{
             backgroundColor: activeBackgroundInfo.maskColor || '#000000',
             opacity: activeBackgroundInfo.maskAlpha,
           }"
         ></div>
 
-        <img
-          :src="bgImageSrc"
-          class="w-full h-full object-cover transition-all duration-700 z-0"
+        <!-- 完美的物理双层解耦图片布局 -->
+        <div
+          v-if="customBgGeometry"
+          class="absolute"
           :style="{
-            filter: `blur(${activeBackgroundInfo.blur}px) brightness(${activeBackgroundInfo.opacity ?? 1.0})`,
-            transform: `scale(${activeBackgroundInfo.scale || 1.05})`,
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            width: `${customBgGeometry.width}px`,
+            height: `${customBgGeometry.height}px`,
+            transform: 'translate(-50%, -50%)',
           }"
-        />
+        >
+          <img
+            :src="bgImageSrc"
+            class="absolute block max-w-none max-h-none select-none pointer-events-none transition-all duration-700"
+            :style="{
+              width: '100%',
+              height: '100%',
+              transform: `translate3d(${customBgTransform.tx}px, ${customBgTransform.ty}px, 0) scale(${customBgTransform.scale})`,
+              transformOrigin: 'center center',
+              filter: `blur(${activeBackgroundInfo.blur}px)`,
+              opacity: activeBackgroundInfo.opacity ?? 1.0,
+            }"
+          />
+        </div>
       </div>
     </transition>
 
@@ -579,4 +756,11 @@ const materialScrimStyle = computed(() => {
 .animate-mesh-1 { animation: mesh-1 var(--mesh-duration-1, 14s) ease-in-out infinite; }
 .animate-mesh-2 { animation: mesh-2 var(--mesh-duration-2, 18s) ease-in-out infinite; }
 .animate-mesh-3 { animation: mesh-3 var(--mesh-duration-3, 22s) ease-in-out infinite; }
+
+.global-background--low-power,
+.global-background--low-power * {
+  animation-play-state: paused !important;
+  transition: none !important;
+  will-change: auto !important;
+}
 </style>

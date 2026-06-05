@@ -5,6 +5,7 @@ import { fileApi } from '../services/tauri/fileApi';
 import { libraryApi } from '../services/tauri/libraryApi';
 import { useLibraryStore } from '../features/library/store';
 import { usePlaybackStore } from '../features/playback/store';
+import { useSettingsStore } from '../features/settings/store';
 
 interface ProcessExternalPathsOptions {
   source?: 'drop' | 'open';
@@ -42,6 +43,7 @@ export const createPlayerLibraryManager = ({
 }: CreatePlayerLibraryManagerDeps) => {
   const libraryStore = useLibraryStore();
   const playbackStore = usePlaybackStore();
+  const settingsStore = useSettingsStore();
   const normalizePath = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
   const isWithinLibraryRoot = (path: string, root: string) => {
     const normalizedPath = normalizePath(path);
@@ -151,7 +153,10 @@ export const createPlayerLibraryManager = ({
     }
 
     const parsedSongs = filePaths.length > 0
-      ? await fileApi.parseAudioFiles(filePaths).catch(error => {
+      ? await fileApi.parseAudioFiles(
+        filePaths,
+        settingsStore.settings.libraryMinDurationSeconds,
+      ).catch(error => {
         console.error('Failed to parse external audio files:', error);
         return [];
       })

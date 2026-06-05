@@ -8,6 +8,7 @@ import { useCoverCache } from './useCoverCache';
 import { useLyrics } from './lyrics';
 import { usePlayer } from './player';
 import { useThemeSettings } from './useThemeSettings';
+import { useSettings } from '../features/settings/useSettings';
 import {
   MINI_PLAYER_ACTION_EVENT,
   MINI_PLAYER_BOUNDS_EVENT,
@@ -32,6 +33,16 @@ let isMiniPlayerReady = false;
 let miniPlayerReadyPromise: Promise<void> | null = null;
 let resolveMiniPlayerReady: (() => void) | null = null;
 let resolveMiniPlayerStateApplied: (() => void) | null = null;
+
+const MINI_PLAYER_PREWARM_DELAY_MS = 3_200;
+let miniPlayerPrewarmTimer: ReturnType<typeof window.setTimeout> | null = null;
+
+function clearMiniPlayerPrewarmTimer() {
+  if (miniPlayerPrewarmTimer !== null) {
+    window.clearTimeout(miniPlayerPrewarmTimer);
+    miniPlayerPrewarmTimer = null;
+  }
+}
 
 function readMiniPlayerBounds(): MiniPlayerWindowBounds | null {
   if (typeof localStorage === 'undefined') return null;
@@ -126,54 +137,58 @@ async function ensureMiniPlayerWindow() {
     isMiniPlayerReady = false;
     miniPlayerReadyPromise = null;
     resolveMiniPlayerReady = null;
-    const bounds = await normalizeMiniPlayerBounds(readMiniPlayerBounds());
-    const windowInstance = new WebviewWindow(MINI_PLAYER_WINDOW_LABEL, {
-      url: '/',
-      title: 'Lycia Mini Player',
-      width: MINI_PLAYER_WINDOW_WIDTH,
-      height: MINI_PLAYER_WINDOW_BASE_HEIGHT,
-      minWidth: MINI_PLAYER_WINDOW_WIDTH,
-      minHeight: MINI_PLAYER_WINDOW_BASE_HEIGHT,
-      maxWidth: MINI_PLAYER_WINDOW_WIDTH,
-      maxHeight: MINI_PLAYER_WINDOW_BASE_HEIGHT,
-      visible: false,
-      decorations: false,
-      transparent: true,
-      shadow: false,
-      resizable: false,
-      skipTaskbar: true,
-      alwaysOnTop: true,
-      focusable: true,
-      center: !bounds,
-    });
 
-    miniPlayerWindowPromise = new Promise<WebviewWindow>((resolve, reject) => {
-      let settled = false;
+    miniPlayerWindowPromise = (async () => {
+      const bounds = await normalizeMiniPlayerBounds(readMiniPlayerBounds());
+      const windowInstance = new WebviewWindow(MINI_PLAYER_WINDOW_LABEL, {
+        url: '/',
+        title: 'Lycia Mini Player',
+        width: MINI_PLAYER_WINDOW_WIDTH,
+        height: MINI_PLAYER_WINDOW_BASE_HEIGHT,
+        minWidth: MINI_PLAYER_WINDOW_WIDTH,
+        minHeight: MINI_PLAYER_WINDOW_BASE_HEIGHT,
+        maxWidth: MINI_PLAYER_WINDOW_WIDTH,
+        maxHeight: MINI_PLAYER_WINDOW_BASE_HEIGHT,
+        visible: false,
+        decorations: false,
+        transparent: true,
+        shadow: false,
+        resizable: false,
+        skipTaskbar: true,
+        alwaysOnTop: true,
+        focusable: true,
+        center: !bounds,
+      });
 
-      void windowInstance.once('tauri://created', async () => {
-        if (settled) return;
+      return new Promise<WebviewWindow>((resolve, reject) => {
+        let settled = false;
 
-        try {
-          if (bounds) {
-            await windowInstance.setPosition(new LogicalPosition(bounds.x, bounds.y));
+        void windowInstance.once('tauri://created', async () => {
+          if (settled) return;
+
+          try {
+            if (bounds) {
+              await windowInstance.setPosition(new LogicalPosition(bounds.x, bounds.y));
+            }
+
+            settled = true;
+            resolve(windowInstance);
+          } catch (error) {
+            settled = true;
+            reject(error);
           }
+        });
 
+        void windowInstance.once('tauri://error', (event) => {
+          if (settled) return;
           settled = true;
-          miniPlayerWindowPromise = null;
-          resolve(windowInstance);
-        } catch (error) {
-          settled = true;
-          miniPlayerWindowPromise = null;
-          reject(error);
-        }
+          reject(event.payload);
+        });
       });
+    })();
 
-      void windowInstance.once('tauri://error', (event) => {
-        if (settled) return;
-        settled = true;
-        miniPlayerWindowPromise = null;
-        reject(event.payload);
-      });
+    miniPlayerWindowPromise = miniPlayerWindowPromise.finally(() => {
+      miniPlayerWindowPromise = null;
     });
   }
 
@@ -230,6 +245,7 @@ export async function restoreMainWindowFromMiniMode(options: {
 
 export function useMiniPlayerWindowBridge() {
   const mainWindow = getCurrentWindow();
+  const { settings } = useSettings();
   const {
     currentSong,
     isPlaying,
@@ -289,6 +305,8 @@ export function useMiniPlayerWindowBridge() {
   };
 
   const openMiniPlayerWindow = async () => {
+    clearMiniPlayerPrewarmTimer();
+
     const targetWindow = await ensureMiniPlayerWindow();
     await waitForMiniPlayerReady();
     await targetWindow.setAlwaysOnTop(true);
@@ -300,12 +318,20 @@ export function useMiniPlayerWindowBridge() {
   };
 
   const prewarmMiniPlayerWindow = async () => {
-    const targetWindow = await ensureMiniPlayerWindow();
-    await waitForMiniPlayerReady();
-    await emitStateToMiniPlayer();
-    await emitMiniPlayerVisibility(false);
-    await targetWindow.hide();
-    isMiniPlayerWindowVisible.value = false;
+    const existing = await getMiniPlayerWindow();
+    if (existing) return;
+    if (miniPlayerWindowPromise) return;
+
+    try {
+      const targetWindow = await ensureMiniPlayerWindow();
+      await waitForMiniPlayerReady();
+      await emitStateToMiniPlayer();
+      await emitMiniPlayerVisibility(false);
+      await targetWindow.hide();
+      isMiniPlayerWindowVisible.value = false;
+    } catch (error) {
+      console.warn('Failed to prewarm mini player window:', error);
+    }
   };
 
   const hideMiniPlayerWindow = async () => {
@@ -387,6 +413,7 @@ export function useMiniPlayerWindowBridge() {
 
   onMounted(async () => {
     unlisteners.push(await mainWindow.onCloseRequested(async (event) => {
+      if (settings.value.closeToTray) return;
       if (isMainWindowClosing) return;
 
       isMainWindowClosing = true;
@@ -420,10 +447,16 @@ export function useMiniPlayerWindowBridge() {
       writeMiniPlayerBounds(event.payload);
     }));
 
-    void prewarmMiniPlayerWindow();
+    if (miniPlayerPrewarmTimer === null) {
+      miniPlayerPrewarmTimer = window.setTimeout(() => {
+        miniPlayerPrewarmTimer = null;
+        void prewarmMiniPlayerWindow();
+      }, MINI_PLAYER_PREWARM_DELAY_MS);
+    }
   });
 
   onUnmounted(() => {
+    clearMiniPlayerPrewarmTimer();
     unlisteners.splice(0).forEach((unlisten) => unlisten());
   });
 

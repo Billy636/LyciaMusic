@@ -17,6 +17,7 @@ import { createPlayerQueue } from './playerQueue';
 import { createPlayerRestore } from './playerRestore';
 import { createPlayerUiShell } from './playerUiShell';
 import type { ScanLibraryOptions } from './playerLibraryScan';
+import { useCoverCache } from './useCoverCache';
 import { useCollectionsActions } from '../features/collections/useCollectionsActions';
 import { useFileImport } from './useFileImport';
 import { useLibrarySync } from '../features/library/useLibrarySync';
@@ -24,6 +25,7 @@ import { usePlaybackActions } from '../features/playback/usePlaybackActions';
 import { usePlayerLibraryView } from '../features/library/usePlayerLibraryView';
 import { useWindowActions } from './useWindowActions';
 import { playerStorage } from '../services/storage/playerStorage';
+import { historyApi } from '../services/tauri/historyApi';
 import { playbackApi } from '../services/tauri/playbackApi';
 import { useCollectionsStore } from '../features/collections/store';
 import { useLibraryStore } from '../features/library/store';
@@ -31,6 +33,12 @@ import { useNavigationStore } from '../shared/stores/navigation';
 import { usePlaybackStore } from '../features/playback/store';
 import { useUiStore } from '../shared/stores/ui';
 import type { HistoryItem, LibrarySong, Song } from '../types';
+import { useSongDetailCache } from './useSongDetailCache';
+import {
+  cleanupRemovedLibrarySongPaths,
+  collectSongPathsInFolderScope,
+  isPathInFolderScope,
+} from './libraryRemovalCleanup';
 
 interface PlaySongOptions {
   updateShuffleHistory?: boolean;
@@ -141,6 +149,8 @@ const formatTimeAgo = (timestamp: number) => {
 function createPlayerCore() {
   const { loadLyrics } = useLyrics();
   const { showToast } = useToast();
+  const { clearCoverCaches } = useCoverCache();
+  const { clearSongDetailCache } = useSongDetailCache();
 
   const collectionsStore = useCollectionsStore();
   const libraryStore = useLibraryStore();
@@ -217,11 +227,44 @@ function createPlayerCore() {
   const removeLibraryFolderPath = async (path: string): Promise<void> => {
     await librarySync.removeLibraryFolderPath(path);
   };
+  const collectRemovedLibraryFolderSongPaths = (path: string) => {
+    const candidates = [
+      ...libraryStore.canonicalSongs,
+      ...libraryStore.sourceSongs,
+      ...playbackStore.playQueue,
+      ...playbackStore.tempQueue,
+      ...(playbackStore.currentSong ? [playbackStore.currentSong] : []),
+    ];
+
+    return collectSongPathsInFolderScope(candidates, path);
+  };
+
   const removeLibraryFolderLinked = async (
     path: string,
     options: { showToast?: boolean } = {},
   ): Promise<void> => {
+    const removedPaths = collectRemovedLibraryFolderSongPaths(path);
+    const activeSongPath = currentSongPath.value ?? currentSong.value?.path ?? null;
+
+    if (activeSongPath && isPathInFolderScope(path, activeSongPath)) {
+      if (!removedPaths.some(songPath => songPath === activeSongPath)) {
+        removedPaths.push(activeSongPath);
+      }
+      await stopPlaybackForMissingSong();
+    }
+
     await librarySync.removeLibraryFolderLinked(path, options);
+    await cleanupRemovedLibrarySongPaths({
+      removedPaths,
+      removedFolderPath: path,
+      stopPlayback: stopPlaybackForMissingSong,
+      removeFromHistory: songPaths => playerHistoryFavorites.removeFromHistory(songPaths),
+      removeSongStatistics: songPaths => historyApi.removeSongsFromHistoryAndStatistics(songPaths),
+      clearCaches: () => {
+        clearCoverCaches();
+        clearSongDetailCache();
+      },
+    });
   };
   const resetShuffleState = () => playerQueue.resetShuffleState();
 
@@ -485,7 +528,9 @@ function createPlayerCore() {
   };
 
   const stopPlaybackForMissingSong = async () => {
-    await playbackApi.pauseAudio().catch(() => {});
+    await playbackApi.stopAudio().catch(async () => {
+      await playbackApi.pauseAudio().catch(() => {});
+    });
     playerPlayback.stopPlaybackRuntime();
     isPlaying.value = false;
     isSongLoaded.value = false;
@@ -597,6 +642,7 @@ function createPlayerCore() {
     clearQueue: playbackActions.clearQueue,
     addSongToQueue: playbackActions.addSongToQueue,
     addSongsToQueue: playbackActions.addSongsToQueue,
+    addAlbumToQueueTail: playbackActions.addAlbumToQueueTail,
     removeSongFromQueue: playbackActions.removeSongFromQueue,
     playNext: playbackActions.playNext,
     handleScan: playbackActions.handleScan,

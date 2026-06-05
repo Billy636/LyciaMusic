@@ -40,7 +40,7 @@ watch([() => dragSession.active, () => dragSession.type], async ([active, type])
   }
 });
 
-const onMouseMove = (e: MouseEvent) => {
+const onPointerMove = (e: PointerEvent) => {
   if (dragSession.active) {
     ghostX.value = e.clientX;
     ghostY.value = e.clientY;
@@ -48,11 +48,11 @@ const onMouseMove = (e: MouseEvent) => {
 };
 
 onMounted(() => {
-  window.addEventListener('mousemove', onMouseMove, { passive: true });
+  window.addEventListener('pointermove', onPointerMove, { passive: true });
 });
 
 onUnmounted(() => {
-  window.removeEventListener('mousemove', onMouseMove);
+  window.removeEventListener('pointermove', onPointerMove);
 });
 
 const ghostStyle = computed(() => ({

@@ -1,10 +1,11 @@
+use crate::player::equalizer::EqualizerHandle;
 use crate::player::output::{OutputBackend, OutputError};
 use crate::player::types::{SharedProgress, TimedSource};
 use cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -71,9 +72,10 @@ pub(crate) fn restore_current_playback(
     output: &Option<SharedOutputBackend>,
     current_sink: &mut Option<Sink>,
     current_path: &str,
-    current_volume: f32,
     is_playing_flag: bool,
     progress: &Arc<SharedProgress>,
+    equalizer_handle: Arc<EqualizerHandle>,
+    user_volume: Arc<AtomicU32>,
 ) {
     if current_path.is_empty() {
         return;
@@ -91,13 +93,27 @@ pub(crate) fn restore_current_playback(
         if let Ok(file) = File::open(current_path) {
             let reader = BufReader::with_capacity(512 * 1024, file);
             if let Ok(source) = Decoder::new(reader) {
+                let skipped = source.convert_samples::<f32>().skip_duration(jump_target);
+
+                // 1. Equalizer
+                let eq_source = crate::player::equalizer::Equalizer::new(skipped, equalizer_handle);
+
+                // 2. UserVolumeSource
+                let vol_source =
+                    crate::player::equalizer::UserVolumeSource::new(eq_source, user_volume);
+
+                // 3. ClipGuardSource
+                let clip_source = crate::player::equalizer::ClipGuardSource::new(vol_source);
+
+                // 4. TimedSource
                 let timed_source = TimedSource::new(
-                    source.convert_samples::<f32>().skip_duration(jump_target),
+                    clip_source,
                     progress.samples_played.clone(),
                     progress.visualizer.clone(),
                 );
+
                 if let Some(sink) = current_sink.as_ref() {
-                    sink.set_volume(current_volume);
+                    sink.set_volume(1.0); // 固定共享模式 Sink 音量恒为 1.0
                     sink.append(timed_source);
                     if is_playing_flag {
                         sink.play();

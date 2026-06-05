@@ -23,6 +23,8 @@ const {
   handlePlaybackPayload,
   emitAction,
   getWordStyle,
+  getRomajiWordStyle,
+  getRomajiLineStyle,
 } = useDesktopLyricsDisplay(showDragShadow);
 
 const {
@@ -105,9 +107,21 @@ const {
                               v-for="(word, index) in displayLine.words"
                               :key="`${word.start}-${word.end}-${index}`"
                               class="desktop-lyric-word"
-                              :style="displayLine.active ? getWordStyle(word.start, word.end) : undefined"
+                              :class="{ 'desktop-lyric-word--with-romaji': displayLine.hasAlignedRomaji }"
                             >
-                              {{ word.text }}
+                              <span
+                                class="desktop-lyric-word-main"
+                                :style="displayLine.active ? getWordStyle(word.start, word.end) : undefined"
+                              >
+                                {{ word.text }}
+                              </span>
+                              <span
+                                v-if="displayLine.hasAlignedRomaji"
+                                class="desktop-lyric-word-romaji"
+                                :style="displayLine.active ? getRomajiWordStyle(word.start, word.end) : undefined"
+                              >
+                                {{ word.romaji?.trim() }}
+                              </span>
                             </span>
                           </template>
                           <template v-else>
@@ -120,6 +134,9 @@ const {
                           :key="`${displayLine.lineIndex}:${secondaryLine.kind}:${secondaryLine.text}`"
                           class="desktop-lyric-sub"
                           :class="`desktop-lyric-sub--${secondaryLine.kind}`"
+                          :style="secondaryLine.kind === 'romaji' && displayLine.active
+                            ? getRomajiLineStyle(displayLine.line, displayLine.lineIndex)
+                            : undefined"
                         >
                           {{ secondaryLine.text }}
                         </div>
@@ -302,41 +319,41 @@ const {
   color: var(--desktop-text-primary);
   overflow-wrap: anywhere;
   word-break: break-word;
-  text-shadow:
-    0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.55)),
-    0 0 var(--desktop-first-line-text-shadow-blur, 0px) rgb(var(--desktop-text-shadow-color, 0 0 0) / var(--desktop-first-line-text-shadow-alpha, 0)),
-    0 0 24px color-mix(in srgb, var(--desktop-accent-a) 14%, transparent);
+  filter:
+    drop-shadow(0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.55)))
+    drop-shadow(0 0 var(--desktop-first-line-text-shadow-blur, 0px) rgb(var(--desktop-text-shadow-color, 0 0 0) / var(--desktop-first-line-text-shadow-alpha, 0)))
+    drop-shadow(0 0 24px color-mix(in srgb, var(--desktop-accent-a) 14%, transparent));
   transition:
     color 460ms ease,
     font-size 560ms cubic-bezier(0.22, 1, 0.36, 1),
     font-weight 520ms ease,
-    text-shadow 460ms ease;
+    filter 460ms ease;
 }
 
 .desktop-lyric-main--inactive {
   font-size: calc(max(20px, min(3.6vw, 4.8vh)) * var(--desktop-font-scale, 1));
   font-weight: 650;
   color: color-mix(in srgb, var(--desktop-text-primary) 76%, transparent);
-  text-shadow:
-    0 1px 2px rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.48)),
-    0 0 var(--desktop-second-line-text-shadow-blur, 0px) rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.86)),
-    0 0 18px color-mix(in srgb, var(--desktop-accent-c) 10%, transparent);
+  filter:
+    drop-shadow(0 1px 2px rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.48)))
+    drop-shadow(0 0 var(--desktop-second-line-text-shadow-blur, 0px) rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.86)))
+    drop-shadow(0 0 18px color-mix(in srgb, var(--desktop-accent-c) 10%, transparent));
 }
 
 .desktop-lyric-main--solid {
   color: var(--desktop-lyric-solid-color, var(--desktop-text-primary));
-  text-shadow:
-    0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.55)),
-    0 0 var(--desktop-first-line-text-shadow-blur, 0px) rgb(var(--desktop-text-shadow-color, 0 0 0) / var(--desktop-first-line-text-shadow-alpha, 0)),
-    0 0 24px color-mix(in srgb, var(--desktop-lyric-solid-color, var(--desktop-accent-a)) 22%, transparent);
+  filter:
+    drop-shadow(0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.55)))
+    drop-shadow(0 0 var(--desktop-first-line-text-shadow-blur, 0px) rgb(var(--desktop-text-shadow-color, 0 0 0) / var(--desktop-first-line-text-shadow-alpha, 0)))
+    drop-shadow(0 0 24px color-mix(in srgb, var(--desktop-lyric-solid-color, var(--desktop-accent-a)) 22%, transparent));
 }
 
 .desktop-lyric-main--solid.desktop-lyric-main--inactive {
   color: color-mix(in srgb, var(--desktop-lyric-solid-color, var(--desktop-text-primary)) 76%, transparent);
-  text-shadow:
-    0 1px 2px rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.48)),
-    0 0 var(--desktop-second-line-text-shadow-blur, 0px) rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.86)),
-    0 0 18px color-mix(in srgb, var(--desktop-lyric-solid-color, var(--desktop-accent-c)) 14%, transparent);
+  filter:
+    drop-shadow(0 1px 2px rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.48)))
+    drop-shadow(0 0 var(--desktop-second-line-text-shadow-blur, 0px) rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.86)))
+    drop-shadow(0 0 18px color-mix(in srgb, var(--desktop-lyric-solid-color, var(--desktop-accent-c)) 14%, transparent));
 }
 
 .desktop-lyric-word {
@@ -349,6 +366,36 @@ const {
     text-shadow 260ms linear;
 }
 
+.desktop-lyric-word--with-romaji {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: center;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.desktop-lyric-word-main {
+  display: inline-block;
+  white-space: pre-wrap;
+}
+
+.desktop-lyric-word-romaji {
+  display: block;
+  margin-top: 0.08em;
+  color: var(--desktop-romaji-unplayed-color);
+  font-size: 0.46em;
+  font-weight: 650;
+  line-height: 1.05;
+  letter-spacing: 0;
+  white-space: pre;
+  filter:
+    drop-shadow(0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.48)))
+    drop-shadow(0 0 calc(var(--desktop-first-line-text-shadow-blur, 0px) * 0.86) rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.86)))
+    drop-shadow(0 0 16px color-mix(in srgb, var(--desktop-romaji-unplayed-color) 20%, transparent));
+}
+
 .desktop-lyric-sub {
   width: 100%;
   font-size: calc(max(14px, min(2.25vw, 2.75vh)) * var(--desktop-font-scale, 1));
@@ -359,38 +406,38 @@ const {
   transition:
     color 460ms ease,
     opacity 460ms ease,
-    text-shadow 460ms ease,
+    filter 460ms ease,
     transform 500ms ease;
 }
 
 .desktop-lyric-sub--romaji {
-  color: var(--desktop-romaji-color);
-  text-shadow:
-    0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.48)),
-    0 0 calc(var(--desktop-first-line-text-shadow-blur, 0px) * 0.86) rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.86)),
-    0 0 16px color-mix(in srgb, var(--desktop-romaji-color) 20%, transparent);
+  color: var(--desktop-romaji-unplayed-color);
+  filter:
+    drop-shadow(0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.48)))
+    drop-shadow(0 0 calc(var(--desktop-first-line-text-shadow-blur, 0px) * 0.86) rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.86)))
+    drop-shadow(0 0 16px color-mix(in srgb, var(--desktop-romaji-unplayed-color) 20%, transparent));
 }
 
 .desktop-lyric-sub--translation {
   color: var(--desktop-translation-color);
-  text-shadow:
-    0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.48)),
-    0 0 calc(var(--desktop-first-line-text-shadow-blur, 0px) * 0.82) rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.82)),
-    0 0 12px color-mix(in srgb, var(--desktop-translation-color) 18%, transparent);
+  filter:
+    drop-shadow(0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.48)))
+    drop-shadow(0 0 calc(var(--desktop-first-line-text-shadow-blur, 0px) * 0.82) rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.82)))
+    drop-shadow(0 0 12px color-mix(in srgb, var(--desktop-translation-color) 18%, transparent));
 }
 
 .desktop-lyric-row--second-line .desktop-lyric-sub--romaji {
-  text-shadow:
-    0 1px 2px rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.48)),
-    0 0 calc(var(--desktop-second-line-text-shadow-blur, 0px) * 0.86) rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.86)),
-    0 0 16px color-mix(in srgb, var(--desktop-romaji-color) 20%, transparent);
+  filter:
+    drop-shadow(0 1px 2px rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.48)))
+    drop-shadow(0 0 calc(var(--desktop-second-line-text-shadow-blur, 0px) * 0.86) rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.86)))
+    drop-shadow(0 0 16px color-mix(in srgb, var(--desktop-romaji-unplayed-color) 20%, transparent));
 }
 
 .desktop-lyric-row--second-line .desktop-lyric-sub--translation {
-  text-shadow:
-    0 1px 2px rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.48)),
-    0 0 calc(var(--desktop-second-line-text-shadow-blur, 0px) * 0.82) rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.82)),
-    0 0 12px color-mix(in srgb, var(--desktop-translation-color) 18%, transparent);
+  filter:
+    drop-shadow(0 1px 2px rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.48)))
+    drop-shadow(0 0 calc(var(--desktop-second-line-text-shadow-blur, 0px) * 0.82) rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.82)))
+    drop-shadow(0 0 12px color-mix(in srgb, var(--desktop-translation-color) 18%, transparent));
 }
 
 .lyrics-align-left {
@@ -447,10 +494,10 @@ const {
   font-size: 1.1rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  text-shadow:
-    0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.48)),
-    0 0 calc(var(--desktop-first-line-text-shadow-blur, 0px) * 0.82) rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.82)),
-    0 0 16px color-mix(in srgb, var(--desktop-accent-a) 12%, transparent);
+  filter:
+    drop-shadow(0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.48)))
+    drop-shadow(0 0 calc(var(--desktop-first-line-text-shadow-blur, 0px) * 0.82) rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.82)))
+    drop-shadow(0 0 16px color-mix(in srgb, var(--desktop-accent-a) 12%, transparent));
 }
 
 .desktop-block-enter-active,

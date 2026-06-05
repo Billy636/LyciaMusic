@@ -9,14 +9,16 @@ import SettingsShortcuts from "../components/settings/SettingsShortcuts.vue";
 import SettingsSidebar from "../components/settings/SettingsSidebar.vue";
 import SettingsTheme from "../components/settings/SettingsTheme.vue";
 import SettingsToolbox from "../components/settings/SettingsToolbox.vue";
+import SettingsAudioOutput from "../components/settings/SettingsAudioOutput.vue";
 
-const activeTab = ref<'general' | 'theme' | 'sidebar' | 'desktopLyrics' | 'toolbox' | 'library' | 'remoteLibrary' | 'shortcuts' | 'about'>('general');
+const activeTab = ref<'general' | 'theme' | 'sidebar' | 'desktopLyrics' | 'audioOutput' | 'toolbox' | 'library' | 'remoteLibrary' | 'shortcuts' | 'about'>('general');
 
 const tabs = [
   { id: 'general', name: '常规' },
   { id: 'theme', name: '外观' },
   { id: 'sidebar', name: '侧边栏管理' },
   { id: 'desktopLyrics', name: '桌面歌词' },
+  { id: 'audioOutput', name: '音频输出' },
   { id: 'toolbox', name: '工具箱' },
   { id: 'library', name: '本地音乐库' },
   { id: 'remoteLibrary', name: '远程音乐库' },
@@ -51,6 +53,7 @@ const tabs = [
         <SettingsTheme v-else-if="activeTab === 'theme'" />
         <SettingsSidebar v-else-if="activeTab === 'sidebar'" />
         <SettingsDesktopLyrics v-else-if="activeTab === 'desktopLyrics'" />
+        <SettingsAudioOutput v-else-if="activeTab === 'audioOutput'" />
         <SettingsToolbox v-else-if="activeTab === 'toolbox'" />
         <SettingsLibrary v-else-if="activeTab === 'library'" />
         <SettingsRemoteLibrary v-else-if="activeTab === 'remoteLibrary'" />

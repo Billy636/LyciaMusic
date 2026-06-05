@@ -1301,6 +1301,54 @@ fn match_song_identity(
         .or_else(|| select_unique_candidate(&index.weak_title, &weak_title_identity_key(identity)))
 }
 
+fn rebuild_statistics_aggregates(conn: &rusqlite::Connection) -> Result<(), String> {
+    clear_aggregate_statistics(conn)?;
+
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT s.path, s.title, s.artist, s.album, s.duration, s.track_number, ph.played_at, ph.played_seconds
+                 FROM play_history ph
+                 INNER JOIN songs s ON ph.song_id = s.id
+                 WHERE ph.event = 'play' AND ph.song_id IS NOT NULL
+                 ORDER BY ph.played_at ASC, ph.id ASC",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7).unwrap_or(0),
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+
+        for row in rows.flatten() {
+            let identity = resolve_song_identity(
+                &row.1,
+                &row.2,
+                &row.3,
+                row.4.max(0) * 1000,
+                parse_track_number_value(row.5.as_deref()),
+                Some(&row.0),
+            );
+            let listened_ms = row.7.max(0) * 1000;
+            let (is_full_play, is_skip) = derive_play_flags(listened_ms, identity.duration_ms);
+            record_aggregate_play(conn, &identity, row.6, listened_ms, is_full_play, is_skip)?;
+        }
+    }
+
+    set_statistics_meta(conn, "aggregates_backfilled", "1")?;
+    Ok(())
+}
+
 fn ensure_statistics_aggregates(conn: &rusqlite::Connection) -> Result<(), String> {
     if get_statistics_meta(conn, "aggregates_backfilled")?
         .as_deref()
@@ -1309,49 +1357,7 @@ fn ensure_statistics_aggregates(conn: &rusqlite::Connection) -> Result<(), Strin
         return Ok(());
     }
 
-    clear_aggregate_statistics(conn)?;
-
-    let mut stmt = conn
-        .prepare(
-            "SELECT s.path, s.title, s.artist, s.album, s.duration, s.track_number, ph.played_at, ph.played_seconds
-             FROM play_history ph
-             INNER JOIN songs s ON ph.song_id = s.id
-             WHERE ph.event = 'play' AND ph.song_id IS NOT NULL
-             ORDER BY ph.played_at ASC, ph.id ASC",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, i64>(6)?,
-                row.get::<_, i64>(7).unwrap_or(0),
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-
-    for row in rows.flatten() {
-        let identity = resolve_song_identity(
-            &row.1,
-            &row.2,
-            &row.3,
-            row.4.max(0) * 1000,
-            parse_track_number_value(row.5.as_deref()),
-            Some(&row.0),
-        );
-        let listened_ms = row.7.max(0) * 1000;
-        let (is_full_play, is_skip) = derive_play_flags(listened_ms, identity.duration_ms);
-        record_aggregate_play(conn, &identity, row.6, listened_ms, is_full_play, is_skip)?;
-    }
-
-    set_statistics_meta(conn, "aggregates_backfilled", "1")?;
-    Ok(())
+    rebuild_statistics_aggregates(conn)
 }
 
 fn load_portable_export(file_path: &str) -> Result<PortableStatisticsExport, String> {
@@ -2294,6 +2300,36 @@ pub fn remove_from_recent_history(
     }
 
     drop(stmt);
+    tx.commit().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn remove_songs_from_history_and_statistics(
+    db: State<DbState>,
+    song_paths: Vec<String>,
+) -> Result<(), String> {
+    if song_paths.is_empty() {
+        return Ok(());
+    }
+
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    {
+        let mut stmt = tx
+            .prepare("DELETE FROM play_history WHERE song_path = ?1")
+            .map_err(|e| e.to_string())?;
+
+        for song_path in song_paths {
+            let normalized_path = normalize_path(&song_path);
+            if normalized_path.is_empty() {
+                continue;
+            }
+            stmt.execute([normalized_path]).map_err(|e| e.to_string())?;
+        }
+    }
+
+    rebuild_statistics_aggregates(&tx)?;
     tx.commit().map_err(|e| e.to_string())
 }
 
