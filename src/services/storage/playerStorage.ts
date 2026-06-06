@@ -1,4 +1,4 @@
-import type { AppSettings, HistoryItem, Playlist, Song } from '../../types';
+import type { AppSettings, HistoryItem, Playlist, Song, EqualizerPreset } from '../../types';
 import { localStore } from './localStore';
 
 export type ArtistSortMode = 'count' | 'name' | 'custom';
@@ -29,6 +29,7 @@ export const playerStorageKeys = {
   folderCustomOrder: 'player_folder_custom_order',
   localCustomOrder: 'player_local_custom_order',
   legacyAppSettings: 'app_settings',
+  equalizerPresets: 'player_equalizer_presets',
 } as const;
 
 const isSong = (value: unknown): value is Song =>
@@ -146,6 +147,42 @@ export const playerStorage = {
       const playlist = item as Playlist;
       return typeof playlist.id === 'string' && typeof playlist.name === 'string' && Array.isArray(playlist.songPaths);
     });
+  },
+
+  // 均衡器预设管理
+  readEqualizerPresets(): EqualizerPreset[] {
+    const parsed = localStore.getJson<unknown>(playerStorageKeys.equalizerPresets);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((item): item is EqualizerPreset => 
+      !!item && typeof item === 'object' && typeof item.id === 'string'
+    );
+  },
+  
+  writeEqualizerPresets(presets: EqualizerPreset[]) {
+    localStore.setJson(playerStorageKeys.equalizerPresets, presets);
+  },
+  
+  addEqualizerPreset(preset: EqualizerPreset) {
+    const presets = this.readEqualizerPresets();
+    presets.push(preset);
+    this.writeEqualizerPresets(presets);
+  },
+  
+  updateEqualizerPreset(preset: EqualizerPreset) {
+    const presets = this.readEqualizerPresets();
+    const index = presets.findIndex(p => p.id === preset.id);
+    if (index !== -1) {
+      presets[index] = preset;
+      this.writeEqualizerPresets(presets);
+    }
+  },
+  
+  deleteEqualizerPreset(presetId: string) {
+    const presets = this.readEqualizerPresets();
+    const filtered = presets.filter(p => p.id !== presetId);
+    this.writeEqualizerPresets(filtered);
   },
 
   writePlayerState(options: {

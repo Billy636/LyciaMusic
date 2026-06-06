@@ -304,10 +304,21 @@ export interface DesktopLyricsSettings {
 
 export type AudioOutputMode = 'shared' | 'wasapiExclusive';
 
+export interface EqualizerPreset {
+  id: string;
+  name: string;
+  preamp: number;
+  gains: number[];
+  isBuiltin: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface EqualizerSettings {
   enabled: boolean;
   preamp: number;
   gains: number[];
+  currentPresetId?: string | null;
 }
 
 export interface AudioSettings {

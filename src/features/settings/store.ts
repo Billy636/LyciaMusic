@@ -5,6 +5,7 @@ import type {
   AppSettings,
   AudioSettings,
   DesktopLyricsSettings,
+  EqualizerPreset,
   ImportedLyricsFont,
   LyricsSettings,
   SidebarSettings,
@@ -22,6 +23,7 @@ import {
   mergeShortcutSettings,
   type ShortcutSettingsPatch,
 } from './shortcuts';
+import { playerStorage } from '../../services/storage/playerStorage';
 
 export type ThemeSettingsPatch = Partial<Omit<ThemeSettings, 'customBackground'>> & {
   customBackground?: Partial<ThemeSettings['customBackground']>;
@@ -326,11 +328,80 @@ export const useSettingsStore = defineStore('settings', () => {
     };
   };
 
+  // 均衡器预设管理
+  const equalizerPresets = ref<EqualizerPreset[]>(
+    playerStorage.readEqualizerPresets()
+  );
+  
+  const builtinPresets = computed(() => 
+    equalizerPresets.value.filter(p => p.isBuiltin)
+  );
+  
+  const userPresets = computed(() => 
+    equalizerPresets.value.filter(p => !p.isBuiltin)
+  );
+  
+  const saveEqualizerPreset = (name: string) => {
+    const newPreset: EqualizerPreset = {
+      id: `user_${Date.now()}`,
+      name,
+      preamp: settings.value.audio.equalizer.preamp,
+      gains: [...settings.value.audio.equalizer.gains],
+      isBuiltin: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    
+    equalizerPresets.value.push(newPreset);
+    playerStorage.writeEqualizerPresets(userPresets.value);
+    
+    // 更新当前预设ID
+    settings.value.audio.equalizer.currentPresetId = newPreset.id;
+    
+    return newPreset;
+  };
+  
+  const updateEqualizerPreset = (presetId: string, name: string) => {
+    const preset = equalizerPresets.value.find(p => p.id === presetId);
+    if (preset && !preset.isBuiltin) {
+      preset.name = name;
+      preset.preamp = settings.value.audio.equalizer.preamp;
+      preset.gains = [...settings.value.audio.equalizer.gains];
+      preset.updatedAt = Date.now();
+      playerStorage.writeEqualizerPresets(userPresets.value);
+    }
+  };
+  
+  const deleteEqualizerPreset = (presetId: string) => {
+    const index = equalizerPresets.value.findIndex(p => p.id === presetId);
+    if (index !== -1 && !equalizerPresets.value[index].isBuiltin) {
+      equalizerPresets.value.splice(index, 1);
+      playerStorage.writeEqualizerPresets(userPresets.value);
+      
+      // 如果删除的是当前预设，清除当前预设ID
+      if (settings.value.audio.equalizer.currentPresetId === presetId) {
+        settings.value.audio.equalizer.currentPresetId = null;
+      }
+    }
+  };
+  
+  const loadEqualizerPreset = (presetId: string) => {
+    const preset = equalizerPresets.value.find(p => p.id === presetId);
+    if (preset) {
+      settings.value.audio.equalizer.preamp = preset.preamp;
+      settings.value.audio.equalizer.gains = [...preset.gains];
+      settings.value.audio.equalizer.currentPresetId = presetId;
+    }
+  };
+
   return {
     settings,
     audioDelay,
     theme,
     sidebar,
+    equalizerPresets,
+    builtinPresets,
+    userPresets,
     replaceSettings,
     patchSettings,
     resetSettings,
@@ -338,5 +409,9 @@ export const useSettingsStore = defineStore('settings', () => {
     patchTheme,
     replaceSidebar,
     patchSidebar,
+    saveEqualizerPreset,
+    updateEqualizerPreset,
+    deleteEqualizerPreset,
+    loadEqualizerPreset,
   };
 });
