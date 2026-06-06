@@ -56,7 +56,7 @@ const showSaveDialog = ref(false);
 const showEditDialog = ref(false);
 const newPresetName = ref('');
 const editPresetName = ref('');
-const selectedPresetId = ref<string | null>(eq.value.currentPresetId || null);
+const selectedPresetId = computed(() => eq.value.currentPresetId || null);
 
 // 保存当前设置为预设
 const handleSavePreset = () => {
@@ -76,18 +76,25 @@ const handleUpdatePreset = () => {
   }
 };
 
+// 打开编辑对话框并回填当前预设名称
+const openEditDialog = () => {
+  const preset = settingsStore.userPresets.find(p => p.id === selectedPresetId.value);
+  if (preset) {
+    editPresetName.value = preset.name;
+    showEditDialog.value = true;
+  }
+};
+
 // 删除预设
 const handleDeletePreset = () => {
   if (selectedPresetId.value && confirm('确定要删除这个预设吗？')) {
     settingsStore.deleteEqualizerPreset(selectedPresetId.value);
-    selectedPresetId.value = null;
   }
 };
 
 // 加载预设
 const handleLoadPreset = (presetId: string) => {
   settingsStore.loadEqualizerPreset(presetId);
-  selectedPresetId.value = presetId;
 };
 
 // 统一的、强健的 Pinia 状态修改函数，包含属性保留与非深合并展开防御
@@ -198,6 +205,7 @@ const handleReset = () => {
   commitSettings({
     preamp: displayPreamp.value,
     gains: displayGains.value,
+    currentPresetId: null,
   });
 };
 
@@ -209,6 +217,7 @@ const handleApplyPreset = (preset: typeof PRESETS[0]) => {
     enabled: true,
     preamp: displayPreamp.value,
     gains: displayGains.value,
+    currentPresetId: null,
   });
 };
 
@@ -322,7 +331,7 @@ onScopeDispose(() => {
     <!-- 预设管理按钮（仅当选中用户预设时显示） -->
     <div v-if="selectedPresetId && !selectedPresetId.startsWith('builtin_')" class="flex gap-2 mb-4">
       <button
-        @click="showEditDialog = true"
+        @click="openEditDialog"
         class="px-3 py-1.5 text-xs rounded-lg bg-yellow-100 dark:bg-yellow-900 hover:bg-yellow-200 dark:hover:bg-yellow-800 text-yellow-600 dark:text-yellow-400"
       >
         编辑预设
@@ -453,7 +462,7 @@ onScopeDispose(() => {
       <input
         v-model="newPresetName"
         placeholder="输入预设名称"
-        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg mb-4"
+        class="w-full px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg mb-4 outline-none focus:border-[#EC4141] transition-colors"
       />
       <div class="flex justify-end gap-2">
         <button
@@ -479,7 +488,7 @@ onScopeDispose(() => {
       <input
         v-model="editPresetName"
         placeholder="输入预设名称"
-        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg mb-4"
+        class="w-full px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg mb-4 outline-none focus:border-[#EC4141] transition-colors"
       />
       <div class="flex justify-end gap-2">
         <button

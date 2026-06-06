@@ -221,11 +221,15 @@ export const mergeAudioSettings = (
   let eqEnabled = base.equalizer?.enabled ?? false;
   let eqPreamp = base.equalizer?.preamp ?? 0.0;
   let eqGains = base.equalizer?.gains ?? [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  let eqCurrentPresetId = base.equalizer?.currentPresetId ?? null;
 
   if (equalizerPatch && typeof equalizerPatch === 'object') {
     eqEnabled = equalizerPatch.enabled ?? eqEnabled;
     eqPreamp = equalizerPatch.preamp ?? eqPreamp;
     eqGains = equalizerPatch.gains ? [...equalizerPatch.gains] : eqGains;
+    if ('currentPresetId' in equalizerPatch) {
+      eqCurrentPresetId = equalizerPatch.currentPresetId ?? null;
+    }
   }
 
   return {
@@ -240,6 +244,7 @@ export const mergeAudioSettings = (
       enabled: eqEnabled,
       preamp: eqPreamp,
       gains: eqGains,
+      currentPresetId: eqCurrentPresetId,
     },
     showEqualizerInFooter: patch.showEqualizerInFooter ?? base.showEqualizerInFooter ?? true,
   };
@@ -333,10 +338,6 @@ export const useSettingsStore = defineStore('settings', () => {
     playerStorage.readEqualizerPresets()
   );
   
-  const builtinPresets = computed(() => 
-    equalizerPresets.value.filter(p => p.isBuiltin)
-  );
-  
   const userPresets = computed(() => 
     equalizerPresets.value.filter(p => !p.isBuiltin)
   );
@@ -388,6 +389,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const loadEqualizerPreset = (presetId: string) => {
     const preset = equalizerPresets.value.find(p => p.id === presetId);
     if (preset) {
+      settings.value.audio.equalizer.enabled = true;
       settings.value.audio.equalizer.preamp = preset.preamp;
       settings.value.audio.equalizer.gains = [...preset.gains];
       settings.value.audio.equalizer.currentPresetId = presetId;
@@ -400,7 +402,6 @@ export const useSettingsStore = defineStore('settings', () => {
     theme,
     sidebar,
     equalizerPresets,
-    builtinPresets,
     userPresets,
     replaceSettings,
     patchSettings,

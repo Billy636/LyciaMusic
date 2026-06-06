@@ -163,27 +163,6 @@ export const playerStorage = {
   writeEqualizerPresets(presets: EqualizerPreset[]) {
     localStore.setJson(playerStorageKeys.equalizerPresets, presets);
   },
-  
-  addEqualizerPreset(preset: EqualizerPreset) {
-    const presets = this.readEqualizerPresets();
-    presets.push(preset);
-    this.writeEqualizerPresets(presets);
-  },
-  
-  updateEqualizerPreset(preset: EqualizerPreset) {
-    const presets = this.readEqualizerPresets();
-    const index = presets.findIndex(p => p.id === preset.id);
-    if (index !== -1) {
-      presets[index] = preset;
-      this.writeEqualizerPresets(presets);
-    }
-  },
-  
-  deleteEqualizerPreset(presetId: string) {
-    const presets = this.readEqualizerPresets();
-    const filtered = presets.filter(p => p.id !== presetId);
-    this.writeEqualizerPresets(filtered);
-  },
 
   writePlayerState(options: {
     playlistPathKey: string;
