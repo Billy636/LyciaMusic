@@ -25,6 +25,11 @@ import {
 } from './shortcuts';
 import { playerStorage } from '../../services/storage/playerStorage';
 
+const createUserPresetId = (): string =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? `user_${crypto.randomUUID()}`
+    : `user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
 export type ThemeSettingsPatch = Partial<Omit<ThemeSettings, 'customBackground'>> & {
   customBackground?: Partial<ThemeSettings['customBackground']>;
 };
@@ -148,6 +153,13 @@ export const createDefaultSidebarSettings = (): SidebarSettings => ({
 
 export const createDefaultAudioSettings = (): AudioSettings => ({
   ...defaultAudioSettings,
+  volumeBalance: {
+    ...defaultAudioSettings.volumeBalance,
+  },
+  equalizer: {
+    ...defaultAudioSettings.equalizer,
+    gains: [...defaultAudioSettings.equalizer.gains],
+  },
 });
 
 export const normalizeLibraryMinDurationSeconds = (
@@ -344,7 +356,7 @@ export const useSettingsStore = defineStore('settings', () => {
   
   const saveEqualizerPreset = (name: string) => {
     const newPreset: EqualizerPreset = {
-      id: `user_${Date.now()}`,
+      id: createUserPresetId(),
       name,
       preamp: settings.value.audio.equalizer.preamp,
       gains: [...settings.value.audio.equalizer.gains],
@@ -356,8 +368,15 @@ export const useSettingsStore = defineStore('settings', () => {
     equalizerPresets.value.push(newPreset);
     playerStorage.writeEqualizerPresets(userPresets.value);
     
-    // 更新当前预设ID
-    settings.value.audio.equalizer.currentPresetId = newPreset.id;
+    // 使用patchSettings替换整个equalizer对象
+    patchSettings({
+      audio: {
+        equalizer: {
+          ...settings.value.audio.equalizer,
+          currentPresetId: newPreset.id,
+        },
+      },
+    });
     
     return newPreset;
   };
@@ -381,7 +400,14 @@ export const useSettingsStore = defineStore('settings', () => {
       
       // 如果删除的是当前预设，清除当前预设ID
       if (settings.value.audio.equalizer.currentPresetId === presetId) {
-        settings.value.audio.equalizer.currentPresetId = null;
+        patchSettings({
+          audio: {
+            equalizer: {
+              ...settings.value.audio.equalizer,
+              currentPresetId: null,
+            },
+          },
+        });
       }
     }
   };
@@ -389,10 +415,16 @@ export const useSettingsStore = defineStore('settings', () => {
   const loadEqualizerPreset = (presetId: string) => {
     const preset = equalizerPresets.value.find(p => p.id === presetId);
     if (preset) {
-      settings.value.audio.equalizer.enabled = true;
-      settings.value.audio.equalizer.preamp = preset.preamp;
-      settings.value.audio.equalizer.gains = [...preset.gains];
-      settings.value.audio.equalizer.currentPresetId = presetId;
+      patchSettings({
+        audio: {
+          equalizer: {
+            enabled: true,
+            preamp: preset.preamp,
+            gains: [...preset.gains],
+            currentPresetId: presetId,
+          },
+        },
+      });
     }
   };
 

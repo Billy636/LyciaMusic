@@ -155,9 +155,29 @@ export const playerStorage = {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed.filter((item): item is EqualizerPreset => 
-      !!item && typeof item === 'object' && typeof item.id === 'string'
-    );
+    
+    return parsed.filter((item): item is EqualizerPreset => {
+      if (!item || typeof item !== 'object') return false;
+      
+      const preset = item as Record<string, unknown>;
+      
+      // 完整校验所有必需字段
+      return (
+        typeof preset.id === 'string' &&
+        preset.id.length > 0 &&
+        typeof preset.name === 'string' &&
+        typeof preset.preamp === 'number' &&
+        Number.isFinite(preset.preamp) &&
+        Array.isArray(preset.gains) &&
+        preset.gains.length === 10 &&
+        preset.gains.every((g: unknown) => typeof g === 'number' && Number.isFinite(g)) &&
+        typeof preset.isBuiltin === 'boolean' &&
+        typeof preset.createdAt === 'number' &&
+        Number.isFinite(preset.createdAt) &&
+        typeof preset.updatedAt === 'number' &&
+        Number.isFinite(preset.updatedAt)
+      );
+    });
   },
   
   writeEqualizerPresets(presets: EqualizerPreset[]) {

@@ -247,3 +247,88 @@ describe('playerStorage: equalizer preset I/O without localStorage', () => {
     }).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// P2 Fix Verification: Comprehensive data validation
+// ---------------------------------------------------------------------------
+
+describe('P2 Fix: filters malformed equalizer presets', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', createLocalStorageMock());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('filters presets missing required fields', () => {
+    const validPreset = makePreset();
+    const malformedData = [
+      { id: 'bad_missing_gains', name: 'Bad' },
+      { id: 'bad_missing_name', preamp: 0, gains: [0,0,0,0,0,0,0,0,0,0] },
+      { name: 'Bad', gains: [0,0,0,0,0,0,0,0,0,0] }, // missing id
+      validPreset,
+    ];
+
+    localStorage.setItem(playerStorageKeys.equalizerPresets, JSON.stringify(malformedData));
+
+    const result = playerStorage.readEqualizerPresets();
+    expect(result).toEqual([validPreset]);
+  });
+
+  it('filters presets with invalid gains array', () => {
+    const validPreset = makePreset();
+    const malformedData = [
+      { id: 'bad_gains_short', name: 'Bad', preamp: 0, gains: [0,0,0], isBuiltin: false, createdAt: 1, updatedAt: 1 },
+      { id: 'bad_gains_type', name: 'Bad', preamp: 0, gains: ['x','y','z','a','b','c','d','e','f','g'], isBuiltin: false, createdAt: 1, updatedAt: 1 },
+      { id: 'bad_gains_nan', name: 'Bad', preamp: 0, gains: [NaN,0,0,0,0,0,0,0,0,0], isBuiltin: false, createdAt: 1, updatedAt: 1 },
+      validPreset,
+    ];
+
+    localStorage.setItem(playerStorageKeys.equalizerPresets, JSON.stringify(malformedData));
+
+    const result = playerStorage.readEqualizerPresets();
+    expect(result).toEqual([validPreset]);
+  });
+
+  it('filters presets with invalid numeric fields', () => {
+    const validPreset = makePreset();
+    const malformedData = [
+      { id: 'bad_preamp', name: 'Bad', preamp: NaN, gains: [0,0,0,0,0,0,0,0,0,0], isBuiltin: false, createdAt: 1, updatedAt: 1 },
+      { id: 'bad_created', name: 'Bad', preamp: 0, gains: [0,0,0,0,0,0,0,0,0,0], isBuiltin: false, createdAt: NaN, updatedAt: 1 },
+      { id: 'bad_updated', name: 'Bad', preamp: 0, gains: [0,0,0,0,0,0,0,0,0,0], isBuiltin: false, createdAt: 1, updatedAt: NaN },
+      validPreset,
+    ];
+
+    localStorage.setItem(playerStorageKeys.equalizerPresets, JSON.stringify(malformedData));
+
+    const result = playerStorage.readEqualizerPresets();
+    expect(result).toEqual([validPreset]);
+  });
+
+  it('filters presets with invalid boolean field', () => {
+    const validPreset = makePreset();
+    const malformedData = [
+      { id: 'bad_builtin', name: 'Bad', preamp: 0, gains: [0,0,0,0,0,0,0,0,0,0], isBuiltin: 'yes', createdAt: 1, updatedAt: 1 },
+      validPreset,
+    ];
+
+    localStorage.setItem(playerStorageKeys.equalizerPresets, JSON.stringify(malformedData));
+
+    const result = playerStorage.readEqualizerPresets();
+    expect(result).toEqual([validPreset]);
+  });
+
+  it('filters presets with empty id', () => {
+    const validPreset = makePreset();
+    const malformedData = [
+      { id: '', name: 'Bad', preamp: 0, gains: [0,0,0,0,0,0,0,0,0,0], isBuiltin: false, createdAt: 1, updatedAt: 1 },
+      validPreset,
+    ];
+
+    localStorage.setItem(playerStorageKeys.equalizerPresets, JSON.stringify(malformedData));
+
+    const result = playerStorage.readEqualizerPresets();
+    expect(result).toEqual([validPreset]);
+  });
+});

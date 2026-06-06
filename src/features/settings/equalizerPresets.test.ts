@@ -1062,3 +1062,77 @@ describe('EqualizerPanel source code verification', () => {
     expect(source).toContain('focus:border-[#EC4141]');
   });
 });
+
+// ---------------------------------------------------------------------------
+// P1 Fix Verification: Deep copy and patchSettings
+// ---------------------------------------------------------------------------
+
+describe('P1 Fix: resetSettings returns pristine defaults after preset operations', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('resetSettings returns equalizer to pristine defaults after preset operations', () => {
+    const store = useSettingsStore();
+    const preset = store.saveEqualizerPreset('Dirty');
+    store.loadEqualizerPreset(preset.id);
+
+    store.resetSettings();
+
+    expect(store.settings.audio.equalizer).toEqual({
+      enabled: false,
+      preamp: 0.0,
+      gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    });
+  });
+
+  it('new store instance does not inherit EQ state from previous store', () => {
+    // First store modifies EQ
+    const store1 = useSettingsStore();
+    store1.saveEqualizerPreset('Test');
+    store1.loadEqualizerPreset('builtin_pop');
+
+    // Create new pinia instance for second store
+    setActivePinia(createPinia());
+    const store2 = useSettingsStore();
+
+    expect(store2.settings.audio.equalizer).toEqual({
+      enabled: false,
+      preamp: 0.0,
+      gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    });
+  });
+
+  it('createDefaultAudioSettings returns independent copies', () => {
+    const settings1 = createDefaultAudioSettings();
+    const settings2 = createDefaultAudioSettings();
+
+    // Modify first copy
+    settings1.equalizer.enabled = true;
+    settings1.equalizer.gains[0] = 10;
+
+    // Second copy should be unaffected
+    expect(settings2.equalizer.enabled).toBe(false);
+    expect(settings2.equalizer.gains[0]).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P3 Fix Verification: Unique ID generation
+// ---------------------------------------------------------------------------
+
+describe('P3 Fix: preset ID generation is unique', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('generates unique IDs for rapid preset saves', () => {
+    const store = useSettingsStore();
+    const preset1 = store.saveEqualizerPreset('First');
+    const preset2 = store.saveEqualizerPreset('Second');
+
+    expect(preset1.id).not.toBe(preset2.id);
+    expect(preset1.id).toMatch(/^user_/);
+    expect(preset2.id).toMatch(/^user_/);
+  });
+});
