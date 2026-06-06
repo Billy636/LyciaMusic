@@ -27,7 +27,7 @@ const toHalfWidth = (text: string): string => {
 
 export const normalizeTitleForIndex = (title: string | null | undefined): string => {
   let clean = toHalfWidth((title || '').trim());
-  const WRAP_SYMBOLS = /^[《》【】\[\]\(\)（）「」『』]/;
+  const WRAP_SYMBOLS = /^[《》【】[\]()（）「」『』]/;
   while (WRAP_SYMBOLS.test(clean)) {
     clean = clean.substring(1).trim();
   }
@@ -60,7 +60,7 @@ export const normalizeTitleForSort = (title: string | null | undefined): string 
     }
   }
   // 替换所有中间残留的包裹符号，转为干净的空格分隔，避免排序干扰
-  clean = clean.replace(/[《》【】\[\]\(\)（）「」『』]/g, ' ').replace(/\s+/g, ' ').trim();
+  clean = clean.replace(/[《》【】[\]()（）「」『』]/g, ' ').replace(/\s+/g, ' ').trim();
   return clean.toLowerCase();
 };
 
