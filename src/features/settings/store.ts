@@ -244,9 +244,14 @@ export const mergeAudioSettings = (
     }
   }
 
+  const nextOutputMode =
+    patch.outputMode === 'wasapiExclusive' || patch.outputMode === 'shared'
+      ? patch.outputMode
+      : base.outputMode ?? 'shared';
+
   return {
     ...base,
-    outputMode: patch.outputMode === 'wasapiExclusive' ? 'wasapiExclusive' : 'shared',
+    outputMode: nextOutputMode,
     volumeBalance: {
       enabled,
       gainOffsetDb,

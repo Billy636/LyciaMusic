@@ -189,10 +189,8 @@ describe('P2: mergeAudioSettings preserves currentPresetId', () => {
     const merged = mergeAudioSettings(fullBase, {
       equalizer: { currentPresetId: 'p2' } as unknown as EqualizerSettings,
     });
-    // Note: mergeAudioSettings intentionally resets outputMode to 'shared'
-    // unless the patch explicitly sets it to 'wasapiExclusive'.
-    // This is by design — it acts as a normalizer, not a deep-merge.
-    expect(merged.outputMode).toBe('shared');
+    // mergeAudioSettings preserves outputMode when the patch does not include it
+    expect(merged.outputMode).toBe('wasapiExclusive');
     expect(merged.volumeBalance).toEqual({ enabled: true, gainOffsetDb: 3, preventClipping: false });
     expect(merged.equalizer.currentPresetId).toBe('p2');
   });
