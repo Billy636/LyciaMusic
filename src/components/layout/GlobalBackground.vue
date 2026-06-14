@@ -531,8 +531,24 @@ const customBgTransform = computed(() => {
 
   const blurComp = Math.min(0.08, (info.blur || 0) * 0.002);
   const renderScale = (info.scale || 1.0) + blurComp;
-  const tx = (info.translateX || 0) * containerWidth.value;
-  const ty = (info.translateY || 0) * containerHeight.value;
+  
+  let tx = (info.translateX || 0) * containerWidth.value;
+  let ty = (info.translateY || 0) * containerHeight.value;
+
+  if (
+    customBgGeometry.value
+    && containerWidth.value > 0
+    && containerHeight.value > 0
+  ) {
+    const scaledImgW = customBgGeometry.value.width * renderScale;
+    const scaledImgH = customBgGeometry.value.height * renderScale;
+
+    const maxTxPx = Math.max(0, (scaledImgW - containerWidth.value) / 2);
+    const maxTyPx = Math.max(0, (scaledImgH - containerHeight.value) / 2);
+
+    tx = Math.max(-maxTxPx, Math.min(maxTxPx, tx));
+    ty = Math.max(-maxTyPx, Math.min(maxTyPx, ty));
+  }
 
   return {
     tx,
