@@ -53,6 +53,11 @@ describe('LyricsView custom font import', () => {
     expect(source).toContain(':low-power="shouldReduceLyricsRendering"');
   });
 
+  it('passes a sync key so AMLL can distinguish seeks from low-frequency clock ticks', () => {
+    expect(source).toContain('lyricsTimeSyncKey');
+    expect(source).toContain(':time-sync-key="lyricsTimeSyncKey"');
+  });
+
   it('offers AMLL and light lyrics render modes at the top of the style panel', () => {
     expect(source).toContain('PLAYER_RENDER_MODE_OPTIONS');
     expect(source).toContain('AMLL');

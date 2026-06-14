@@ -153,13 +153,13 @@ describe('player playback domain', () => {
   it('does not auto-advance songs with unknown duration', async () => {
     const song = makeSong({ path: 'remote://source/demo.flac', duration: 0 });
     const handleAutoNext = vi.fn();
-    let frameCallback: FrameRequestCallback | undefined;
+    let progressCallback: (() => void) | undefined;
     vi
-      .stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-        frameCallback = callback;
+      .stubGlobal('setTimeout', (callback: () => void) => {
+        progressCallback = callback;
         return 1;
       });
-    vi.stubGlobal('cancelAnimationFrame', () => {});
+    vi.stubGlobal('clearTimeout', () => {});
     const playerPlayback = createPlayerPlayback({
       getDisplaySongList: () => [song],
       addToHistory: vi.fn(),
@@ -168,8 +168,8 @@ describe('player playback domain', () => {
     });
 
     await playerPlayback.playSong(song);
-    expect(frameCallback).toBeDefined();
-    (frameCallback as FrameRequestCallback)(performance.now() + 16);
+    expect(progressCallback).toBeDefined();
+    (progressCallback as () => void)();
 
     expect(handleAutoNext).not.toHaveBeenCalled();
 
@@ -199,6 +199,32 @@ describe('player playback domain', () => {
 
     expect(requestAnimationFrameMock).not.toHaveBeenCalled();
     expect(setTimeoutMock).toHaveBeenCalledWith(expect.any(Function), 1000);
+
+    playerPlayback.dispose();
+    vi.unstubAllGlobals();
+  });
+
+  it('updates global playback progress with a low-frequency timer during normal rendering', async () => {
+    const song = makeSong({ duration: 180 });
+    const handleAutoNext = vi.fn();
+    const requestAnimationFrameMock = vi.fn();
+    const setTimeoutMock = vi.fn().mockReturnValue(7);
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock);
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('setTimeout', setTimeoutMock);
+    vi.stubGlobal('clearTimeout', vi.fn());
+
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext,
+    });
+
+    await playerPlayback.playSong(song);
+
+    expect(requestAnimationFrameMock).not.toHaveBeenCalled();
+    expect(setTimeoutMock).toHaveBeenCalledWith(expect.any(Function), 100);
 
     playerPlayback.dispose();
     vi.unstubAllGlobals();
@@ -309,6 +335,10 @@ describe('player playback domain', () => {
       title: 'Persisted Thumb',
       cover_thumb_path: 'C:\\covers\\persisted-thumb.jpg',
     });
+    let resolvePlayAudio!: () => void;
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<void>((resolve) => {
+      resolvePlayAudio = resolve;
+    }));
     primeCoverPathMock.mockReturnValue('asset://C:\\covers\\persisted-thumb.jpg');
 
     const playerPlayback = createPlayerPlayback({
@@ -318,11 +348,14 @@ describe('player playback domain', () => {
       handleAutoNext: vi.fn(),
     });
 
-    await playerPlayback.playSong(song);
+    const playPromise = playerPlayback.playSong(song);
 
     expect(primeCoverPathMock).toHaveBeenCalledWith(song.path, song.cover_thumb_path);
     expect(playbackStore.currentCover).toBe('asset://C:\\covers\\persisted-thumb.jpg');
     expect(loadCoverMock).toHaveBeenCalledWith(song.path);
+
+    resolvePlayAudio();
+    await playPromise;
     playerPlayback.dispose();
   });
 

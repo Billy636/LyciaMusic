@@ -12,7 +12,8 @@ const props = defineProps<{
 
 const BAR_COUNT = 48;
 const DISPLAY_BAR_COUNT = 112;
-const FETCH_INTERVAL_MS = 33;
+const VISUALIZER_TARGET_FPS = 30;
+const FETCH_INTERVAL_MS = Math.round(1000 / VISUALIZER_TARGET_FPS);
 const MIN_BAR_HEIGHT = 3;
 const { isMainWindowLowPower } = useRenderingPower();
 

@@ -29,7 +29,6 @@ interface CreatePlayerPlaybackDeps {
   onBeforePlay?: (song: Song, options: PlaySongOptions) => void;
 }
 
-let progressFrameId: number | null = null;
 let progressTimerId: ReturnType<typeof setTimeout> | null = null;
 let syncIntervalId: ReturnType<typeof setInterval> | null = null;
 let playRequestId = 0;
@@ -41,6 +40,7 @@ let accumulatedTime = 0;
 let isSeeking = false;
 
 const getSmtcTitle = (song: Song) => song.title?.trim() || song.name.replace(/\.[^/.]+$/, '');
+const NORMAL_PROGRESS_UPDATE_MS = 100;
 const LOW_POWER_PROGRESS_UPDATE_MS = 1000;
 
 export const createPlayerPlayback = ({
@@ -167,10 +167,6 @@ export const createPlayerPlayback = ({
   };
 
   const stopPlaybackRuntime = () => {
-    if (progressFrameId !== null) {
-      cancelAnimationFrame(progressFrameId);
-      progressFrameId = null;
-    }
     if (progressTimerId !== null) {
       clearTimeout(progressTimerId);
       progressTimerId = null;
@@ -191,16 +187,11 @@ export const createPlayerPlayback = ({
     stopPlaybackRuntime();
     reanchorPlaybackClock(currentTime.value);
 
-    const scheduleUpdate = (update: FrameRequestCallback) => {
-      if (isMainWindowLowPower.value) {
-        progressTimerId = setTimeout(() => {
-          progressTimerId = null;
-          update(performance.now());
-        }, LOW_POWER_PROGRESS_UPDATE_MS);
-        return;
-      }
-
-      progressFrameId = requestAnimationFrame(update);
+    const scheduleUpdate = (update: () => void) => {
+      progressTimerId = setTimeout(() => {
+        progressTimerId = null;
+        update();
+      }, isMainWindowLowPower.value ? LOW_POWER_PROGRESS_UPDATE_MS : NORMAL_PROGRESS_UPDATE_MS);
     };
 
     const update = () => {

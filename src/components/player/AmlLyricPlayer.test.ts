@@ -21,4 +21,11 @@ describe('AmlLyricPlayer playback pausing', () => {
     expect(source).toContain('pendingLowPowerRecoveryReason = reason;');
     expect(source).toContain('watch(() => props.lowPower');
   });
+
+  it('uses a local playback clock instead of applying every external currentTime tick', () => {
+    expect(source).toContain('LOCAL_CLOCK_SYNC_DRIFT_MS');
+    expect(source).toContain('function resolveLocalCurrentTime(frameTime: number)');
+    expect(source).toContain('syncExternalCurrentTime(false)');
+    expect(source).not.toContain('watch(() => props.currentTime, (value) => {\n  player?.setCurrentTime(Math.trunc(value));\n});');
+  });
 });
