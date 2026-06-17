@@ -17,12 +17,19 @@ pub fn normalize_path(path_str: &str) -> String {
         }
         return s;
     }
-    let s = path_str.to_string();
+    let mut s = path_str.to_string();
     if cfg!(windows) {
-        s.replace("/", "\\")
-    } else {
-        s
+        s = s.replace("/", "\\");
+        if s.len() >= 2 {
+            let first_char = s.chars().next().unwrap();
+            let second_char = s.chars().nth(1).unwrap();
+            if first_char.is_ascii_alphabetic() && second_char == ':' {
+                let upper_drive = first_char.to_ascii_uppercase();
+                s = format!("{}{}", upper_drive, &s[1..]);
+            }
+        }
     }
+    s
 }
 
 /// Escape special characters for SQL LIKE pattern with `ESCAPE '^'`.

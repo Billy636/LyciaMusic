@@ -27,6 +27,7 @@ import { useWindowActions } from './useWindowActions';
 import { playerStorage } from '../services/storage/playerStorage';
 import { historyApi } from '../services/tauri/historyApi';
 import { playbackApi } from '../services/tauri/playbackApi';
+import { fileApi } from '../services/tauri/fileApi';
 import { useCollectionsStore } from '../features/collections/store';
 import { useLibraryStore } from '../features/library/store';
 import { useNavigationStore } from '../shared/stores/navigation';
@@ -519,26 +520,6 @@ function createPlayerCore() {
     return playerFileManager.deleteFromDisk(song);
   }
 
-  const syncRemovedSongPreferences = (removedPaths: string[]) => {
-    if (removedPaths.length === 0) {
-      return;
-    }
-
-    const removedSet = new Set(removedPaths);
-    collectionsStore.favoritePaths = collectionsStore.favoritePaths.filter(path => !removedSet.has(path));
-    collectionsStore.playlists.forEach((playlist) => {
-      playlist.songPaths = playlist.songPaths.filter(path => !removedSet.has(path));
-    });
-    localCustomOrder.value = localCustomOrder.value.filter(path => !removedSet.has(path));
-
-    folderCustomOrder.value = Object.fromEntries(
-      Object.entries(folderCustomOrder.value).map(([folderPath, paths]) => [
-        folderPath,
-        paths.filter(path => !removedSet.has(path)),
-      ]),
-    );
-  };
-
   const stopPlaybackForMissingSong = async () => {
     await playbackApi.stopAudio().catch(async () => {
       await playbackApi.pauseAudio().catch(() => {});
@@ -565,15 +546,45 @@ function createPlayerCore() {
     const currentPathSet = new Set(libraryStore.canonicalSongPaths);
     const removedPaths = previousPaths.filter(path => !currentPathSet.has(path));
 
-    if (removedPaths.length > 0) {
-      syncRemovedSongPreferences(removedPaths);
-      await playerHistoryFavorites.removeFromHistory(removedPaths);
+    const queuePathsToCheck = [
+      ...playbackStore.playQueuePaths,
+      ...playbackStore.tempQueuePaths,
+      ...(currentSongPath.value ? [currentSongPath.value] : []),
+    ];
+    const uniqueQueuePaths = Array.from(new Set(queuePathsToCheck));
+
+    const allRemovedPaths = [...removedPaths];
+    for (const path of uniqueQueuePaths) {
+      if (!previousPathSet.has(path)) {
+        try {
+          const exists = await fileApi.fileExists(path);
+          if (!exists) {
+            allRemovedPaths.push(path);
+          }
+        } catch (error) {
+          console.error(`Failed to verify file existence for external path: ${path}`, error);
+        }
+      }
+    }
+
+    const isActiveSongRemoved = activeSongPath && allRemovedPaths.includes(activeSongPath);
+
+    if (allRemovedPaths.length > 0) {
+      await cleanupRemovedLibrarySongPaths({
+        removedPaths: allRemovedPaths,
+        stopPlayback: stopPlaybackForMissingSong,
+        removeFromHistory: songPaths => playerHistoryFavorites.removeFromHistory(songPaths),
+        removeSongStatistics: songPaths => historyApi.removeSongsFromHistoryAndStatistics(songPaths),
+        clearCaches: () => {
+          clearCoverCaches();
+          clearSongDetailCache();
+        },
+      });
       refreshStateSongReferences();
     }
 
-    if (activeSongPath && previousPathSet.has(activeSongPath) && !currentPathSet.has(activeSongPath)) {
-      await stopPlaybackForMissingSong();
-      showToast('当前歌曲已不存在', 'info');
+    if (isActiveSongRemoved) {
+      showToast('当前播放歌曲已不存在', 'info');
     }
 
     return {

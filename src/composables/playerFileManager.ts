@@ -419,6 +419,9 @@ export const createPlayerFileManager = ({
         return;
       }
 
+      const previousPaths = sourceSongs.value.map(song => song.path);
+      const previousPathSet = new Set(previousPaths);
+
       let allNewSongs: Song[] = [];
       for (const folder of watchedFolders.value) {
         const songs = await fileApi.scanMusicFolder(folder);
@@ -426,10 +429,51 @@ export const createPlayerFileManager = ({
       }
 
       const keptSongs = sourceSongs.value.filter(song => {
-        return !watchedFolders.value.some(folder => song.path.startsWith(folder));
+        return !watchedFolders.value.some(folder => isSongInFolderScope(folder, song.path));
       });
-
       sourceSongs.value = [...keptSongs, ...allNewSongs];
+
+      const keptCanonicalSongs = canonicalSongs.value.filter(song => {
+        return !watchedFolders.value.some(folder => isSongInFolderScope(folder, song.path));
+      });
+      canonicalSongs.value = [...keptCanonicalSongs, ...allNewSongs];
+
+      const currentPathSet = new Set(sourceSongs.value.map(song => song.path));
+      const removedPaths = previousPaths.filter(path => !currentPathSet.has(path));
+
+      const queuePathsToCheck = [
+        ...playQueue.value.map(s => s.path),
+        ...tempQueue.value.map(s => s.path),
+        ...(currentSong.value ? [currentSong.value.path] : []),
+      ];
+      const uniqueQueuePaths = Array.from(new Set(queuePathsToCheck));
+
+      const allRemovedPaths = [...removedPaths];
+      for (const path of uniqueQueuePaths) {
+        if (!previousPathSet.has(path)) {
+          try {
+            const exists = await fileApi.fileExists(path);
+            if (!exists) {
+              allRemovedPaths.push(path);
+            }
+          } catch (error) {
+            console.error(`Failed to verify file existence for external path: ${path}`, error);
+          }
+        }
+      }
+
+      if (allRemovedPaths.length > 0) {
+        removeSongPathsFromPlaybackState({ playQueue, tempQueue, currentSong }, allRemovedPaths);
+        await removeFromHistory(allRemovedPaths);
+        playlists.value.forEach((playlist) => {
+          const removedSet = new Set(allRemovedPaths);
+          playlist.songPaths = playlist.songPaths.filter(path => !removedSet.has(path));
+        });
+        const removedSet = new Set(allRemovedPaths);
+        recentSongs.value = recentSongs.value.filter(item => !removedSet.has(item.path));
+        favoritePaths.value = favoritePaths.value.filter(path => !removedSet.has(path));
+      }
+
       showToast('已刷新所有文件夹', 'success');
     } catch (error) {
       console.error('刷新文件夹失败:', error);

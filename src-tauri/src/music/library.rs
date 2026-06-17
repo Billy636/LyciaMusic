@@ -81,9 +81,20 @@ fn deserialize_string_list(raw: Option<String>) -> Vec<String> {
 }
 
 fn is_descendant_path(song_path: &str, folder_path: &str) -> bool {
-    song_path == folder_path
-        || song_path.starts_with(&format!("{folder_path}\\"))
-        || song_path.starts_with(&format!("{folder_path}/"))
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        let sp_lower = song_path.to_lowercase();
+        let fp_lower = folder_path.to_lowercase();
+        sp_lower == fp_lower
+            || sp_lower.starts_with(&format!("{fp_lower}\\"))
+            || sp_lower.starts_with(&format!("{fp_lower}/"))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        song_path == folder_path
+            || song_path.starts_with(&format!("{folder_path}\\"))
+            || song_path.starts_with(&format!("{folder_path}/"))
+    }
 }
 
 fn remove_library_folder_from_conn(
@@ -91,7 +102,13 @@ fn remove_library_folder_from_conn(
     folder_path: &str,
 ) -> Result<Vec<String>, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM library_folders WHERE path = ?1", [folder_path])
+
+    #[cfg(target_os = "windows")]
+    let delete_folder_sql = "DELETE FROM library_folders WHERE path = ?1 COLLATE NOCASE";
+    #[cfg(not(target_os = "windows"))]
+    let delete_folder_sql = "DELETE FROM library_folders WHERE path = ?1";
+
+    tx.execute(delete_folder_sql, [folder_path])
         .map_err(|e| e.to_string())?;
 
     let remaining_roots = {
@@ -108,14 +125,13 @@ fn remove_library_folder_from_conn(
 
     let (forward_like, backward_like) = descendant_like_patterns(folder_path);
     let candidate_paths = {
+        #[cfg(target_os = "windows")]
+        let query_songs_sql = "SELECT path FROM songs WHERE path = ?1 COLLATE NOCASE OR path LIKE ?2 ESCAPE '^' OR path LIKE ?3 ESCAPE '^'";
+        #[cfg(not(target_os = "windows"))]
+        let query_songs_sql = "SELECT path FROM songs WHERE path = ?1 OR path LIKE ?2 ESCAPE '^' OR path LIKE ?3 ESCAPE '^'";
+
         let mut stmt = tx
-            .prepare(
-                "SELECT path
-                 FROM songs
-                 WHERE path = ?1
-                    OR path LIKE ?2 ESCAPE '^'
-                    OR path LIKE ?3 ESCAPE '^'",
-            )
+            .prepare(query_songs_sql)
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(
@@ -138,8 +154,13 @@ fn remove_library_folder_from_conn(
         .collect::<Vec<_>>();
 
     {
+        #[cfg(target_os = "windows")]
+        let delete_song_sql = "DELETE FROM songs WHERE path = ?1 COLLATE NOCASE";
+        #[cfg(not(target_os = "windows"))]
+        let delete_song_sql = "DELETE FROM songs WHERE path = ?1";
+
         let mut delete_stmt = tx
-            .prepare("DELETE FROM songs WHERE path = ?1")
+            .prepare(delete_song_sql)
             .map_err(|e| e.to_string())?;
         for path in &deleted_paths {
             delete_stmt
@@ -157,6 +178,65 @@ fn remove_library_folder_from_conn(
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(deleted_paths)
+}
+
+fn cleanup_orphaned_local_songs(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+    let folder_roots: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT path FROM library_folders")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(Result::ok).collect()
+    };
+
+    let local_song_paths: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT path FROM songs WHERE COALESCE(source_type, 'local') = 'local'")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(Result::ok).collect()
+    };
+
+    let delete_paths = local_song_paths
+        .into_iter()
+        .filter(|path| {
+            !folder_roots
+                .iter()
+                .any(|root| is_descendant_path(path, root))
+        })
+        .collect::<Vec<_>>();
+
+    if delete_paths.is_empty() {
+        return Ok(delete_paths);
+    }
+
+    #[cfg(target_os = "windows")]
+    let delete_song_sql = "DELETE FROM songs WHERE path = ?1 COLLATE NOCASE";
+    #[cfg(not(target_os = "windows"))]
+    let delete_song_sql = "DELETE FROM songs WHERE path = ?1";
+
+    {
+        let mut delete_stmt = conn
+            .prepare(delete_song_sql)
+            .map_err(|e| e.to_string())?;
+        for path in &delete_paths {
+            delete_stmt
+                .execute([path])
+                .map_err(|e| format!("delete failed for '{}': {}", path, e))?;
+        }
+    }
+
+    let _ = conn.execute(
+        "DELETE FROM artists
+         WHERE id NOT IN (SELECT DISTINCT artist_id FROM song_artists)",
+        [],
+    );
+
+    Ok(delete_paths)
 }
 
 fn normalize_for_compare(path: &str) -> String {
@@ -882,6 +962,11 @@ pub async fn scan_library(
             );
         }
 
+        {
+            let conn = db_conn.lock().map_err(|e| e.to_string())?;
+            cleanup_orphaned_local_songs(&conn)?;
+        }
+
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
         load_cached_songs(&conn)
     })
@@ -1078,6 +1163,61 @@ mod tests {
     }
 
     #[test]
+    fn orphan_cleanup_removes_only_local_songs_outside_library_roots() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute(
+            "CREATE TABLE library_folders (
+                path TEXT PRIMARY KEY,
+                added_at INTEGER
+            )",
+            [],
+        )
+        .expect("create library_folders");
+        conn.execute(
+            "CREATE TABLE songs (
+                id INTEGER PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                source_type TEXT
+            )",
+            [],
+        )
+        .expect("create songs");
+        conn.execute(
+            "INSERT INTO library_folders (path, added_at) VALUES (?1, 1)",
+            ["/library/a"],
+        )
+        .expect("insert library folder");
+        conn.execute(
+            "INSERT INTO songs (path, source_type) VALUES
+             (?1, 'local'),
+             (?2, 'local'),
+             (?3, 'remote')",
+            [
+                "/library/a/kept.flac",
+                "/downloads/orphan.flac",
+                "remote://source/orphan.flac",
+            ],
+        )
+        .expect("insert songs");
+
+        let deleted = cleanup_orphaned_local_songs(&conn).expect("cleanup orphaned local songs");
+
+        let remaining: Vec<String> = conn
+            .prepare("SELECT path FROM songs ORDER BY path")
+            .expect("prepare remaining songs")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("query remaining songs")
+            .filter_map(Result::ok)
+            .collect();
+
+        assert_eq!(deleted, vec!["/downloads/orphan.flac"]);
+        assert_eq!(
+            remaining,
+            vec!["/library/a/kept.flac", "remote://source/orphan.flac"]
+        );
+    }
+
+    #[test]
     fn cached_library_songs_include_comment() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         create_cached_song_schema(&conn);
@@ -1191,4 +1331,3 @@ mod tests {
         assert_eq!(songs[3].path, "/a/song1.flac");
     }
 }
-

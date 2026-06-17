@@ -678,8 +678,32 @@ fn child_dummy() -> std::process::Child {
 }
 
 #[tauri::command]
-pub fn delete_music_file(path: String) -> Result<(), String> {
-    fs::remove_file(path).map_err(|e| e.to_string())
+pub fn delete_music_file(path: String, db_state: State<'_, DbState>) -> Result<(), String> {
+    let normalized_path = crate::music::utils::normalize_path(&path);
+
+    if let Err(e) = fs::remove_file(&path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            return Err(format!("Failed to delete file on disk: {}", e));
+        }
+    }
+
+    let conn = db_state.conn.lock().map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    let delete_sql = "DELETE FROM songs WHERE path = ?1 COLLATE NOCASE";
+    #[cfg(not(target_os = "windows"))]
+    let delete_sql = "DELETE FROM songs WHERE path = ?1";
+
+    let mut stmt = conn.prepare(delete_sql).map_err(|e| e.to_string())?;
+    stmt.execute([&normalized_path]).map_err(|e| e.to_string())?;
+
+    let _ = conn.execute(
+        "DELETE FROM artists
+         WHERE id NOT IN (SELECT DISTINCT artist_id FROM song_artists)",
+        [],
+    );
+
+    Ok(())
 }
 
 #[tauri::command]
