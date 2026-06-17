@@ -700,4 +700,62 @@ mod tests {
             .unwrap();
         assert_eq!(db_path_after, Some("/cache/avatar.jpg".to_string()));
     }
+
+    #[test]
+    fn collect_scan_diff_ignores_dot_prefixed_directories() {
+        let temp_dir = create_empty_temp_dir();
+        let normalized_folder = temp_dir.to_string_lossy().replace('\\', "/");
+
+        let song_dir = temp_dir.join("normal_dir");
+        fs::create_dir_all(&song_dir).unwrap();
+        fs::write(song_dir.join("album.flac"), b"fake flac content").unwrap();
+        fs::write(
+            song_dir.join("album.cue"),
+            concat!(
+                "TITLE \"Visible Album\"\n",
+                "PERFORMER \"Visible Artist\"\n",
+                "FILE \"album.flac\" WAVE\n",
+                "  TRACK 01 AUDIO\n",
+                "    TITLE \"Visible Track\"\n",
+                "    INDEX 01 00:00:00\n",
+            ),
+        )
+        .unwrap();
+
+        let dot_dir = temp_dir.join(".fnsync_temp_dir");
+        fs::create_dir_all(&dot_dir).unwrap();
+        fs::write(dot_dir.join("ignored.flac"), b"fake flac content").unwrap();
+        fs::write(
+            dot_dir.join("ignored.cue"),
+            concat!(
+                "TITLE \"Hidden Album\"\n",
+                "PERFORMER \"Hidden Artist\"\n",
+                "FILE \"ignored.flac\" WAVE\n",
+                "  TRACK 01 AUDIO\n",
+                "    TITLE \"Hidden Track\"\n",
+                "    INDEX 01 00:00:00\n",
+            ),
+        )
+        .unwrap();
+
+        let diff = collect_scan_diff(
+            &normalized_folder,
+            HashMap::new(),
+            None,
+            ScanOptions::default(),
+        )
+        .expect("collect diff");
+
+        assert!(diff.has_disk_songs);
+        assert_eq!(diff.songs.len(), 1);
+        assert_eq!(diff.to_add.len(), 1);
+        assert!(diff
+            .to_add
+            .iter()
+            .all(|song| !song.path.contains(".fnsync_temp_dir")));
+        assert!(diff.to_add[0].path.contains("normal_dir"));
+        assert!(diff.to_add[0].path.contains("album.cue::track01"));
+
+        fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
 }

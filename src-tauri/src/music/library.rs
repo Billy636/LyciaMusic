@@ -3,7 +3,7 @@
 use super::scanner::ScanOptions;
 use super::scanner::{scan_folder_recursive, scan_single_directory_internal};
 use super::types::{AlbumCatalogItem, ArtistCatalogItem, FolderNode, LibraryFolder, LibrarySong};
-use super::utils::{descendant_like_patterns, normalize_path};
+use super::utils::{descendant_like_patterns, is_dot_prefixed_path, normalize_path};
 use crate::database::DbState;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -892,14 +892,14 @@ pub async fn get_library_song_paths_for_folder_view(
             FolderSongSortMode::TrackNumber => {
                 let left_disc = parse_track_or_disc_number(&left.disc_number);
                 let right_disc = parse_track_or_disc_number(&right.disc_number);
-                
+
                 let disc_cmp = match (left_disc, right_disc) {
                     (None, Some(_)) => std::cmp::Ordering::Greater,
                     (Some(_), None) => std::cmp::Ordering::Less,
                     (Some(l), Some(r)) => l.cmp(&r),
                     (None, None) => std::cmp::Ordering::Equal,
                 };
-                
+
                 disc_cmp.then_with(|| {
                     let left_track = parse_track_or_disc_number(&left.track_number);
                     let right_track = parse_track_or_disc_number(&right.track_number);
@@ -1026,7 +1026,7 @@ pub async fn get_folder_children(
         let mut subdirs: Vec<PathBuf> = read_dir
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
+            .filter(|path| path.is_dir() && !is_dot_prefixed_path(path))
             .collect();
 
         subdirs.sort_by(|left, right| {
@@ -1299,14 +1299,14 @@ mod tests {
         songs.sort_by(|left, right| {
             let left_disc = parse_track_or_disc_number(&left.disc_number);
             let right_disc = parse_track_or_disc_number(&right.disc_number);
-            
+
             let disc_cmp = match (left_disc, right_disc) {
                 (None, Some(_)) => std::cmp::Ordering::Greater,
                 (Some(_), None) => std::cmp::Ordering::Less,
                 (Some(l), Some(r)) => l.cmp(&r),
                 (None, None) => std::cmp::Ordering::Equal,
             };
-            
+
             disc_cmp.then_with(|| {
                 let left_track = parse_track_or_disc_number(&left.track_number);
                 let right_track = parse_track_or_disc_number(&right.track_number);

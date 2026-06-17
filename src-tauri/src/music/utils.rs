@@ -1,6 +1,7 @@
 // music/utils.rs - 辅助函数
 
 use std::fs;
+use std::path::Path;
 
 pub const SUPPORTED_LIBRARY_EXTENSIONS: &[&str] = &[
     "aac", "aif", "aiff", "flac", "m4a", "m4b", "mp3", "mp4", "oga", "ogg", "wav",
@@ -60,6 +61,12 @@ pub fn descendant_like_patterns(folder_path: &str) -> (String, String) {
         format!("{}%", escape_like(&forward_base)),
         format!("{}%", escape_like(&backward_base)),
     )
+}
+
+pub fn is_dot_prefixed_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map_or(false, |name| name.starts_with('.'))
 }
 
 pub fn is_supported_library_extension(ext: &str) -> bool {

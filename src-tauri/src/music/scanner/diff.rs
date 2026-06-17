@@ -1,7 +1,8 @@
 use super::super::cue;
 use super::super::types::Song;
 use super::super::utils::{
-    descendant_like_patterns, is_cue_file_extension, is_supported_library_extension, normalize_path,
+    descendant_like_patterns, is_cue_file_extension, is_dot_prefixed_path,
+    is_supported_library_extension, normalize_path,
 };
 use super::parser::{
     build_cue_track_song, enrich_album_groups, parse_song_from_file, preferred_parse_workers,
@@ -163,10 +164,8 @@ fn collect_disk_candidates(
         reporter.emit_collecting(0, 0, Some("正在扫描文件夹".to_string()));
     }
 
-    for entry in WalkDir::new(normalized_folder)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-    {
+    let mut it = WalkDir::new(normalized_folder).into_iter();
+    while let Some(entry) = next_visible_walk_entry(&mut it) {
         let path = entry.path();
         if !path.is_file() {
             continue;
@@ -216,10 +215,8 @@ fn collect_disk_candidates(
     // Collect CUE sheet tracks and record referenced audio paths
     let mut cue_referenced_audio: Vec<String> = Vec::new();
 
-    for entry in WalkDir::new(normalized_folder)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-    {
+    let mut it = WalkDir::new(normalized_folder).into_iter();
+    while let Some(entry) = next_visible_walk_entry(&mut it) {
         let path = entry.path();
         if !path.is_file() {
             continue;
@@ -278,6 +275,26 @@ fn collect_disk_candidates(
     }
 
     candidates
+}
+
+fn should_skip_dot_prefixed_child_directory(entry: &walkdir::DirEntry) -> bool {
+    entry.depth() > 0 && entry.file_type().is_dir() && is_dot_prefixed_path(entry.path())
+}
+
+fn next_visible_walk_entry(iter: &mut walkdir::IntoIter) -> Option<walkdir::DirEntry> {
+    loop {
+        let entry = match iter.next()? {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+
+        if should_skip_dot_prefixed_child_directory(&entry) {
+            iter.skip_current_dir();
+            continue;
+        }
+
+        return Some(entry);
+    }
 }
 
 fn parse_tasks_in_parallel(

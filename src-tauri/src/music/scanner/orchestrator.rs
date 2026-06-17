@@ -1,5 +1,5 @@
 use super::super::types::{FolderNode, GeneratedFolder, Song};
-use super::super::utils::{descendant_like_patterns, normalize_path};
+use super::super::utils::{descendant_like_patterns, is_dot_prefixed_path, normalize_path};
 use super::diff::{collect_scan_diff, load_db_snapshot_for_folder};
 use super::parser::parse_audio_files_internal;
 use super::progress::ScanProgressReporter;
@@ -223,7 +223,7 @@ fn read_subdirectories(folder_path: &Path) -> Option<Vec<PathBuf>> {
     let mut subdirs: Vec<PathBuf> = read_dir
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
+        .filter(|path| path.is_dir() && !is_dot_prefixed_path(path))
         .collect();
 
     subdirs.sort_by(|left, right| {
