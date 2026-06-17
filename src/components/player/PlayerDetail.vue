@@ -324,7 +324,7 @@ const metaInfo = computed(() => {
               class="h-full rounded-2xl border border-white/5 bg-black/10 p-4 shadow-xl backdrop-blur-sm"
             />
 
-            <LyricsView v-else-if="parsedLyrics.length > 0" class="h-full" />
+            <LyricsView v-else-if="showPlayerDetail && parsedLyrics.length > 0" class="h-full" />
 
             <div
               v-else

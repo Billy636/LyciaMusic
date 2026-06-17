@@ -98,6 +98,7 @@ const amllCurrentTime = computed(() => {
 const lightCurrentTime = computed(() => {
   return Math.max(0, currentTime.value - audioDelay.value);
 });
+const lyricsTimeSyncKey = computed(() => `${currentSong.value?.path ?? ''}:${audioDelay.value}`);
 
 const emptyStateText = computed(() => {
   if (lyricsStatus.value === 'loading') return 'Loading lyrics...';
@@ -877,6 +878,7 @@ onUnmounted(() => {
           class="amll-host h-full min-h-0 w-full min-w-0"
           :lyric-lines="amllLines"
           :current-time="amllCurrentTime"
+          :time-sync-key="lyricsTimeSyncKey"
           :playing="isPlaying"
           :low-power="shouldReduceLyricsRendering"
           :layout-version="lyricsLayoutVersion"
