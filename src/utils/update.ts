@@ -58,7 +58,10 @@ async function fetchUpdateJson<T>(
       const rawJson = await invoke<string>('check_update_by_rust', { source });
       return JSON.parse(rawJson);
     } catch (error) {
-      throw new Error(`[Rust Backend] ${error instanceof Error ? error.message : String(error)}`);
+      throw Object.assign(
+        new Error(`[Rust Backend] ${error instanceof Error ? error.message : String(error)}`),
+        { cause: error },
+      );
     }
   } else {
     const response = await fetch(fallbackUrl, { headers });
