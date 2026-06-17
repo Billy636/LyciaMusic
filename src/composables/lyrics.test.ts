@@ -69,12 +69,21 @@ describe('enhanced lrc parser', async () => {
     parseEnhancedLrc,
     parseEnhancedLrcLine,
     parseTimestampToMs,
+    normalizeLyricTimestamps,
   } = await import('./lyrics');
 
   it('parses enhanced timestamp strings to milliseconds', () => {
     expect(parseTimestampToMs('00:36.111')).toBe(36111);
+    expect(parseTimestampToMs('00:36:111')).toBe(36111);
     expect(parseTimestampToMs('01:02.3')).toBe(62300);
+    expect(parseTimestampToMs('01:02:3')).toBe(62300);
+    expect(parseTimestampToMs('00:22:05')).toBe(22050);
     expect(parseTimestampToMs('bad')).toBeNull();
+  });
+
+  it('normalizes colon timestamps to dot format', () => {
+    expect(normalizeLyricTimestamps('[00:22:05]A<00:22:05>B')).toBe('[00:22.05]A<00:22.05>B');
+    expect(normalizeLyricTimestamps('[01:02:03]C')).toBe('[01:02.03]C');
   });
 
   it('detects enhanced lrc lines by angle-bracket timestamps', () => {

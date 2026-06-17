@@ -392,39 +392,64 @@ fn normalize_eslrc_source(source: &str) -> String {
         .join("\n")
 }
 
+fn parse_milliseconds_fraction(fraction_opt: Option<&str>) -> u32 {
+    let Some(fraction) = fraction_opt else {
+        return 0;
+    };
+    let mut padded = fraction.to_string();
+    while padded.len() < 3 {
+        padded.push('0');
+    }
+    padded
+        .chars()
+        .take(3)
+        .collect::<String>()
+        .parse::<u32>()
+        .unwrap_or(0)
+}
+
 fn parse_timestamp_to_ms(raw: &str) -> Option<u32> {
     let trimmed = raw.trim();
-    let mut parts = trimmed.split(':');
-    let minutes = parts.next()?.parse::<u32>().ok()?;
-    let seconds_part = parts.next()?;
-    if parts.next().is_some() {
-        return None;
-    }
+    let parts: Vec<&str> = trimmed.split(':').collect();
 
-    let mut second_parts = seconds_part.split('.');
-    let seconds = second_parts.next()?.parse::<u32>().ok()?;
-    if seconds >= 60 {
-        return None;
-    }
-
-    let milliseconds = second_parts
-        .next()
-        .map(|fraction| {
-            let mut padded = fraction.to_string();
-            while padded.len() < 3 {
-                padded.push('0');
+    if parts.len() == 2 {
+        let minutes = parts[0].parse::<u32>().ok()?;
+        let mut second_parts = parts[1].split('.');
+        let seconds = second_parts.next()?.parse::<u32>().ok()?;
+        if seconds >= 60 {
+            return None;
+        }
+        let fraction = second_parts.next();
+        let milliseconds = parse_milliseconds_fraction(fraction);
+        Some(minutes * 60_000 + seconds * 1_000 + milliseconds)
+    } else if parts.len() == 3 {
+        if parts[2].contains('.') {
+            let hours = parts[0].parse::<u32>().ok()?;
+            let minutes = parts[1].parse::<u32>().ok()?;
+            if minutes >= 60 {
+                return None;
             }
-            padded
-                .chars()
-                .take(3)
-                .collect::<String>()
-                .parse::<u32>()
-                .ok()
-        })
-        .flatten()
-        .unwrap_or(0);
-
-    Some(minutes * 60_000 + seconds * 1_000 + milliseconds)
+            let mut second_parts = parts[2].split('.');
+            let seconds = second_parts.next()?.parse::<u32>().ok()?;
+            if seconds >= 60 {
+                return None;
+            }
+            let fraction = second_parts.next();
+            let milliseconds = parse_milliseconds_fraction(fraction);
+            Some(hours * 3_600_000 + minutes * 60_000 + seconds * 1_000 + milliseconds)
+        } else {
+            let minutes = parts[0].parse::<u32>().ok()?;
+            let seconds = parts[1].parse::<u32>().ok()?;
+            if seconds >= 60 {
+                return None;
+            }
+            let fraction = Some(parts[2]);
+            let milliseconds = parse_milliseconds_fraction(fraction);
+            Some(minutes * 60_000 + seconds * 1_000 + milliseconds)
+        }
+    } else {
+        None
+    }
 }
 
 fn parse_ttml_clock_to_ms(raw: &str) -> Option<u32> {
@@ -1131,8 +1156,17 @@ fn collect_candidate(
     candidates.push(ParserCandidate { source, lines });
 }
 
+fn normalize_lyric_timestamps(source: &str) -> String {
+    let re_square = Regex::new(r"\[(\d+):(\d{2}):(\d{1,3})\]").expect("valid square regex");
+    let re_angle = Regex::new(r"<(\d+):(\d{2}):(\d{1,3})>").expect("valid angle regex");
+
+    let step1 = re_square.replace_all(source, "[$1:$2.$3]");
+    re_angle.replace_all(&step1, "<$1:$2.$3>").to_string()
+}
+
 fn parse_raw_lyrics(raw: &str) -> Vec<ParsedLine> {
-    let normalized = raw
+    let raw_normalized = normalize_lyric_timestamps(raw);
+    let normalized = raw_normalized
         .replace('\u{FEFF}', "")
         .replace("\r\n", "\n")
         .replace('\r', "\n");
@@ -3488,6 +3522,18 @@ mod tests {
 
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].text, "如果当时 - 许嵩");
+    }
+
+    #[test]
+    fn parses_colons_timestamp_lrc() {
+        let parsed = parse_raw_lyrics(
+            "[00:22:05]上天啊\n[00:25:20]难道你看不出我很爱她",
+        );
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].start_ms, 22050);
+        assert_eq!(parsed[0].text, "上天啊");
+        assert_eq!(parsed[1].start_ms, 25200);
+        assert_eq!(parsed[1].text, "难道你看不出我很爱她");
     }
 
     #[test]

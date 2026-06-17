@@ -10,12 +10,12 @@ import type {
   ParsedWord,
 } from './types';
 
-const TIMESTAMP_BLOCK_PATTERN = /\[(\d{1,}:\d{2}(?:\.\d+)?)\]/g;
-const ADJACENT_TIMESTAMPS_BEFORE_TEXT_PATTERN = /(?:\[(?:\d{1,}:\d{2}(?:\.\d+)?)\])+(?=[^[\]\r\n])/g;
+const TIMESTAMP_BLOCK_PATTERN = /\[(\d{1,}:\d{2}(?:[.:]\d+)?)\]/g;
+const ADJACENT_TIMESTAMPS_BEFORE_TEXT_PATTERN = /(?:\[(?:\d{1,}:\d{2}(?:[.:]\d+)?)\])+(?=[^[\]\r\n])/g;
 const ESLRC_GAP_PLACEHOLDER = '\u2063';
-const ENHANCED_TIMESTAMP_PATTERN = /<(\d{1,}:\d{2}(?:\.\d+)?)>/g;
-const ENHANCED_TIMESTAMP_TEXT_PATTERN = /<\d{1,}:\d{2}(?:\.\d+)?>/;
-const LRC_LINE_TIMESTAMP_PATTERN = /^\[(\d{1,}:\d{2}(?:\.\d+)?)\](.*)$/;
+const ENHANCED_TIMESTAMP_PATTERN = /<(\d{1,}:\d{2}(?:[.:]\d+)?)>/g;
+const ENHANCED_TIMESTAMP_TEXT_PATTERN = /<\d{1,}:\d{2}(?:[.:]\d+)?>/;
+const LRC_LINE_TIMESTAMP_PATTERN = /^\[(\d{1,}:\d{2}(?:[.:]\d+)?)\](.*)$/;
 const ENHANCED_EMPTY_BACKWARD_TOLERANCE_MS = 5;
 
 type ParserSource = ParsedLineSourceFormat;
@@ -79,8 +79,14 @@ export function normalizeEslrcSource(source: string): string {
   });
 }
 
+export function normalizeLyricTimestamps(source: string): string {
+  return source
+    .replace(/\[(\d+):(\d{2}):(\d{1,3})\]/g, '[$1:$2.$3]')
+    .replace(/<(\d+):(\d{2}):(\d{1,3})>/g, '<$1:$2.$3>');
+}
+
 export function parseTimestampToMs(raw: string): number | null {
-  const match = /^(\d+):(\d{2})(?:\.(\d{1,3}))?$/.exec(raw.trim());
+  const match = /^(\d+):(\d{2})(?:[.:](\d{1,3}))?$/.exec(raw.trim());
   if (!match) return null;
 
   const minutes = Number(match[1]);
@@ -374,7 +380,8 @@ async function parseWithBestCandidate(raw: string): Promise<ParserCandidate | nu
     parseTTML,
     parseYrc,
   } = await getAmlModule();
-  const source = raw.replace(/^\uFEFF/, '').replace(/\r/g, '');
+  const normalizedTimestamps = normalizeLyricTimestamps(raw);
+  const source = normalizedTimestamps.replace(/^\uFEFF/, '').replace(/\r/g, '');
   const normalizedEslrcSource = normalizeEslrcSource(source);
   const candidates: ParserCandidate[] = [];
 
