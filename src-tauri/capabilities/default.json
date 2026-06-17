@@ -22,6 +22,8 @@
     "core:window:allow-close",
     "core:window:allow-destroy",
     "core:window:allow-unmaximize",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
     "core:window:allow-show",
     "core:window:allow-hide",
     "core:window:allow-set-size",
