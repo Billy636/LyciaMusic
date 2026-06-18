@@ -439,3 +439,70 @@ fn keeps_japanese_main_after_english_interlude_in_romaji_translation_lyrics() {
     assert_eq!(mixed_line.romaji, "to me do na i resonant harm");
     assert_eq!(mixed_line.translation, "是那从不曾间断的杀戮之音");
 }
+
+#[test]
+fn parses_enhanced_lrc_line_without_trailing_timestamp() {
+    // Test case 1: Inferred duration using median of local durations
+    // Word A: 400ms, Word B: 601ms. The integer median is 500ms.
+    // Word C starts at 11.001s, so it should end at 11.501s.
+    let median_payload = build_structured_lyrics_payload(
+        "[00:10.000]<00:10.000>A<00:10.400>B<00:11.001>C".to_string(),
+    );
+    let line1 = find_display_line_by_time(&median_payload, 10.0).unwrap();
+    assert_eq!(line1.text, "ABC");
+    let words1 = line1.words.as_ref().unwrap();
+    assert_eq!(words1.len(), 3);
+    assert_eq!(words1[2].text, "C");
+    assert_eq!((words1[2].start * 1000.0).round() as i64, 11001);
+    assert_eq!((words1[2].end * 1000.0).round() as i64, 11501);
+
+    // Test case 2: Single untimed word using default 300ms duration
+    let default_payload = build_structured_lyrics_payload("[00:20.000]<00:20.000>Hi".to_string());
+    let line2 = find_display_line_by_time(&default_payload, 20.0).unwrap();
+    assert_eq!(line2.text, "Hi");
+    let words2 = line2.words.as_ref().unwrap();
+    assert_eq!(words2.len(), 1);
+    assert_eq!(words2[0].text, "Hi");
+    assert_eq!((words2[0].start * 1000.0).round() as i64, 20000);
+    assert_eq!((words2[0].end * 1000.0).round() as i64, 20300);
+
+    // Test case 3: Clamping to minimum duration 150ms
+    let minimum_payload =
+        build_structured_lyrics_payload("[00:30.000]<00:30.000>A<00:30.050>B".to_string());
+    let line3 = find_display_line_by_time(&minimum_payload, 30.0).unwrap();
+    let words3 = line3.words.as_ref().unwrap();
+    assert_eq!((words3[1].start * 1000.0).round() as i64, 30050);
+    assert_eq!((words3[1].end * 1000.0).round() as i64, 30200); // 30050 + 150
+
+    // Test case 4: Clamping to maximum duration 1000ms
+    let maximum_payload =
+        build_structured_lyrics_payload("[00:40.000]<00:40.000>A<00:42.000>B".to_string());
+    let line4 = find_display_line_by_time(&maximum_payload, 40.0).unwrap();
+    let words4 = line4.words.as_ref().unwrap();
+    assert_eq!((words4[1].start * 1000.0).round() as i64, 42000);
+    assert_eq!((words4[1].end * 1000.0).round() as i64, 43000); // 42000 + 1000
+
+    // Test case 5: A single-word line can use timing context from another enhanced line.
+    let contextual_payload = build_structured_lyrics_payload(
+        [
+            "[00:00.000]<00:00.000>Hi",
+            "[00:10.000]<00:10.000>A<00:10.400>B<00:11.000>",
+        ]
+        .join("\n"),
+    );
+    let contextual_line = find_display_line_by_time(&contextual_payload, 0.0).unwrap();
+    let contextual_words = contextual_line.words.as_ref().unwrap();
+    assert_eq!((contextual_words[0].end * 1000.0).round() as i64, 500);
+
+    // Test case 6: Inference never extends beyond the next enhanced line.
+    let capped_payload = build_structured_lyrics_payload(
+        [
+            "[00:00.000]<00:00.000>A<00:00.900>B",
+            "[00:01.000]<00:01.000>C<00:01.500>",
+        ]
+        .join("\n"),
+    );
+    let capped_line = find_display_line_by_time(&capped_payload, 0.0).unwrap();
+    let capped_words = capped_line.words.as_ref().unwrap();
+    assert_eq!((capped_words[1].end * 1000.0).round() as i64, 1000);
+}

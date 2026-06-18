@@ -13,6 +13,9 @@ const ALIGNMENT_HIGH_WINDOW_MS: u32 = 300;
 const ALIGNMENT_MEDIUM_WINDOW_MS: u32 = 800;
 const ALIGNMENT_LOW_WINDOW_MS: u32 = 1500;
 const MIN_TRACK_MATCH_SCORE: f64 = 2.6;
+const ENHANCED_INFERRED_WORD_DEFAULT_DURATION_MS: u32 = 300;
+const ENHANCED_INFERRED_WORD_MIN_DURATION_MS: u32 = 150;
+const ENHANCED_INFERRED_WORD_MAX_DURATION_MS: u32 = 1000;
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -115,6 +118,11 @@ pub struct ParsedLine {
     pub source_index: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explicit_role: Option<ExplicitLineRole>,
+}
+
+struct EnhancedLrcParseResult {
+    line: ParsedLine,
+    inferred_word_index: Option<usize>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -898,12 +906,15 @@ fn parse_inline_square_timed_line(line: &str, source_index: usize) -> Option<Par
     })
 }
 
-fn parse_enhanced_lrc_line(line: &str, source_index: usize) -> Option<ParsedLine> {
+fn parse_enhanced_lrc_line_internal(
+    line: &str,
+    source_index: usize,
+) -> Option<EnhancedLrcParseResult> {
     let leading = collect_markers(line, '[', ']');
     let (_, body_start, line_start_ms) = *leading.first()?;
     let body = &line[body_start..];
     let markers = collect_markers(body, '<', '>');
-    if markers.len() < 2 {
+    if markers.is_empty() {
         return None;
     }
 
@@ -912,6 +923,9 @@ fn parse_enhanced_lrc_line(line: &str, source_index: usize) -> Option<ParsedLine
     }
 
     let mut words = Vec::new();
+    let mut explicit_end_time = None;
+    let mut inferred_word_index = None;
+
     for window in markers.windows(2) {
         let (_, current_end, current_start_ms) = window[0];
         let (next_start, _, next_start_ms) = window[1];
@@ -933,9 +947,34 @@ fn parse_enhanced_lrc_line(line: &str, source_index: usize) -> Option<ParsedLine
         });
     }
 
+    if let Some(&last_marker) = markers.last() {
+        let (_, current_end, current_start_ms) = last_marker;
+        let segment = &body[current_end..];
+        let text = sanitize_word_text(segment);
+
+        if text.trim().is_empty() {
+            explicit_end_time = Some(current_start_ms);
+        } else {
+            inferred_word_index = Some(words.len());
+            words.push(ParsedWord {
+                text,
+                start_ms: current_start_ms,
+                end_ms: current_start_ms, // temporary
+                roman_text: None,
+            });
+        }
+    }
+
     if words.is_empty() {
         return None;
     }
+
+    let end_ms = explicit_end_time.unwrap_or_else(|| {
+        words
+            .last()
+            .map(|word| word.end_ms)
+            .unwrap_or(line_start_ms)
+    });
 
     let text = sanitize_line_text(
         &words
@@ -944,22 +983,84 @@ fn parse_enhanced_lrc_line(line: &str, source_index: usize) -> Option<ParsedLine
             .collect::<String>(),
     );
     let (explicit_role, normalized_text) = detect_explicit_role(&text);
-    let end_ms = markers
-        .last()
-        .map(|marker| marker.2)
-        .unwrap_or(line_start_ms);
 
-    Some(ParsedLine {
-        start_ms: line_start_ms,
-        end_ms: end_ms.max(line_start_ms),
-        text: normalized_text,
-        words: Some(words),
-        translated_text: None,
-        roman_text: None,
-        source_format: ParsedLineSourceFormat::EnhancedLrc,
-        source_index: source_index as f64,
-        explicit_role,
+    Some(EnhancedLrcParseResult {
+        line: ParsedLine {
+            start_ms: line_start_ms,
+            end_ms: end_ms.max(line_start_ms),
+            text: normalized_text,
+            words: Some(words),
+            translated_text: None,
+            roman_text: None,
+            source_format: ParsedLineSourceFormat::EnhancedLrc,
+            source_index: source_index as f64,
+            explicit_role,
+        },
+        inferred_word_index,
     })
+}
+
+fn median_u32(values: &[u32]) -> Option<u32> {
+    if values.is_empty() {
+        return None;
+    }
+
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    let middle = sorted.len() / 2;
+    if sorted.len() % 2 == 1 {
+        Some(sorted[middle])
+    } else {
+        Some(((sorted[middle - 1] as u64 + sorted[middle] as u64) / 2) as u32)
+    }
+}
+
+fn collect_explicit_word_durations(result: &EnhancedLrcParseResult) -> Vec<u32> {
+    result
+        .line
+        .words
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| Some(*index) != result.inferred_word_index)
+        .filter_map(|(_, word)| {
+            let duration = word.end_ms.saturating_sub(word.start_ms);
+            (duration > 0).then_some(duration)
+        })
+        .collect()
+}
+
+fn finalize_enhanced_lrc_line(
+    mut result: EnhancedLrcParseResult,
+    contextual_durations: &[u32],
+    next_line_start_ms: Option<u32>,
+) -> ParsedLine {
+    let Some(inferred_word_index) = result.inferred_word_index else {
+        return result.line;
+    };
+
+    let local_durations = collect_explicit_word_durations(&result);
+    let estimated_duration = median_u32(&local_durations)
+        .or_else(|| median_u32(contextual_durations))
+        .unwrap_or(ENHANCED_INFERRED_WORD_DEFAULT_DURATION_MS)
+        .clamp(
+            ENHANCED_INFERRED_WORD_MIN_DURATION_MS,
+            ENHANCED_INFERRED_WORD_MAX_DURATION_MS,
+        );
+    let words = result.line.words.as_mut().expect("enhanced line has words");
+    let inferred_word = &mut words[inferred_word_index];
+    let estimated_end_ms = inferred_word.start_ms.saturating_add(estimated_duration);
+    inferred_word.end_ms = next_line_start_ms
+        .map(|next_start| estimated_end_ms.min(next_start).max(inferred_word.start_ms))
+        .unwrap_or(estimated_end_ms);
+    result.line.end_ms = inferred_word.end_ms;
+    result.line
+}
+
+fn parse_enhanced_lrc_line(line: &str, source_index: usize) -> Option<ParsedLine> {
+    parse_enhanced_lrc_line_internal(line, source_index)
+        .map(|result| finalize_enhanced_lrc_line(result, &[], None))
 }
 
 fn parse_plain_lrc_line(line: &str, source_index: usize) -> Vec<ParsedLine> {
@@ -1126,19 +1227,38 @@ fn parse_ttml(raw: &str) -> Vec<ParsedLine> {
 
 fn parse_manual_lrc_like(raw: &str) -> Vec<ParsedLine> {
     let mut lines = Vec::new();
+    let mut enhanced_results = Vec::new();
     for (index, line) in raw.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
 
-        if let Some(parsed) = parse_enhanced_lrc_line(trimmed, index) {
-            lines.push(parsed);
+        if let Some(parsed) = parse_enhanced_lrc_line_internal(trimmed, index) {
+            enhanced_results.push(parsed);
             continue;
         }
 
         lines.extend(parse_plain_lrc_line(trimmed, index));
     }
+
+    let contextual_durations = enhanced_results
+        .iter()
+        .flat_map(collect_explicit_word_durations)
+        .collect::<Vec<_>>();
+    let start_times = enhanced_results
+        .iter()
+        .map(|result| result.line.start_ms)
+        .collect::<Vec<_>>();
+
+    lines.extend(enhanced_results.into_iter().map(|result| {
+        let next_line_start_ms = start_times
+            .iter()
+            .copied()
+            .filter(|start_ms| *start_ms > result.line.start_ms)
+            .min();
+        finalize_enhanced_lrc_line(result, &contextual_durations, next_line_start_ms)
+    }));
 
     lines
 }

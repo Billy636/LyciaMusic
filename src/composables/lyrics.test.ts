@@ -109,6 +109,60 @@ describe('enhanced lrc parser', async () => {
     ]);
   });
 
+  it('infers the final word end time when the closing timestamp is missing', () => {
+    const parsed = parseEnhancedLrcLine('[00:10.000]<00:10.000>A<00:10.400>B<00:11.001>C');
+
+    expect(parsed?.words.map((word) => ({
+      text: word.word,
+      start: word.startTime,
+      end: word.endTime,
+    }))).toEqual([
+      { text: 'A', start: 10000, end: 10400 },
+      { text: 'B', start: 10400, end: 11001 },
+      { text: 'C', start: 11001, end: 11501 },
+    ]);
+    expect(parsed?.endTime).toBe(11501);
+  });
+
+  it('uses the default duration for a single untimed final word', () => {
+    const parsed = parseEnhancedLrcLine('[00:10.000]<00:10.000>Hi');
+
+    expect(parsed?.words).toEqual([{
+      startTime: 10000,
+      endTime: 10300,
+      word: 'Hi',
+      romanWord: '',
+    }]);
+    expect(parsed?.endTime).toBe(10300);
+  });
+
+  it('clamps inferred final word durations to the configured range', () => {
+    const short = parseEnhancedLrcLine('[00:00.000]<00:00.000>A<00:00.050>B');
+    const long = parseEnhancedLrcLine('[00:00.000]<00:00.000>A<00:02.000>B');
+
+    expect(short?.words[1].endTime).toBe(200);
+    expect(long?.words[1].endTime).toBe(3000);
+  });
+
+  it('caps an inferred final word at the next enhanced line start', () => {
+    const parsed = parseEnhancedLrc([
+      '[00:00.000]<00:00.000>A<00:00.900>B',
+      '[00:01.000]<00:01.000>C<00:01.500>',
+    ].join('\n'));
+
+    expect(parsed[0].words[1].endTime).toBe(1000);
+    expect(parsed[0].endTime).toBe(1000);
+  });
+
+  it('uses timing context from other enhanced lines when local timing is unavailable', () => {
+    const parsed = parseEnhancedLrc([
+      '[00:00.000]<00:00.000>Hi',
+      '[00:10.000]<00:10.000>A<00:10.400>B<00:11.000>',
+    ].join('\n'));
+
+    expect(parsed[0].words[0].endTime).toBe(500);
+  });
+
   it('allows line start time and first word time to differ', () => {
     const parsed = parseEnhancedLrcLine('[00:36.000]<00:36.111>Lead<00:36.551>In<00:36.991>');
 
@@ -167,14 +221,13 @@ describe('enhanced lrc parser', async () => {
   it('falls back on malformed enhanced lines while preserving valid enhanced lines', () => {
     const parsed = parseEnhancedLrc([
       '[00:36.111]<00:36.111>A<00:36.551>B<00:36.991>',
-      '[00:40.000]<00:40.000>Broken<00:40.500>Line',
+      '[00:40.000]Broken<00:40.500>Line<00:41.000>',
       '[00:41.000]plain line',
     ].join('\n'));
 
     expect(parsed).toHaveLength(1);
     expect(parsed[0].startTime).toBe(36111);
   });
-
   it('merges enhanced lines into a plain lrc baseline without dropping ordinary lines', () => {
     const enhancedLines = parseEnhancedLrc('[00:10.000]<00:10.000>A<00:10.500>B<00:11.000>');
     const baseLines = [
