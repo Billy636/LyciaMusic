@@ -39,17 +39,30 @@ const wasMaximizedBeforeFullscreen = ref(false);
 let unlistenResize: (() => void) | null = null;
 
 const toggleFullscreen = async () => {
-  const currentFullscreen = await appWindow.isFullscreen();
-  if (!currentFullscreen) {
-    wasMaximizedBeforeFullscreen.value = await appWindow.isMaximized();
-    await appWindow.setFullscreen(true);
-    isFullscreen.value = true;
-  } else {
-    await appWindow.setFullscreen(false);
-    isFullscreen.value = false;
-    if (wasMaximizedBeforeFullscreen.value) {
-      await appWindow.maximize();
+  try {
+    const currentFullscreen = await appWindow.isFullscreen();
+    if (!currentFullscreen) {
+      try {
+        wasMaximizedBeforeFullscreen.value = await appWindow.isMaximized();
+      } catch (e) {
+        console.error('Failed to check if window is maximized:', e);
+        wasMaximizedBeforeFullscreen.value = false;
+      }
+      await appWindow.setFullscreen(true);
+      isFullscreen.value = true;
+    } else {
+      await appWindow.setFullscreen(false);
+      isFullscreen.value = false;
+      if (wasMaximizedBeforeFullscreen.value) {
+        try {
+          await appWindow.maximize();
+        } catch (e) {
+          console.error('Failed to maximize window:', e);
+        }
+      }
     }
+  } catch (error) {
+    console.error('Failed to toggle fullscreen:', error);
   }
 };
 

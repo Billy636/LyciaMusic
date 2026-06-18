@@ -50,11 +50,15 @@ const minimize = async () => {
 
 // 最大化/还原
 const toggleMaximize = async () => { 
-  const isMax = await appWindow.isMaximized();
-  if (isMax) {
-    await appWindow.unmaximize();
-  } else {
-    await appWindow.maximize();
+  try {
+    const isMax = await appWindow.isMaximized();
+    if (isMax) {
+      await appWindow.unmaximize();
+    } else {
+      await appWindow.maximize();
+    }
+  } catch (error) {
+    console.error('Failed to toggle maximize:', error);
   }
 };
 
