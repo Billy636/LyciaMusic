@@ -385,6 +385,7 @@ export interface AppSettings {
   sidebar: SidebarSettings;
   shortcuts: ShortcutSettings;
   showTaskbarPlayer: boolean;
+  showTaskbarPlayerIcon: boolean;
   taskbarPlayerCanDrag: boolean;
   gpuAcceleration: boolean;
   writeArtistAvatarToTags: boolean;

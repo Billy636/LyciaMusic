@@ -43,6 +43,10 @@ watch(
   { immediate: true },
 );
 
+const toggleTaskbarPlayer = () => {
+  settings.value.showTaskbarPlayer = !settings.value.showTaskbarPlayer;
+};
+
 // 最小化
 const minimize = async () => {
   await appWindow.minimize();
@@ -146,7 +150,29 @@ const goBack = () => { router.back(); };
       <div class="h-4 w-px bg-gray-400/30 mx-2"></div>
       <div class="flex items-center gap-1">
         <button @click.stop="isMiniMode = true" class="p-2 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors cursor-pointer" title="Mini 模式">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" stroke-width="2" /><rect x="12" y="12" width="6" height="4" rx="1" stroke-width="2" /></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <!-- 左上角带缺口的外侧大矩形 -->
+            <path d="M13 6H18a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V13" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            <!-- 左上角的实心嵌套小矩形 (7x5) -->
+            <rect x="4" y="6" width="7" height="5" rx="1" fill="currentColor" />
+          </svg>
+        </button>
+        <button
+          v-if="settings.showTaskbarPlayerIcon"
+          type="button"
+          class="p-2 transition-colors cursor-pointer rounded-md"
+          :class="settings.showTaskbarPlayer
+            ? 'text-[#EC4141] dark:text-[#ff8b8b]'
+            : 'text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'"
+          @click.stop="toggleTaskbarPlayer"
+          title="任务栏播控"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <!-- 右下角带缺口的外侧大矩形 -->
+            <path d="M11 18H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2V11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            <!-- 右下角的实心填充小矩形 (7x5) -->
+            <rect x="13" y="13" width="7" height="5" rx="1" fill="currentColor" />
+          </svg>
         </button>
         <button @click.stop="minimize" class="p-2 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 12H6" /></svg></button>
         <button @click.stop="toggleMaximize" class="p-2 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" stroke-width="2" /></svg></button>

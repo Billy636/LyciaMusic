@@ -136,6 +136,7 @@ export const defaultAppSettings: AppSettings = {
   sidebar: defaultSidebarSettings,
   shortcuts: createDefaultShortcutSettings(),
   showTaskbarPlayer: false,
+  showTaskbarPlayerIcon: true,
   taskbarPlayerCanDrag: false,
   gpuAcceleration: true,
   writeArtistAvatarToTags: false,
