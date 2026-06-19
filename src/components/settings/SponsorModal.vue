@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
-import alipayQrcode from '../../assets/alipay.jpg';
+import alipayQrcode from '../../assets/alipay.png';
 import wechatpayQrcode from '../../assets/wechatpay.png';
 
 const props = defineProps<{
@@ -89,6 +89,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown));
                   class="h-full w-full object-contain p-1 bg-white transition-transform duration-500 group-hover:scale-105"
                 />
               </div>
+              <span class="mt-2.5 text-sm font-bold text-sky-600 dark:text-sky-400">Alipay</span>
             </div>
 
             <!-- WeChat Card -->
@@ -100,6 +101,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown));
                   class="h-full w-full object-contain p-1 bg-white transition-transform duration-500 group-hover:scale-105"
                 />
               </div>
+              <span class="mt-2.5 text-sm font-bold text-emerald-600 dark:text-emerald-400">Wechatpay</span>
             </div>
           </div>
 
@@ -111,7 +113,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown));
                 🍳
               </div>
               <p class="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300">
-                一元请作者早餐加个鸡蛋。
+                一元在作者早餐里加个鸡蛋。
               </p>
             </div>
 
@@ -121,17 +123,17 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown));
                 🥤
               </div>
               <p class="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300">
-                五元请作者喝一杯蜜雪冰城。
+                五元请作者喝一杯棒打鲜橙。
               </p>
             </div>
 
             <!-- Tier 15 -->
             <div class="flex items-center gap-3">
               <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-rose-500/10 text-lg dark:bg-rose-950/20">
-                🍱
+                🥤
               </div>
               <p class="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300">
-                十五元请作者吃一顿午餐。
+                十元请作者喝一杯杨枝甘露。
               </p>
             </div>
           </div>
