@@ -33,6 +33,13 @@ pub enum ExplicitLineRole {
     Roman,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum LineRoleHint {
+    Main,
+    Translation,
+    Roman,
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ClassificationConfidence {
@@ -2863,6 +2870,29 @@ fn normalize_semantic_line_display_roles(mut line: SemanticLine) -> SemanticLine
     line
 }
 
+fn classify_line_role(line: &LyricTrackLine) -> LineRoleHint {
+    match line.explicit_role {
+        Some(ExplicitLineRole::Translation) => return LineRoleHint::Translation,
+        Some(ExplicitLineRole::Roman) => return LineRoleHint::Roman,
+        None => {}
+    }
+
+    let p = &line.script_profile;
+    if p.kana_count > 0 {
+        return LineRoleHint::Main;
+    }
+    if p.han_count > 0 && p.latin_count == 0 {
+        return LineRoleHint::Translation;
+    }
+    if p.han_count > 0 && p.latin_count > 0 {
+        return LineRoleHint::Translation;
+    }
+    if p.latin_count > 0 && p.han_count == 0 {
+        return LineRoleHint::Roman;
+    }
+    LineRoleHint::Main
+}
+
 fn is_han_only_line(line: &LyricTrackLine) -> bool {
     line.script_profile.han_count > 0
         && line.script_profile.latin_count == 0
@@ -2902,48 +2932,86 @@ fn build_hard_role_semantic_line(
     }
 }
 
+fn build_two_line_semantic(
+    first: &LyricTrackLine,
+    second: &LyricTrackLine,
+) -> Option<SemanticLine> {
+    use LineRoleHint::*;
+    match (classify_line_role(first), classify_line_role(second)) {
+        (Main, Translation) => Some(build_hard_role_semantic_line(first, Some(second), None)),
+        (Translation, Main) => Some(build_hard_role_semantic_line(second, Some(first), None)),
+        (Main, Roman) => Some(build_hard_role_semantic_line(first, None, Some(second))),
+        (Roman, Main) => Some(build_hard_role_semantic_line(second, None, Some(first))),
+        _ => {
+            let (m, t) = resolve_two_line_script_heuristic(first, second);
+            Some(build_hard_role_semantic_line(m, Some(t), None))
+        }
+    }
+}
+
+fn resolve_two_line_script_heuristic<'a>(
+    first: &'a LyricTrackLine,
+    second: &'a LyricTrackLine,
+) -> (&'a LyricTrackLine, &'a LyricTrackLine) {
+    if is_han_only_line(first) && !is_han_only_line(second) {
+        (second, first)
+    } else if is_han_only_line(second) && !is_han_only_line(first) {
+        (first, second)
+    } else if is_han_latin_mixed_line(first) && is_latin_only_line(second) {
+        (second, first)
+    } else if is_han_latin_mixed_line(second) && is_latin_only_line(first) {
+        (first, second)
+    } else {
+        (first, second)
+    }
+}
+
+fn build_three_line_semantic(lines: &[&LyricTrackLine]) -> Option<SemanticLine> {
+    use LineRoleHint::*;
+
+    let roman = lines.iter().find(|l| classify_line_role(l) == Roman);
+    let non_roman: Vec<&&LyricTrackLine> =
+        lines.iter().filter(|l| classify_line_role(l) != Roman).collect();
+
+    let (main_line, translation_line) = match non_roman.as_slice() {
+        [] => {
+            return roman.map(|r| build_hard_role_semantic_line(r, None, None));
+        }
+        [only] => (*only, None),
+        [first, second] => {
+            let r0 = classify_line_role(first);
+            let r1 = classify_line_role(second);
+            match (r0, r1) {
+                (Main, Translation) => (*first, Some(*second)),
+                (Translation, Main) => (*second, Some(*first)),
+                (Main, Roman) | (Roman, Main) => {
+                    // Should not reach here due to filter, but handle gracefully
+                    (*first, None)
+                }
+                _ => (*first, Some(*second)),
+            }
+        }
+        _ => {
+            return roman.map(|r| build_hard_role_semantic_line(r, None, None));
+        }
+    };
+
+    Some(build_hard_role_semantic_line(
+        main_line,
+        translation_line.map(|v| *v),
+        roman.copied(),
+    ))
+}
+
 fn build_hard_role_semantic_line_from_cluster(
     group: &[(usize, usize, LyricTrackLine)],
 ) -> Option<SemanticLine> {
-    let mut lines = group
-        .iter()
-        .map(|(_, _, line)| line)
-        .collect::<Vec<&LyricTrackLine>>();
-    lines.sort_by(|left, right| {
-        left.slot_index
-            .unwrap_or(usize::MAX)
-            .cmp(&right.slot_index.unwrap_or(usize::MAX))
-            .then_with(|| compare_source_index(left.source_index, right.source_index))
-            .then_with(|| left.start_ms.cmp(&right.start_ms))
-    });
+    let lines: Vec<&LyricTrackLine> = group.iter().map(|(_, _, line)| line).collect();
 
-    match lines.as_slice() {
-        [main_line] => Some(build_hard_role_semantic_line(main_line, None, None)),
-        [first_line, second_line] => {
-            let (main_line, translation_line) =
-                if is_han_only_line(first_line) && !is_han_only_line(second_line) {
-                    (*second_line, *first_line)
-                } else if is_han_only_line(second_line) && !is_han_only_line(first_line) {
-                    (*first_line, *second_line)
-                } else if is_han_latin_mixed_line(first_line) && is_latin_only_line(second_line) {
-                    (*second_line, *first_line)
-                } else if is_han_latin_mixed_line(second_line) && is_latin_only_line(first_line) {
-                    (*first_line, *second_line)
-                } else {
-                    (*first_line, *second_line)
-                };
-
-            Some(build_hard_role_semantic_line(
-                main_line,
-                Some(translation_line),
-                None,
-            ))
-        }
-        [roman_line, main_line, translation_line] => Some(build_hard_role_semantic_line(
-            main_line,
-            Some(translation_line),
-            Some(roman_line),
-        )),
+    match lines.len() {
+        1 => Some(build_hard_role_semantic_line(lines[0], None, None)),
+        2 => build_two_line_semantic(lines[0], lines[1]),
+        3 => build_three_line_semantic(&lines),
         _ => None,
     }
 }
@@ -3572,6 +3640,49 @@ mod tests {
         assert_eq!(payload.display_lines[0].text, "忘れたくないこと");
         assert_eq!(payload.display_lines[0].translation, "我不愿遗忘");
         assert_eq!(payload.display_lines[0].romaji, "wa su re ta ku na i ko to");
+    }
+
+    #[test]
+    fn hard_role_rules_three_lines_main_translation_roman_order() {
+        let payload = build_structured_lyrics_payload(
+            [
+                "[00:01.000]忘れたくないこと",
+                "[00:01.000]我不愿遗忘",
+                "[00:01.000]wasuretakunaikoto",
+            ]
+            .join("\n"),
+        );
+        assert_eq!(payload.display_lines.len(), 1);
+        assert_eq!(payload.display_lines[0].text, "忘れたくないこと");
+        assert_eq!(payload.display_lines[0].translation, "我不愿遗忘");
+        assert_eq!(payload.display_lines[0].romaji, "wasuretakunaikoto");
+    }
+
+    #[test]
+    fn hard_role_rules_two_lines_main_roman_pair() {
+        let payload = build_structured_lyrics_payload(
+            ["[00:01.000]忘れたくないこと", "[00:01.000]wasuretakunaikoto"].join("\n"),
+        );
+        assert_eq!(payload.display_lines.len(), 1);
+        assert_eq!(payload.display_lines[0].text, "忘れたくないこと");
+        assert_eq!(payload.display_lines[0].translation, "");
+        assert_eq!(payload.display_lines[0].romaji, "wasuretakunaikoto");
+    }
+
+    #[test]
+    fn hard_role_rules_three_lines_swapped_order() {
+        let payload = build_structured_lyrics_payload(
+            [
+                "[00:01.000]wasuretakunaikoto",
+                "[00:01.000]忘れたくないこと",
+                "[00:01.000]我不愿遗忘",
+            ]
+            .join("\n"),
+        );
+        assert_eq!(payload.display_lines.len(), 1);
+        assert_eq!(payload.display_lines[0].text, "忘れたくないこと");
+        assert_eq!(payload.display_lines[0].translation, "我不愿遗忘");
+        assert_eq!(payload.display_lines[0].romaji, "wasuretakunaikoto");
     }
 
     #[test]
