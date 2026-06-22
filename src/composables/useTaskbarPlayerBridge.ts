@@ -349,6 +349,7 @@ export function useTaskbarPlayerBridge() {
   const unlisteners: Array<() => void> = [];
   let checkTimer: number | null = null;
   let isMainWindowClosing = false;
+  let updateSequence = 0;
 
   const createStatePayload = async (): Promise<TaskbarPlayerStatePayload> => {
     const song = currentSong.value;
@@ -366,11 +367,19 @@ export function useTaskbarPlayerBridge() {
     const targetWindow = await getTaskbarPlayerWindow();
     if (!targetWindow) return;
 
+    updateSequence++;
+    const currentSeq = updateSequence;
+
+    const payload = await createStatePayload();
+    if (currentSeq !== updateSequence) {
+      return;
+    }
+
     const appliedPromise = waitForTaskbarPlayerStateApplied();
     await emitTo<TaskbarPlayerStatePayload>(
       TASKBAR_PLAYER_WINDOW_LABEL,
       TASKBAR_PLAYER_STATE_EVENT,
-      await createStatePayload(),
+      payload,
     );
     await appliedPromise;
   };
@@ -470,6 +479,7 @@ export function useTaskbarPlayerBridge() {
           if (!isTaskbarPlayerVisible.value) {
             // 对齐一次坐标并显示
             await stabilizeTaskbarWindowGeometry(targetWindow);
+            await emitStateToTaskbarPlayer();
             await targetWindow.show();
             await stabilizeTaskbarWindowGeometry(targetWindow);
             isTaskbarPlayerVisible.value = true;
