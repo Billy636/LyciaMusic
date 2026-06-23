@@ -310,8 +310,8 @@ describe('player playback domain', () => {
 
   it('starts loading the current thumbnail before the audio backend finishes switching songs', async () => {
     const song = makeSong({ path: '/music/current-thumbnail.flac', title: 'Current Thumbnail' });
-    let resolvePlayAudio!: () => void;
-    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<void>((resolve) => {
+    let resolvePlayAudio!: (val?: any) => void;
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<any>((resolve) => {
       resolvePlayAudio = resolve;
     }));
 
@@ -338,8 +338,8 @@ describe('player playback domain', () => {
       title: 'Persisted Thumb',
       cover_thumb_path: 'C:\\covers\\persisted-thumb.jpg',
     });
-    let resolvePlayAudio!: () => void;
-    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<void>((resolve) => {
+    let resolvePlayAudio!: (val?: any) => void;
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<any>((resolve) => {
       resolvePlayAudio = resolve;
     }));
     primeCoverPathMock.mockReturnValue('asset://C:\\covers\\persisted-thumb.jpg');
@@ -366,9 +366,9 @@ describe('player playback domain', () => {
     const playbackStore = usePlaybackStore();
     const oldCover = 'asset://C:\\covers\\old-thumb.jpg';
     const song = makeSong({ path: '/music/cold-hdd.flac', title: 'Cold HDD' });
-    let resolvePlayAudio!: () => void;
+    let resolvePlayAudio!: (val?: any) => void;
     playbackStore.currentCover = oldCover;
-    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<void>((resolve) => {
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<any>((resolve) => {
       resolvePlayAudio = resolve;
     }));
 
@@ -394,12 +394,12 @@ describe('player playback domain', () => {
     const oldCover = 'asset://C:\\covers\\old-thumb.jpg';
     const oldFullCover = 'asset://C:\\covers\\old-full.png';
     const song = makeSong({ path: '/music/new-song.flac', title: 'New Song' });
-    let resolvePlayAudio!: () => void;
+    let resolvePlayAudio!: (val?: any) => void;
     uiStore.showPlayerDetail = true;
     playbackStore.currentCover = oldCover;
     playbackStore.currentCoverPath = '/music/old-song.flac';
     playbackStore.currentCoverFull = oldFullCover;
-    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<void>((resolve) => {
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<any>((resolve) => {
       resolvePlayAudio = resolve;
     }));
 
