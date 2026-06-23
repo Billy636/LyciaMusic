@@ -7,7 +7,7 @@ use crate::player::output::wasapi_exclusive::{ExclusivePlayRequest, WasapiExclus
 use crate::player::output::OutputBackend;
 use crate::player::types::{
     AudioCommand, AudioOutputMode, AudioOutputStatus, AudioSource, PlayerState,
-    SeekCompletedPayload, SharedProgress, SharedVisualizer, TimedSource,
+    SeekCompletedPayload, PlaybackFinishedPayload, SharedProgress, SharedVisualizer, TimedSource,
 };
 use crate::remote::cache::RemoteStreamSource;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -68,6 +68,8 @@ fn start_exclusive_playback(
     volume_balance_gain: f32,
     equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
     user_volume: Arc<std::sync::atomic::AtomicU32>,
+    cue_start_offset: Duration,
+    total_duration: Option<Duration>,
 ) -> Result<WasapiExclusivePlayback, String> {
     WasapiExclusivePlayback::start(ExclusivePlayRequest {
         path,
@@ -79,6 +81,8 @@ fn start_exclusive_playback(
         volume_balance_gain,
         equalizer_handle,
         user_volume,
+        cue_start_offset,
+        total_duration,
     })
     .map_err(|error| error.to_string())
 }
@@ -101,6 +105,8 @@ fn restore_preferred_output(
     volume_balance_gain: f32,
     equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
     user_volume: Arc<std::sync::atomic::AtomicU32>,
+    cue_start_offset: Duration,
+    total_duration: Option<Duration>,
 ) {
     *output = SharedOutputBackend::open(host, selected_device_name.as_deref()).ok();
     *active_device_name = output
@@ -119,6 +125,8 @@ fn restore_preferred_output(
             volume_balance_gain,
             equalizer_handle.clone(),
             user_volume.clone(),
+            cue_start_offset,
+            total_duration,
         ) {
             Ok(playback) => {
                 *active_device_name = Some(playback.active_device_name().to_string());
@@ -155,6 +163,8 @@ fn restore_preferred_output(
         progress,
         equalizer_handle,
         user_volume,
+        cue_start_offset,
+        total_duration,
     );
 }
 
@@ -169,6 +179,8 @@ fn restore_shared_output(
     progress: &Arc<SharedProgress>,
     equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
     user_volume: Arc<std::sync::atomic::AtomicU32>,
+    cue_start_offset: Duration,
+    total_duration: Option<Duration>,
 ) {
     *output = SharedOutputBackend::open(host, selected_device_name.as_deref()).ok();
     *active_device_name = output
@@ -182,6 +194,8 @@ fn restore_shared_output(
         progress,
         equalizer_handle,
         user_volume,
+        cue_start_offset,
+        total_duration,
     );
 }
 
@@ -397,6 +411,8 @@ fn append_decoded_source<R>(
     current_normalizer_handle: &mut Option<VolumeNormalizerHandle>,
     equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
     user_volume: Arc<std::sync::atomic::AtomicU32>,
+    cue_start_offset: Duration,
+    total_duration: Option<Duration>,
 ) where
     R: Read + Seek + Send + Sync + 'static,
 {
@@ -421,10 +437,16 @@ fn append_decoded_source<R>(
             }
 
             let skipped_source = source.convert_samples::<f32>().skip_duration(offset);
+            let mut source_chain: Box<dyn Source<Item = f32> + Send> = Box::new(skipped_source);
+            if let Some(tot_dur) = total_duration {
+                let resume_time = offset.saturating_sub(cue_start_offset);
+                let remaining = tot_dur.saturating_sub(resume_time);
+                source_chain = Box::new(source_chain.take_duration(remaining));
+            }
 
             // 1. VolumeNormalizer 音量平衡节点
             let (normalized_source, handle) = VolumeNormalizer::new(
-                skipped_source,
+                source_chain,
                 volume_balance_gain,
                 100, // ramp 100ms
             );
@@ -469,6 +491,8 @@ fn handle_play(
     current_normalizer_handle: &mut Option<VolumeNormalizerHandle>,
     equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
     user_volume: Arc<std::sync::atomic::AtomicU32>,
+    duration_ms: Option<u64>,
+    cue_start_offset_ms: Option<u64>,
 ) {
     *current_path = source.display_path();
     *is_playing_flag = true;
@@ -479,6 +503,8 @@ fn handle_play(
     }
 
     let start_offset = start_offset_ms.map(Duration::from_millis);
+    let cue_start_offset = Duration::from_millis(cue_start_offset_ms.unwrap_or(0));
+    let total_duration = duration_ms.map(Duration::from_millis);
 
     match source {
         AudioSource::LocalFile(path) => {
@@ -493,6 +519,8 @@ fn handle_play(
                     current_normalizer_handle,
                     equalizer_handle,
                     user_volume,
+                    cue_start_offset,
+                    total_duration,
                 );
             }
         }
@@ -508,6 +536,8 @@ fn handle_play(
                     current_normalizer_handle,
                     equalizer_handle,
                     user_volume,
+                    cue_start_offset,
+                    total_duration,
                 );
             }
         }
@@ -528,6 +558,8 @@ fn handle_seek(
     current_normalizer_handle: &mut Option<VolumeNormalizerHandle>,
     equalizer_handle: Arc<crate::player::equalizer::EqualizerHandle>,
     user_volume: Arc<std::sync::atomic::AtomicU32>,
+    duration_ms: Option<u64>,
+    cue_start_offset_ms: Option<u64>,
 ) {
     let clamped_time = time.max(0.0);
     let jump_target = Duration::from_secs_f64(clamped_time);
@@ -570,10 +602,18 @@ fn handle_seek(
 
                                 let skipped_source =
                                     source.convert_samples::<f32>().skip_duration(jump_target);
+                                let mut source_chain: Box<dyn Source<Item = f32> + Send> = Box::new(skipped_source);
+                                let cue_start_offset = Duration::from_millis(cue_start_offset_ms.unwrap_or(0));
+                                let total_duration = duration_ms.map(Duration::from_millis);
+                                if let Some(tot_dur) = total_duration {
+                                    let resume_time = jump_target.saturating_sub(cue_start_offset);
+                                    let remaining = tot_dur.saturating_sub(resume_time);
+                                    source_chain = Box::new(source_chain.take_duration(remaining));
+                                }
 
                                 // 1. VolumeNormalizer 音量平衡节点
                                 let (normalized_source, handle) = VolumeNormalizer::new(
-                                    skipped_source,
+                                    source_chain,
                                     volume_balance_gain,
                                     100, // ramp 100ms
                                 );
@@ -658,6 +698,9 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
         let mut current_path = String::new();
         let mut current_volume = 1.0;
         let mut is_playing_flag = false;
+        let mut current_duration_ms: Option<u64> = None;
+        let mut current_cue_start_offset_ms: Option<u64> = None;
+        let mut current_playback_id: u64 = 0;
         let mut requested_output_mode = AudioOutputMode::Shared;
         let mut active_output_mode = AudioOutputMode::Shared;
         let mut fallback_reason: Option<String> = None;
@@ -690,9 +733,15 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         output_mode,
                         start_offset_ms,
                         volume_balance_gain,
+                        duration_ms,
+                        cue_start_offset_ms,
+                        playback_id,
                     } => {
                         requested_output_mode = output_mode;
                         current_volume_balance_gain = volume_balance_gain;
+                        current_duration_ms = duration_ms;
+                        current_cue_start_offset_ms = cue_start_offset_ms;
+                        current_playback_id = playback_id;
                         let source_is_remote = source.is_remote();
                         let display_path = source.display_path();
 
@@ -707,6 +756,9 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         if output_mode == AudioOutputMode::WasapiExclusive && !source_is_remote {
                             let exclusive_start =
                                 start_offset_ms.map_or(Duration::ZERO, Duration::from_millis);
+                            let cue_start_offset = Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
+                            let total_duration = current_duration_ms.map(Duration::from_millis);
+
                             match start_exclusive_playback(
                                 display_path.clone(),
                                 selected_device_name.clone(),
@@ -717,6 +769,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                                 current_volume_balance_gain,
                                 thread_eq_handle.clone(),
                                 thread_user_volume.clone(),
+                                cue_start_offset,
+                                total_duration,
                             ) {
                                 Ok(playback) => {
                                     if selected_device_name.is_none() {
@@ -799,6 +853,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             &mut current_normalizer_handle,
                             thread_eq_handle.clone(),
                             thread_user_volume.clone(),
+                            current_duration_ms,
+                            current_cue_start_offset_ms,
                         )
                     }
                     AudioCommand::Pause => {
@@ -872,6 +928,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             &mut current_normalizer_handle,
                             thread_eq_handle.clone(),
                             thread_user_volume.clone(),
+                            current_duration_ms,
+                            current_cue_start_offset_ms,
                         )
                     }
                     AudioCommand::SetVolume(vol) => {
@@ -887,6 +945,9 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         current_sink = None;
                         #[cfg(target_os = "windows")]
                         stop_exclusive_playback(&mut exclusive_playback);
+
+                        let cue_start_offset = Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
+                        let total_duration = current_duration_ms.map(Duration::from_millis);
 
                         restore_preferred_output(
                             &selected_device_name,
@@ -906,6 +967,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             current_volume_balance_gain,
                             thread_eq_handle.clone(),
                             thread_user_volume.clone(),
+                            cue_start_offset,
+                            total_duration,
                         );
                         if selected_device_name.is_none() {
                             last_default_device_name = default_output_device_name(&host);
@@ -931,6 +994,9 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         #[cfg(target_os = "windows")]
                         stop_exclusive_playback(&mut exclusive_playback);
 
+                        let cue_start_offset = Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
+                        let total_duration = current_duration_ms.map(Duration::from_millis);
+
                         restore_preferred_output(
                             &selected_device_name,
                             &mut output,
@@ -949,6 +1015,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             current_volume_balance_gain,
                             thread_eq_handle.clone(),
                             thread_user_volume.clone(),
+                            cue_start_offset,
+                            total_duration,
                         );
                         if selected_device_name.is_none() {
                             last_default_device_name = default_output_device_name(&host);
@@ -990,41 +1058,76 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                 },
                 Err(RecvTimeoutError::Timeout) => {
                     #[cfg(target_os = "windows")]
-                    if let Some(result) = exclusive_playback
+                    let exclusive_finished = if let Some(result) = exclusive_playback
                         .as_ref()
                         .and_then(|playback| playback.try_finished())
                     {
                         stop_exclusive_playback(&mut exclusive_playback);
 
-                        if let Err(error) = result {
-                            active_output_mode = AudioOutputMode::Shared;
-                            fallback_reason = Some(error);
-                            restore_shared_output(
-                                &selected_device_name,
-                                &mut output,
-                                &host,
-                                &mut current_sink,
-                                &mut active_device_name,
-                                &current_path,
-                                is_playing_flag,
-                                &thread_progress,
-                                thread_eq_handle.clone(),
-                                thread_user_volume.clone(),
-                            );
-                            if selected_device_name.is_none() {
-                                last_default_device_name = default_output_device_name(&host);
+                        match result {
+                            Ok(()) => {
+                                is_playing_flag = false;
+                                let _ = thread_app_handle.emit(
+                                    "playback-finished",
+                                    PlaybackFinishedPayload {
+                                        playback_id: current_playback_id,
+                                    },
+                                );
+                                true
                             }
+                            Err(error) => {
+                                active_output_mode = AudioOutputMode::Shared;
+                                fallback_reason = Some(error);
+                                let cue_start_offset = Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
+                                let total_duration = current_duration_ms.map(Duration::from_millis);
 
-                            emit_output_status(
-                                &thread_app_handle,
-                                &thread_output_status,
-                                selected_device_name.clone(),
-                                active_device_name.clone(),
-                                requested_output_mode,
-                                active_output_mode,
-                                fallback_reason.clone(),
-                            );
+                                restore_shared_output(
+                                    &selected_device_name,
+                                    &mut output,
+                                    &host,
+                                    &mut current_sink,
+                                    &mut active_device_name,
+                                    &current_path,
+                                    is_playing_flag,
+                                    &thread_progress,
+                                    thread_eq_handle.clone(),
+                                    thread_user_volume.clone(),
+                                    cue_start_offset,
+                                    total_duration,
+                                );
+                                if selected_device_name.is_none() {
+                                    last_default_device_name = default_output_device_name(&host);
+                                }
+
+                                emit_output_status(
+                                    &thread_app_handle,
+                                    &thread_output_status,
+                                    selected_device_name.clone(),
+                                    active_device_name.clone(),
+                                    requested_output_mode,
+                                    active_output_mode,
+                                    fallback_reason.clone(),
+                                );
+                                false
+                            }
                         }
+                    } else {
+                        false
+                    };
+
+                    #[cfg(target_os = "windows")]
+                    let should_check_shared = !exclusive_finished && exclusive_playback.is_none();
+                    #[cfg(not(target_os = "windows"))]
+                    let should_check_shared = true;
+
+                    if should_check_shared && is_playing_flag && current_sink.as_ref().map_or(false, |sink| sink.empty()) {
+                        is_playing_flag = false;
+                        let _ = thread_app_handle.emit(
+                            "playback-finished",
+                            PlaybackFinishedPayload {
+                                playback_id: current_playback_id,
+                            },
+                        );
                     }
 
                     if selected_device_name.is_none() {
@@ -1042,6 +1145,10 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             current_sink = None;
                             #[cfg(target_os = "windows")]
                             stop_exclusive_playback(&mut exclusive_playback);
+
+                            let cue_start_offset = Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
+                            let total_duration = current_duration_ms.map(Duration::from_millis);
+
                             restore_preferred_output(
                                 &selected_device_name,
                                 &mut output,
@@ -1060,6 +1167,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                                 current_volume_balance_gain,
                                 thread_eq_handle.clone(),
                                 thread_user_volume.clone(),
+                                cue_start_offset,
+                                total_duration,
                             );
 
                             emit_output_status(
@@ -1130,6 +1239,8 @@ mod tests {
             &mut current_normalizer_handle,
             eq_handle,
             user_volume,
+            None,
+            None,
         );
 
         assert_eq!(progress.samples_played.load(Ordering::Relaxed), 0);

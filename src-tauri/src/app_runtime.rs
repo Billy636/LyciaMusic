@@ -188,7 +188,9 @@ pub(crate) fn setup_app(
     queue_open_paths(app.handle(), initial_open_paths);
 
     install_window_boundary(app);
-    build_tray(app)?;
+    if let Err(error) = build_tray(app) {
+        eprintln!("Warning: failed to build tray icon: {:?}", error);
+    }
 
     Ok(())
 }

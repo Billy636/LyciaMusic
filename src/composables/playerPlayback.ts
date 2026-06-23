@@ -74,6 +74,7 @@ export const createPlayerPlayback = ({
     currentTime,
     isPlaying,
     isSongLoaded,
+    currentPlaybackId,
     playQueue,
     playMode,
     tempQueue,
@@ -255,6 +256,7 @@ export const createPlayerPlayback = ({
     const requestId = ++playRequestId;
     const previousSong = currentSong.value;
 
+    currentPlaybackId.value = 0;
     flushPlaySession();
     onBeforePlay?.(song, options);
 
@@ -342,15 +344,17 @@ export const createPlayerPlayback = ({
     const startOffsetMs = cueStartOffset + Math.round(resumeTime * 1000);
 
     try {
-      await playbackApi.playAudio({
+      const pId = await playbackApi.playAudio({
         path: audioFilePath,
         title: getSmtcTitle(song),
         artist: song.artist || 'Unknown Artist',
         album: song.album || 'Unknown Album',
         cover: cachedCoverPath,
         duration: Math.floor(song.duration),
+        durationMs: Math.round(song.duration * 1000),
         outputMode: settingsStore.settings.audio.outputMode,
         startOffsetMs: startOffsetMs || undefined,
+        cueStartOffsetMs: cueStartOffset || undefined,
         songId: song.id,
         volumeBalanceEnabled: settingsStore.settings.audio.volumeBalance?.enabled,
         gainOffsetDb: settingsStore.settings.audio.volumeBalance?.gainOffsetDb,
@@ -358,6 +362,7 @@ export const createPlayerPlayback = ({
       });
       if (requestId !== playRequestId || currentSong.value?.path !== song.path) return;
 
+      currentPlaybackId.value = pId;
       isSongLoaded.value = true;
       sessionStartTime = Date.now();
       loadLyrics();

@@ -49,6 +49,7 @@ interface CreatePlayerLifecycleDeps {
   togglePlay: () => void | Promise<void>;
   nextSong: () => void;
   prevSong: () => void;
+  handleAutoNext: () => void;
   applyLibraryScanBatch: (payload: LibraryScanBatchPayload) => void;
   flushBufferedLibraryScanBatch: () => void;
   handleSeekCompleted: (payload: SeekCompletedPayload) => void;
@@ -171,6 +172,7 @@ export const createPlayerLifecycle = ({
   togglePlay,
   nextSong,
   prevSong,
+  handleAutoNext,
   applyLibraryScanBatch,
   flushBufferedLibraryScanBatch,
   handleSeekCompleted,
@@ -311,6 +313,18 @@ export const createPlayerLifecycle = ({
       }),
       listen<SeekCompletedPayload>('seek_completed', event => {
         handleSeekCompleted(event.payload);
+      }),
+      listen<{ playbackId: number }>('playback-finished', event => {
+        if (import.meta.env.DEV) {
+          console.log('[playerLifecycle] Received playback-finished event:', event.payload);
+        }
+        if (
+          currentSong.value &&
+          isPlaying.value &&
+          event.payload.playbackId === playbackStore.currentPlaybackId
+        ) {
+          handleAutoNext();
+        }
       }),
       listen<RemoteLyricsCacheReadyPayload>('remote-lyrics-cache-ready', event => {
         const payload = event.payload;

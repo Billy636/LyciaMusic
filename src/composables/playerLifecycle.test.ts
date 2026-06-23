@@ -71,6 +71,7 @@ const createLifecycleDeps = (loadLyrics = vi.fn()) => ({
   togglePlay: vi.fn(),
   nextSong: vi.fn(),
   prevSong: vi.fn(),
+  handleAutoNext: vi.fn(),
   applyLibraryScanBatch: vi.fn(),
   flushBufferedLibraryScanBatch: vi.fn(),
   handleSeekCompleted: vi.fn(),
@@ -227,5 +228,53 @@ describe('player lifecycle', () => {
       gainOffsetDb: -2,
       preventClipping: false,
     });
+  });
+
+  it('handles playback-finished event with proper guards and playback ID matching', async () => {
+    const {
+      usePlaybackStore,
+      createPlayerLifecycle,
+    } = await loadModules();
+    const callbacks = new Map<string, (event: { payload: unknown }) => void>();
+    mocks.listen.mockImplementation((eventName: string, callback: (event: { payload: unknown }) => void) => {
+      callbacks.set(eventName, callback);
+      return Promise.resolve(vi.fn());
+    });
+
+    const playbackStore = usePlaybackStore();
+    playbackStore.currentSong = makeSong();
+    playbackStore.isPlaying = true;
+    playbackStore.currentPlaybackId = 42;
+
+    const deps = createLifecycleDeps();
+    createPlayerLifecycle(deps).init();
+
+    const triggerEvent = (playbackId: number) => {
+      const cb = callbacks.get('playback-finished');
+      if (cb) {
+        cb({ payload: { playbackId } });
+      }
+    };
+
+    // 1. Doesn't trigger if playback ID doesn't match
+    triggerEvent(41);
+    expect(deps.handleAutoNext).not.toHaveBeenCalled();
+
+    // 2. Doesn't trigger if not playing
+    playbackStore.isPlaying = false;
+    triggerEvent(42);
+    expect(deps.handleAutoNext).not.toHaveBeenCalled();
+
+    // 3. Doesn't trigger if currentSong is missing
+    playbackStore.isPlaying = true;
+    playbackStore.currentSong = null;
+    triggerEvent(42);
+    expect(deps.handleAutoNext).not.toHaveBeenCalled();
+
+    // 4. Triggers when matching, playing, and song exists
+    playbackStore.currentSong = makeSong();
+    playbackStore.isPlaying = true;
+    triggerEvent(42);
+    expect(deps.handleAutoNext).toHaveBeenCalledTimes(1);
   });
 });

@@ -56,8 +56,10 @@ pub async fn play_audio(
     album: String,
     cover: String,
     duration: u32,
+    duration_ms: Option<u64>,
     output_mode: AudioOutputMode,
     start_offset_ms: Option<u64>,
+    cue_start_offset_ms: Option<u64>,
     song_id: Option<i64>,
     volume_balance_enabled: Option<bool>,
     gain_offset_db: Option<f32>,
@@ -65,7 +67,7 @@ pub async fn play_audio(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbState>,
     state: tauri::State<'_, PlayerState>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let playback_id = state.playback_id.fetch_add(1, Ordering::Relaxed) + 1;
     let mut selected_output_mode = output_mode;
     let source = if is_remote_uri(&path) {
@@ -107,6 +109,9 @@ pub async fn play_audio(
         output_mode: selected_output_mode,
         start_offset_ms,
         volume_balance_gain,
+        duration_ms,
+        cue_start_offset_ms,
+        playback_id,
     })
     .map_err(|e| e.to_string())?;
 
@@ -129,7 +134,7 @@ pub async fn play_audio(
         }
     }
 
-    Ok(())
+    Ok(playback_id)
 }
 
 fn schedule_remote_cache_after_half(

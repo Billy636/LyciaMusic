@@ -34,6 +34,8 @@ pub(crate) struct ExclusivePlayRequest {
     pub volume_balance_gain: f32,
     pub equalizer_handle: Arc<EqualizerHandle>,
     pub user_volume: Arc<AtomicU32>,
+    pub cue_start_offset: Duration,
+    pub total_duration: Option<Duration>,
 }
 
 enum ExclusiveCommand {
@@ -173,6 +175,8 @@ impl ExclusiveSource {
         volume_balance_gain: f32,
         equalizer_handle: Arc<EqualizerHandle>,
         user_volume: Arc<AtomicU32>,
+        cue_start_offset: Duration,
+        total_duration: Option<Duration>,
     ) -> Result<(Self, u32, u16), String> {
         let file = File::open(path).map_err(|error| error.to_string())?;
         let reader = BufReader::with_capacity(512 * 1024, file);
@@ -191,8 +195,16 @@ impl ExclusiveSource {
 
         // 按照管线顺序装配: Decoder -> VolumeNormalizer -> Equalizer -> UserVolumeSource -> ClipGuardSource
         let decoded = decoder.convert_samples::<f32>().skip_duration(start_time);
+        let mut source_chain: Box<dyn Source<Item = f32> + Send> = Box::new(decoded);
+        
+        if let Some(tot_dur) = total_duration {
+            let resume_time = start_time.saturating_sub(cue_start_offset);
+            let remaining = tot_dur.saturating_sub(resume_time);
+            source_chain = Box::new(source_chain.take_duration(remaining));
+        }
+
         let (normalized, normalizer_handle) = crate::player::loudness::VolumeNormalizer::new(
-            decoded,
+            source_chain,
             volume_balance_gain,
             100, // ramp 100ms
         );
@@ -343,6 +355,8 @@ fn run_exclusive_playback(
         current_volume_balance_gain,
         request.equalizer_handle.clone(),
         request.user_volume.clone(),
+        request.cue_start_offset,
+        request.total_duration,
     )?;
 
     let enumerator = DeviceEnumerator::new().map_err(|error| error.to_string())?;
@@ -442,6 +456,8 @@ fn run_exclusive_playback(
                         current_volume_balance_gain,
                         request.equalizer_handle.clone(),
                         request.user_volume.clone(),
+                        request.cue_start_offset,
+                        request.total_duration,
                     )?
                     .0;
                     let _ = source.read_frames_into(

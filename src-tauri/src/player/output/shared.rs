@@ -76,6 +76,8 @@ pub(crate) fn restore_current_playback(
     progress: &Arc<SharedProgress>,
     equalizer_handle: Arc<EqualizerHandle>,
     user_volume: Arc<AtomicU32>,
+    cue_start_offset: Duration,
+    total_duration: Option<Duration>,
 ) {
     if current_path.is_empty() {
         return;
@@ -94,9 +96,15 @@ pub(crate) fn restore_current_playback(
             let reader = BufReader::with_capacity(512 * 1024, file);
             if let Ok(source) = Decoder::new(reader) {
                 let skipped = source.convert_samples::<f32>().skip_duration(jump_target);
+                let mut source_chain: Box<dyn Source<Item = f32> + Send> = Box::new(skipped);
+                if let Some(tot_dur) = total_duration {
+                    let resume_time = jump_target.saturating_sub(cue_start_offset);
+                    let remaining = tot_dur.saturating_sub(resume_time);
+                    source_chain = Box::new(source_chain.take_duration(remaining));
+                }
 
                 // 1. Equalizer
-                let eq_source = crate::player::equalizer::Equalizer::new(skipped, equalizer_handle);
+                let eq_source = crate::player::equalizer::Equalizer::new(source_chain, equalizer_handle);
 
                 // 2. UserVolumeSource
                 let vol_source =

@@ -132,8 +132,10 @@ export interface PlayAudioOptions {
   album: string;
   cover: string;
   duration: number;
+  durationMs?: number;
   outputMode: AudioOutputMode;
   startOffsetMs?: number;
+  cueStartOffsetMs?: number;
   songId?: number | null;
   volumeBalanceEnabled?: boolean | null;
   gainOffsetDb?: number | null;
@@ -289,7 +291,7 @@ export interface TauriCommandMap {
     response: SaveSongInfoResponse;
   };
   get_song_detail: { payload: { path: string }; response: SongDetail };
-  play_audio: { payload: PlayAudioOptions; response: void };
+  play_audio: { payload: PlayAudioOptions; response: number };
   update_playback_metadata: { payload: UpdatePlaybackMetadataOptions; response: void };
   pause_audio: { payload: undefined; response: void };
   stop_audio: { payload: undefined; response: void };

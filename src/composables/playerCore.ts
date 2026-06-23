@@ -388,6 +388,7 @@ function createPlayerCore() {
     togglePlay,
     nextSong,
     prevSong,
+    handleAutoNext: () => playbackActions.handleAutoNext(),
     applyLibraryScanBatch,
     flushBufferedLibraryScanBatch,
     handleSeekCompleted: payload => playerPlayback.handleSeekCompleted(payload),

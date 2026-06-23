@@ -149,6 +149,9 @@ pub enum AudioCommand {
         output_mode: AudioOutputMode,
         start_offset_ms: Option<u64>,
         volume_balance_gain: f32,
+        duration_ms: Option<u64>,
+        cue_start_offset_ms: Option<u64>,
+        playback_id: u64,
     },
     Pause,
     Stop,
@@ -225,4 +228,10 @@ pub enum AudioOutputMode {
 pub(crate) struct SeekCompletedPayload {
     pub request_id: u64,
     pub time: f64,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PlaybackFinishedPayload {
+    pub playback_id: u64,
 }
