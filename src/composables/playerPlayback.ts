@@ -57,6 +57,7 @@ export const createPlayerPlayback = ({
   const {
     loadCover,
     loadCoverPath,
+    loadFullCoverPath,
     primeCoverPath,
     loadFullCover,
     peekCoverUrl,
@@ -287,6 +288,8 @@ export const createPlayerPlayback = ({
     const coverLookupPath = song.cue_source_path || song.path;
     const cachedCover = peekCoverUrl(coverLookupPath);
     const cachedCoverPath = peekCoverPath(coverLookupPath) || song.cover_thumb_path || '';
+    const cachedFullCoverPath = peekCoverPath(coverLookupPath, 'full');
+    const smtcCoverPath = cachedFullCoverPath || cachedCoverPath;
     const persistedCover = primeCoverPath(coverLookupPath, song.cover_thumb_path);
     const cachedFullCover = getFullCoverUrl(coverLookupPath);
     const immediateCover = cachedCover || persistedCover;
@@ -349,7 +352,7 @@ export const createPlayerPlayback = ({
         title: getSmtcTitle(song),
         artist: song.artist || 'Unknown Artist',
         album: song.album || 'Unknown Album',
-        cover: cachedCoverPath,
+        cover: smtcCoverPath,
         duration: Math.floor(song.duration),
         durationMs: Math.round(song.duration * 1000),
         outputMode: settingsStore.settings.audio.outputMode,
@@ -368,27 +371,21 @@ export const createPlayerPlayback = ({
       loadLyrics();
       startPlaybackRuntime();
 
-      void currentThumbnailLoad
-        .then(async ([cover, coverPath]) => {
+      void loadFullCoverPath(coverLookupPath)
+        .then(async (fullCoverPath) => {
           if (requestId !== playRequestId || currentSong.value?.path !== song.path) {
             return;
           }
-
-          const normalizedCover = cover || '';
-          const normalizedCoverPath = coverPath || '';
-          currentCover.value = normalizedCover;
-          if (!currentCoverFull.value) {
-            currentCoverFull.value = normalizedCover;
+          if (fullCoverPath) {
+            await playbackApi.updatePlaybackMetadata({
+              title: getSmtcTitle(song),
+              artist: song.artist || 'Unknown Artist',
+              album: song.album || 'Unknown Album',
+              cover: fullCoverPath,
+              duration: Math.floor(song.duration),
+              isPlaying: isPlaying.value,
+            }).catch(() => {});
           }
-
-          await playbackApi.updatePlaybackMetadata({
-            title: getSmtcTitle(song),
-            artist: song.artist || 'Unknown Artist',
-            album: song.album || 'Unknown Album',
-            cover: normalizedCoverPath,
-            duration: Math.floor(song.duration),
-            isPlaying: isPlaying.value,
-          }).catch(() => {});
         })
         .catch(() => {});
     } catch {

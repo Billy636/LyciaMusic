@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 const loadCoverMock = vi.fn().mockResolvedValue('');
 const loadCoverPathMock = vi.fn().mockResolvedValue('');
 const loadFullCoverMock = vi.fn().mockResolvedValue('');
+const loadFullCoverPathMock = vi.fn().mockResolvedValue('');
 const peekCoverUrlMock = vi.fn().mockReturnValue('');
 const peekCoverPathMock = vi.fn().mockReturnValue('');
 const getFullCoverUrlMock = vi.fn().mockReturnValue('');
@@ -28,6 +29,7 @@ vi.mock('./useCoverCache', () => ({
   useCoverCache: () => ({
     loadCover: loadCoverMock,
     loadCoverPath: loadCoverPathMock,
+    loadFullCoverPath: loadFullCoverPathMock,
     loadFullCover: loadFullCoverMock,
     peekCoverUrl: peekCoverUrlMock,
     peekCoverPath: peekCoverPathMock,
@@ -68,6 +70,7 @@ describe('player playback domain', () => {
     vi.clearAllMocks();
     loadCoverMock.mockResolvedValue('');
     loadCoverPathMock.mockResolvedValue('');
+    loadFullCoverPathMock.mockResolvedValue('');
     loadFullCoverMock.mockResolvedValue('');
     peekCoverUrlMock.mockReturnValue('');
     peekCoverPathMock.mockReturnValue('');

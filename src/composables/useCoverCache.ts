@@ -600,6 +600,20 @@ export function useCoverCache() {
     return getCachedCoverPath(path, 'thumbnail');
   };
 
+  const loadFullCoverPath = async (path: string | undefined): Promise<string | undefined> => {
+    if (!path) {
+      return undefined;
+    }
+
+    const cachedValue = getCachedCoverPath(path, 'full');
+    if (cachedValue !== undefined) {
+      return cachedValue;
+    }
+
+    await loadCoverInternal(path, 'full');
+    return getCachedCoverPath(path, 'full');
+  };
+
   const primeCoverPath = (path: string | undefined, rawPath: string | undefined | null) => {
     if (!path || !rawPath) {
       return '';
@@ -725,6 +739,7 @@ export function useCoverCache() {
     isCoverLoading,
     loadCover,
     loadCoverPath,
+    loadFullCoverPath,
     primeCoverPath,
     loadFullCover,
     preloadCovers,
