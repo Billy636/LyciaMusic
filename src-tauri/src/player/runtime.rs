@@ -233,6 +233,12 @@ fn initialize_media_controls(app: &AppHandle) -> Arc<Mutex<Option<MediaControls>
                                 MediaControlEvent::Previous => {
                                     let _ = app_clone.emit("player:prev", ());
                                 }
+                                MediaControlEvent::SetPosition(position) => {
+                                    let seconds = position.0.as_secs_f64();
+                                    if seconds.is_finite() && seconds >= 0.0 {
+                                        let _ = app_clone.emit("player:seek", seconds);
+                                    }
+                                }
                                 _ => {}
                             });
                             *controls.lock().unwrap() = Some(mc);

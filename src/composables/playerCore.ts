@@ -388,6 +388,7 @@ function createPlayerCore() {
     togglePlay,
     nextSong,
     prevSong,
+    seekTo: time => playerPlayback.seekTo(time),
     handleAutoNext: () => playbackActions.handleAutoNext(),
     applyLibraryScanBatch,
     flushBufferedLibraryScanBatch,

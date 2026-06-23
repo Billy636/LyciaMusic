@@ -66,11 +66,15 @@ const makeSong = (overrides: Partial<Song> = {}): Song => ({
   ...overrides,
 });
 
-const createLifecycleDeps = (loadLyrics = vi.fn()) => ({
+const createLifecycleDeps = (
+  loadLyrics = vi.fn(),
+  seekTo = vi.fn().mockResolvedValue(undefined)
+) => ({
   bootstrapLibrary: vi.fn().mockResolvedValue(undefined),
   togglePlay: vi.fn(),
   nextSong: vi.fn(),
   prevSong: vi.fn(),
+  seekTo,
   handleAutoNext: vi.fn(),
   applyLibraryScanBatch: vi.fn(),
   flushBufferedLibraryScanBatch: vi.fn(),
@@ -276,5 +280,47 @@ describe('player lifecycle', () => {
     playbackStore.isPlaying = true;
     triggerEvent(42);
     expect(deps.handleAutoNext).toHaveBeenCalledTimes(1);
+  });
+
+  it('seeks to the specified time when player:seek event is received', async () => {
+    const { createPlayerLifecycle } = await loadModules();
+    const callbacks = new Map<string, (event: { payload: unknown }) => void>();
+    mocks.listen.mockImplementation((eventName: string, callback: (event: { payload: unknown }) => void) => {
+      callbacks.set(eventName, callback);
+      return Promise.resolve(vi.fn());
+    });
+
+    const seekTo = vi.fn().mockResolvedValue(undefined);
+    const deps = createLifecycleDeps(vi.fn(), seekTo);
+    createPlayerLifecycle(deps).init();
+
+    const seekHandler = callbacks.get('player:seek');
+    expect(seekHandler).toBeDefined();
+
+    if (seekHandler) {
+      // 1. 正常数值跳转
+      await seekHandler({ payload: 120 } as any);
+      expect(deps.seekTo).toHaveBeenCalledWith(120);
+
+      // 2. 字符串类型数字跳转
+      seekTo.mockClear();
+      await seekHandler({ payload: '120' } as any);
+      expect(deps.seekTo).toHaveBeenCalledWith(120);
+
+      // 3. 负数过滤
+      seekTo.mockClear();
+      await seekHandler({ payload: -10 } as any);
+      expect(deps.seekTo).not.toHaveBeenCalled();
+
+      // 4. 非法字符串过滤
+      seekTo.mockClear();
+      await seekHandler({ payload: 'abc' } as any);
+      expect(deps.seekTo).not.toHaveBeenCalled();
+
+      // 5. NaN/非有限数值过滤
+      seekTo.mockClear();
+      await seekHandler({ payload: NaN } as any);
+      expect(deps.seekTo).not.toHaveBeenCalled();
+    }
   });
 });

@@ -49,6 +49,7 @@ interface CreatePlayerLifecycleDeps {
   togglePlay: () => void | Promise<void>;
   nextSong: () => void;
   prevSong: () => void;
+  seekTo: (time: number) => Promise<void>;
   handleAutoNext: () => void;
   applyLibraryScanBatch: (payload: LibraryScanBatchPayload) => void;
   flushBufferedLibraryScanBatch: () => void;
@@ -172,6 +173,7 @@ export const createPlayerLifecycle = ({
   togglePlay,
   nextSong,
   prevSong,
+  seekTo,
   handleAutoNext,
   applyLibraryScanBatch,
   flushBufferedLibraryScanBatch,
@@ -293,6 +295,15 @@ export const createPlayerLifecycle = ({
       }),
       listen('player:prev', () => {
         prevSong();
+      }),
+      listen<number>('player:seek', event => {
+        const time = Number(event.payload);
+        if (!Number.isFinite(time) || time < 0) {
+          return;
+        }
+        void seekTo(time).catch(error => {
+          console.warn('Failed to seek from SMTC:', error);
+        });
       }),
       listen<LibraryScanBatchPayload>('library-scan-batch', event => {
         applyLibraryScanBatch(event.payload);
