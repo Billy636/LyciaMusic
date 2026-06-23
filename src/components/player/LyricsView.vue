@@ -521,8 +521,7 @@ onUnmounted(() => {
     <div
       v-show="amllLines.length > 0"
       ref="fontPanelRef"
-      class="pointer-events-none absolute right-[100%] mr-[14vw] 2xl:mr-[22vw] top-2 bottom-12 z-[85] flex min-h-0 min-w-[260px] max-w-[320px] flex-col justify-center"
-      style="width: min(320px, calc(34vw - 24px));"
+      class="pointer-events-none absolute top-2 bottom-12 z-[85] flex min-h-0 min-w-[260px] max-w-[320px] flex-col justify-center lyric-style-panel"
     >
       <transition name="font-panel">
         <div
@@ -1259,4 +1258,18 @@ onUnmounted(() => {
   border-radius: 9999px;
   background: transparent;
 }
+
+.lyric-style-panel {
+  --panel-width: min(320px, calc(34vw - 24px));
+  --shift-vw: 14vw;
+  width: var(--panel-width);
+  right: calc(100% + min(var(--shift-vw), max(40vw, 300px) + 40px - var(--panel-width) - 16px));
+}
+
+@media (min-width: 1536px) {
+  .lyric-style-panel {
+    --shift-vw: 22vw;
+  }
+}
 </style>
+
