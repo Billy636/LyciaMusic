@@ -131,7 +131,6 @@ export function useLibraryCurrentViewSongs({
 
       const isWaitingForBootstrapLibrary =
         canonicalSongPaths.value.length === 0 &&
-        libraryStore.libraryFolders.length === 0 &&
         libraryStore.libraryDataVersion === 0;
       if (isWaitingForBootstrapLibrary) {
         allViewSongPaths.value = [];
