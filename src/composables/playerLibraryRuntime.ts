@@ -21,6 +21,7 @@ import { useLibraryStore } from '../features/library/store';
 
 let hasBootstrappedLibrary = false;
 let libraryBootstrapPromise: Promise<void> | null = null;
+let libraryCacheLoadPromise: Promise<void> | null = null;
 let libraryRefreshPromise: Promise<void> | null = null;
 let queuedLibraryRefreshOptions: Required<ScanLibraryOptions> | null = null;
 let queuedLibraryRefreshPromise: Promise<void> | null = null;
@@ -106,30 +107,44 @@ export const createPlayerLibraryRuntime = ({
   };
 
   const loadLibrarySongsFromCache = async () => {
+    if (libraryCacheLoadPromise) {
+      if (import.meta.env.DEV) {
+        console.log('[Profiling] loadLibrarySongsFromCache joined in-flight request');
+      }
+      return libraryCacheLoadPromise;
+    }
+
     const profileStart = import.meta.env.DEV ? performance.now() : 0;
     const startVersion = libraryStore.libraryDataVersion;
-    try {
-      flushBufferedLibraryScanBatch();
-      const songs = await invoke<LibrarySong[]>('get_library_songs_cached');
 
-      // 使用增量 Patch 和极速路径覆盖，替代高开销的全量 normalize，加速启动
-      libraryStore.patchLibrarySongs({ songs, deleted_paths: [] });
-      const paths = songs.map(song => song.path);
-      libraryStore.setCanonicalSongOrder(paths);
+    libraryCacheLoadPromise = (async () => {
+      try {
+        flushBufferedLibraryScanBatch();
+        const songs = await invoke<LibrarySong[]>('get_library_songs_cached');
 
-      if (libraryStore.libraryDataVersion !== startVersion) {
-        clearLibraryPathCaches();
+        // 使用增量 Patch 和极速路径覆盖，替代高开销的全量 normalize，加速启动
+        libraryStore.patchLibrarySongs({ songs, deleted_paths: [] });
+        const paths = songs.map(song => song.path);
+        libraryStore.setCanonicalSongOrder(paths);
+
+        if (libraryStore.libraryDataVersion !== startVersion) {
+          clearLibraryPathCaches();
+        }
+        refreshStateSongReferences(songs);
+        await fetchFolderTree();
+        if (import.meta.env.DEV) {
+          console.log(
+            `[Profiling] loadLibrarySongsFromCache took ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${songs.length})`,
+          );
+        }
+      } catch (error) {
+        console.error('Failed to load cached library songs:', error);
+      } finally {
+        libraryCacheLoadPromise = null;
       }
-      refreshStateSongReferences(songs);
-      await fetchFolderTree();
-      if (import.meta.env.DEV) {
-        console.log(
-          `[Profiling] loadLibrarySongsFromCache took ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${songs.length})`,
-        );
-      }
-    } catch (error) {
-      console.error('Failed to load cached library songs:', error);
-    }
+    })();
+
+    return libraryCacheLoadPromise;
   };
 
   const loadLibraryCatalogsFromCache = async () => {

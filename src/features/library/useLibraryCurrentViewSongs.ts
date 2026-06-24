@@ -107,6 +107,7 @@ export function useLibraryCurrentViewSongs({
       currentAlbumFilter,
       localSortMode,
       canonicalSongPaths,
+      () => libraryStore.libraryFolders.length,
     ],
     async ([viewMode, query, musicTab, artistFilter, albumFilter, sortMode]) => {
       const requestId = ++allViewRequestId;
@@ -123,6 +124,21 @@ export function useLibraryCurrentViewSongs({
         if (import.meta.env.DEV) {
           console.log(
             `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} skipped in ${(performance.now() - profileStart).toFixed(2)}ms`,
+          );
+        }
+        return;
+      }
+
+      const isWaitingForBootstrapLibrary =
+        canonicalSongPaths.value.length === 0 &&
+        libraryStore.libraryFolders.length === 0 &&
+        libraryStore.libraryDataVersion === 0;
+      if (isWaitingForBootstrapLibrary) {
+        allViewSongPaths.value = [];
+        allViewLoading.value = false;
+        if (import.meta.env.DEV) {
+          console.log(
+            `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} delayed initial path IPC in ${(performance.now() - profileStart).toFixed(2)}ms`,
           );
         }
         return;
