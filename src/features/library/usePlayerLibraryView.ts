@@ -1,5 +1,5 @@
 import { computed } from 'vue';
-import { storeToRefs } from 'pinia';
+import { getActivePinia, storeToRefs, type Pinia } from 'pinia';
 
 import { useCollectionsStore } from '../collections/store';
 import { useLibraryStore } from './store';
@@ -11,8 +11,11 @@ import { useLibraryFolderSelectors } from './useLibraryFolderSelectors';
 export type { AlbumListItem, ArtistListItem } from './playerLibraryViewShared';
 
 let playerLibraryViewInstanceCount = 0;
+const playerLibraryViewByPinia = new WeakMap<Pinia, PlayerLibraryView>();
 
-export function usePlayerLibraryView() {
+type PlayerLibraryView = ReturnType<typeof createPlayerLibraryView>;
+
+const createPlayerLibraryView = () => {
   const debugInstanceId = ++playerLibraryViewInstanceCount;
   const debugStart = import.meta.env.DEV ? performance.now() : 0;
   const collectionsStore = useCollectionsStore();
@@ -146,4 +149,20 @@ export function usePlayerLibraryView() {
     librarySongs: canonicalSongs,
     songList: sourceSongs,
   };
+};
+
+export function usePlayerLibraryView() {
+  const pinia = getActivePinia();
+  if (!pinia) {
+    return createPlayerLibraryView();
+  }
+
+  const existingView = playerLibraryViewByPinia.get(pinia);
+  if (existingView) {
+    return existingView;
+  }
+
+  const view = createPlayerLibraryView();
+  playerLibraryViewByPinia.set(pinia, view);
+  return view;
 }

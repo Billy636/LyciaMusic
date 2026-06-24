@@ -28,6 +28,9 @@ let libraryRefreshIdleId: number | null = null;
 let libraryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let libraryScanProfileId = 0;
 
+const BOOTSTRAP_SILENT_SCAN_DELAY_MS = 5000;
+const BOOTSTRAP_SILENT_SCAN_IDLE_TIMEOUT_MS = 2000;
+
 const LIBRARY_SCAN_VISIBILITY_PRIORITY: Record<LibraryScanVisibility, number> = {
   silent: 1,
   inline: 2,
@@ -104,6 +107,7 @@ export const createPlayerLibraryRuntime = ({
 
   const loadLibrarySongsFromCache = async () => {
     const profileStart = import.meta.env.DEV ? performance.now() : 0;
+    const startVersion = libraryStore.libraryDataVersion;
     try {
       flushBufferedLibraryScanBatch();
       const songs = await invoke<LibrarySong[]>('get_library_songs_cached');
@@ -113,7 +117,9 @@ export const createPlayerLibraryRuntime = ({
       const paths = songs.map(song => song.path);
       libraryStore.setCanonicalSongOrder(paths);
 
-      clearLibraryPathCaches();
+      if (libraryStore.libraryDataVersion !== startVersion) {
+        clearLibraryPathCaches();
+      }
       refreshStateSongReferences(songs);
       await fetchFolderTree();
       if (import.meta.env.DEV) {
@@ -203,6 +209,7 @@ export const createPlayerLibraryRuntime = ({
     const session = startLibraryScanSession(resolvedOptions);
     beginLibraryScanProgress(session);
     libraryStore.setLastLibraryScanError(null);
+    const scanStartLibraryDataVersion = libraryStore.libraryDataVersion;
 
     libraryRefreshPromise = (async () => {
       try {
@@ -217,7 +224,9 @@ export const createPlayerLibraryRuntime = ({
         const paths = songs.map(song => song.path);
         libraryStore.setCanonicalSongOrder(paths);
 
-        clearLibraryPathCaches();
+        if (libraryStore.libraryDataVersion !== scanStartLibraryDataVersion) {
+          clearLibraryPathCaches();
+        }
         refreshStateSongReferences(songs);
         await Promise.all([
           fetchLibraryFolders(),
@@ -263,13 +272,6 @@ export const createPlayerLibraryRuntime = ({
       return;
     }
 
-    const scheduledSession = startLibraryScanSession({
-      trigger: 'bootstrap',
-      visibility: 'silent',
-      sourcePath: '',
-    });
-    beginLibraryScanProgress(scheduledSession);
-
     const runRefresh = () => {
       libraryRefreshIdleId = null;
       libraryRefreshTimer = null;
@@ -279,12 +281,17 @@ export const createPlayerLibraryRuntime = ({
       void scanLibrary({ trigger: 'bootstrap', visibility: 'silent' });
     };
 
-    if ('requestIdleCallback' in window) {
-      libraryRefreshIdleId = window.requestIdleCallback(runRefresh, { timeout: 400 });
-      return;
-    }
+    libraryRefreshTimer = setTimeout(() => {
+      libraryRefreshTimer = null;
+      if ('requestIdleCallback' in window) {
+        libraryRefreshIdleId = window.requestIdleCallback(runRefresh, {
+          timeout: BOOTSTRAP_SILENT_SCAN_IDLE_TIMEOUT_MS,
+        });
+        return;
+      }
 
-    libraryRefreshTimer = setTimeout(runRefresh, 220);
+      runRefresh();
+    }, BOOTSTRAP_SILENT_SCAN_DELAY_MS);
   };
 
   const bootstrapLibrary = async () => {
