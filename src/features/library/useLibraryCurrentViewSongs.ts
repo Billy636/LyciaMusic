@@ -107,7 +107,6 @@ export function useLibraryCurrentViewSongs({
       currentAlbumFilter,
       localSortMode,
       canonicalSongPaths,
-      () => libraryStore.libraryFolders.length,
     ],
     async ([viewMode, query, musicTab, artistFilter, albumFilter, sortMode]) => {
       const requestId = ++allViewRequestId;
