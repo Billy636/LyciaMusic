@@ -41,6 +41,7 @@ interface UseLibraryCurrentViewSongsOptions {
   albumDetailSortMode: Ref<AlbumDetailSortMode>;
   localCustomOrder: Ref<string[]>;
   playlistSortMode: Ref<PlaylistSortMode>;
+  debugOwnerId?: number;
 }
 
 export function useLibraryCurrentViewSongs({
@@ -64,6 +65,7 @@ export function useLibraryCurrentViewSongs({
   albumDetailSortMode,
   localCustomOrder,
   playlistSortMode,
+  debugOwnerId = 0,
 }: UseLibraryCurrentViewSongsOptions) {
   const libraryStore = useLibraryStore();
 
@@ -108,9 +110,21 @@ export function useLibraryCurrentViewSongs({
     ],
     async ([viewMode, query, musicTab, artistFilter, albumFilter, sortMode]) => {
       const requestId = ++allViewRequestId;
+      const profileStart = import.meta.env.DEV ? performance.now() : 0;
+
+      if (import.meta.env.DEV) {
+        console.log(
+          `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} start (view: ${viewMode}, sort: ${sortMode}, query: ${query ? 'yes' : 'no'}, canonical paths: ${canonicalSongPaths.value.length})`,
+        );
+      }
 
       if (viewMode !== 'all' || sortMode === 'custom') {
         allViewSongPaths.value = [];
+        if (import.meta.env.DEV) {
+          console.log(
+            `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} skipped in ${(performance.now() - profileStart).toFixed(2)}ms`,
+          );
+        }
         return;
       }
 
@@ -151,6 +165,11 @@ export function useLibraryCurrentViewSongs({
         allViewSongPaths.value = paths;
         allViewUseCanonicalFallback.value = false;
         lastSuccessfulAllViewSongPaths.value = paths; // 缓存成功列表
+        if (import.meta.env.DEV) {
+          console.log(
+            `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} loaded paths in ${(performance.now() - profileStart).toFixed(2)}ms (paths: ${paths.length})`,
+          );
+        }
       } catch (error) {
         if (requestId !== allViewRequestId) {
           return;
@@ -165,6 +184,11 @@ export function useLibraryCurrentViewSongs({
             allViewSongPaths.value = paths;
             allViewUseCanonicalFallback.value = false;
             lastSuccessfulAllViewSongPaths.value = paths;
+            if (import.meta.env.DEV) {
+              console.log(
+                `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} retry loaded paths in ${(performance.now() - profileStart).toFixed(2)}ms (paths: ${paths.length})`,
+              );
+            }
           } catch (retryError) {
             if (!isStaleLibraryPathRequestError(retryError)) {
               allViewSongPaths.value = [];
@@ -175,6 +199,11 @@ export function useLibraryCurrentViewSongs({
         }
         allViewUseCanonicalFallback.value = false;
         allViewSongPaths.value = [];
+        if (import.meta.env.DEV) {
+          console.log(
+            `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} failed in ${(performance.now() - profileStart).toFixed(2)}ms`,
+          );
+        }
       } finally {
         if (requestId === allViewRequestId) {
           allViewLoading.value = false;
@@ -537,6 +566,8 @@ export function useLibraryCurrentViewSongs({
   };
 
   const currentViewSongPaths = computed(() => {
+    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+    const result = (() => {
     if (searchQuery.value.trim()) {
       const query = searchQuery.value.toLowerCase();
 
@@ -730,11 +761,30 @@ export function useLibraryCurrentViewSongs({
     }
 
     return [];
+    })();
+
+    if (import.meta.env.DEV) {
+      console.log(
+        `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} currentViewSongPaths computed in ${(performance.now() - profileStart).toFixed(2)}ms (view: ${currentViewMode.value}, sort: ${localSortMode.value}/${folderSortMode.value}, paths: ${result.length}, canonical: ${canonicalSongPaths.value.length}, query: ${searchQuery.value.trim() ? 'yes' : 'no'})`,
+      );
+    }
+
+    return result;
   });
 
   const currentViewSongs = computed(() => {
+    const profileStart = import.meta.env.DEV ? performance.now() : 0;
     canonicalSongPaths.value;
-    return materializeSongPaths(currentViewSongPaths.value);
+    const paths = currentViewSongPaths.value;
+    const songs = materializeSongPaths(paths);
+
+    if (import.meta.env.DEV) {
+      console.log(
+        `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} currentViewSongs computed in ${(performance.now() - profileStart).toFixed(2)}ms (paths: ${paths.length}, songs: ${songs.length})`,
+      );
+    }
+
+    return songs;
   });
 
   const currentViewSongCount = computed(() => currentViewSongs.value.length);

@@ -10,7 +10,11 @@ import { useLibraryCurrentViewSongs } from './useLibraryCurrentViewSongs';
 import { useLibraryFolderSelectors } from './useLibraryFolderSelectors';
 export type { AlbumListItem, ArtistListItem } from './playerLibraryViewShared';
 
+let playerLibraryViewInstanceCount = 0;
+
 export function usePlayerLibraryView() {
+  const debugInstanceId = ++playerLibraryViewInstanceCount;
+  const debugStart = import.meta.env.DEV ? performance.now() : 0;
   const collectionsStore = useCollectionsStore();
   const libraryStore = useLibraryStore();
   const navigationStore = useNavigationStore();
@@ -106,7 +110,14 @@ export function usePlayerLibraryView() {
     albumDetailSortMode,
     localCustomOrder,
     playlistSortMode,
+    debugOwnerId: debugInstanceId,
   });
+
+  if (import.meta.env.DEV) {
+    console.log(
+      `[Profiling] usePlayerLibraryView#${debugInstanceId} created in ${(performance.now() - debugStart).toFixed(2)}ms (total instances: ${playerLibraryViewInstanceCount})`,
+    );
+  }
 
   return {
     activeRootPath,

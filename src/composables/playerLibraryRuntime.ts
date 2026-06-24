@@ -26,6 +26,7 @@ let queuedLibraryRefreshOptions: Required<ScanLibraryOptions> | null = null;
 let queuedLibraryRefreshPromise: Promise<void> | null = null;
 let libraryRefreshIdleId: number | null = null;
 let libraryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let libraryScanProfileId = 0;
 
 const LIBRARY_SCAN_VISIBILITY_PRIORITY: Record<LibraryScanVisibility, number> = {
   silent: 1,
@@ -102,6 +103,7 @@ export const createPlayerLibraryRuntime = ({
   };
 
   const loadLibrarySongsFromCache = async () => {
+    const profileStart = import.meta.env.DEV ? performance.now() : 0;
     try {
       flushBufferedLibraryScanBatch();
       const songs = await invoke<LibrarySong[]>('get_library_songs_cached');
@@ -114,12 +116,18 @@ export const createPlayerLibraryRuntime = ({
       clearLibraryPathCaches();
       refreshStateSongReferences(songs);
       await fetchFolderTree();
+      if (import.meta.env.DEV) {
+        console.log(
+          `[Profiling] loadLibrarySongsFromCache took ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${songs.length})`,
+        );
+      }
     } catch (error) {
       console.error('Failed to load cached library songs:', error);
     }
   };
 
   const loadLibraryCatalogsFromCache = async () => {
+    const profileStart = import.meta.env.DEV ? performance.now() : 0;
     try {
       const [artists, albums] = await Promise.all([
         invoke<ArtistCatalogItem[]>('get_library_artist_catalog'),
@@ -128,6 +136,11 @@ export const createPlayerLibraryRuntime = ({
 
       libraryStore.setArtistCatalog(artists);
       libraryStore.setAlbumCatalog(albums);
+      if (import.meta.env.DEV) {
+        console.log(
+          `[Profiling] loadLibraryCatalogsFromCache took ${(performance.now() - profileStart).toFixed(2)}ms (artists: ${artists.length}, albums: ${albums.length})`,
+        );
+      }
     } catch (error) {
       console.error('Failed to load cached library catalogs:', error);
     }
@@ -135,6 +148,14 @@ export const createPlayerLibraryRuntime = ({
 
   const scanLibrary = async (options: ScanLibraryOptions = {}) => {
     const resolvedOptions = resolveScanLibraryOptions(options);
+    const profileId = ++libraryScanProfileId;
+    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+
+    if (import.meta.env.DEV) {
+      console.log(
+        `[Profiling] scanLibrary#${profileId} start (trigger: ${resolvedOptions.trigger}, visibility: ${resolvedOptions.visibility}, folders: ${libraryStore.libraryFolders.length}, songs: ${libraryStore.canonicalSongPaths.length})`,
+      );
+    }
 
     if (libraryRefreshPromise) {
       startLibraryScanSession(resolvedOptions);
@@ -171,6 +192,11 @@ export const createPlayerLibraryRuntime = ({
       libraryStore.setLibraryScanSession(null);
       libraryStore.setLibraryScanProgress(null);
       libraryStore.setLastLibraryScanError(null);
+      if (import.meta.env.DEV) {
+        console.log(
+          `[Profiling] scanLibrary#${profileId} skipped empty library in ${(performance.now() - profileStart).toFixed(2)}ms`,
+        );
+      }
       return Promise.resolve();
     }
 
@@ -202,6 +228,11 @@ export const createPlayerLibraryRuntime = ({
         if (!libraryStore.libraryScanProgress?.done) {
           finalizeLibraryScanProgress(songs);
         }
+        if (import.meta.env.DEV) {
+          console.log(
+            `[Profiling] scanLibrary#${profileId} completed in ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${songs.length})`,
+          );
+        }
       } catch (error) {
         console.error('Library scan failed:', error);
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -209,6 +240,11 @@ export const createPlayerLibraryRuntime = ({
         finalizeLibraryScanProgress([], true, errorMessage || '扫描音乐库时出现问题');
         if (session.visibility === 'silent') {
           onSilentScanError(errorMessage);
+        }
+        if (import.meta.env.DEV) {
+          console.log(
+            `[Profiling] scanLibrary#${profileId} failed in ${(performance.now() - profileStart).toFixed(2)}ms`,
+          );
         }
       } finally {
         libraryRefreshPromise = null;
@@ -237,6 +273,9 @@ export const createPlayerLibraryRuntime = ({
     const runRefresh = () => {
       libraryRefreshIdleId = null;
       libraryRefreshTimer = null;
+      if (import.meta.env.DEV) {
+        console.log('[Profiling] scheduled bootstrap library refresh fired');
+      }
       void scanLibrary({ trigger: 'bootstrap', visibility: 'silent' });
     };
 
@@ -251,6 +290,11 @@ export const createPlayerLibraryRuntime = ({
   const bootstrapLibrary = async () => {
     if (hasBootstrappedLibrary) return;
     hasBootstrappedLibrary = true;
+    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+
+    if (import.meta.env.DEV) {
+      console.log('[Profiling] bootstrapLibrary start');
+    }
 
     if (!libraryBootstrapPromise) {
       libraryBootstrapPromise = (async () => {
@@ -264,6 +308,11 @@ export const createPlayerLibraryRuntime = ({
     }
 
     await libraryBootstrapPromise;
+    if (import.meta.env.DEV) {
+      console.log(
+        `[Profiling] bootstrapLibrary completed in ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${libraryStore.canonicalSongPaths.length}, folders: ${libraryStore.libraryFolders.length})`,
+      );
+    }
   };
 
   return {

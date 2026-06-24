@@ -63,6 +63,7 @@ export function useSongTableAlphabetIndex({
   const hoverIndexKey = ref<AlphabetIndexKey | null>(null);
   const isIndexBarVisible = ref(false);
   let hideIndexBarTimer: ReturnType<typeof setTimeout> | null = null;
+  let firstSongIndexProfileCount = 0;
 
   const indexLabelGetter = computed<((song: Song) => string) | null>(() => {
     if (currentViewMode.value === 'all' && localSortMode.value === 'title') {
@@ -83,9 +84,18 @@ export function useSongTableAlphabetIndex({
   );
 
   const firstSongIndexByKey = computed(() => {
+    const profileStart = import.meta.env.DEV ? performance.now() : 0;
     const keyMap = new Map<AlphabetIndexKey, number>();
 
     if (!indexLabelGetter.value) {
+      if (import.meta.env.DEV) {
+        firstSongIndexProfileCount += 1;
+        if (firstSongIndexProfileCount <= 3) {
+          console.log(
+            `[Profiling] SongTable firstSongIndexByKey#${firstSongIndexProfileCount} skipped in ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${songs.value.length})`,
+          );
+        }
+      }
       return keyMap;
     }
 
@@ -95,6 +105,16 @@ export function useSongTableAlphabetIndex({
         keyMap.set(key, index);
       }
     });
+
+    if (import.meta.env.DEV) {
+      const duration = performance.now() - profileStart;
+      firstSongIndexProfileCount += 1;
+      if (firstSongIndexProfileCount <= 3 || duration > 8) {
+        console.log(
+          `[Profiling] SongTable firstSongIndexByKey#${firstSongIndexProfileCount} computed in ${duration.toFixed(2)}ms (songs: ${songs.value.length}, keys: ${keyMap.size}, view: ${currentViewMode.value}, sort: ${localSortMode.value}/${folderSortMode.value})`,
+        );
+      }
+    }
 
     return keyMap;
   });

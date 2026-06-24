@@ -44,16 +44,33 @@ export function useLibraryAllSongPathCache() {
     const cacheKey = makeCacheKey(query, artistFilter, albumFilter, sortMode);
     const cached = allViewPathCache.get(cacheKey);
     if (cached) {
+      if (import.meta.env.DEV) {
+        console.log(
+          `[Profiling] loadAllViewSongPaths cache hit (sort: ${sortMode}, query: ${query ? 'yes' : 'no'}, paths: ${cached.length})`,
+        );
+      }
       return cached;
     }
 
     const inFlight = inFlightRequests.get(cacheKey);
     if (inFlight) {
+      if (import.meta.env.DEV) {
+        console.log(
+          `[Profiling] loadAllViewSongPaths joined in-flight request (sort: ${sortMode}, query: ${query ? 'yes' : 'no'})`,
+        );
+      }
       return inFlight;
     }
 
     // 记录发起异步请求时的全局数据版本
     const requestVersion = libraryStore.libraryDataVersion;
+    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+
+    if (import.meta.env.DEV) {
+      console.log(
+        `[Profiling] loadAllViewSongPaths IPC start (sort: ${sortMode}, query: ${query ? 'yes' : 'no'}, artistFilter: ${artistFilter ? 'yes' : 'no'}, albumFilter: ${albumFilter ? 'yes' : 'no'}, version: ${requestVersion})`,
+      );
+    }
 
     const request = tauriInvoke('get_library_song_paths_for_all_view', {
       query,
@@ -66,6 +83,11 @@ export function useLibraryAllSongPathCache() {
         if (libraryStore.libraryDataVersion === requestVersion) {
           allViewPathCache.set(cacheKey, paths);
           cacheVersion.value += 1;
+          if (import.meta.env.DEV) {
+            console.log(
+              `[Profiling] loadAllViewSongPaths IPC completed in ${(performance.now() - profileStart).toFixed(2)}ms (paths: ${paths.length}, version: ${requestVersion})`,
+            );
+          }
           return paths;
         } else if (import.meta.env.DEV) {
           console.log(`[useLibraryAllSongPathCache] Discarded in-flight path cache. Version mismatch: request ${requestVersion} vs current ${libraryStore.libraryDataVersion}`);

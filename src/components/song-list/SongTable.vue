@@ -82,6 +82,7 @@ const songCommentCache = reactive(new Map<string, string>());
 const loadingSongCommentPaths = new Set<string>();
 let visibleCoverPaths = new Set<string>();
 let scrollbarActiveTimer: ReturnType<typeof window.setTimeout> | null = null;
+let virtualDataProfileCount = 0;
 const resolveListRoutePath = (path: string) =>
   ['/', '/favorites', '/recent'].includes(path) ? path : '/';
 const listRoutePath = ref(resolveListRoutePath(route.path));
@@ -283,21 +284,34 @@ const {
 } = useListScrollMemory(tableViewportKey, containerRef);
 
 const virtualData = computed(() => {
+  const profileStart = import.meta.env.DEV ? performance.now() : 0;
   const songs = Array.isArray(props.songs) ? props.songs : [];
   const total = songs.length;
   const start = Math.floor(scrollTop.value / ROW_HEIGHT);
   const visibleCount = Math.ceil(containerHeight.value / ROW_HEIGHT);
   const renderStart = Math.max(0, start - OVERSCAN);
   const renderEnd = Math.min(total, start + visibleCount + OVERSCAN);
-
-  return {
-    items: songs.slice(renderStart, renderEnd).map((song, index) => ({
-      ...song,
-      virtualIndex: renderStart + index,
-    })),
+  const items = songs.slice(renderStart, renderEnd).map((song, index) => ({
+    ...song,
+    virtualIndex: renderStart + index,
+  }));
+  const result = {
+    items,
     paddingTop: renderStart * ROW_HEIGHT,
     paddingBottom: (total - renderEnd) * ROW_HEIGHT,
   };
+
+  if (import.meta.env.DEV) {
+    const duration = performance.now() - profileStart;
+    virtualDataProfileCount += 1;
+    if (virtualDataProfileCount <= 3 || duration > 8) {
+      console.log(
+        `[Profiling] SongTable virtualData#${virtualDataProfileCount} computed in ${duration.toFixed(2)}ms (total: ${total}, rendered: ${items.length}, range: ${renderStart}-${renderEnd}, scrollTop: ${scrollTop.value})`,
+      );
+    }
+  }
+
+  return result;
 });
 
 const virtualPaddingTop = computed(() => `${virtualData.value?.paddingTop ?? 0}px`);
