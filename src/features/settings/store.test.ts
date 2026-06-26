@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
-import { mergeAppSettings, useSettingsStore } from './store';
+import { createDefaultAppSettings, mergeAppSettings, useSettingsStore } from './store';
 import type { EqualizerSettings } from '../../types';
 
 // Helper: allows partial EqualizerSettings patches in tests
@@ -632,5 +632,24 @@ describe('settings store', () => {
     expect(store.settings.audio.equalizer.gains).toEqual(Array(10).fill(0));
     // 注意：equalizerPresets 是独立的ref，resetSettings不会清除它
     // 这是设计决定，因为预设存储在localStorage中
+  });
+
+  it('default settings have autoScanLibraryOnStartup set to false', () => {
+    const store = useSettingsStore();
+    expect(store.settings.autoScanLibraryOnStartup).toBe(false);
+  });
+
+  it('mergeAppSettings handles missing autoScanLibraryOnStartup by falling back to default false', () => {
+    const merged = mergeAppSettings(createDefaultAppSettings(), {
+      closeToTray: true,
+    });
+    expect(merged.autoScanLibraryOnStartup).toBe(false);
+  });
+
+  it('mergeAppSettings keeps autoScanLibraryOnStartup value when explicitly true', () => {
+    const merged = mergeAppSettings(createDefaultAppSettings(), {
+      autoScanLibraryOnStartup: true,
+    });
+    expect(merged.autoScanLibraryOnStartup).toBe(true);
   });
 });

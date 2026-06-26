@@ -140,6 +140,7 @@ export const defaultAppSettings: AppSettings = {
   taskbarPlayerCanDrag: false,
   gpuAcceleration: true,
   writeArtistAvatarToTags: false,
+  autoScanLibraryOnStartup: false,
 };
 
 export const createDefaultThemeSettings = (): ThemeSettings => ({

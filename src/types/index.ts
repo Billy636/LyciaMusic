@@ -389,6 +389,7 @@ export interface AppSettings {
   taskbarPlayerCanDrag: boolean;
   gpuAcceleration: boolean;
   writeArtistAvatarToTags: boolean;
+  autoScanLibraryOnStartup: boolean;
 }
 
 export interface SaveArtistAvatarResponse {

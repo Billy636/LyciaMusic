@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import type { Song } from '../types';
 
@@ -225,6 +225,91 @@ describe('playerLibraryRuntime.scanLibrary', () => {
 
     expect(invokeMock).toHaveBeenCalledWith('scan_library', {
       minimumDurationSeconds: 9,
+    });
+  });
+
+  describe('scheduleLibraryRefresh (bootstrap)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('does not invoke scan_library on bootstrap if autoScanLibraryOnStartup is false', async () => {
+      const { useLibraryStore } = await import('../features/library/store');
+      const { useSettingsStore } = await import('../features/settings/store');
+      const { createPlayerLibraryRuntime } = await import('./playerLibraryRuntime');
+
+      const libraryStore = useLibraryStore();
+      const settingsStore = useSettingsStore();
+
+      libraryStore.setLibraryFolders([{ path: 'C:\\Music', song_count: 1 }]);
+      settingsStore.patchSettings({ autoScanLibraryOnStartup: false });
+
+      invokeMock.mockResolvedValue([]);
+
+      const runtime = createPlayerLibraryRuntime({
+        fetchLibraryFolders: vi.fn(async () => {}),
+        fetchFolderTree: vi.fn(async () => {}),
+        flushBufferedLibraryScanBatch: vi.fn(),
+        refreshStateSongReferences: vi.fn(),
+        finalizeLibraryScanProgress: vi.fn(),
+        onSilentScanError: vi.fn(),
+      });
+
+      await runtime.bootstrapLibrary();
+      
+      vi.advanceTimersByTime(6000);
+
+      const scanLibraryCalls = invokeMock.mock.calls.filter(([name]) => name === 'scan_library');
+      expect(scanLibraryCalls).toHaveLength(0);
+    });
+
+    it('invokes scan_library on bootstrap if autoScanLibraryOnStartup is true', async () => {
+      const { useLibraryStore } = await import('../features/library/store');
+      const { useSettingsStore } = await import('../features/settings/store');
+      const { createPlayerLibraryRuntime } = await import('./playerLibraryRuntime');
+
+      const libraryStore = useLibraryStore();
+      const settingsStore = useSettingsStore();
+
+      libraryStore.setLibraryFolders([{ path: 'C:\\Music', song_count: 1 }]);
+      settingsStore.patchSettings({ autoScanLibraryOnStartup: true });
+
+      invokeMock.mockResolvedValue([]);
+
+      const requestIdleCallbackMock = vi.fn((cb) => {
+        cb({ didTimeout: false, timeRemaining: () => 10 });
+        return 1;
+      });
+      const cancelIdleCallbackMock = vi.fn();
+
+      (globalThis as any).window = {
+        requestIdleCallback: requestIdleCallbackMock,
+        cancelIdleCallback: cancelIdleCallbackMock,
+      };
+
+      try {
+        const runtime = createPlayerLibraryRuntime({
+          fetchLibraryFolders: vi.fn(async () => {}),
+          fetchFolderTree: vi.fn(async () => {}),
+          flushBufferedLibraryScanBatch: vi.fn(),
+          refreshStateSongReferences: vi.fn(),
+          finalizeLibraryScanProgress: vi.fn(),
+          onSilentScanError: vi.fn(),
+        });
+
+        await runtime.bootstrapLibrary();
+        
+        vi.advanceTimersByTime(6000);
+
+        const scanLibraryCalls = invokeMock.mock.calls.filter(([name]) => name === 'scan_library');
+        expect(scanLibraryCalls).toHaveLength(1);
+      } finally {
+        delete (globalThis as any).window;
+      }
     });
   });
 });

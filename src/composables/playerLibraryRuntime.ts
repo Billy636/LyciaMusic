@@ -18,6 +18,7 @@ import { useLibraryDetailSongPathCache } from './useLibraryDetailSongPathCache';
 import { useLibraryFolderSongPathCache } from './useLibraryFolderSongPathCache';
 import { useSettingsStore } from '../features/settings/store';
 import { useLibraryStore } from '../features/library/store';
+import { isProfilingEnabled } from '../utils/profiling';
 
 let hasBootstrappedLibrary = false;
 let libraryBootstrapPromise: Promise<void> | null = null;
@@ -108,13 +109,13 @@ export const createPlayerLibraryRuntime = ({
 
   const loadLibrarySongsFromCache = async () => {
     if (libraryCacheLoadPromise) {
-      if (import.meta.env.DEV) {
+      if (isProfilingEnabled()) {
         console.log('[Profiling] loadLibrarySongsFromCache joined in-flight request');
       }
       return libraryCacheLoadPromise;
     }
 
-    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+    const profileStart = isProfilingEnabled() ? performance.now() : 0;
     const startVersion = libraryStore.libraryDataVersion;
 
     libraryCacheLoadPromise = (async () => {
@@ -132,7 +133,7 @@ export const createPlayerLibraryRuntime = ({
         }
         refreshStateSongReferences(songs);
         await fetchFolderTree();
-        if (import.meta.env.DEV) {
+        if (isProfilingEnabled()) {
           console.log(
             `[Profiling] loadLibrarySongsFromCache took ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${songs.length})`,
           );
@@ -148,7 +149,7 @@ export const createPlayerLibraryRuntime = ({
   };
 
   const loadLibraryCatalogsFromCache = async () => {
-    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+    const profileStart = isProfilingEnabled() ? performance.now() : 0;
     try {
       const [artists, albums] = await Promise.all([
         invoke<ArtistCatalogItem[]>('get_library_artist_catalog'),
@@ -157,7 +158,7 @@ export const createPlayerLibraryRuntime = ({
 
       libraryStore.setArtistCatalog(artists);
       libraryStore.setAlbumCatalog(albums);
-      if (import.meta.env.DEV) {
+      if (isProfilingEnabled()) {
         console.log(
           `[Profiling] loadLibraryCatalogsFromCache took ${(performance.now() - profileStart).toFixed(2)}ms (artists: ${artists.length}, albums: ${albums.length})`,
         );
@@ -170,9 +171,9 @@ export const createPlayerLibraryRuntime = ({
   const scanLibrary = async (options: ScanLibraryOptions = {}) => {
     const resolvedOptions = resolveScanLibraryOptions(options);
     const profileId = ++libraryScanProfileId;
-    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+    const profileStart = isProfilingEnabled() ? performance.now() : 0;
 
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       console.log(
         `[Profiling] scanLibrary#${profileId} start (trigger: ${resolvedOptions.trigger}, visibility: ${resolvedOptions.visibility}, folders: ${libraryStore.libraryFolders.length}, songs: ${libraryStore.canonicalSongPaths.length})`,
       );
@@ -213,7 +214,7 @@ export const createPlayerLibraryRuntime = ({
       libraryStore.setLibraryScanSession(null);
       libraryStore.setLibraryScanProgress(null);
       libraryStore.setLastLibraryScanError(null);
-      if (import.meta.env.DEV) {
+      if (isProfilingEnabled()) {
         console.log(
           `[Profiling] scanLibrary#${profileId} skipped empty library in ${(performance.now() - profileStart).toFixed(2)}ms`,
         );
@@ -252,7 +253,7 @@ export const createPlayerLibraryRuntime = ({
         if (!libraryStore.libraryScanProgress?.done) {
           finalizeLibraryScanProgress(songs);
         }
-        if (import.meta.env.DEV) {
+        if (isProfilingEnabled()) {
           console.log(
             `[Profiling] scanLibrary#${profileId} completed in ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${songs.length})`,
           );
@@ -265,7 +266,7 @@ export const createPlayerLibraryRuntime = ({
         if (session.visibility === 'silent') {
           onSilentScanError(errorMessage);
         }
-        if (import.meta.env.DEV) {
+        if (isProfilingEnabled()) {
           console.log(
             `[Profiling] scanLibrary#${profileId} failed in ${(performance.now() - profileStart).toFixed(2)}ms`,
           );
@@ -283,6 +284,13 @@ export const createPlayerLibraryRuntime = ({
       return;
     }
 
+    if (!settingsStore.settings.autoScanLibraryOnStartup) {
+      if (isProfilingEnabled()) {
+        console.log('[Profiling] skipped bootstrap library refresh because autoScanLibraryOnStartup is disabled');
+      }
+      return;
+    }
+
     if (libraryStore.libraryFolders.length === 0) {
       return;
     }
@@ -290,7 +298,7 @@ export const createPlayerLibraryRuntime = ({
     const runRefresh = () => {
       libraryRefreshIdleId = null;
       libraryRefreshTimer = null;
-      if (import.meta.env.DEV) {
+      if (isProfilingEnabled()) {
         console.log('[Profiling] scheduled bootstrap library refresh fired');
       }
       void scanLibrary({ trigger: 'bootstrap', visibility: 'silent' });
@@ -312,9 +320,9 @@ export const createPlayerLibraryRuntime = ({
   const bootstrapLibrary = async () => {
     if (hasBootstrappedLibrary) return;
     hasBootstrappedLibrary = true;
-    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+    const profileStart = isProfilingEnabled() ? performance.now() : 0;
 
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       console.log('[Profiling] bootstrapLibrary start');
     }
 
@@ -330,7 +338,7 @@ export const createPlayerLibraryRuntime = ({
     }
 
     await libraryBootstrapPromise;
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       console.log(
         `[Profiling] bootstrapLibrary completed in ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${libraryStore.canonicalSongPaths.length}, folders: ${libraryStore.libraryFolders.length})`,
       );
