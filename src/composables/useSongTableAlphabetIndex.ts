@@ -15,6 +15,7 @@ import {
   getAlphabetIndexKey,
   type AlphabetIndexKey,
 } from '../utils/alphabetIndex';
+import { isProfilingEnabled } from '../utils/profiling';
 
 const ROW_HEIGHT = 72;
 const INDEX_PROXIMITY_PX = 72;
@@ -84,11 +85,11 @@ export function useSongTableAlphabetIndex({
   );
 
   const firstSongIndexByKey = computed(() => {
-    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+    const profileStart = isProfilingEnabled() ? performance.now() : 0;
     const keyMap = new Map<AlphabetIndexKey, number>();
 
     if (!indexLabelGetter.value) {
-      if (import.meta.env.DEV) {
+      if (isProfilingEnabled()) {
         firstSongIndexProfileCount += 1;
         if (firstSongIndexProfileCount <= 3) {
           console.log(
@@ -106,7 +107,7 @@ export function useSongTableAlphabetIndex({
       }
     });
 
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       const duration = performance.now() - profileStart;
       firstSongIndexProfileCount += 1;
       if (firstSongIndexProfileCount <= 3 || duration > 8) {

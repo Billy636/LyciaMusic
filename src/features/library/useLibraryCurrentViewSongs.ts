@@ -11,6 +11,7 @@ import { useLibraryFolderSongPathCache } from '../../composables/useLibraryFolde
 import type { AlbumDetailSortMode, FolderSortMode, LocalSortMode, PlaylistSortMode } from '../../services/storage/playerStorage';
 import type { HistoryItem, Playlist, Song } from '../../types';
 import { sortItemsByAlphabetIndex } from '../../utils/alphabetIndex';
+import { isProfilingEnabled } from '../../utils/profiling';
 import {
   compareSongPathsByTrackNumber,
   getSongArtistSearchText,
@@ -110,9 +111,9 @@ export function useLibraryCurrentViewSongs({
     ],
     async ([viewMode, query, musicTab, artistFilter, albumFilter, sortMode]) => {
       const requestId = ++allViewRequestId;
-      const profileStart = import.meta.env.DEV ? performance.now() : 0;
+      const profileStart = isProfilingEnabled() ? performance.now() : 0;
 
-      if (import.meta.env.DEV) {
+      if (isProfilingEnabled()) {
         console.log(
           `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} start (view: ${viewMode}, sort: ${sortMode}, query: ${query ? 'yes' : 'no'}, canonical paths: ${canonicalSongPaths.value.length})`,
         );
@@ -120,7 +121,7 @@ export function useLibraryCurrentViewSongs({
 
       if (viewMode !== 'all' || sortMode === 'custom') {
         allViewSongPaths.value = [];
-        if (import.meta.env.DEV) {
+        if (isProfilingEnabled()) {
           console.log(
             `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} skipped in ${(performance.now() - profileStart).toFixed(2)}ms`,
           );
@@ -134,7 +135,7 @@ export function useLibraryCurrentViewSongs({
       if (isWaitingForBootstrapLibrary) {
         allViewSongPaths.value = [];
         allViewLoading.value = false;
-        if (import.meta.env.DEV) {
+        if (isProfilingEnabled()) {
           console.log(
             `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} delayed initial path IPC in ${(performance.now() - profileStart).toFixed(2)}ms`,
           );
@@ -179,7 +180,7 @@ export function useLibraryCurrentViewSongs({
         allViewSongPaths.value = paths;
         allViewUseCanonicalFallback.value = false;
         lastSuccessfulAllViewSongPaths.value = paths; // 缓存成功列表
-        if (import.meta.env.DEV) {
+        if (isProfilingEnabled()) {
           console.log(
             `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} loaded paths in ${(performance.now() - profileStart).toFixed(2)}ms (paths: ${paths.length})`,
           );
@@ -198,7 +199,7 @@ export function useLibraryCurrentViewSongs({
             allViewSongPaths.value = paths;
             allViewUseCanonicalFallback.value = false;
             lastSuccessfulAllViewSongPaths.value = paths;
-            if (import.meta.env.DEV) {
+            if (isProfilingEnabled()) {
               console.log(
                 `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} retry loaded paths in ${(performance.now() - profileStart).toFixed(2)}ms (paths: ${paths.length})`,
               );
@@ -213,7 +214,7 @@ export function useLibraryCurrentViewSongs({
         }
         allViewUseCanonicalFallback.value = false;
         allViewSongPaths.value = [];
-        if (import.meta.env.DEV) {
+        if (isProfilingEnabled()) {
           console.log(
             `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} all-view watcher#${requestId} failed in ${(performance.now() - profileStart).toFixed(2)}ms`,
           );
@@ -580,7 +581,7 @@ export function useLibraryCurrentViewSongs({
   };
 
   const currentViewSongPaths = computed(() => {
-    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+    const profileStart = isProfilingEnabled() ? performance.now() : 0;
     const result = (() => {
     if (searchQuery.value.trim()) {
       const query = searchQuery.value.toLowerCase();
@@ -777,7 +778,7 @@ export function useLibraryCurrentViewSongs({
     return [];
     })();
 
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       console.log(
         `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} currentViewSongPaths computed in ${(performance.now() - profileStart).toFixed(2)}ms (view: ${currentViewMode.value}, sort: ${localSortMode.value}/${folderSortMode.value}, paths: ${result.length}, canonical: ${canonicalSongPaths.value.length}, query: ${searchQuery.value.trim() ? 'yes' : 'no'})`,
       );
@@ -787,12 +788,12 @@ export function useLibraryCurrentViewSongs({
   });
 
   const currentViewSongs = computed(() => {
-    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+    const profileStart = isProfilingEnabled() ? performance.now() : 0;
     canonicalSongPaths.value;
     const paths = currentViewSongPaths.value;
     const songs = materializeSongPaths(paths);
 
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       console.log(
         `[Profiling] useLibraryCurrentViewSongs#${debugOwnerId} currentViewSongs computed in ${(performance.now() - profileStart).toFixed(2)}ms (paths: ${paths.length}, songs: ${songs.length})`,
       );

@@ -22,6 +22,7 @@ import { useLibraryStore } from '../../features/library/store';
 import { DEFAULT_SCROLLBAR_HOT_ZONE_PX, isPointerNearVerticalScrollbar } from '../../utils/scrollbarActivity';
 import { isRemoteSong } from '../../utils/remoteSong';
 import { useSongDetailCache } from '../../composables/useSongDetailCache';
+import { isProfilingEnabled } from '../../utils/profiling';
 
 const { settings } = useSettings();
 const libraryStore = useLibraryStore();
@@ -284,7 +285,7 @@ const {
 } = useListScrollMemory(tableViewportKey, containerRef);
 
 const virtualData = computed(() => {
-  const profileStart = import.meta.env.DEV ? performance.now() : 0;
+  const profileStart = isProfilingEnabled() ? performance.now() : 0;
   const songs = Array.isArray(props.songs) ? props.songs : [];
   const total = songs.length;
   const start = Math.floor(scrollTop.value / ROW_HEIGHT);
@@ -301,7 +302,7 @@ const virtualData = computed(() => {
     paddingBottom: (total - renderEnd) * ROW_HEIGHT,
   };
 
-  if (import.meta.env.DEV) {
+  if (isProfilingEnabled()) {
     const duration = performance.now() - profileStart;
     virtualDataProfileCount += 1;
     if (virtualDataProfileCount <= 3 || duration > 8) {

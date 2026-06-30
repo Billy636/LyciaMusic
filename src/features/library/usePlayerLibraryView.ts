@@ -8,6 +8,7 @@ import { useLibraryCatalogSelectors } from './useLibraryCatalogSelectors';
 import { useLibraryCollectionSelectors } from './useLibraryCollectionSelectors';
 import { useLibraryCurrentViewSongs } from './useLibraryCurrentViewSongs';
 import { useLibraryFolderSelectors } from './useLibraryFolderSelectors';
+import { isProfilingEnabled } from '../../utils/profiling';
 export type { AlbumListItem, ArtistListItem } from './playerLibraryViewShared';
 
 let playerLibraryViewInstanceCount = 0;
@@ -17,7 +18,7 @@ type PlayerLibraryView = ReturnType<typeof createPlayerLibraryView>;
 
 const createPlayerLibraryView = () => {
   const debugInstanceId = ++playerLibraryViewInstanceCount;
-  const debugStart = import.meta.env.DEV ? performance.now() : 0;
+  const debugStart = isProfilingEnabled() ? performance.now() : 0;
   const collectionsStore = useCollectionsStore();
   const libraryStore = useLibraryStore();
   const navigationStore = useNavigationStore();
@@ -116,7 +117,7 @@ const createPlayerLibraryView = () => {
     debugOwnerId: debugInstanceId,
   });
 
-  if (import.meta.env.DEV) {
+  if (isProfilingEnabled()) {
     console.log(
       `[Profiling] usePlayerLibraryView#${debugInstanceId} created in ${(performance.now() - debugStart).toFixed(2)}ms (total instances: ${playerLibraryViewInstanceCount})`,
     );

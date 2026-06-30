@@ -3,6 +3,7 @@ import type { Song } from '../types';
 
 import { useLibraryStore } from '../features/library/store';
 import { usePlaybackStore } from '../features/playback/store';
+import { isProfilingEnabled } from '../utils/profiling';
 
 const LIBRARY_SCAN_BATCH_FLUSH_MS = 120;
 
@@ -51,7 +52,7 @@ export const createPlayerLibraryBatch = ({
       return;
     }
 
-    const startTime = import.meta.env.DEV ? performance.now() : 0;
+    const startTime = isProfilingEnabled() ? performance.now() : 0;
     const pendingSongsCount = pendingLibraryScanSongs.size;
     const pendingDeletedCount = pendingLibraryScanDeletedPaths.size;
 
@@ -67,7 +68,7 @@ export const createPlayerLibraryBatch = ({
     pendingLibraryScanDeletedPaths.clear();
     pendingLibraryScanFallbackSongs.clear();
 
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       const duration = performance.now() - startTime;
       console.log(`[Profiling] flushBufferedLibraryScanBatch took ${duration.toFixed(2)}ms (added/updated batch: ${pendingSongsCount}, deleted: ${pendingDeletedCount}, total canonical: ${canonicalSongs.value.length})`);
     }

@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import type { LocalSortMode } from '../services/storage/playerStorage';
 import { tauriInvoke } from '../services/tauri/invoke';
 import { MemoryCache } from '../utils/MemoryCache';
+import { isProfilingEnabled } from '../utils/profiling';
 
 import { useLibraryStore } from '../features/library/store';
 
@@ -44,7 +45,7 @@ export function useLibraryAllSongPathCache() {
     const cacheKey = makeCacheKey(query, artistFilter, albumFilter, sortMode);
     const cached = allViewPathCache.get(cacheKey);
     if (cached) {
-      if (import.meta.env.DEV) {
+      if (isProfilingEnabled()) {
         console.log(
           `[Profiling] loadAllViewSongPaths cache hit (sort: ${sortMode}, query: ${query ? 'yes' : 'no'}, paths: ${cached.length})`,
         );
@@ -54,7 +55,7 @@ export function useLibraryAllSongPathCache() {
 
     const inFlight = inFlightRequests.get(cacheKey);
     if (inFlight) {
-      if (import.meta.env.DEV) {
+      if (isProfilingEnabled()) {
         console.log(
           `[Profiling] loadAllViewSongPaths joined in-flight request (sort: ${sortMode}, query: ${query ? 'yes' : 'no'})`,
         );
@@ -64,9 +65,9 @@ export function useLibraryAllSongPathCache() {
 
     // 记录发起异步请求时的全局数据版本
     const requestVersion = libraryStore.libraryDataVersion;
-    const profileStart = import.meta.env.DEV ? performance.now() : 0;
+    const profileStart = isProfilingEnabled() ? performance.now() : 0;
 
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       console.log(
         `[Profiling] loadAllViewSongPaths IPC start (sort: ${sortMode}, query: ${query ? 'yes' : 'no'}, artistFilter: ${artistFilter ? 'yes' : 'no'}, albumFilter: ${albumFilter ? 'yes' : 'no'}, version: ${requestVersion})`,
       );
@@ -83,13 +84,13 @@ export function useLibraryAllSongPathCache() {
         if (libraryStore.libraryDataVersion === requestVersion) {
           allViewPathCache.set(cacheKey, paths);
           cacheVersion.value += 1;
-          if (import.meta.env.DEV) {
+          if (isProfilingEnabled()) {
             console.log(
               `[Profiling] loadAllViewSongPaths IPC completed in ${(performance.now() - profileStart).toFixed(2)}ms (paths: ${paths.length}, version: ${requestVersion})`,
             );
           }
           return paths;
-        } else if (import.meta.env.DEV) {
+        } else if (isProfilingEnabled()) {
           console.log(`[useLibraryAllSongPathCache] Discarded in-flight path cache. Version mismatch: request ${requestVersion} vs current ${libraryStore.libraryDataVersion}`);
         }
         throw Object.assign(new Error('Stale library path request'), {
