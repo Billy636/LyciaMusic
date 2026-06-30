@@ -366,6 +366,71 @@ fn load_cached_songs(conn: &rusqlite::Connection) -> Result<Vec<LibrarySong>, St
     Ok(songs)
 }
 
+const ALBUM_CATALOG_SQL: &str = "WITH normalized_songs AS (
+                    SELECT
+                        id,
+                        path,
+                        added_at,
+                        COALESCE(NULLIF(TRIM(album_key), ''), '') AS album_key,
+                        COALESCE(NULLIF(TRIM(album), ''), 'Unknown') AS album_name,
+                        COALESCE(NULLIF(TRIM(album_artist), ''), NULLIF(TRIM(artist), ''), 'Unknown') AS album_artist_name
+                    FROM songs
+                 ),
+                 ranked_songs AS (
+                    SELECT
+                        album_key,
+                        album_name,
+                        album_artist_name,
+                        path,
+                        COUNT(*) OVER (
+                            PARTITION BY album_key, album_name, album_artist_name
+                        ) AS song_count,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY album_key, album_name, album_artist_name
+                            ORDER BY added_at DESC, id ASC
+                        ) AS representative_rank
+                    FROM normalized_songs
+                 )
+                 SELECT
+                    album_key,
+                    album_name,
+                    album_artist_name,
+                    song_count,
+                    path AS first_song_path
+                 FROM ranked_songs
+                 WHERE representative_rank = 1
+                 ORDER BY album_name COLLATE NOCASE ASC, album_artist_name COLLATE NOCASE ASC";
+
+fn load_album_catalog(conn: &rusqlite::Connection) -> Result<Vec<AlbumCatalogItem>, String> {
+    let mut stmt = conn.prepare(ALBUM_CATALOG_SQL).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            let album_key = row.get::<_, String>(0)?;
+            let album_name = row.get::<_, String>(1)?;
+            let album_artist_name = row.get::<_, String>(2)?;
+            let key = if album_key.trim().is_empty() {
+                format!(
+                    "{}::{}",
+                    album_name.to_ascii_lowercase(),
+                    album_artist_name.to_ascii_lowercase()
+                )
+            } else {
+                album_key
+            };
+
+            Ok(AlbumCatalogItem {
+                key,
+                name: album_name,
+                count: clamp_i64_to_u32_count(row.get::<_, i64>(3)?),
+                artist: album_artist_name,
+                first_song_path: row.get::<_, String>(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows.filter_map(Result::ok).collect())
+}
+
 #[tauri::command]
 pub async fn get_library_folders(
     db_state: State<'_, DbState>,
@@ -532,60 +597,7 @@ pub async fn get_library_album_catalog(
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT
-                    COALESCE(NULLIF(TRIM(album_key), ''), '') AS album_key,
-                    COALESCE(NULLIF(TRIM(album), ''), 'Unknown') AS album_name,
-                    COALESCE(NULLIF(TRIM(album_artist), ''), NULLIF(TRIM(artist), ''), 'Unknown') AS album_artist_name,
-                    COUNT(*) AS song_count,
-                    COALESCE((
-                        SELECT nested.path
-                        FROM songs AS nested
-                        WHERE (
-                            COALESCE(NULLIF(TRIM(nested.album_key), ''), '') = COALESCE(NULLIF(TRIM(songs.album_key), ''), '')
-                            AND COALESCE(NULLIF(TRIM(nested.album), ''), 'Unknown') = COALESCE(NULLIF(TRIM(songs.album), ''), 'Unknown')
-                            AND COALESCE(NULLIF(TRIM(nested.album_artist), ''), NULLIF(TRIM(nested.artist), ''), 'Unknown')
-                                = COALESCE(NULLIF(TRIM(songs.album_artist), ''), NULLIF(TRIM(songs.artist), ''), 'Unknown')
-                        )
-                        ORDER BY nested.added_at DESC, nested.id ASC
-                        LIMIT 1
-                    ), '') AS first_song_path
-                 FROM songs
-                 GROUP BY
-                    COALESCE(NULLIF(TRIM(album_key), ''), ''),
-                    COALESCE(NULLIF(TRIM(album), ''), 'Unknown'),
-                    COALESCE(NULLIF(TRIM(album_artist), ''), NULLIF(TRIM(artist), ''), 'Unknown')
-                 ORDER BY album_name COLLATE NOCASE ASC, album_artist_name COLLATE NOCASE ASC",
-            )
-            .map_err(|e| e.to_string())?;
-
-        let rows = stmt
-            .query_map([], |row| {
-                let album_key = row.get::<_, String>(0)?;
-                let album_name = row.get::<_, String>(1)?;
-                let album_artist_name = row.get::<_, String>(2)?;
-                let key = if album_key.trim().is_empty() {
-                    format!(
-                        "{}::{}",
-                        album_name.to_ascii_lowercase(),
-                        album_artist_name.to_ascii_lowercase()
-                    )
-                } else {
-                    album_key
-                };
-
-                Ok(AlbumCatalogItem {
-                    key,
-                    name: album_name,
-                    count: clamp_i64_to_u32_count(row.get::<_, i64>(3)?),
-                    artist: album_artist_name,
-                    first_song_path: row.get::<_, String>(4)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-
-        Ok::<Vec<AlbumCatalogItem>, String>(rows.filter_map(Result::ok).collect())
+        load_album_catalog(&conn)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1120,6 +1132,22 @@ mod tests {
         .expect("create cached song schema");
     }
 
+    fn create_album_catalog_schema(conn: &Connection) {
+        conn.execute(
+            "CREATE TABLE songs (
+                id INTEGER PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                artist TEXT,
+                album TEXT,
+                album_artist TEXT,
+                album_key TEXT,
+                added_at INTEGER
+            )",
+            [],
+        )
+        .expect("create album catalog schema");
+    }
+
     fn insert_song(conn: &Connection, path: &str) {
         conn.execute(
             "INSERT INTO songs (path, title, artist, album) VALUES (?1, 'Title', 'Artist', 'Album')",
@@ -1232,6 +1260,60 @@ mod tests {
 
         assert_eq!(songs.len(), 1);
         assert_eq!(songs[0].comment.as_deref(), Some("Live version"));
+    }
+
+    #[test]
+    fn album_catalog_groups_songs_and_selects_the_latest_representative() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        create_album_catalog_schema(&conn);
+        conn.execute_batch(
+            "INSERT INTO songs (id, path, artist, album, album_artist, album_key, added_at) VALUES
+             (1, '/album-a/older.flac', 'Artist A', 'Album A', 'Artist A', 'album-a', 100),
+             (2, '/album-a/latest.flac', 'Artist A', 'Album A', 'Artist A', 'album-a', 200),
+             (3, '/album-b/first.flac', 'Artist B', 'Album B', '', '   ', 300),
+             (4, '/album-b/second.flac', 'Artist B', 'Album B', NULL, NULL, 300),
+             (5, '/unknown/song.flac', '', '', '', NULL, NULL);",
+        )
+        .expect("insert album catalog songs");
+
+        let catalog = load_album_catalog(&conn).expect("load album catalog");
+
+        assert_eq!(catalog.len(), 3);
+        assert_eq!(catalog[0].key, "album-a");
+        assert_eq!(catalog[0].name, "Album A");
+        assert_eq!(catalog[0].artist, "Artist A");
+        assert_eq!(catalog[0].count, 2);
+        assert_eq!(catalog[0].first_song_path, "/album-a/latest.flac");
+
+        assert_eq!(catalog[1].key, "album b::artist b");
+        assert_eq!(catalog[1].count, 2);
+        assert_eq!(catalog[1].first_song_path, "/album-b/first.flac");
+
+        assert_eq!(catalog[2].key, "unknown::unknown");
+        assert_eq!(catalog[2].name, "Unknown");
+        assert_eq!(catalog[2].artist, "Unknown");
+        assert_eq!(catalog[2].count, 1);
+        assert_eq!(catalog[2].first_song_path, "/unknown/song.flac");
+    }
+
+    #[test]
+    fn album_catalog_query_does_not_use_a_correlated_subquery() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        create_album_catalog_schema(&conn);
+        let mut stmt = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {ALBUM_CATALOG_SQL}"))
+            .expect("prepare album catalog query plan");
+        let plan: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(3))
+            .expect("query album catalog plan")
+            .filter_map(Result::ok)
+            .collect();
+
+        assert!(
+            plan.iter()
+                .all(|detail| !detail.contains("CORRELATED SCALAR SUBQUERY")),
+            "unexpected correlated subquery in plan: {plan:?}"
+        );
     }
 
     #[test]
