@@ -8,6 +8,7 @@ use super::tags::{
 };
 use super::types::{
     LyricsStorageSource, SaveSongInfoResponse, SongDetail, SongInfoEditPayload, SongLyricsForEdit,
+    SongRuntimeMetadata,
 };
 use crate::database::DbState;
 use crate::error::CommandError;
@@ -520,6 +521,97 @@ pub fn save_song_info(
     Ok(SaveSongInfoResponse { song, detail })
 }
 
+fn load_song_runtime_metadata(
+    conn: &rusqlite::Connection,
+    normalized_path: &str,
+) -> Result<Option<SongRuntimeMetadata>, String> {
+    conn.query_row(
+        "SELECT id, remote_source_id, cue_source_path, cue_start_offset, cue_end_offset
+         FROM songs
+         WHERE path = ?1
+         LIMIT 1",
+        params![normalized_path],
+        |row| {
+            Ok(SongRuntimeMetadata {
+                id: row.get(0)?,
+                remote_source_id: row.get(1)?,
+                cue_source_path: row.get(2)?,
+                cue_start_offset: row.get::<_, Option<i64>>(3)?.map(|value| value as u32),
+                cue_end_offset: row.get::<_, Option<i64>>(4)?.map(|value| value as u32),
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_song_runtime_metadata(
+    path: String,
+    db_state: State<'_, DbState>,
+) -> Result<Option<SongRuntimeMetadata>, String> {
+    let normalized_path = normalize_path(&path);
+    let conn = db_state.conn.lock().map_err(|e| e.to_string())?;
+    load_song_runtime_metadata(&conn, &normalized_path)
+}
+
+fn hydrate_song_detail_from_db(
+    conn: &rusqlite::Connection,
+    normalized_path: &str,
+    detail: &mut SongDetail,
+) -> Result<(), String> {
+    if let Some((
+        container,
+        codec,
+        file_size,
+        track_number,
+        disc_number,
+        comment,
+        bitrate,
+        sample_rate,
+        bit_depth,
+        format,
+    )) = conn
+        .query_row(
+            "SELECT container, codec, file_size, track_number, disc_number, comment,
+                    bitrate, sample_rate, bit_depth, format
+             FROM songs
+             WHERE path = ?1
+             LIMIT 1",
+            params![normalized_path],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<i64>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    {
+        detail.container = container.filter(|value| !value.trim().is_empty());
+        detail.codec = codec.filter(|value| !value.trim().is_empty());
+        detail.file_size = file_size.and_then(|value| u64::try_from(value).ok());
+        detail.track_number = track_number;
+        detail.disc_number = disc_number;
+        detail.comment = comment;
+        detail.bitrate = bitrate.and_then(|value| u32::try_from(value).ok());
+        detail.sample_rate = sample_rate.and_then(|value| u32::try_from(value).ok());
+        detail.bit_depth = bit_depth.and_then(|value| u8::try_from(value).ok());
+        detail.format = format.filter(|value| !value.trim().is_empty());
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn get_song_detail(
     path: String,
@@ -534,25 +626,7 @@ pub async fn get_song_detail(
 
     {
         let conn = db_state.conn.lock().map_err(|e| e.to_string())?;
-        if let Some((container, codec, file_size)) = conn
-            .query_row(
-                "SELECT container, codec, file_size FROM songs WHERE path = ?1 LIMIT 1",
-                params![&normalized_path],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<i64>>(2)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(|e| e.to_string())?
-        {
-            detail.container = container.filter(|value| !value.trim().is_empty());
-            detail.codec = codec.filter(|value| !value.trim().is_empty());
-            detail.file_size = file_size.and_then(|value| u64::try_from(value).ok());
-        }
+        hydrate_song_detail_from_db(&conn, &normalized_path, &mut detail)?;
     }
 
     if let Ok(metadata) = fs::metadata(path_obj) {
@@ -826,6 +900,91 @@ mod tests {
 
         assert_eq!(lyrics, "[00:01.00]cached lyric");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn loads_runtime_metadata_only_when_requested() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE songs (
+                id INTEGER PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                remote_source_id TEXT,
+                cue_source_path TEXT,
+                cue_start_offset INTEGER,
+                cue_end_offset INTEGER
+            );
+            INSERT INTO songs VALUES (
+                7,
+                '/music/track.cue',
+                'remote-source',
+                '/music/album.flac',
+                12000,
+                34000
+            );",
+        )
+        .unwrap();
+
+        let metadata = load_song_runtime_metadata(&conn, "/music/track.cue")
+            .unwrap()
+            .expect("runtime metadata");
+
+        assert_eq!(metadata.id, Some(7));
+        assert_eq!(metadata.remote_source_id.as_deref(), Some("remote-source"));
+        assert_eq!(metadata.cue_source_path.as_deref(), Some("/music/album.flac"));
+        assert_eq!(metadata.cue_start_offset, Some(12000));
+        assert_eq!(metadata.cue_end_offset, Some(34000));
+    }
+
+    #[test]
+    fn song_detail_uses_database_metadata_when_file_is_unavailable() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE songs (
+                path TEXT PRIMARY KEY,
+                container TEXT,
+                codec TEXT,
+                file_size INTEGER,
+                track_number TEXT,
+                disc_number TEXT,
+                comment TEXT,
+                bitrate INTEGER,
+                sample_rate INTEGER,
+                bit_depth INTEGER,
+                format TEXT
+            );
+            INSERT INTO songs VALUES (
+                'remote://source/track.flac',
+                'flac',
+                'flac',
+                123456,
+                '03',
+                '02',
+                'Remote comment',
+                1411,
+                96000,
+                24,
+                'flac'
+            );",
+        )
+        .unwrap();
+        let mut detail = SongDetail {
+            path: "remote://source/track.flac".to_string(),
+            ..SongDetail::default()
+        };
+
+        hydrate_song_detail_from_db(&conn, &detail.path.clone(), &mut detail).unwrap();
+
+        assert_eq!(detail.container.as_deref(), Some("flac"));
+        assert_eq!(detail.codec.as_deref(), Some("flac"));
+        assert_eq!(detail.file_size, Some(123456));
+        assert_eq!(detail.track_number.as_deref(), Some("03"));
+        assert_eq!(detail.disc_number.as_deref(), Some("02"));
+        assert_eq!(detail.comment.as_deref(), Some("Remote comment"));
+        assert_eq!(detail.bitrate, Some(1411));
+        assert_eq!(detail.sample_rate, Some(96000));
+        assert_eq!(detail.bit_depth, Some(24));
+        assert_eq!(detail.format.as_deref(), Some("flac"));
     }
 }
 
@@ -1165,4 +1324,3 @@ pub async fn save_artist_avatar(
         task_id,
     })
 }
-

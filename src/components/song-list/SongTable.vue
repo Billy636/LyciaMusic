@@ -2,7 +2,7 @@
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { dragSession } from '../../composables/dragState';
-import type { Song } from '../../types';
+import type { Song, SongQualityMetadata } from '../../types';
 import { songTableViewportCoverSnapshotCache } from '../../caches/imageCaches';
 import { useLibraryCollections } from '../../features/collections/useLibraryCollections';
 import { useSettings } from '../../features/settings/useSettings';
@@ -22,6 +22,7 @@ import { useLibraryStore } from '../../features/library/store';
 import { DEFAULT_SCROLLBAR_HOT_ZONE_PX, isPointerNearVerticalScrollbar } from '../../utils/scrollbarActivity';
 import { isRemoteSong } from '../../utils/remoteSong';
 import { useSongDetailCache } from '../../composables/useSongDetailCache';
+import { useSongQualityMetadata } from '../../composables/useSongQualityMetadata';
 import { isProfilingEnabled } from '../../utils/profiling';
 
 const { settings } = useSettings();
@@ -67,6 +68,7 @@ const route = useRoute();
 const { openHomeArtist } = useHomeNavigation(router);
 const { coverCache, loadCover, touchCoverPaths, preloadPriorityCovers, primeCoverPath } = useCoverCache();
 const { loadSongDetail } = useSongDetailCache();
+const { loadSongQualityMetadata } = useSongQualityMetadata();
 
 const ROW_HEIGHT = 72;
 const OVERSCAN = 20;
@@ -80,8 +82,10 @@ const isScrollbarScrolling = ref(false);
 const isScrollbarActive = computed(() => isScrollbarHot.value || isScrollbarScrolling.value);
 const displayedCoverUrls = reactive(new Map<string, string>());
 const songCommentCache = reactive(new Map<string, string>());
+const songQualityCache = reactive(new Map<string, SongQualityMetadata>());
 const loadingSongCommentPaths = new Set<string>();
 let visibleCoverPaths = new Set<string>();
+let qualityRequestId = 0;
 let scrollbarActiveTimer: ReturnType<typeof window.setTimeout> | null = null;
 let virtualDataProfileCount = 0;
 const resolveListRoutePath = (path: string) =>
@@ -121,6 +125,33 @@ const getDisplayedCoverUrl = (path: string | undefined) => {
 const getSongComment = (song: Song) => (
   song.comment?.trim() || songCommentCache.get(song.path)?.trim() || ''
 );
+
+const getSongQuality = (song: Song) => songQualityCache.get(song.path) ?? song;
+
+const loadVisibleSongQuality = (songs: Song[]) => {
+  if (!settings.value.showQualityBadges) {
+    return;
+  }
+  const requestId = ++qualityRequestId;
+  const visiblePaths = new Set(songs.map(song => song.path));
+  void loadSongQualityMetadata(Array.from(visiblePaths))
+    .then((metadata) => {
+      if (requestId !== qualityRequestId || !settings.value.showQualityBadges) {
+        return;
+      }
+      for (const path of Array.from(songQualityCache.keys())) {
+        if (!visiblePaths.has(path)) {
+          songQualityCache.delete(path);
+        }
+      }
+      metadata.forEach((value, path) => {
+        if (visiblePaths.has(path)) {
+          songQualityCache.set(path, value);
+        }
+      });
+    })
+    .catch(() => {});
+};
 
 const hasVisibleSongComment = (song: Song) => settings.value.showSongComments && getSongComment(song).length > 0;
 
@@ -407,6 +438,7 @@ watch(
     const paths = newItems.map(song => song.path);
     preloadPriorityCovers(paths);
     loadVisibleSongComments(newItems);
+    loadVisibleSongQuality(newItems);
   },
   { immediate: true },
 );
@@ -416,6 +448,18 @@ watch(
   (showSongComments) => {
     if (showSongComments) {
       loadVisibleSongComments(virtualItems.value);
+    }
+  },
+);
+
+watch(
+  () => settings.value.showQualityBadges,
+  (showQualityBadges) => {
+    if (showQualityBadges) {
+      loadVisibleSongQuality(virtualItems.value);
+    } else {
+      qualityRequestId += 1;
+      songQualityCache.clear();
     }
   },
 );
@@ -700,10 +744,10 @@ const getRowStyle = (songIndex: number, songPath: string) => {
               <QualityBadge
                 v-if="settings.showQualityBadges"
                 class="shrink-0"
-                :bitrate="song.bitrate || 0"
-                :sample-rate="song.sample_rate || 0"
-                :bit-depth="song.bit_depth || 0"
-                :format="song.format || ''"
+                :bitrate="getSongQuality(song).bitrate || 0"
+                :sample-rate="getSongQuality(song).sample_rate || 0"
+                :bit-depth="getSongQuality(song).bit_depth || 0"
+                :format="getSongQuality(song).format || ''"
                 :codec="song.codec || ''"
                 :container="song.container || ''"
               />

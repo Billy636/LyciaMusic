@@ -354,6 +354,10 @@ const displaySong = computed(() => {
     container: currentSongDetail.value?.container ?? baseSong.container,
     codec: currentSongDetail.value?.codec ?? baseSong.codec,
     file_size: currentSongDetail.value?.file_size ?? baseSong.file_size,
+    bitrate: currentSongDetail.value?.bitrate ?? baseSong.bitrate,
+    sample_rate: currentSongDetail.value?.sample_rate ?? baseSong.sample_rate,
+    bit_depth: currentSongDetail.value?.bit_depth ?? baseSong.bit_depth,
+    format: currentSongDetail.value?.format ?? baseSong.format,
     track_number: currentSongDetail.value?.track_number,
     disc_number: currentSongDetail.value?.disc_number,
   };

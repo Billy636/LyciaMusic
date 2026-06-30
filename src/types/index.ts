@@ -37,7 +37,40 @@ export interface SongCore {
 
 export interface Song extends SongCore {}
 
-export type LibrarySong = Omit<Song, 'container' | 'codec' | 'file_size' | 'genre' | 'year'>;
+export type LibrarySong = Omit<
+  Song,
+  | 'id'
+  | 'container'
+  | 'codec'
+  | 'file_size'
+  | 'genre'
+  | 'year'
+  | 'remote_source_id'
+  | 'cue_source_path'
+  | 'cue_start_offset'
+  | 'cue_end_offset'
+  | 'comment'
+  | 'bitrate'
+  | 'sample_rate'
+  | 'bit_depth'
+  | 'format'
+>;
+
+export interface SongRuntimeMetadata {
+  id?: number;
+  remote_source_id?: string;
+  cue_source_path?: string;
+  cue_start_offset?: number;
+  cue_end_offset?: number;
+}
+
+export interface SongQualityMetadata {
+  path: string;
+  bitrate: number;
+  sample_rate: number;
+  bit_depth?: number;
+  format: string;
+}
 
 export interface SongDetail {
   path: string;
@@ -49,6 +82,10 @@ export interface SongDetail {
   container?: string;
   codec?: string;
   file_size?: number;
+  bitrate?: number;
+  sample_rate?: number;
+  bit_depth?: number;
+  format?: string;
 }
 
 export interface ArtistCatalogItem {
@@ -397,4 +434,3 @@ export interface SaveArtistAvatarResponse {
   avatarPath: string;
   taskId?: string;
 }
-

@@ -87,7 +87,8 @@ export const useLibraryStore = defineStore('library', () => {
       song.album_key = registerString(song.album_key) ?? '';
       song.track_number = registerString(song.track_number);
       song.disc_number = registerString(song.disc_number);
-      song.format = registerString(song.format);
+      song.cover_thumb_path = registerString(song.cover_thumb_path);
+      song.source_type = registerString(song.source_type) as LibrarySong['source_type'];
     }
 
     stringPool.clear();
@@ -102,11 +103,9 @@ export const useLibraryStore = defineStore('library', () => {
   };
 
   const songKeys: Array<keyof LibrarySong> = [
-    'id',
     'name',
     'title',
     'path',
-    'comment',
     'artist',
     'artist_names',
     'effective_artist_names',
@@ -118,12 +117,10 @@ export const useLibraryStore = defineStore('library', () => {
     'is_various_artists_album',
     'collapse_artist_credits',
     'duration',
-    'bitrate',
-    'sample_rate',
-    'bit_depth',
-    'format',
+    'cover_thumb_path',
     'added_at',
     'file_modified_at',
+    'source_type',
   ];
 
   const canonicalSongPaths = shallowRef<string[]>([]);
@@ -162,10 +159,8 @@ export const useLibraryStore = defineStore('library', () => {
   };
 
   const normalizeSongRecord = (song: LibrarySong): LibrarySong => ({
-    ...song,
     name: internString(song.name) ?? '',
     title: internString(song.title),
-    comment: internString(song.comment),
     path: internString(song.path) ?? '',
     artist: internString(song.artist) ?? '',
     artist_names: internStringArray(song.artist_names),
@@ -173,9 +168,15 @@ export const useLibraryStore = defineStore('library', () => {
     album: internString(song.album) ?? '',
     album_artist: internString(song.album_artist) ?? '',
     album_key: internString(song.album_key) ?? '',
+    is_various_artists_album: song.is_various_artists_album,
+    collapse_artist_credits: song.collapse_artist_credits,
+    duration: song.duration,
+    cover_thumb_path: internString(song.cover_thumb_path),
     track_number: internString(song.track_number),
     disc_number: internString(song.disc_number),
-    format: internString(song.format),
+    added_at: song.added_at,
+    file_modified_at: song.file_modified_at,
+    source_type: internString(song.source_type) as LibrarySong['source_type'],
   });
 
   const syncSongRecord = (target: LibrarySong, source: LibrarySong) => {
@@ -323,6 +324,7 @@ export const useLibraryStore = defineStore('library', () => {
     const interned = internSong(song);
     if (interned.changed) {
       songCatalogVersion.value += 1;
+      libraryDataVersion.value += 1;
     }
   };
 

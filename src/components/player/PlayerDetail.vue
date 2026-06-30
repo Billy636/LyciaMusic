@@ -219,7 +219,12 @@ const metaInfo = computed(() => {
   return [
     { label: '歌手', value: song.artist },
     { label: '专辑', value: song.album },
-    { label: '音质', value: song.bitrate ? `${song.sample_rate}Hz / ${song.bitrate}kbps` : 'Standard' },
+    {
+      label: '音质',
+      value: (detail?.bitrate || song.bitrate)
+        ? `${detail?.sample_rate || song.sample_rate}Hz / ${detail?.bitrate || song.bitrate}kbps`
+        : 'Standard',
+    },
     (detail?.genre || song.genre) ? { label: '风格', value: detail?.genre || song.genre || '' } : null,
     (detail?.year || song.year) ? { label: '年份', value: detail?.year || song.year || '' } : null,
     detail?.file_size ? { label: '大小', value: formatFileSize(detail.file_size) } : null,

@@ -10,7 +10,9 @@ import { useLibraryStore } from '../features/library/store';
 type BackendLocalSortMode = Exclude<LocalSortMode, 'custom'>;
 
 const ALL_VIEW_PATH_CACHE_TTL_MS = 5 * 60 * 1000;
-const ALL_VIEW_PATH_CACHE_MAX_ENTRIES = 96;
+// Each entry can contain tens of thousands of paths. Keep only the most recent
+// view variants so search and sort changes cannot retain dozens of full lists.
+const ALL_VIEW_PATH_CACHE_MAX_ENTRIES = 8;
 
 const allViewPathCache = new MemoryCache<string, string[]>({
   maxEntries: ALL_VIEW_PATH_CACHE_MAX_ENTRIES,

@@ -267,6 +267,41 @@ describe('player playback domain', () => {
     playerPlayback.dispose();
   });
 
+  it('hydrates runtime metadata before starting playback', async () => {
+    const playbackStore = usePlaybackStore();
+    const song = makeSong({ path: '/music/album.cue::track02', duration: 120 });
+    const resolveSongForPlayback = vi.fn(async (value: Song) => Object.assign(value, {
+      id: 42,
+      cue_source_path: '/music/album.flac',
+      cue_start_offset: 180_000,
+      cue_end_offset: 300_000,
+    }));
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext: vi.fn(),
+      resolveSongForPlayback,
+    });
+
+    await playerPlayback.playSong(song);
+
+    expect(resolveSongForPlayback).toHaveBeenCalledWith(song);
+    expect(playbackStore.currentSong).toMatchObject({
+      path: song.path,
+      id: 42,
+      cue_source_path: '/music/album.flac',
+      cue_start_offset: 180_000,
+    });
+    expect(playbackApi.playAudio).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/music/album.flac',
+      songId: 42,
+      cueStartOffsetMs: 180_000,
+      startOffsetMs: 180_000,
+    }));
+    playerPlayback.dispose();
+  });
+
   it('strips the file extension when title metadata is missing', async () => {
     const song = makeSong({ name: 'i-dle - Allergy.flac', title: '   ' });
     const playerPlayback = createPlayerPlayback({

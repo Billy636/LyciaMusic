@@ -27,6 +27,7 @@ interface CreatePlayerPlaybackDeps {
   loadLyrics: () => void | Promise<void>;
   handleAutoNext: () => void;
   onBeforePlay?: (song: Song, options: PlaySongOptions) => void;
+  resolveSongForPlayback?: (song: Song) => Promise<Song>;
 }
 
 let progressTimerId: ReturnType<typeof setTimeout> | null = null;
@@ -49,6 +50,7 @@ export const createPlayerPlayback = ({
   loadLyrics,
   handleAutoNext,
   onBeforePlay,
+  resolveSongForPlayback,
 }: CreatePlayerPlaybackDeps) => {
   const playbackStore = usePlaybackStore();
   const settingsStore = useSettingsStore();
@@ -255,6 +257,13 @@ export const createPlayerPlayback = ({
 
   const playSong = async (song: Song, options: PlaySongOptions = {}) => {
     const requestId = ++playRequestId;
+    const resolvedSong = resolveSongForPlayback
+      ? await resolveSongForPlayback(song).catch(() => song)
+      : song;
+    if (requestId !== playRequestId) {
+      return;
+    }
+    song = resolvedSong;
     const previousSong = currentSong.value;
 
     currentPlaybackId.value = 0;

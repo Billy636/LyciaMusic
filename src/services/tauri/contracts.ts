@@ -14,6 +14,8 @@ import type {
   RemoteSyncResult,
   Song,
   SongDetail,
+  SongQualityMetadata,
+  SongRuntimeMetadata,
   SaveArtistAvatarResponse,
 } from '../../types';
 import type { AudioOutputMode } from '../../types';
@@ -291,6 +293,8 @@ export interface TauriCommandMap {
     response: SaveSongInfoResponse;
   };
   get_song_detail: { payload: { path: string }; response: SongDetail };
+  get_song_runtime_metadata: { payload: { path: string }; response: SongRuntimeMetadata | null };
+  get_song_quality_metadata: { payload: { paths: string[] }; response: SongQualityMetadata[] };
   play_audio: { payload: PlayAudioOptions; response: number };
   update_playback_metadata: { payload: UpdatePlaybackMetadataOptions; response: void };
   pause_audio: { payload: undefined; response: void };

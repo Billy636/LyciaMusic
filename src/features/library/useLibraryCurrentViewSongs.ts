@@ -802,11 +802,8 @@ export function useLibraryCurrentViewSongs({
     return songs;
   });
 
-  const currentViewSongCount = computed(() => currentViewSongs.value.length);
-
   return {
     currentViewSongPaths,
-    currentViewSongCount,
     currentViewSongs,
   };
 }

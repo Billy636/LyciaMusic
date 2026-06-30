@@ -18,6 +18,7 @@ import { createPlayerRestore } from './playerRestore';
 import { createPlayerUiShell } from './playerUiShell';
 import type { ScanLibraryOptions } from './playerLibraryScan';
 import { useCoverCache } from './useCoverCache';
+import { useSongRuntimeMetadata } from './useSongRuntimeMetadata';
 import { useCollectionsActions } from '../features/collections/useCollectionsActions';
 import { useFileImport } from './useFileImport';
 import { useLibrarySync } from '../features/library/useLibrarySync';
@@ -164,6 +165,7 @@ function createPlayerCore() {
   const { showToast } = useToast();
   const { clearCoverCaches } = useCoverCache();
   const { clearSongDetailCache } = useSongDetailCache();
+  const { resolveSongForPlayback, clearSongRuntimeMetadataCache } = useSongRuntimeMetadata();
 
   const collectionsStore = useCollectionsStore();
   const libraryStore = useLibraryStore();
@@ -276,6 +278,7 @@ function createPlayerCore() {
       clearCaches: () => {
         clearCoverCaches();
         clearSongDetailCache();
+        clearSongRuntimeMetadataCache();
       },
     });
   };
@@ -418,6 +421,7 @@ function createPlayerCore() {
     addToHistory,
     loadLyrics,
     handleAutoNext: playbackActions.handleAutoNext,
+    resolveSongForPlayback,
     onBeforePlay: (song, options) => {
       playerQueue.handleBeforePlay(song, options);
     },
@@ -580,6 +584,7 @@ function createPlayerCore() {
         clearCaches: () => {
           clearCoverCaches();
           clearSongDetailCache();
+          clearSongRuntimeMetadataCache();
         },
       });
       refreshStateSongReferences();

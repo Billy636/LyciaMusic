@@ -86,7 +86,6 @@ pub struct SaveSongInfoResponse {
 
 #[derive(Serialize, Clone, Debug)]
 pub struct LibrarySong {
-    pub id: Option<i64>,
     pub name: String,
     pub title: String,
     pub path: String,
@@ -100,20 +99,29 @@ pub struct LibrarySong {
     pub collapse_artist_credits: bool,
     pub duration: u32,
     pub cover_thumb_path: Option<String>,
-    pub bitrate: u32,
-    pub sample_rate: u32,
-    pub bit_depth: Option<u8>,
-    pub format: String,
     pub track_number: Option<String>,
     pub disc_number: Option<String>,
     pub added_at: Option<u64>,
     pub file_modified_at: Option<u64>,
     pub source_type: String,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct SongRuntimeMetadata {
+    pub id: Option<i64>,
     pub remote_source_id: Option<String>,
     pub cue_source_path: Option<String>,
     pub cue_start_offset: Option<u32>,
     pub cue_end_offset: Option<u32>,
-    pub comment: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct SongQualityMetadata {
+    pub path: String,
+    pub bitrate: u32,
+    pub sample_rate: u32,
+    pub bit_depth: Option<u8>,
+    pub format: String,
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -127,6 +135,10 @@ pub struct SongDetail {
     pub container: Option<String>,
     pub codec: Option<String>,
     pub file_size: Option<u64>,
+    pub bitrate: Option<u32>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u8>,
+    pub format: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
