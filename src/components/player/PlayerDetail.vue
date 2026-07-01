@@ -11,6 +11,7 @@ import LyricsView from './LyricsView.vue';
 import PlayerDetailBackground from './PlayerDetailBackground.vue';
 import PlayerDetailLeft from './PlayerDetailLeft.vue';
 import QueueList from './QueueList.vue';
+import { hideMainWindowToTray } from '../../composables/renderingPower';
 
 const {
   showPlayerDetail,
@@ -77,7 +78,7 @@ const toggleMaximize = async () => {
 };
 const closeApp = async () => {
   if (settings.value.closeToTray) {
-    await appWindow.hide();
+    await hideMainWindowToTray(appWindow);
   } else {
     await appWindow.close();
   }

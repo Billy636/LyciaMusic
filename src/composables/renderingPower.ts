@@ -1,5 +1,5 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWindow, type Window } from '@tauri-apps/api/window';
 import { storeToRefs } from 'pinia';
 
 import { useUiStore } from '../shared/stores/ui';
@@ -23,7 +23,8 @@ const defaultSnapshot = (): MainWindowRenderingSnapshot => ({
 const mainWindowRenderingSnapshot = ref<MainWindowRenderingSnapshot>(defaultSnapshot());
 
 export function resolveMainWindowLowPower(snapshot: MainWindowRenderingSnapshot) {
-  return !snapshot.windowVisible
+  return snapshot.documentHidden
+    || !snapshot.windowVisible
     || snapshot.windowMinimized
     || snapshot.miniMode;
 }
@@ -42,6 +43,16 @@ export function useRenderingPower() {
     mainWindowRenderingSnapshot,
     isMainWindowLowPower,
   };
+}
+
+export async function hideMainWindowToTray(appWindow: Window = getCurrentWindow()) {
+  await appWindow.hide();
+  setMainWindowRenderingSnapshot({
+    documentHidden: true,
+    windowFocused: false,
+    windowVisible: false,
+    windowMinimized: false,
+  });
 }
 
 export function useMainWindowRenderingPower() {

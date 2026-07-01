@@ -6,6 +6,7 @@ import { usePlayerViewState } from '../../composables/usePlayerViewState';
 import { useThemeSettings } from '../../composables/useThemeSettings';
 import { getCurrentWindow } from '@tauri-apps/api/window'; 
 import { useSettings } from '../../features/settings/useSettings';
+import { hideMainWindowToTray } from '../../composables/renderingPower';
 
 const router = useRouter();
 const route = useRoute();
@@ -69,7 +70,7 @@ const toggleMaximize = async () => {
 // 关闭
 const closeWindow = async () => { 
   if (settings.value.closeToTray) {
-    await appWindow.hide();
+    await hideMainWindowToTray(appWindow);
   } else {
     await appWindow.close();
   }
