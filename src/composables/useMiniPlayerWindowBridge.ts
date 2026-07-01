@@ -8,6 +8,7 @@ import { useCoverCache } from './useCoverCache';
 import { useLyrics } from './lyrics';
 import { usePlayer } from './player';
 import { useThemeSettings } from './useThemeSettings';
+import { useLibrarySongResolver } from './useLibrarySongResolver';
 import { useSettings } from '../features/settings/useSettings';
 import {
   MINI_PLAYER_ACTION_EVENT,
@@ -259,8 +260,8 @@ export function useMiniPlayerWindowBridge() {
     currentSong,
     isPlaying,
     volume,
-    playQueue,
-    songList,
+    playQueuePaths,
+    sourceSongPaths,
     togglePlay,
     prevSong,
     nextSong,
@@ -271,6 +272,7 @@ export function useMiniPlayerWindowBridge() {
   } = usePlayer();
   const { currentLyricLine } = useLyrics();
   const { loadCover } = useCoverCache();
+  const { loadSong } = useLibrarySongResolver();
   const { isDarkTheme } = useThemeSettings();
 
   let isMainWindowClosing = false;
@@ -288,7 +290,7 @@ export function useMiniPlayerWindowBridge() {
       isPlaying: isPlaying.value,
       isDarkTheme: isDarkTheme.value,
       volume: volume.value,
-      queue: playQueue.value.length > 0 ? playQueue.value : songList.value,
+      queuePaths: playQueuePaths.value.length > 0 ? playQueuePaths.value : sourceSongPaths.value,
       lyricText: currentLyricLine.value?.text ?? '',
     };
   };
@@ -402,7 +404,12 @@ export function useMiniPlayerWindowBridge() {
         await toggleMute();
         break;
       case 'play-song':
-        await playSong(action.song);
+        {
+          const song = await loadSong(action.path);
+          if (song) {
+            await playSong(song);
+          }
+        }
         break;
       case 'restore-main':
         await restoreMainWindowFromMiniMode({
@@ -488,8 +495,8 @@ export function useMiniPlayerWindowBridge() {
       currentSong,
       isPlaying,
       volume,
-      playQueue,
-      songList,
+      playQueuePaths,
+      sourceSongPaths,
       isDarkTheme,
       () => currentLyricLine.value?.text,
     ],

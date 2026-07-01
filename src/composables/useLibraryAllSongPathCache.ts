@@ -4,6 +4,7 @@ import type { LocalSortMode } from '../services/storage/playerStorage';
 import { tauriInvoke } from '../services/tauri/invoke';
 import { MemoryCache } from '../utils/MemoryCache';
 import { isProfilingEnabled } from '../utils/profiling';
+import { sortItemsByAlphabetIndex } from '../utils/alphabetIndex';
 
 import { useLibraryStore } from '../features/library/store';
 
@@ -20,6 +21,7 @@ const allViewPathCache = new MemoryCache<string, string[]>({
 });
 
 const inFlightRequests = new Map<string, Promise<string[]>>();
+const songTitleLabels = new Map<string, string>();
 const cacheVersion = ref(0);
 const STALE_LIBRARY_PATH_REQUEST = 'STALE_LIBRARY_PATH_REQUEST';
 
@@ -75,12 +77,41 @@ export function useLibraryAllSongPathCache() {
       );
     }
 
-    const request = tauriInvoke('get_library_song_paths_for_all_view', {
-      query,
-      artistFilter,
-      albumFilter,
-      sortMode,
-    })
+    const pathRequest = sortMode === 'title'
+      ? tauriInvoke('get_library_song_labels_for_all_view', {
+          query,
+          artistFilter,
+          albumFilter,
+        }).then((labels) => {
+          // Keep older mocks and mixed-version backends compatible while the
+          // compact label endpoint rolls out.
+          if (labels.length > 0 && typeof labels[0] === 'string') {
+            return sortItemsByAlphabetIndex(
+              labels as unknown as string[],
+              path => libraryStore.getSongByPath(path)?.title
+                || path.split(/[\\/]/).pop()
+                || path,
+            );
+          }
+          if (labels.length > 0 || query || artistFilter || albumFilter) {
+            labels.forEach(item => songTitleLabels.set(item.path, item.label));
+            return sortItemsByAlphabetIndex(labels, item => item.label).map(item => item.path);
+          }
+          return sortItemsByAlphabetIndex(
+            libraryStore.canonicalSongPaths,
+            path => libraryStore.getSongByPath(path)?.title
+              || path.split(/[\\/]/).pop()
+              || path,
+          );
+        })
+      : tauriInvoke('get_library_song_paths_for_all_view', {
+          query,
+          artistFilter,
+          albumFilter,
+          sortMode,
+        });
+
+    const request = pathRequest
       .then((paths) => {
         // 强一致性校验：若在请求未决期间数据版本发生变更（如新增、删除或重排），则丢弃缓存回填
         if (libraryStore.libraryDataVersion === requestVersion) {
@@ -112,11 +143,14 @@ export function useLibraryAllSongPathCache() {
     clearLibraryAllSongPathCache: () => {
       allViewPathCache.clear();
       inFlightRequests.clear();
+      songTitleLabels.clear();
       cacheVersion.value += 1;
     },
     libraryAllSongPathCacheVersion: cacheVersion,
   };
 }
+
+export const getCachedLibrarySongTitleLabel = (path: string) => songTitleLabels.get(path);
 
 export const isStaleLibraryPathRequestError = (error: unknown) =>
   typeof error === 'object'

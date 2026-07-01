@@ -45,8 +45,8 @@ describe('useHomeBatchActions physical delete', () => {
     deleteMusicFileMock.mockResolvedValue(undefined);
 
     const selectedPaths = ref(new Set([deletedSong.path]));
-    const canonicalSongs = ref<Song[]>([deletedSong, keptSong]);
-    const sourceSongs = ref<Song[]>([deletedSong, keptSong]);
+    const canonicalSongPaths = ref([deletedSong.path, keptSong.path]);
+    const sourceSongPaths = ref([deletedSong.path, keptSong.path]);
     const favoritePaths = ref([deletedSong.path, keptSong.path]);
     const playlists = ref<Playlist[]>([
       { id: 'playlist-1', name: 'Playlist', songPaths: [deletedSong.path, keptSong.path] },
@@ -58,8 +58,8 @@ describe('useHomeBatchActions physical delete', () => {
       selectedPaths,
       isBatchMode: ref(true),
       isManagementMode: ref(true),
-      canonicalSongs,
-      sourceSongs,
+      canonicalSongPaths,
+      sourceSongPaths,
       favoritePaths,
       playlists,
       moveFilesToFolder: vi.fn(),

@@ -17,6 +17,7 @@ const props = defineProps<{
   selectedCount?: number;
   activeTab: ArtistTabId;
   songs?: any[];
+  songPaths?: string[];
 }>();
 
 const emit = defineEmits([
@@ -345,17 +346,10 @@ const isLoading = ref<boolean>(false);
 const { loadCover, peekCoverUrl } = useCoverCache();
 let coverRequestId = 0;
 
-watch([() => props.artistName, () => props.songs], async ([artistName, newSongs]) => {
+watch([() => props.artistName, () => props.songPaths, () => props.songs], async ([artistName, songPaths, newSongs]) => {
   const requestId = ++coverRequestId;
 
-  if (!newSongs || newSongs.length === 0) {
-    if (requestId !== coverRequestId) return;
-    coverUrl.value = '';
-    isLoading.value = false;
-    return;
-  }
-
-  const firstSongPath = newSongs[0]?.path;
+  const firstSongPath = songPaths?.[0] ?? newSongs?.[0]?.path;
   if (!firstSongPath) {
     if (requestId !== coverRequestId) return;
     coverUrl.value = '';

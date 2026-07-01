@@ -1,6 +1,6 @@
 import { ref, watch, type Ref } from 'vue';
 
-import type { FolderNode, Song } from '../types';
+import type { FolderNode } from '../types';
 
 interface ConfirmOptions {
   title: string;
@@ -14,7 +14,7 @@ interface UseHomeFolderManagementOptions {
   activeRootPath: Ref<string | null>;
   currentFolderFilter: Ref<string>;
   libraryHierarchy: Ref<FolderNode[]>;
-  sourceSongs: Ref<Song[]>;
+  sourceSongPaths: Ref<string[]>;
   refreshFolder: (folderPath: string) => Promise<unknown>;
   fetchFolderTree: () => Promise<unknown>;
   createFolder: (parentPath: string, folderName: string) => Promise<string>;
@@ -31,7 +31,7 @@ export function useHomeFolderManagement({
   activeRootPath,
   currentFolderFilter,
   libraryHierarchy,
-  sourceSongs,
+  sourceSongPaths,
   refreshFolder,
   fetchFolderTree,
   createFolder,
@@ -181,7 +181,7 @@ export function useHomeFolderManagement({
           await syncRootSelection(nextRoot, { forceRefresh: true });
         } else {
           await syncRootSelection(null);
-          sourceSongs.value = [];
+          sourceSongPaths.value = [];
         }
       } else if (fallbackPath) {
         if (owningRootPath) {
@@ -254,7 +254,7 @@ export function useHomeFolderManagement({
             await syncRootSelection(libraryHierarchy.value[0].path, { forceRefresh: true });
           } else {
             await syncRootSelection(null);
-            sourceSongs.value = [];
+            sourceSongPaths.value = [];
           }
         }
       },

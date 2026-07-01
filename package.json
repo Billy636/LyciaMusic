@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "bench:library-page": "cargo test --manifest-path src-tauri/Cargo.toml benchmark_full_materialization_against_first_page -- --ignored --nocapture",
     "version": "node scripts/sync-version.js",
     "release:patch": "npm version patch --no-git-tag-version --force",
     "release:minor": "npm version minor --no-git-tag-version --force",

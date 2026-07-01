@@ -11,6 +11,7 @@ const props = defineProps<{
   isBatchMode: boolean;
   selectedCount?: number;
   songs?: Array<{ path: string }>;
+  songPaths?: string[];
 }>();
 
 const emit = defineEmits([
@@ -73,16 +74,10 @@ const handleGlobalClick = (e: MouseEvent) => {
 onMounted(() => window.addEventListener('click', handleGlobalClick));
 onUnmounted(() => window.removeEventListener('click', handleGlobalClick));
 
-watch([albumCacheKey, () => props.songs], async ([cacheKey, newSongs]) => {
+watch([albumCacheKey, () => props.songPaths, () => props.songs], async ([cacheKey, songPaths, newSongs]) => {
   const requestId = ++coverRequestId;
 
-  if (!newSongs || newSongs.length === 0) {
-    coverUrl.value = '';
-    isLoading.value = false;
-    return;
-  }
-
-  const firstSongPath = newSongs[0]?.path;
+  const firstSongPath = songPaths?.[0] ?? newSongs?.[0]?.path;
   if (!firstSongPath) {
     coverUrl.value = '';
     isLoading.value = false;

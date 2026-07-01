@@ -34,11 +34,10 @@ import { useLibraryStore } from '../features/library/store';
 import { useNavigationStore } from '../shared/stores/navigation';
 import { usePlaybackStore } from '../features/playback/store';
 import { useUiStore } from '../shared/stores/ui';
-import type { HistoryItem, LibrarySong, Song } from '../types';
+import type { HistoryItem, Song } from '../types';
 import { useSongDetailCache } from './useSongDetailCache';
 import {
   cleanupRemovedLibrarySongPaths,
-  collectSongPathsInFolderScope,
   isPathInFolderScope,
 } from './libraryRemovalCleanup';
 
@@ -62,7 +61,7 @@ const LEGACY_PLAYER_QUEUE_KEY = 'player_queue';
 const LEGACY_PLAYER_HISTORY_KEY = 'player_history';
 const LEGACY_PLAYER_LAST_SONG_KEY = 'player_last_song';
 
-const finalizeLibraryScanProgress = (songs: LibrarySong[], failed = false, message?: string) => {
+const finalizeLibraryScanProgress = (songs: ArrayLike<unknown>, failed = false, message?: string) => {
   const libraryStore = useLibraryStore();
   const existing = libraryStore.libraryScanProgress;
 
@@ -122,16 +121,11 @@ const createSongLookup = (fallbackSongs: Song[] = []) => {
     }
   }
 
-  libraryStore.canonicalSongs.forEach((song) => {
+  libraryStore.songLookup.forEach((song) => {
     lookup.set(song.path, song);
   });
 
   return lookup;
-};
-
-const resolveSongsFromPaths = (paths: string[], fallbackSongs: Song[] = []) => {
-  const libraryStore = useLibraryStore();
-  return libraryStore.resolveSongsByPaths(paths, fallbackSongs);
 };
 
 const formatDuration = (seconds: number) => {
@@ -214,6 +208,7 @@ function createPlayerCore() {
     favAlbumList,
     recentAlbumList,
     recentPlaylistList,
+    currentViewSongPaths,
     currentViewSongs,
     isLocalMusic,
     isFolderMode,
@@ -243,15 +238,13 @@ function createPlayerCore() {
     await librarySync.removeLibraryFolderPath(path);
   };
   const collectRemovedLibraryFolderSongPaths = (path: string) => {
-    const candidates = [
-      ...libraryStore.canonicalSongs,
-      ...libraryStore.sourceSongs,
-      ...playbackStore.playQueue,
-      ...playbackStore.tempQueue,
-      ...(playbackStore.currentSong ? [playbackStore.currentSong] : []),
-    ];
-
-    return collectSongPathsInFolderScope(candidates, path);
+    return Array.from(new Set([
+      ...libraryStore.canonicalSongPaths,
+      ...libraryStore.sourceSongPaths,
+      ...playbackStore.playQueuePaths,
+      ...playbackStore.tempQueuePaths,
+      ...(playbackStore.currentSong?.path ? [playbackStore.currentSong.path] : []),
+    ])).filter(songPath => isPathInFolderScope(path, songPath));
   };
 
   const removeLibraryFolderLinked = async (
@@ -365,7 +358,6 @@ function createPlayerCore() {
       legacyPlayerLastSong: LEGACY_PLAYER_LAST_SONG_KEY,
     },
     createSongLookup,
-    resolveSongsFromPaths,
     readStoredHistory,
     readStoredSongArray,
     readStoredSong,
@@ -417,7 +409,7 @@ function createPlayerCore() {
   });
 
   playerPlayback = createPlayerPlayback({
-    getDisplaySongList: () => currentViewSongs.value,
+    getDisplaySongPaths: () => currentViewSongPaths.value,
     addToHistory,
     loadLyrics,
     handleAutoNext: playbackActions.handleAutoNext,
@@ -672,6 +664,7 @@ function createPlayerCore() {
     clearQueue: playbackActions.clearQueue,
     addSongToQueue: playbackActions.addSongToQueue,
     addSongsToQueue: playbackActions.addSongsToQueue,
+    addSongPathsToQueue: playbackActions.addSongPathsToQueue,
     addAlbumToQueueTail: playbackActions.addAlbumToQueueTail,
     removeSongFromQueue: playbackActions.removeSongFromQueue,
     playNext: playbackActions.playNext,

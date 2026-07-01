@@ -3,12 +3,13 @@
 use super::scanner::ScanOptions;
 use super::scanner::{scan_folder_recursive, scan_single_directory_internal};
 use super::types::{
-    AlbumCatalogItem, ArtistCatalogItem, FolderNode, LibraryFolder, LibrarySong,
-    SongQualityMetadata,
+    AlbumCatalogItem, ArtistCatalogItem, FolderNode, LibraryFolder, LibrarySong, LibrarySongLabel,
+    LibrarySongPage,
 };
 use super::utils::{descendant_like_patterns, is_dot_prefixed_path, normalize_path};
 use crate::database::DbState;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use tauri::{AppHandle, State};
@@ -304,56 +305,119 @@ fn folder_song_matches_query(row: &FolderViewSongRow, query: &str) -> bool {
 fn load_cached_songs(conn: &rusqlite::Connection) -> Result<Vec<LibrarySong>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT path, title, artist, artist_names, effective_artist_names, album, album_artist, album_key, is_various_artists_album, collapse_artist_credits, duration, cover_thumb_path, track_number, disc_number, added_at, file_modified_at, source_type
+            "SELECT path, title, artist, artist_names, effective_artist_names, album, album_artist, album_key, is_various_artists_album, collapse_artist_credits, duration, cover_thumb_path, bitrate, sample_rate, bit_depth, format, track_number, disc_number, added_at, file_modified_at, source_type
              FROM songs",
         )
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([], |row| {
-            let path: String = row.get(0)?;
-            let duration = clamp_i64_to_u32(row.get::<_, Option<i64>>(10)?.unwrap_or(0));
-            let cover_thumb_path = row.get::<_, Option<String>>(11)?;
-            let track_number = row.get::<_, Option<String>>(12)?;
-            let disc_number = row.get::<_, Option<String>>(13)?;
-            let added_at_i64 = row.get::<_, Option<i64>>(14)?;
-            let file_modified_at_i64 = row.get::<_, Option<i64>>(15)?;
-            let artist_names = deserialize_string_list(row.get::<_, Option<String>>(3)?);
-            let effective_artist_names = deserialize_string_list(row.get::<_, Option<String>>(4)?);
-
-            let name = std::path::Path::new(&path)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.clone());
-
-            Ok(LibrarySong {
-                name,
-                path,
-                title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                artist_names,
-                effective_artist_names,
-                album: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                album_artist: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                album_key: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
-                is_various_artists_album: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
-                collapse_artist_credits: row.get::<_, Option<i64>>(9)?.unwrap_or(0) != 0,
-                duration,
-                cover_thumb_path,
-                track_number,
-                disc_number,
-                added_at: i64_to_u64_opt(added_at_i64),
-                file_modified_at: i64_to_u64_opt(file_modified_at_i64),
-                source_type: row
-                    .get::<_, Option<String>>(16)?
-                    .unwrap_or_else(|| "local".to_string()),
-            })
-        })
+        .query_map([], map_library_song_row)
         .map_err(|e| e.to_string())?;
 
     let mut songs: Vec<LibrarySong> = rows.filter_map(|row| row.ok()).collect();
     songs.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(songs)
+}
+
+fn load_cached_song_paths(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+    let mut statement = conn
+        .prepare("SELECT path FROM songs")
+        .map_err(|error| error.to_string())?;
+    let paths = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(paths)
+}
+
+fn map_library_song_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibrarySong> {
+    let path: String = row.get(0)?;
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.clone());
+
+    Ok(LibrarySong {
+        name,
+        path,
+        title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+        artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+        artist_names: deserialize_string_list(row.get::<_, Option<String>>(3)?),
+        effective_artist_names: deserialize_string_list(row.get::<_, Option<String>>(4)?),
+        album: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+        album_artist: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+        album_key: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
+        is_various_artists_album: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
+        collapse_artist_credits: row.get::<_, Option<i64>>(9)?.unwrap_or(0) != 0,
+        duration: clamp_i64_to_u32(row.get::<_, Option<i64>>(10)?.unwrap_or(0)),
+        cover_thumb_path: row.get(11)?,
+        bitrate: clamp_i64_to_u32(row.get::<_, Option<i64>>(12)?.unwrap_or(0)),
+        sample_rate: clamp_i64_to_u32(row.get::<_, Option<i64>>(13)?.unwrap_or(0)),
+        bit_depth: i64_to_u8_opt(row.get(14)?),
+        format: row.get::<_, Option<String>>(15)?.unwrap_or_default(),
+        track_number: row.get(16)?,
+        disc_number: row.get(17)?,
+        added_at: i64_to_u64_opt(row.get(18)?),
+        file_modified_at: i64_to_u64_opt(row.get(19)?),
+        source_type: row
+            .get::<_, Option<String>>(20)?
+            .unwrap_or_else(|| "local".to_string()),
+    })
+}
+
+const LIBRARY_SONG_BATCH_MAX_SIZE: usize = 512;
+
+fn load_library_songs_by_paths(
+    conn: &rusqlite::Connection,
+    paths: &[String],
+) -> Result<Vec<LibrarySong>, String> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    if paths.len() > LIBRARY_SONG_BATCH_MAX_SIZE {
+        return Err(format!(
+            "Too many library song paths: {} (max {})",
+            paths.len(),
+            LIBRARY_SONG_BATCH_MAX_SIZE,
+        ));
+    }
+
+    let placeholders = std::iter::repeat_n("?", paths.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT {LIBRARY_SONG_PAGE_COLUMNS} FROM songs WHERE songs.path IN ({placeholders})"
+    );
+    let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(paths.iter()), map_library_song_row)
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let songs_by_path = rows
+        .into_iter()
+        .map(|song| (song.path.clone(), song))
+        .collect::<HashMap<_, _>>();
+
+    Ok(paths
+        .iter()
+        .filter_map(|path| songs_by_path.get(path).cloned())
+        .collect())
+}
+
+#[tauri::command]
+pub async fn get_library_songs_by_paths(
+    paths: Vec<String>,
+    db_state: State<'_, DbState>,
+) -> Result<Vec<LibrarySong>, String> {
+    let db_conn = db_state.conn.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        load_library_songs_by_paths(&conn, &paths)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 const ALBUM_CATALOG_SQL: &str = "WITH normalized_songs AS (
@@ -530,58 +594,17 @@ pub async fn get_library_songs_cached(
     Ok(result)
 }
 
-fn load_song_quality_metadata(
-    conn: &rusqlite::Connection,
-    paths: &[String],
-) -> Result<Vec<SongQualityMetadata>, String> {
-    if paths.is_empty() {
-        return Ok(Vec::new());
-    }
-    let placeholders = std::iter::repeat_n("?", paths.len())
-        .collect::<Vec<_>>()
-        .join(",");
-    let sql = format!(
-        "SELECT path, bitrate, sample_rate, bit_depth, format
-         FROM songs
-         WHERE path IN ({placeholders})"
-    );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(rusqlite::params_from_iter(paths.iter()), |row| {
-            Ok(SongQualityMetadata {
-                path: row.get(0)?,
-                bitrate: clamp_i64_to_u32(row.get::<_, Option<i64>>(1)?.unwrap_or(0)),
-                sample_rate: clamp_i64_to_u32(row.get::<_, Option<i64>>(2)?.unwrap_or(0)),
-                bit_depth: i64_to_u8_opt(row.get::<_, Option<i64>>(3)?),
-                format: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-            })
-        })
-        .map_err(|e| e.to_string())?;
-
-    Ok(rows.filter_map(Result::ok).collect())
-}
-
 #[tauri::command]
-pub async fn get_song_quality_metadata(
-    paths: Vec<String>,
+pub async fn get_library_song_paths_cached(
     db_state: State<'_, DbState>,
-) -> Result<Vec<SongQualityMetadata>, String> {
-    const MAX_PATHS_PER_REQUEST: usize = 256;
-    if paths.len() > MAX_PATHS_PER_REQUEST {
-        return Err(format!(
-            "Too many song quality paths: {} (max {})",
-            paths.len(),
-            MAX_PATHS_PER_REQUEST
-        ));
-    }
-
+) -> Result<Vec<String>, String> {
     let db_conn = db_state.conn.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let conn = db_conn.lock().map_err(|e| e.to_string())?;
-        load_song_quality_metadata(&conn, &paths)
+        let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        load_cached_song_paths(&conn)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -650,6 +673,65 @@ pub async fn get_library_album_catalog(
 }
 
 #[tauri::command]
+pub async fn get_library_album_catalog_by_artist(
+    artist_name: String,
+    db_state: State<'_, DbState>,
+) -> Result<Vec<AlbumCatalogItem>, String> {
+    let db_conn = db_state.conn.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "WITH artist_songs AS (
+                    SELECT DISTINCT songs.id, songs.path, songs.added_at,
+                        COALESCE(NULLIF(TRIM(songs.album_key), ''), '') AS album_key,
+                        COALESCE(NULLIF(TRIM(songs.album), ''), 'Unknown') AS album_name,
+                        COALESCE(NULLIF(TRIM(songs.album_artist), ''), NULLIF(TRIM(songs.artist), ''), 'Unknown') AS album_artist_name
+                    FROM songs
+                    JOIN song_artists ON song_artists.song_id = songs.id
+                    JOIN artists ON artists.id = song_artists.artist_id
+                    WHERE artists.name = ?1 COLLATE NOCASE
+                 ), ranked_songs AS (
+                    SELECT album_key, album_name, album_artist_name, path,
+                        COUNT(*) OVER (PARTITION BY album_key, album_name, album_artist_name) AS song_count,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY album_key, album_name, album_artist_name
+                            ORDER BY added_at DESC, id ASC
+                        ) AS representative_rank
+                    FROM artist_songs
+                 )
+                 SELECT album_key, album_name, album_artist_name, song_count, path
+                 FROM ranked_songs
+                 WHERE representative_rank = 1",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map([artist_name], |row| {
+                let album_key = row.get::<_, String>(0)?;
+                let album_name = row.get::<_, String>(1)?;
+                let artist = row.get::<_, String>(2)?;
+                Ok(AlbumCatalogItem {
+                    key: if album_key.trim().is_empty() {
+                        format!("{}::{}", album_name.to_ascii_lowercase(), artist.to_ascii_lowercase())
+                    } else {
+                        album_key
+                    },
+                    name: album_name,
+                    artist,
+                    count: clamp_i64_to_u32_count(row.get::<_, i64>(3)?),
+                    first_song_path: row.get::<_, String>(4)?,
+                })
+            })
+            .map_err(|error| error.to_string())?;
+
+        Ok::<Vec<AlbumCatalogItem>, String>(rows.filter_map(Result::ok).collect())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 pub async fn get_library_song_paths_by_artist(
     artist_name: String,
     db_state: State<'_, DbState>,
@@ -685,6 +767,7 @@ pub async fn get_library_song_paths_by_artist(
 #[tauri::command]
 pub async fn get_library_song_paths_by_album(
     album_key: String,
+    sort_mode: Option<String>,
     db_state: State<'_, DbState>,
 ) -> Result<Vec<String>, String> {
     let db_conn = db_state.conn.clone();
@@ -693,7 +776,7 @@ pub async fn get_library_song_paths_by_album(
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
-                "SELECT path
+                "SELECT path, title, artist, artist_names, effective_artist_names, album, album_artist, added_at, track_number, disc_number
                  FROM songs
                  WHERE LOWER(
                     COALESCE(
@@ -701,16 +784,49 @@ pub async fn get_library_song_paths_by_album(
                       COALESCE(NULLIF(TRIM(album), ''), 'Unknown') || '::' ||
                       COALESCE(NULLIF(TRIM(album_artist), ''), NULLIF(TRIM(artist), ''), 'Unknown')
                     )
-                 ) = LOWER(?1)
-                 ORDER BY COALESCE(NULLIF(TRIM(title), ''), path) COLLATE NOCASE ASC",
+                 ) = LOWER(?1)",
             )
             .map_err(|e| e.to_string())?;
 
         let rows = stmt
-            .query_map([album_key], |row| row.get::<_, String>(0))
+            .query_map([album_key], |row| {
+                Ok(FolderViewSongRow {
+                    path: row.get::<_, String>(0)?,
+                    title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    artist_names: deserialize_string_list(row.get::<_, Option<String>>(3)?),
+                    effective_artist_names: deserialize_string_list(row.get::<_, Option<String>>(4)?),
+                    album: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                    album_artist: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                    added_at: i64_to_u64_opt(row.get::<_, Option<i64>>(7)?),
+                    track_number: row.get::<_, Option<String>>(8)?,
+                    disc_number: row.get::<_, Option<String>>(9)?,
+                })
+            })
             .map_err(|e| e.to_string())?;
+        let mut songs: Vec<FolderViewSongRow> = rows.filter_map(Result::ok).collect();
+        songs.sort_by(|left, right| {
+            let compare_number = |left: &Option<String>, right: &Option<String>| {
+                match (parse_track_or_disc_number(left), parse_track_or_disc_number(right)) {
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (Some(left), Some(right)) => left.cmp(&right),
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+            };
+            let track_order = compare_number(&left.disc_number, &right.disc_number)
+                .then_with(|| compare_number(&left.track_number, &right.track_number))
+                .then_with(|| song_title_label(&left.title, &left.path).to_lowercase()
+                    .cmp(&song_title_label(&right.title, &right.path).to_lowercase()));
+            match sort_mode.as_deref() {
+                Some("track_number_desc") => track_order.reverse(),
+                Some("track_number") => track_order,
+                _ => song_title_label(&left.title, &left.path).to_lowercase()
+                    .cmp(&song_title_label(&right.title, &right.path).to_lowercase()),
+            }
+        });
 
-        Ok::<Vec<String>, String>(rows.filter_map(Result::ok).collect())
+        Ok::<Vec<String>, String>(songs.into_iter().map(|song| song.path).collect())
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -844,6 +960,225 @@ pub async fn get_library_song_paths_for_all_view(
     .map_err(|e| e.to_string())??;
 
     Ok(result)
+}
+
+const LIBRARY_SONG_PAGE_MAX_SIZE: u32 = 512;
+const LIBRARY_SONG_PAGE_COLUMNS: &str =
+    "songs.path, songs.title, songs.artist, songs.artist_names, songs.effective_artist_names, \
+     songs.album, songs.album_artist, songs.album_key, songs.is_various_artists_album, \
+     songs.collapse_artist_credits, songs.duration, songs.cover_thumb_path, songs.bitrate, \
+     songs.sample_rate, songs.bit_depth, songs.format, songs.track_number, songs.disc_number, \
+     songs.added_at, songs.file_modified_at, songs.source_type";
+
+fn build_all_view_page_filter(
+    query: Option<String>,
+    artist_filter: Option<String>,
+    album_filter: Option<String>,
+) -> (String, Vec<String>) {
+    let mut filter = String::from(" WHERE 1 = 1");
+    let mut params = Vec::new();
+
+    if let Some(artist_name) = artist_filter
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        filter.push_str(
+            " AND EXISTS (
+                SELECT 1
+                FROM song_artists
+                JOIN artists ON artists.id = song_artists.artist_id
+                WHERE song_artists.song_id = songs.id
+                  AND artists.name = ? COLLATE NOCASE
+            )",
+        );
+        params.push(artist_name);
+    }
+
+    if let Some(album_key) = album_filter
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        filter.push_str(
+            " AND LOWER(
+                COALESCE(
+                  NULLIF(TRIM(songs.album_key), ''),
+                  COALESCE(NULLIF(TRIM(songs.album), ''), 'Unknown') || '::' ||
+                  COALESCE(NULLIF(TRIM(songs.album_artist), ''), NULLIF(TRIM(songs.artist), ''), 'Unknown')
+                )
+            ) = LOWER(?)",
+        );
+        params.push(album_key);
+    }
+
+    if let Some(search_query) = query
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty())
+    {
+        let like = format!("%{search_query}%");
+        filter.push_str(
+            " AND (
+                LOWER(COALESCE(songs.title, '')) LIKE ?
+                OR LOWER(COALESCE(songs.artist, '')) LIKE ?
+                OR LOWER(COALESCE(songs.album, '')) LIKE ?
+                OR LOWER(COALESCE(songs.album_artist, '')) LIKE ?
+                OR LOWER(COALESCE(songs.path, '')) LIKE ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM song_artists
+                    JOIN artists ON artists.id = song_artists.artist_id
+                    WHERE song_artists.song_id = songs.id
+                      AND LOWER(artists.name) LIKE ?
+                )
+            )",
+        );
+        for _ in 0..6 {
+            params.push(like.clone());
+        }
+    }
+
+    (filter, params)
+}
+
+fn load_all_view_song_labels(
+    conn: &rusqlite::Connection,
+    query: Option<String>,
+    artist_filter: Option<String>,
+    album_filter: Option<String>,
+) -> Result<Vec<LibrarySongLabel>, String> {
+    let (filter, params) = build_all_view_page_filter(query, artist_filter, album_filter);
+    let sql = format!("SELECT songs.path, songs.title FROM songs{filter}");
+    let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
+    let labels = statement
+        .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            let path: String = row.get(0)?;
+            let title = row.get::<_, Option<String>>(1)?.unwrap_or_default();
+            let label = if title.trim().is_empty() {
+                file_name_from_path(&path)
+            } else {
+                title
+            };
+            Ok(LibrarySongLabel { path, label })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(labels)
+}
+
+#[tauri::command]
+pub async fn get_library_song_labels_for_all_view(
+    query: Option<String>,
+    artist_filter: Option<String>,
+    album_filter: Option<String>,
+    db_state: State<'_, DbState>,
+) -> Result<Vec<LibrarySongLabel>, String> {
+    let db_conn = db_state.conn.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        load_all_view_song_labels(&conn, query, artist_filter, album_filter)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn all_view_page_order(sort_mode: &LibrarySongSortMode) -> &'static str {
+    match sort_mode {
+        LibrarySongSortMode::Title => {
+            " ORDER BY COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC,
+                       songs.path COLLATE NOCASE ASC"
+        }
+        LibrarySongSortMode::Artist => {
+            " ORDER BY COALESCE(NULLIF(TRIM(songs.artist), ''), 'Unknown') COLLATE NOCASE ASC,
+                       COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC,
+                       songs.path COLLATE NOCASE ASC"
+        }
+        LibrarySongSortMode::AddedAt => {
+            " ORDER BY COALESCE(songs.added_at, 0) DESC,
+                       COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC,
+                       songs.path COLLATE NOCASE ASC"
+        }
+        LibrarySongSortMode::AddedAtAsc => {
+            " ORDER BY COALESCE(songs.added_at, 0) ASC,
+                       COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC,
+                       songs.path COLLATE NOCASE ASC"
+        }
+        LibrarySongSortMode::FileModifiedAt => {
+            " ORDER BY COALESCE(songs.file_modified_at, 0) DESC,
+                       COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC,
+                       songs.path COLLATE NOCASE ASC"
+        }
+        LibrarySongSortMode::FileModifiedAtAsc => {
+            " ORDER BY COALESCE(songs.file_modified_at, 0) ASC,
+                       COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC,
+                       songs.path COLLATE NOCASE ASC"
+        }
+    }
+}
+
+fn load_all_view_song_page(
+    conn: &rusqlite::Connection,
+    query: Option<String>,
+    artist_filter: Option<String>,
+    album_filter: Option<String>,
+    sort_mode: LibrarySongSortMode,
+    offset: u32,
+    limit: u32,
+) -> Result<LibrarySongPage, String> {
+    let limit = limit.clamp(1, LIBRARY_SONG_PAGE_MAX_SIZE);
+    let (filter, params) = build_all_view_page_filter(query, artist_filter, album_filter);
+    let count_sql = format!("SELECT COUNT(*) FROM songs{filter}");
+    let total = conn
+        .query_row(
+            &count_sql,
+            rusqlite::params_from_iter(params.iter()),
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())?
+        .max(0) as u64;
+
+    let page_sql = format!(
+        "SELECT {LIBRARY_SONG_PAGE_COLUMNS} FROM songs{filter}{} LIMIT {limit} OFFSET {offset}",
+        all_view_page_order(&sort_mode),
+    );
+    let mut statement = conn.prepare(&page_sql).map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(params.iter()), map_library_song_row)
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    Ok(LibrarySongPage {
+        total,
+        offset,
+        rows,
+    })
+}
+
+#[tauri::command]
+pub async fn get_library_song_page(
+    query: Option<String>,
+    artist_filter: Option<String>,
+    album_filter: Option<String>,
+    sort_mode: LibrarySongSortMode,
+    offset: u32,
+    limit: u32,
+    db_state: State<'_, DbState>,
+) -> Result<LibrarySongPage, String> {
+    let db_conn = db_state.conn.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        load_all_view_song_page(
+            &conn,
+            query,
+            artist_filter,
+            album_filter,
+            sort_mode,
+            offset,
+            limit,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn parse_track_or_disc_number(val: &Option<String>) -> Option<i32> {
@@ -988,7 +1323,7 @@ pub async fn scan_library(
     minimum_duration_seconds: Option<u32>,
     app: AppHandle,
     db_state: State<'_, DbState>,
-) -> Result<Vec<LibrarySong>, String> {
+) -> Result<Vec<String>, String> {
     let db_conn = db_state.conn.clone();
     let options = ScanOptions::from_minimum_duration_seconds(minimum_duration_seconds);
 
@@ -1024,7 +1359,7 @@ pub async fn scan_library(
         }
 
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
-        load_cached_songs(&conn)
+        load_cached_song_paths(&conn)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1174,6 +1509,24 @@ mod tests {
             [],
         )
         .expect("create cached song schema");
+        conn.execute(
+            "CREATE TABLE artists (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE
+            )",
+            [],
+        )
+        .expect("create cached artist schema");
+        conn.execute(
+            "CREATE TABLE song_artists (
+                song_id INTEGER NOT NULL,
+                artist_id INTEGER NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (song_id, artist_id)
+            )",
+            [],
+        )
+        .expect("create cached song artist schema");
     }
 
     fn create_album_catalog_schema(conn: &Connection) {
@@ -1294,8 +1647,8 @@ mod tests {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         create_cached_song_schema(&conn);
         conn.execute(
-            "INSERT INTO songs (path, title, artist, album, comment)
-             VALUES (?1, 'Title', 'Artist', 'Album', 'Live version')",
+            "INSERT INTO songs (path, title, artist, album, comment, bitrate, sample_rate, bit_depth, format)
+             VALUES (?1, 'Title', 'Artist', 'Album', 'Live version', 1411, 96000, 24, 'flac')",
             ["/library/song.flac"],
         )
         .expect("insert cached song");
@@ -1307,10 +1660,14 @@ mod tests {
         assert_eq!(songs[0].title, "Title");
         assert_eq!(songs[0].artist, "Artist");
         assert_eq!(songs[0].album, "Album");
+        assert_eq!(songs[0].bitrate, 1411);
+        assert_eq!(songs[0].sample_rate, 96000);
+        assert_eq!(songs[0].bit_depth, Some(24));
+        assert_eq!(songs[0].format, "flac");
     }
 
     #[test]
-    fn quality_metadata_is_loaded_only_for_requested_paths() {
+    fn library_song_batch_preserves_requested_order_and_quality() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         create_cached_song_schema(&conn);
         conn.execute_batch(
@@ -1319,17 +1676,197 @@ mod tests {
              ('/library/first.flac', 'First', 'Artist', 'Album', 1411, 96000, 24, 'flac'),
              ('/library/second.mp3', 'Second', 'Artist', 'Album', 320, 44100, NULL, 'mp3');",
         )
-        .expect("insert quality songs");
-        let paths = vec!["/library/second.mp3".to_string()];
+        .expect("insert batch songs");
+        let paths = vec![
+            "/library/second.mp3".to_string(),
+            "/library/first.flac".to_string(),
+        ];
 
-        let metadata = load_song_quality_metadata(&conn, &paths).expect("load quality metadata");
+        let songs = load_library_songs_by_paths(&conn, &paths).expect("load song batch");
 
-        assert_eq!(metadata.len(), 1);
-        assert_eq!(metadata[0].path, "/library/second.mp3");
-        assert_eq!(metadata[0].bitrate, 320);
-        assert_eq!(metadata[0].sample_rate, 44100);
-        assert_eq!(metadata[0].bit_depth, None);
-        assert_eq!(metadata[0].format, "mp3");
+        assert_eq!(songs.len(), 2);
+        assert_eq!(songs[0].path, "/library/second.mp3");
+        assert_eq!(songs[0].bitrate, 320);
+        assert_eq!(songs[1].path, "/library/first.flac");
+        assert_eq!(songs[1].sample_rate, 96000);
+        assert_eq!(songs[1].bit_depth, Some(24));
+    }
+
+    #[test]
+    fn library_song_batch_rejects_oversized_requests() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        create_cached_song_schema(&conn);
+        let paths = (0..=LIBRARY_SONG_BATCH_MAX_SIZE)
+            .map(|index| format!("/library/{index}.flac"))
+            .collect::<Vec<_>>();
+
+        let error = load_library_songs_by_paths(&conn, &paths).expect_err("reject large batch");
+
+        assert!(error.contains("Too many library song paths"));
+    }
+
+    #[test]
+    fn all_view_song_page_reports_total_and_keeps_quality_metadata() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        create_cached_song_schema(&conn);
+        conn.execute_batch(
+            "INSERT INTO songs (
+                path, title, artist, artist_names, effective_artist_names, album,
+                album_artist, album_key, duration, bitrate, sample_rate, bit_depth,
+                format, source_type
+             ) VALUES
+             ('/library/c.flac', 'Charlie', 'Artist', '[\"Artist\"]', '[\"Artist\"]', 'Album', 'Artist', 'album::artist', 180, 1411, 96000, 24, 'flac', 'local'),
+             ('/library/a.mp3', 'Alpha', 'Artist', '[\"Artist\"]', '[\"Artist\"]', 'Album', 'Artist', 'album::artist', 181, 320, 44100, NULL, 'mp3', 'local'),
+             ('/library/b.flac', 'Bravo', 'Artist', '[\"Artist\"]', '[\"Artist\"]', 'Album', 'Artist', 'album::artist', 182, 900, 48000, 24, 'flac', 'local');",
+        )
+        .expect("insert paged songs");
+
+        let page = load_all_view_song_page(
+            &conn,
+            None,
+            None,
+            None,
+            LibrarySongSortMode::Title,
+            1,
+            1,
+        )
+        .expect("load song page");
+
+        assert_eq!(page.total, 3);
+        assert_eq!(page.offset, 1);
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(page.rows[0].title, "Bravo");
+        assert_eq!(page.rows[0].bitrate, 900);
+        assert_eq!(page.rows[0].sample_rate, 48000);
+        assert_eq!(page.rows[0].bit_depth, Some(24));
+        assert_eq!(page.rows[0].format, "flac");
+    }
+
+    #[test]
+    fn all_view_song_page_applies_search_and_caps_page_size() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        create_cached_song_schema(&conn);
+        conn.execute_batch(
+            "INSERT INTO songs (path, title, artist, album, source_type)
+             VALUES
+             ('/library/needle.flac', 'Needle Song', 'Artist', 'Album', 'local'),
+             ('/library/other.flac', 'Other Song', 'Artist', 'Album', 'local');",
+        )
+        .expect("insert searchable songs");
+
+        let page = load_all_view_song_page(
+            &conn,
+            Some("needle".to_string()),
+            None,
+            None,
+            LibrarySongSortMode::Title,
+            0,
+            LIBRARY_SONG_PAGE_MAX_SIZE + 100,
+        )
+        .expect("load searched song page");
+
+        assert_eq!(page.total, 1);
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(page.rows[0].path, "/library/needle.flac");
+    }
+
+    #[test]
+    #[ignore = "manual 50k-song performance baseline"]
+    fn benchmark_full_materialization_against_first_page() {
+        use std::time::Instant;
+
+        const SONG_COUNT: usize = 50_000;
+        const PAGE_SIZE: u32 = 128;
+
+        let mut conn = Connection::open_in_memory().expect("open in-memory db");
+        create_cached_song_schema(&conn);
+        let transaction = conn.transaction().expect("start synthetic insert");
+        {
+            let mut insert = transaction
+                .prepare(
+                    "INSERT INTO songs (
+                        path, title, artist, artist_names, effective_artist_names, album,
+                        album_artist, album_key, duration, cover_thumb_path, bitrate,
+                        sample_rate, bit_depth, format, track_number, disc_number,
+                        added_at, file_modified_at, source_type
+                     ) VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?3, ?6, 180, ?7, 1411, 96000, 24, 'flac', ?8, '1', ?9, ?9, 'local')",
+                )
+                .expect("prepare synthetic song insert");
+
+            for index in 0..SONG_COUNT {
+                let artist = format!("Artist {:04}", index % 1_000);
+                let album = format!("Album {:05}", index % 10_000);
+                let artist_names = serde_json::to_string(&vec![artist.clone()])
+                    .expect("serialize synthetic artists");
+                insert
+                    .execute(rusqlite::params![
+                        format!("C:/Synthetic/{artist}/{album}/track-{index:05}.flac"),
+                        format!("Track {index:05}"),
+                        artist,
+                        artist_names,
+                        album,
+                        format!("album::{:05}", index % 10_000),
+                        format!("C:/Synthetic/Covers/{:05}.webp", index % 10_000),
+                        format!("{}", (index % 12) + 1),
+                        index as i64,
+                    ])
+                    .expect("insert synthetic song");
+            }
+        }
+        transaction.commit().expect("commit synthetic songs");
+
+        let paths_started = Instant::now();
+        let startup_paths = load_cached_song_paths(&conn).expect("load startup path index");
+        let paths_elapsed = paths_started.elapsed();
+        let paths_json_bytes = serde_json::to_vec(&startup_paths)
+            .expect("serialize startup path index")
+            .len();
+
+        let full_started = Instant::now();
+        let full = load_cached_songs(&conn).expect("materialize complete library");
+        let full_elapsed = full_started.elapsed();
+        let full_json_bytes = serde_json::to_vec(&full)
+            .expect("serialize complete library")
+            .len();
+
+        let page_started = Instant::now();
+        let page = load_all_view_song_page(
+            &conn,
+            None,
+            None,
+            None,
+            LibrarySongSortMode::Title,
+            0,
+            PAGE_SIZE,
+        )
+        .expect("materialize first page");
+        let page_elapsed = page_started.elapsed();
+        let page_json_bytes = serde_json::to_vec(&page)
+            .expect("serialize first page")
+            .len();
+        let batch_paths = full
+            .iter()
+            .take(PAGE_SIZE as usize)
+            .map(|song| song.path.clone())
+            .collect::<Vec<_>>();
+        let batch_started = Instant::now();
+        let batch = load_library_songs_by_paths(&conn, &batch_paths)
+            .expect("materialize ordered visible batch");
+        let batch_elapsed = batch_started.elapsed();
+        let batch_json_bytes = serde_json::to_vec(&batch)
+            .expect("serialize ordered visible batch")
+            .len();
+
+        assert_eq!(full.len(), SONG_COUNT);
+        assert_eq!(startup_paths.len(), SONG_COUNT);
+        assert!(paths_json_bytes < full_json_bytes);
+        assert_eq!(page.total, SONG_COUNT as u64);
+        assert_eq!(page.rows.len(), PAGE_SIZE as usize);
+        assert_eq!(batch.len(), PAGE_SIZE as usize);
+        assert_eq!(batch[0].path, batch_paths[0]);
+        eprintln!(
+            "50k benchmark: startup_paths={paths_elapsed:?}/{paths_json_bytes} bytes, full={full_elapsed:?}/{full_json_bytes} bytes, page={page_elapsed:?}/{page_json_bytes} bytes, ordered_batch={batch_elapsed:?}/{batch_json_bytes} bytes"
+        );
     }
 
     #[test]

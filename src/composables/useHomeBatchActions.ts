@@ -2,7 +2,7 @@ import { ref, type Ref } from 'vue';
 import { storeToRefs } from 'pinia';
 import { fileApi } from '../services/tauri/fileApi';
 import { usePlaybackStore } from '../features/playback/store';
-import type { Playlist, Song } from '../types';
+import type { Playlist } from '../types';
 import { removeSongPathsFromPlaybackState } from './playbackCleanup';
 
 interface ConfirmOptions {
@@ -17,8 +17,8 @@ interface UseHomeBatchActionsOptions {
   selectedPaths: Ref<Set<string>>;
   isBatchMode: Ref<boolean>;
   isManagementMode: Ref<boolean>;
-  canonicalSongs: Ref<Song[]>;
-  sourceSongs: Ref<Song[]>;
+  canonicalSongPaths: Ref<string[]>;
+  sourceSongPaths: Ref<string[]>;
   favoritePaths: Ref<string[]>;
   playlists: Ref<Playlist[]>;
   moveFilesToFolder: (paths: string[], targetFolder: string) => Promise<number>;
@@ -32,8 +32,8 @@ export function useHomeBatchActions({
   selectedPaths,
   isBatchMode,
   isManagementMode,
-  canonicalSongs,
-  sourceSongs,
+  canonicalSongPaths,
+  sourceSongPaths,
   favoritePaths,
   playlists,
   moveFilesToFolder,
@@ -48,7 +48,7 @@ export function useHomeBatchActions({
   const confirmMessage = ref('');
   const confirmAction = ref<() => void | Promise<void>>(() => {});
   const playbackStore = usePlaybackStore();
-  const { playQueue, tempQueue, currentSong } = storeToRefs(playbackStore);
+  const { playQueuePaths, tempQueuePaths, currentSong } = storeToRefs(playbackStore);
 
   const resetSelection = () => {
     selectedPaths.value.clear();
@@ -66,8 +66,8 @@ export function useHomeBatchActions({
   const executeBatchDelete = () => {
     if (currentViewMode.value === 'all' && getRoutePath() === '/') {
       const selected = new Set(selectedPaths.value);
-      canonicalSongs.value = canonicalSongs.value.filter((song) => !selected.has(song.path));
-      sourceSongs.value = sourceSongs.value.filter((song) => !selected.has(song.path));
+      canonicalSongPaths.value = canonicalSongPaths.value.filter(path => !selected.has(path));
+      sourceSongPaths.value = sourceSongPaths.value.filter(path => !selected.has(path));
     } else if (getRoutePath() === '/favorites') {
       const selected = new Set(selectedPaths.value);
       favoritePaths.value = favoritePaths.value.filter((path) => !selected.has(path));
@@ -95,10 +95,10 @@ export function useHomeBatchActions({
     }
 
     if (deletedPaths.size > 0) {
-      canonicalSongs.value = canonicalSongs.value.filter((song) => !deletedPaths.has(song.path));
-      sourceSongs.value = sourceSongs.value.filter((song) => !deletedPaths.has(song.path));
+      canonicalSongPaths.value = canonicalSongPaths.value.filter(path => !deletedPaths.has(path));
+      sourceSongPaths.value = sourceSongPaths.value.filter(path => !deletedPaths.has(path));
       favoritePaths.value = favoritePaths.value.filter((path) => !deletedPaths.has(path));
-      removeSongPathsFromPlaybackState({ playQueue, tempQueue, currentSong }, deletedPaths);
+      removeSongPathsFromPlaybackState({ playQueuePaths, tempQueuePaths, currentSong }, deletedPaths);
       await removeFromHistory(Array.from(deletedPaths));
       playlists.value.forEach((playlist) => {
         playlist.songPaths = playlist.songPaths.filter((path) => !deletedPaths.has(path));

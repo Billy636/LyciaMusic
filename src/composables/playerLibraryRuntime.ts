@@ -9,7 +9,6 @@ import type {
   AlbumCatalogItem,
   ArtistCatalogItem,
   LibraryScanVisibility,
-  LibrarySong,
   Song,
 } from '../types';
 import { useLibraryAllSongPathCache } from './useLibraryAllSongPathCache';
@@ -45,7 +44,7 @@ interface CreatePlayerLibraryRuntimeDeps {
   flushBufferedLibraryScanBatch: () => void;
   refreshStateSongReferences: (fallbackSongs?: Song[]) => void;
   finalizeLibraryScanProgress: (
-    songs: LibrarySong[],
+    songs: ArrayLike<unknown>,
     failed?: boolean,
     message?: string,
   ) => void;
@@ -121,21 +120,20 @@ export const createPlayerLibraryRuntime = ({
     libraryCacheLoadPromise = (async () => {
       try {
         flushBufferedLibraryScanBatch();
-        const songs = await invoke<LibrarySong[]>('get_library_songs_cached');
-
-        // 使用增量 Patch 和极速路径覆盖，替代高开销的全量 normalize，加速启动
-        libraryStore.patchLibrarySongs({ songs, deleted_paths: [] });
-        const paths = songs.map(song => song.path);
+        const cachedEntries = await invoke<Array<string | { path: string }>>('get_library_song_paths_cached');
+        const paths = cachedEntries
+          .map(entry => typeof entry === 'string' ? entry : entry.path)
+          .filter(Boolean);
         libraryStore.setCanonicalSongOrder(paths);
+        libraryStore.setSourceSongOrder(paths);
 
         if (libraryStore.libraryDataVersion !== startVersion) {
           clearLibraryPathCaches();
         }
-        refreshStateSongReferences(songs);
         await fetchFolderTree();
         if (isProfilingEnabled()) {
           console.log(
-            `[Profiling] loadLibrarySongsFromCache took ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${songs.length})`,
+            `[Profiling] loadLibrarySongsFromCache took ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${paths.length})`,
           );
         }
       } catch (error) {
@@ -229,21 +227,18 @@ export const createPlayerLibraryRuntime = ({
 
     libraryRefreshPromise = (async () => {
       try {
-        const songs = await invoke<LibrarySong[]>('scan_library', {
+        const scanEntries = await invoke<Array<string | { path: string }>>('scan_library', {
           minimumDurationSeconds: settingsStore.settings.libraryMinDurationSeconds,
         });
-
-        // 1. 先进行最终的增量补全 patch，规避未 patch 到的空洞风险项
-        libraryStore.patchLibrarySongs({ songs, deleted_paths: [] });
-
-        // 2. 提取路径并使用独立的 setCanonicalSongOrder 极速重排覆盖，杜绝 setter 的全量 normalize
-        const paths = songs.map(song => song.path);
+        const paths = scanEntries
+          .map(entry => typeof entry === 'string' ? entry : entry.path)
+          .filter(Boolean);
         libraryStore.setCanonicalSongOrder(paths);
+        libraryStore.setSourceSongOrder(paths);
 
         if (libraryStore.libraryDataVersion !== scanStartLibraryDataVersion) {
           clearLibraryPathCaches();
         }
-        refreshStateSongReferences(songs);
         await Promise.all([
           fetchLibraryFolders(),
           fetchFolderTree(),
@@ -251,11 +246,11 @@ export const createPlayerLibraryRuntime = ({
         ]);
 
         if (!libraryStore.libraryScanProgress?.done) {
-          finalizeLibraryScanProgress(songs);
+          finalizeLibraryScanProgress(paths);
         }
         if (isProfilingEnabled()) {
           console.log(
-            `[Profiling] scanLibrary#${profileId} completed in ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${songs.length})`,
+            `[Profiling] scanLibrary#${profileId} completed in ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${paths.length})`,
           );
         }
       } catch (error) {

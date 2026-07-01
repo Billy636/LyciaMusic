@@ -218,7 +218,6 @@ export const createPlayerLifecycle = ({
     currentTime,
     isPlaying,
     playMode,
-    playQueue,
     playQueuePaths,
     volume,
   } = storeToRefs(playbackStore);
@@ -460,19 +459,19 @@ export const createPlayerLifecycle = ({
     }, { immediate: true });
 
     let lastPrecachedRemotePath = '';
-    watch([currentSong, currentTime, playQueue], ([song, time, queue]) => {
+    watch([currentSong, currentTime, playQueuePaths], ([song, time, queuePaths]) => {
       if (!isPlaying.value || !song || song.duration <= 0 || time / song.duration < 0.6) {
         return;
       }
 
-      const index = queue.findIndex(item => item.path === song.path);
-      const nextSong = index >= 0 ? queue[index + 1] : null;
-      if (!nextSong || !isRemoteSong(nextSong) || nextSong.path === lastPrecachedRemotePath) {
+      const index = queuePaths.indexOf(song.path);
+      const nextPath = index >= 0 ? queuePaths[index + 1] : null;
+      if (!nextPath || !isRemoteSong({ path: nextPath }) || nextPath === lastPrecachedRemotePath) {
         return;
       }
 
-      lastPrecachedRemotePath = nextSong.path;
-      remoteLibraryApi.precacheRemoteSong(nextSong.path).catch(error => {
+      lastPrecachedRemotePath = nextPath;
+      remoteLibraryApi.precacheRemoteSong(nextPath).catch(error => {
         console.warn('Failed to precache remote song:', error);
       });
     });

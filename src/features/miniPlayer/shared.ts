@@ -27,7 +27,7 @@ export interface MiniPlayerStatePayload {
   isPlaying: boolean;
   isDarkTheme: boolean;
   volume: number;
-  queue: Song[];
+  queuePaths: string[];
   lyricText: string;
 }
 
@@ -37,6 +37,6 @@ export type MiniPlayerAction =
   | { type: 'next-song' }
   | { type: 'set-volume'; volume: number }
   | { type: 'toggle-mute' }
-  | { type: 'play-song'; song: Song }
+  | { type: 'play-song'; path: string }
   | { type: 'close' }
   | { type: 'restore-main' };

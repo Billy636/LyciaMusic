@@ -17,6 +17,7 @@
         <SongTable
           ref="songTableRef"
           :songs="localSongList"
+          :songPaths="localSongPaths"
           :isBatchMode="isBatchMode"
           :selectedPaths="selectedPaths"
           memoryScopeKey="recent-view"
@@ -68,9 +69,11 @@ import DragGhost from '../components/common/DragGhost.vue';
 import SongContextMenu from '../components/overlays/SongContextMenu.vue';
 import ModernModal from '../components/common/ModernModal.vue';
 import { useSongDrag } from '../composables/useSongDrag';
+import { useLibrarySongResolver } from '../composables/useLibrarySongResolver';
 
-const { displaySongList, searchQuery } = usePlayerLibraryView();
-const { playSong, addSongsToQueue } = usePlaybackController();
+const { currentViewSongPaths, displaySongList, searchQuery } = usePlayerLibraryView();
+const { playSong, addSongPathsToQueue } = usePlaybackController();
+const { loadSong } = useLibrarySongResolver();
 const { openAddToPlaylistDialog } = useAddToPlaylistDialog();
 const {
   removeFromHistory,
@@ -78,6 +81,7 @@ const {
 } = useLibraryCollections();
 
 const localSongList = computed(() => displaySongList.value);
+const localSongPaths = computed(() => currentViewSongPaths.value);
 
 // ========== 状态管理 ==========
 const isBatchMode = ref(false);
@@ -85,7 +89,7 @@ const selectedPaths = ref<Set<string>>(new Set());
 const songTableRef = ref<any>(null);
 
 // 初始化拖拽逻辑
-const { handleTableDragStart } = useSongDrag(localSongList, isBatchMode, selectedPaths, songTableRef);
+const { handleTableDragStart } = useSongDrag(localSongList, isBatchMode, selectedPaths, songTableRef, localSongPaths);
 
 // 弹窗状态
 const showConfirm = ref(false);
@@ -102,9 +106,10 @@ watch(isBatchMode, (val) => { if (!val) selectedPaths.value.clear(); });
 // ========== 业务逻辑处理 ==========
 
 // 播放全部
-const handlePlayAll = () => {
-  if (localSongList.value.length > 0) {
-    void playSong(localSongList.value[0]);
+const handlePlayAll = async () => {
+  const song = await loadSong(localSongPaths.value[0] ?? '');
+  if (song) {
+    await playSong(song);
   }
 };
 
@@ -114,14 +119,15 @@ const handlePlaySong = (song: Song) => {
 };
 
 const handleAddAllToQueue = () => {
-  addSongsToQueue(localSongList.value);
+  addSongPathsToQueue(localSongPaths.value);
 };
 
 // 批量播放
-const handleBatchPlay = () => {
-  const selected = localSongList.value.filter(s => selectedPaths.value.has(s.path));
-  if (selected.length > 0) {
-    void playSong(selected[0]);
+const handleBatchPlay = async () => {
+  const firstSelectedPath = localSongPaths.value.find(path => selectedPaths.value.has(path));
+  const song = await loadSong(firstSelectedPath ?? '');
+  if (song) {
+    await playSong(song);
   }
 };
 

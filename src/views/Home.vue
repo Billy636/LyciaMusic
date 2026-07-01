@@ -11,6 +11,7 @@
       :currentFolderFilter="currentFolderFilter"
       :playlistDetail="playlistDetail"
       :localSongList="localSongList"
+      :localSongPaths="localSongPaths"
       :artistActiveTab="artistActiveTab"
       :localFilterCondition="localFilterCondition"
       :selectedAlbumSong="selectedAlbumSong"
@@ -133,6 +134,7 @@ const {
   currentFolderFilter,
   playlistDetail,
   localSongList,
+  localSongPaths,
   artistActiveTab,
   localFilterCondition,
   selectedAlbumSong,

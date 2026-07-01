@@ -34,7 +34,7 @@ describe('library store', () => {
     expect(libraryStore.libraryDataVersion).toBeGreaterThan(initialVersion);
   });
 
-  it('keeps only list metadata in the long-lived song pool', () => {
+  it('keeps quality badges but excludes runtime metadata from the long-lived song pool', () => {
     const libraryStore = useLibraryStore();
     libraryStore.setLibrarySongs([makeSong({
       id: 7,
@@ -52,9 +52,12 @@ describe('library store', () => {
       title: 'Demo',
       artist: 'Artist',
       album: 'Album',
+      bitrate: 1411,
+      sample_rate: 96000,
+      bit_depth: 24,
+      format: 'flac',
     });
     expect(libraryStore.canonicalSongs[0]).not.toHaveProperty('id');
-    expect(libraryStore.canonicalSongs[0]).not.toHaveProperty('bitrate');
     expect(libraryStore.canonicalSongs[0]).not.toHaveProperty('cue_source_path');
     expect(libraryStore.canonicalSongs[0]).not.toHaveProperty('comment');
   });

@@ -5,6 +5,7 @@ import { useCollectionsStore } from '../features/collections/store';
 import { useLibraryStore } from '../features/library/store';
 import { usePlaybackStore } from '../features/playback/store';
 import { useCoverCache } from './useCoverCache';
+import { useLibrarySongResolver } from './useLibrarySongResolver';
 
 interface PlayerRestoreKeys {
   playerPlaylistPaths: string;
@@ -19,7 +20,6 @@ interface PlayerRestoreKeys {
 interface CreatePlayerRestoreDeps {
   keys: PlayerRestoreKeys;
   createSongLookup: (fallbackSongs?: Song[]) => Map<string, Song>;
-  resolveSongsFromPaths: (paths: string[], fallbackSongs?: Song[]) => Song[];
   readStoredHistory: (key: string) => HistoryItem[];
   readStoredSongArray: (key: string) => Song[];
   readStoredSong: (key: string) => Song | null;
@@ -30,7 +30,6 @@ interface CreatePlayerRestoreDeps {
 export const createPlayerRestore = ({
   keys,
   createSongLookup,
-  resolveSongsFromPaths,
   readStoredHistory,
   readStoredSongArray,
   readStoredSong,
@@ -41,6 +40,7 @@ export const createPlayerRestore = ({
   const libraryStore = useLibraryStore();
   const playbackStore = usePlaybackStore();
   const { loadCover, retainFullCoverPaths } = useCoverCache();
+  const { loadSong, rememberSongs } = useLibrarySongResolver();
 
   const restoreRecentHistory = async () => {
     const legacyHistory = readStoredHistory(keys.legacyPlayerHistory);
@@ -88,7 +88,7 @@ export const createPlayerRestore = ({
 
     if (
       playbackStore.hasExternalStartupFile
-      || playbackStore.playQueue.length > 0
+      || playbackStore.playQueuePaths.length > 0
       || playbackStore.currentSong !== null
     ) {
       return;
@@ -103,11 +103,11 @@ export const createPlayerRestore = ({
       ...(legacyLastSong ? [legacyLastSong] : []),
     ];
 
-    if (libraryStore.canonicalSongs.length === 0) {
+    if (libraryStore.canonicalSongPaths.length === 0) {
       await loadLibrarySongsFromCache();
       if (
         playbackStore.hasExternalStartupFile
-        || playbackStore.playQueue.length > 0
+        || playbackStore.playQueuePaths.length > 0
         || playbackStore.currentSong !== null
       ) {
         return;
@@ -122,11 +122,14 @@ export const createPlayerRestore = ({
       ?? legacyLastSong?.path
       ?? null;
 
-    libraryStore.setSourceSongs(resolveSongsFromPaths(storedSongListPaths, fallbackSongs));
-    playbackStore.playQueue = resolveSongsFromPaths(storedQueuePaths, fallbackSongs);
+    rememberSongs(fallbackSongs);
+    libraryStore.setSourceSongOrder(storedSongListPaths);
+    playbackStore.playQueuePaths = storedQueuePaths;
 
     if (storedLastSongPath) {
-      playbackStore.currentSong = createSongLookup(fallbackSongs).get(storedLastSongPath) ?? legacyLastSong;
+      playbackStore.currentSong = await loadSong(storedLastSongPath)
+        ?? createSongLookup(fallbackSongs).get(storedLastSongPath)
+        ?? legacyLastSong;
     }
 
     if (playbackStore.currentSong?.path) {

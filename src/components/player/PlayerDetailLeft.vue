@@ -15,7 +15,7 @@ const {
 } = usePlaybackController();
 const { getFullCoverUrl, loadFullCover, preloadFullCovers, retainFullCoverPaths } = useCoverCache();
 const playbackStore = usePlaybackStore();
-const { playQueue, tempQueue } = storeToRefs(playbackStore);
+const { playQueuePaths, tempQueuePaths } = storeToRefs(playbackStore);
 
 const showContextMenu = ref(false);
 const contextMenuX = ref(0);
@@ -63,13 +63,13 @@ const getRetainedFullCoverPaths = (path: string) => {
   };
 
   // Temp queue items will be played before the regular queue.
-  pushUniquePath(tempQueue.value[0]?.path);
+  pushUniquePath(tempQueuePaths.value[0]);
 
-  const queue = playQueue.value;
-  const currentIndex = queue.findIndex(song => song.path === path);
+  const queue = playQueuePaths.value;
+  const currentIndex = queue.indexOf(path);
   if (currentIndex >= 0 && queue.length > 1) {
-    pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]?.path);
-    pushUniquePath(queue[(currentIndex + 1) % queue.length]?.path);
+    pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]);
+    pushUniquePath(queue[(currentIndex + 1) % queue.length]);
   }
 
   return retainedPaths.slice(0, 4);

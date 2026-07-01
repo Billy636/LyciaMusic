@@ -22,7 +22,8 @@ interface SeekCompletedPayload {
 }
 
 interface CreatePlayerPlaybackDeps {
-  getDisplaySongList: () => Song[];
+  getDisplaySongPaths?: () => string[];
+  getDisplaySongList?: () => Song[];
   addToHistory: (song: Song) => void | Promise<void>;
   loadLyrics: () => void | Promise<void>;
   handleAutoNext: () => void;
@@ -45,6 +46,7 @@ const NORMAL_PROGRESS_UPDATE_MS = 100;
 const LOW_POWER_PROGRESS_UPDATE_MS = 1000;
 
 export const createPlayerPlayback = ({
+  getDisplaySongPaths,
   getDisplaySongList,
   addToHistory,
   loadLyrics,
@@ -52,6 +54,8 @@ export const createPlayerPlayback = ({
   onBeforePlay,
   resolveSongForPlayback,
 }: CreatePlayerPlaybackDeps) => {
+  const resolveDisplaySongPaths = () =>
+    getDisplaySongPaths?.() ?? getDisplaySongList?.().map(song => song.path) ?? [];
   const playbackStore = usePlaybackStore();
   const settingsStore = useSettingsStore();
   const uiStore = useUiStore();
@@ -78,33 +82,33 @@ export const createPlayerPlayback = ({
     isPlaying,
     isSongLoaded,
     currentPlaybackId,
-    playQueue,
+    playQueuePaths,
     playMode,
-    tempQueue,
+    tempQueuePaths,
   } = storeToRefs(playbackStore);
   const { showPlayerDetail } = storeToRefs(uiStore);
 
-  const buildQueueWithInsertedSong = (song: Song, previousSong: Song | null, queue: Song[]) => {
-    if (previousSong?.path === song.path) {
-      return queue.length > 0 ? [...queue] : [song];
+  const buildQueueWithInsertedPath = (songPath: string, previousPath: string | null, queue: string[]) => {
+    if (previousPath === songPath) {
+      return queue.length > 0 ? [...queue] : [songPath];
     }
 
-    const queueWithoutSong = queue.filter(item => item.path !== song.path);
+    const queueWithoutSong = queue.filter(path => path !== songPath);
 
-    if (!previousSong) {
-      return [song];
+    if (!previousPath) {
+      return [songPath];
     }
 
-    const baseQueue = queueWithoutSong.length > 0 ? queueWithoutSong : [previousSong];
-    const currentIndex = baseQueue.findIndex(item => item.path === previousSong.path);
+    const baseQueue = queueWithoutSong.length > 0 ? queueWithoutSong : [previousPath];
+    const currentIndex = baseQueue.indexOf(previousPath);
 
     if (currentIndex === -1) {
-      return [previousSong, song, ...baseQueue];
+      return [previousPath, songPath, ...baseQueue];
     }
 
     return [
       ...baseQueue.slice(0, currentIndex + 1),
-      song,
+      songPath,
       ...baseQueue.slice(currentIndex + 1),
     ];
   };
@@ -119,13 +123,13 @@ export const createPlayerPlayback = ({
       retainedPaths.push(path);
     };
 
-    pushUniquePath(tempQueue.value[0]?.path);
+    pushUniquePath(tempQueuePaths.value[0]);
 
-    const queue = playQueue.value;
-    const currentIndex = queue.findIndex(item => item.path === song.path);
+    const queue = playQueuePaths.value;
+    const currentIndex = queue.indexOf(song.path);
     if (currentIndex >= 0 && queue.length > 1) {
-      pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]?.path);
-      pushUniquePath(queue[(currentIndex + 1) % queue.length]?.path);
+      pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]);
+      pushUniquePath(queue[(currentIndex + 1) % queue.length]);
     }
 
     return retainedPaths.slice(0, 4);
@@ -151,20 +155,20 @@ export const createPlayerPlayback = ({
     };
 
     pushUniquePath(song.path);
-    pushUniquePath(tempQueue.value[0]?.path);
+    pushUniquePath(tempQueuePaths.value[0]);
 
-    const queue = playQueue.value;
-    const currentIndex = queue.findIndex(item => item.path === song.path);
+    const queue = playQueuePaths.value;
+    const currentIndex = queue.indexOf(song.path);
     if (currentIndex >= 0 && queue.length > 1) {
-      pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]?.path);
-      pushUniquePath(queue[(currentIndex + 1) % queue.length]?.path);
+      pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]);
+      pushUniquePath(queue[(currentIndex + 1) % queue.length]);
     }
 
     if (playMode.value === 2) {
-      const randomCandidates = (queue.length ? queue : getDisplaySongList())
-        .filter(item => item.path !== song.path)
+      const randomCandidates = (queue.length ? queue : resolveDisplaySongPaths())
+        .filter(path => path !== song.path)
         .slice(0, 5);
-      randomCandidates.forEach(item => pushUniquePath(item.path));
+      randomCandidates.forEach(pushUniquePath);
     }
 
     return paths;
@@ -275,16 +279,20 @@ export const createPlayerPlayback = ({
 
     if (!preserveQueue) {
       if (options.insertAfterCurrent) {
-        playQueue.value = buildQueueWithInsertedSong(song, previousSong, playQueue.value);
+        playQueuePaths.value = buildQueueWithInsertedPath(
+          song.path,
+          previousSong?.path ?? null,
+          playQueuePaths.value,
+        );
       } else {
-        const displaySongList = getDisplaySongList();
-        if (displaySongList.some(item => item.path === song.path)) {
-          playQueue.value = displaySongList;
-        } else if (!playQueue.value.some(item => item.path === song.path)) {
-          if (playQueue.value.length === 0) {
-            playQueue.value = [song];
+        const displaySongPaths = resolveDisplaySongPaths();
+        if (displaySongPaths.includes(song.path)) {
+          playQueuePaths.value = [...displaySongPaths];
+        } else if (!playQueuePaths.value.includes(song.path)) {
+          if (playQueuePaths.value.length === 0) {
+            playQueuePaths.value = [song.path];
           } else {
-            playQueue.value = [...playQueue.value, song];
+            playQueuePaths.value = [...playQueuePaths.value, song.path];
           }
         }
       }

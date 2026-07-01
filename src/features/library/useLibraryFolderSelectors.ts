@@ -46,6 +46,9 @@ export function useLibraryFolderSelectors({
     }
 
     const paths = sourceSongPaths.value.filter(path => isDirectParent(currentFolderFilter.value, path));
+    if (folderSortMode.value !== 'custom' && songLookup.value.size === 0) {
+      return paths;
+    }
 
     if (folderSortMode.value === 'title') {
       return sortItemsByAlphabetIndex(paths, (path) => getSongTitleLabel(songLookup.value.get(path)!));

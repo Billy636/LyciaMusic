@@ -87,8 +87,8 @@ export const cleanupRemovedLibrarySongPaths = async ({
   const isRemovedFolderPath = (path: string | null | undefined) =>
     !!path && !!removedFolderPath && isPathInFolderScope(removedFolderPath, path);
 
-  playbackStore.playQueue = playbackStore.playQueue.filter(song => !isRemovedPath(song.path));
-  playbackStore.tempQueue = playbackStore.tempQueue.filter(song => !isRemovedPath(song.path));
+  playbackStore.playQueuePaths = playbackStore.playQueuePaths.filter(path => !isRemovedPath(path));
+  playbackStore.tempQueuePaths = playbackStore.tempQueuePaths.filter(path => !isRemovedPath(path));
 
   const activeSongPath = playbackStore.currentSongPath ?? playbackStore.currentSong?.path ?? null;
   if (isRemovedPath(activeSongPath) || isRemovedFolderPath(activeSongPath)) {

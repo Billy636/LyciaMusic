@@ -6,6 +6,7 @@ import { tauriInvoke } from '../services/tauri/invoke';
 import { MemoryCache } from '../utils/MemoryCache';
 
 type BackendLocalSortMode = Exclude<LocalSortMode, 'custom'>;
+type SelectionSortMode = BackendLocalSortMode | 'name';
 type FavoriteDetailFilter = { type: 'artist' | 'album'; name: string } | null;
 
 const COLLECTION_VIEW_PATH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -30,7 +31,7 @@ const serializeFavoriteDetailFilter = (filter: FavoriteDetailFilter) =>
 const makeFavoriteCacheKey = (
   favoritePaths: string[],
   query: string,
-  sortMode: BackendLocalSortMode,
+  sortMode: SelectionSortMode,
   detailFilter: FavoriteDetailFilter,
 ) => [
   'favorites',
@@ -85,7 +86,7 @@ export function useLibraryCollectionSongPathCache() {
   }: {
     favoritePaths: string[];
     query?: string;
-    sortMode: BackendLocalSortMode;
+    sortMode: SelectionSortMode;
     detailFilter?: FavoriteDetailFilter;
   }) => {
     if (favoritePaths.length === 0) {

@@ -54,11 +54,15 @@ describe('player library batch', () => {
       },
     });
 
-    playerLibraryBatch.refreshStateSongReferences();
+    playerLibraryBatch.applyLibraryScanBatch({
+      songs: [],
+      deleted_paths: [removedSong.path],
+    });
+    playerLibraryBatch.flushBufferedLibraryScanBatch();
 
-    expect(libraryStore.songList.map(song => song.path)).toEqual([keptSong.path]);
-    expect(playbackStore.playQueue.map(song => song.path)).toEqual([keptSong.path]);
-    expect(playbackStore.tempQueue).toEqual([]);
+    expect(libraryStore.sourceSongPaths).toEqual([keptSong.path]);
+    expect(playbackStore.playQueuePaths).toEqual([keptSong.path]);
+    expect(playbackStore.tempQueuePaths).toEqual([]);
     expect(playbackStore.currentSong).toBeNull();
   });
 });

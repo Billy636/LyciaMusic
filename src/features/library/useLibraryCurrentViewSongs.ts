@@ -10,15 +10,10 @@ import { useLibraryDetailSongPathCache } from '../../composables/useLibraryDetai
 import { useLibraryFolderSongPathCache } from '../../composables/useLibraryFolderSongPathCache';
 import type { AlbumDetailSortMode, FolderSortMode, LocalSortMode, PlaylistSortMode } from '../../services/storage/playerStorage';
 import type { HistoryItem, Playlist, Song } from '../../types';
-import { sortItemsByAlphabetIndex } from '../../utils/alphabetIndex';
 import { isProfilingEnabled } from '../../utils/profiling';
 import {
   compareSongPathsByTrackNumber,
   getSongArtistSearchText,
-  getSongFileNameLabel,
-  getSongTitleLabel,
-  matchesAlbumKey,
-  songHasArtist,
 } from './playerLibraryViewShared';
 
 interface UseLibraryCurrentViewSongsOptions {
@@ -83,21 +78,15 @@ export function useLibraryCurrentViewSongs({
   const favoriteViewSongPaths = ref<string[]>([]);
   const recentViewSongPaths = ref<string[]>([]);
   const folderViewSongPaths = ref<string[]>([]);
-  const localArtistFilterPaths = ref<string[]>([]);
-  const localAlbumFilterPaths = ref<string[]>([]);
+  const playlistViewSongPaths = ref<string[]>([]);
   const detailViewSongPaths = ref<string[]>([]);
   let allViewRequestId = 0;
   let favoriteViewRequestId = 0;
   let recentViewRequestId = 0;
   let folderViewRequestId = 0;
-  let localArtistRequestId = 0;
-  let localAlbumRequestId = 0;
+  let playlistViewRequestId = 0;
   let detailViewRequestId = 0;
-
-  const resolveRecentSongPaths = () =>
-    recentSongs.value
-      .map(item => item.path)
-      .filter(path => songLookup.value.has(path));
+  const canonicalPathSet = computed(() => new Set(canonicalSongPaths.value));
 
   watch(
     [
@@ -119,7 +108,7 @@ export function useLibraryCurrentViewSongs({
         );
       }
 
-      if (viewMode !== 'all' || sortMode === 'custom') {
+      if (viewMode !== 'all') {
         allViewSongPaths.value = [];
         if (isProfilingEnabled()) {
           console.log(
@@ -167,7 +156,7 @@ export function useLibraryCurrentViewSongs({
         query,
         artistFilter: musicTab === 'artist' ? artistFilter : '',
         albumFilter: musicTab === 'album' ? albumFilter : '',
-        sortMode,
+        sortMode: sortMode === 'custom' ? 'title' : sortMode,
       });
 
       try {
@@ -241,7 +230,7 @@ export function useLibraryCurrentViewSongs({
     async ([viewMode, paths, query, currentFavTab, detailFilter, sortMode]) => {
       const requestId = ++favoriteViewRequestId;
 
-      if (viewMode !== 'favorites' || sortMode === 'custom') {
+      if (viewMode !== 'favorites') {
         favoriteViewSongPaths.value = [];
         return;
       }
@@ -262,7 +251,7 @@ export function useLibraryCurrentViewSongs({
         const nextPaths = await loadFavoriteSongPaths({
           favoritePaths: paths,
           query,
-          sortMode,
+          sortMode: sortMode === 'custom' ? 'title' : sortMode,
           detailFilter: resolvedDetailFilter,
         });
 
@@ -293,7 +282,7 @@ export function useLibraryCurrentViewSongs({
     async ([viewMode, items, query, sortMode]) => {
       const requestId = ++recentViewRequestId;
 
-      if (viewMode !== 'recent' || sortMode === 'custom') {
+      if (viewMode !== 'recent') {
         recentViewSongPaths.value = [];
         return;
       }
@@ -307,7 +296,7 @@ export function useLibraryCurrentViewSongs({
         const nextPaths = await loadRecentSongPaths({
           recentSongs: items,
           query,
-          sortMode,
+          sortMode: sortMode === 'custom' ? 'title' : sortMode,
         });
 
         if (requestId !== recentViewRequestId) {
@@ -337,7 +326,7 @@ export function useLibraryCurrentViewSongs({
     async ([viewMode, folderFilter, query, sortMode]) => {
       const requestId = ++folderViewRequestId;
 
-      if (viewMode !== 'folder' || !folderFilter || sortMode === 'custom') {
+      if (viewMode !== 'folder' || !folderFilter) {
         folderViewSongPaths.value = [];
         return;
       }
@@ -346,7 +335,7 @@ export function useLibraryCurrentViewSongs({
         const nextPaths = await loadFolderViewSongPaths({
           folderPath: folderFilter,
           query,
-          sortMode,
+          sortMode: sortMode === 'custom' ? 'title' : sortMode,
         });
 
         if (requestId !== folderViewRequestId) {
@@ -366,78 +355,52 @@ export function useLibraryCurrentViewSongs({
   );
 
   watch(
-    [
-      currentViewMode,
-      localMusicTab,
-      currentArtistFilter,
-      canonicalSongPaths,
-    ],
-    async ([viewMode, musicTab, artistFilter]) => {
-      const requestId = ++localArtistRequestId;
+    [currentViewMode, playlists, filterCondition, searchQuery, playlistSortMode, canonicalSongPaths],
+    async ([viewMode, , , query, sortMode]) => {
+      const requestId = ++playlistViewRequestId;
+      if (viewMode !== 'playlist') {
+        playlistViewSongPaths.value = [];
+        return;
+      }
 
-      if (viewMode !== 'all' || musicTab !== 'artist' || !artistFilter) {
-        localArtistFilterPaths.value = [];
+      const playlist = playlists.value.find(item => item.id === filterCondition.value);
+      const paths = playlist?.songPaths.filter(path => canonicalPathSet.value.has(path)) ?? [];
+      if (paths.length === 0) {
+        playlistViewSongPaths.value = [];
         return;
       }
 
       try {
-        const paths = await loadArtistSongPaths(artistFilter);
-        if (requestId !== localArtistRequestId) {
-          return;
+        const resolvedPaths = await loadFavoriteSongPaths({
+          favoritePaths: paths,
+          query,
+          sortMode: sortMode === 'custom' ? 'title' : sortMode,
+        });
+        if (requestId === playlistViewRequestId) {
+          const resolvedPathSet = new Set(resolvedPaths);
+          playlistViewSongPaths.value = sortMode === 'custom'
+            ? paths.filter(path => resolvedPathSet.has(path))
+            : resolvedPaths;
         }
-
-        localArtistFilterPaths.value = paths;
       } catch {
-        if (requestId !== localArtistRequestId) {
-          return;
+        if (requestId === playlistViewRequestId) {
+          playlistViewSongPaths.value = paths;
         }
-
-        localArtistFilterPaths.value = [];
       }
     },
-    { immediate: true },
-  );
-
-  watch(
-    [
-      currentViewMode,
-      localMusicTab,
-      currentAlbumFilter,
-      canonicalSongPaths,
-    ],
-    async ([viewMode, musicTab, albumFilter]) => {
-      const requestId = ++localAlbumRequestId;
-
-      if (viewMode !== 'all' || musicTab !== 'album' || !albumFilter) {
-        localAlbumFilterPaths.value = [];
-        return;
-      }
-
-      try {
-        const paths = await loadAlbumSongPaths(albumFilter);
-        if (requestId !== localAlbumRequestId) {
-          return;
-        }
-
-        localAlbumFilterPaths.value = paths;
-      } catch {
-        if (requestId !== localAlbumRequestId) {
-          return;
-        }
-
-        localAlbumFilterPaths.value = [];
-      }
-    },
-    { immediate: true },
+    { deep: true, immediate: true },
   );
 
   watch(
     [
       currentViewMode,
       filterCondition,
+      searchQuery,
+      localSortMode,
+      albumDetailSortMode,
       canonicalSongPaths,
     ],
-    async ([viewMode, filter]) => {
+    async ([viewMode, filter, query, currentLocalSortMode, currentAlbumSortMode]) => {
       const requestId = ++detailViewRequestId;
 
       if (!filter || (viewMode !== 'artist' && viewMode !== 'album')) {
@@ -447,8 +410,20 @@ export function useLibraryCurrentViewSongs({
 
       try {
         const paths = viewMode === 'artist'
-          ? await loadArtistSongPaths(filter)
-          : await loadAlbumSongPaths(filter);
+          ? currentLocalSortMode === 'custom'
+            ? await loadArtistSongPaths(filter)
+            : await loadAllViewSongPaths({
+                query,
+                artistFilter: filter,
+                sortMode: currentLocalSortMode,
+              })
+          : currentAlbumSortMode === 'track_number' || currentAlbumSortMode === 'track_number_desc'
+            ? await loadAlbumSongPaths(filter, currentAlbumSortMode)
+            : await loadAllViewSongPaths({
+                query,
+                albumFilter: filter,
+                sortMode: currentAlbumSortMode,
+              });
 
         if (requestId !== detailViewRequestId) {
           return;
@@ -471,28 +446,11 @@ export function useLibraryCurrentViewSongs({
       .map(path => songLookup.value.get(path))
       .filter((song): song is Song => !!song);
 
-  const resolveFavoriteFallbackPaths = () => {
-    if (favTab.value === 'songs') {
-      return [...favoriteSongPaths.value];
-    }
-
-    if (favTab.value === 'artists') {
-      return favDetailFilter.value?.type === 'artist'
-        ? favoriteSongPaths.value.filter(path => songHasArtist(songLookup.value.get(path)!, favDetailFilter.value!.name))
-        : [];
-    }
-
-    if (favTab.value === 'albums') {
-      return favDetailFilter.value?.type === 'album'
-        ? favoriteSongPaths.value.filter(path => matchesAlbumKey(songLookup.value.get(path)!, favDetailFilter.value!.name))
-        : [];
-    }
-
-    return [...favoriteSongPaths.value];
-  };
-
   const sortSongPathsByLocalMode = (paths: string[], mode: LocalSortMode) => {
     const sortedPaths = [...paths];
+    if (songLookup.value.size === 0) {
+      return sortedPaths;
+    }
 
     if (mode === 'title') {
       sortedPaths.sort((left, right) =>
@@ -527,6 +485,9 @@ export function useLibraryCurrentViewSongs({
   };
 
   const sortSongPathsByAlbumDetailMode = (paths: string[], mode: AlbumDetailSortMode) => {
+    if (songLookup.value.size === 0) {
+      return [...paths];
+    }
     if (mode !== 'track_number' && mode !== 'track_number_desc') {
       return sortSongPathsByLocalMode(paths, mode as LocalSortMode);
     }
@@ -540,44 +501,13 @@ export function useLibraryCurrentViewSongs({
     return sortedPaths;
   };
 
-  const sortSongPathsByPlaylistMode = (paths: string[], mode: PlaylistSortMode) => {
-    const sortedPaths = [...paths];
-
-    if (mode === 'title') {
-      sortedPaths.sort((left, right) =>
-        (songLookup.value.get(left)?.title || songLookup.value.get(left)?.name || '').localeCompare(
-          songLookup.value.get(right)?.title || songLookup.value.get(right)?.name || '',
-          'zh-CN',
-        ),
-      );
-    } else if (mode === 'name') {
-      sortedPaths.sort((left, right) =>
-        (songLookup.value.get(left)?.name || '').localeCompare(songLookup.value.get(right)?.name || '', 'zh-CN'),
-      );
-    } else if (mode === 'artist') {
-      sortedPaths.sort((left, right) =>
-        (songLookup.value.get(left)?.artist || '').localeCompare(songLookup.value.get(right)?.artist || '', 'zh-CN'),
-      );
-    } else if (mode === 'added_at') {
-      sortedPaths.sort((left, right) =>
-        (songLookup.value.get(right)?.added_at || 0) - (songLookup.value.get(left)?.added_at || 0),
-      );
-    } else if (mode === 'added_at_asc') {
-      sortedPaths.sort((left, right) =>
-        (songLookup.value.get(left)?.added_at || 0) - (songLookup.value.get(right)?.added_at || 0),
-      );
-    }
-
-    return sortedPaths;
-  };
-
-  const resolvePlaylistSongPaths = () => {
-    const playlist = playlists.value.find(item => item.id === filterCondition.value);
-    if (!playlist) {
-      return [];
-    }
-
-    return playlist.songPaths.filter(path => songLookup.value.has(path));
+  const applyCustomPathOrder = (paths: string[], customOrder: string[]) => {
+    const orderMap = new Map(customOrder.map((path, index) => [path, index]));
+    return [...paths].sort((left, right) => {
+      const leftIndex = orderMap.get(left) ?? Number.MAX_SAFE_INTEGER;
+      const rightIndex = orderMap.get(right) ?? Number.MAX_SAFE_INTEGER;
+      return leftIndex - rightIndex;
+    });
   };
 
   const currentViewSongPaths = computed(() => {
@@ -587,12 +517,6 @@ export function useLibraryCurrentViewSongs({
       const query = searchQuery.value.toLowerCase();
 
       if (currentViewMode.value === 'all' && localSortMode.value !== 'custom') {
-        if (localSortMode.value === 'title') {
-          return sortItemsByAlphabetIndex(
-            allViewSongPaths.value,
-            (path) => getSongTitleLabel(songLookup.value.get(path)!),
-          );
-        }
         return allViewSongPaths.value;
       }
 
@@ -607,56 +531,36 @@ export function useLibraryCurrentViewSongs({
       };
 
       if (currentViewMode.value === 'favorites') {
-        if (localSortMode.value !== 'custom') {
-          return favoriteViewSongPaths.value;
-        }
-
-        return resolveFavoriteFallbackPaths().filter(matchesQuery);
+        return localSortMode.value === 'custom'
+          ? applyCustomPathOrder(favoriteViewSongPaths.value, localCustomOrder.value)
+          : favoriteViewSongPaths.value;
       }
 
       if (currentViewMode.value === 'recent') {
-        if (localSortMode.value !== 'custom') {
-          return recentViewSongPaths.value;
-        }
-
-        return resolveRecentSongPaths().filter(matchesQuery);
+        return localSortMode.value === 'custom'
+          ? applyCustomPathOrder(recentViewSongPaths.value, localCustomOrder.value)
+          : recentViewSongPaths.value;
       }
 
       if (currentViewMode.value === 'all') {
-        if (localSortMode.value !== 'custom') {
-          return allViewSongPaths.value;
-        }
-
-        return sortItemsByAlphabetIndex(
-          canonicalSongPaths.value.filter(matchesQuery),
-          (path) => getSongTitleLabel(songLookup.value.get(path)!),
-        );
+        return localSortMode.value === 'custom'
+          ? applyCustomPathOrder(allViewSongPaths.value, localCustomOrder.value)
+          : allViewSongPaths.value;
       }
 
       if (currentViewMode.value === 'folder') {
-        if (folderSortMode.value !== 'custom') {
-          if (folderSortMode.value === 'name') {
-            return sortItemsByAlphabetIndex(
+        return folderSortMode.value === 'custom'
+          ? applyCustomPathOrder(
               folderViewSongPaths.value,
-              (path) => getSongFileNameLabel(songLookup.value.get(path)!),
-            );
-          }
-          if (folderSortMode.value === 'title') {
-            return sortItemsByAlphabetIndex(
-              folderViewSongPaths.value,
-              (path) => getSongTitleLabel(songLookup.value.get(path)!),
-            );
-          }
-          return folderViewSongPaths.value;
-        }
-
-        return sortItemsByAlphabetIndex(currentFolderSongPaths.value.filter(matchesQuery), (path) =>
-          getSongTitleLabel(songLookup.value.get(path)!),
-        );
+              currentFolderSongPaths.value,
+            )
+          : folderViewSongPaths.value;
       }
 
       if (currentViewMode.value === 'artist') {
-        const filteredPaths = detailViewSongPaths.value.filter(matchesQuery);
+        const filteredPaths = songLookup.value.size === 0
+          ? detailViewSongPaths.value
+          : detailViewSongPaths.value.filter(matchesQuery);
         return localSortMode.value === 'custom'
           ? filteredPaths
           : sortSongPathsByLocalMode(filteredPaths, localSortMode.value);
@@ -664,16 +568,15 @@ export function useLibraryCurrentViewSongs({
 
       if (currentViewMode.value === 'album') {
         return sortSongPathsByAlbumDetailMode(
-          detailViewSongPaths.value.filter(matchesQuery),
+          songLookup.value.size === 0
+            ? detailViewSongPaths.value
+            : detailViewSongPaths.value.filter(matchesQuery),
           albumDetailSortMode.value,
         );
       }
 
       if (currentViewMode.value === 'playlist') {
-        return sortSongPathsByPlaylistMode(
-          resolvePlaylistSongPaths().filter(matchesQuery),
-          playlistSortMode.value,
-        );
+        return playlistViewSongPaths.value;
       }
 
       return canonicalSongPaths.value.filter(matchesQuery);
@@ -693,48 +596,15 @@ export function useLibraryCurrentViewSongs({
             pathsToRender = sortSongPathsByLocalMode(canonicalSongPaths.value, localSortMode.value);
           }
         }
-        pathsToRender = pathsToRender.filter(path => songLookup.value.has(path));
-
-        if (localSortMode.value === 'title') {
-          return sortItemsByAlphabetIndex(
-            pathsToRender,
-            (path) => getSongTitleLabel(songLookup.value.get(path)!),
-          );
-        }
+        pathsToRender = pathsToRender.filter(path => canonicalPathSet.value.has(path));
         return pathsToRender;
       }
 
-      let base = [...canonicalSongPaths.value];
-      if (localMusicTab.value === 'artist' && currentArtistFilter.value) {
-        base = [...localArtistFilterPaths.value];
-      } else if (localMusicTab.value === 'album' && currentAlbumFilter.value) {
-        base = [...localAlbumFilterPaths.value];
-      }
-
-      const orderMap = new Map(localCustomOrder.value.map((path, index) => [path, index]));
-      base.sort((left, right) => {
-        const leftIndex = orderMap.has(left) ? orderMap.get(left)! : Number.MAX_SAFE_INTEGER;
-        const rightIndex = orderMap.has(right) ? orderMap.get(right)! : Number.MAX_SAFE_INTEGER;
-        return leftIndex - rightIndex;
-      });
-
-      return base;
+      return applyCustomPathOrder(allViewSongPaths.value, localCustomOrder.value);
     }
 
     if (currentViewMode.value === 'folder') {
       if (folderSortMode.value !== 'custom') {
-        if (folderSortMode.value === 'name') {
-          return sortItemsByAlphabetIndex(
-            folderViewSongPaths.value,
-            (path) => getSongFileNameLabel(songLookup.value.get(path)!),
-          );
-        }
-        if (folderSortMode.value === 'title') {
-          return sortItemsByAlphabetIndex(
-            folderViewSongPaths.value,
-            (path) => getSongTitleLabel(songLookup.value.get(path)!),
-          );
-        }
         return folderViewSongPaths.value;
       }
 
@@ -756,7 +626,7 @@ export function useLibraryCurrentViewSongs({
         return recentViewSongPaths.value;
       }
 
-      return sortSongPathsByLocalMode(resolveRecentSongPaths(), localSortMode.value);
+      return applyCustomPathOrder(recentViewSongPaths.value, localCustomOrder.value);
     }
 
     if (currentViewMode.value === 'favorites') {
@@ -764,15 +634,11 @@ export function useLibraryCurrentViewSongs({
         return favoriteViewSongPaths.value;
       }
 
-      const paths = resolveFavoriteFallbackPaths();
-      return sortSongPathsByLocalMode(paths, localSortMode.value);
+      return applyCustomPathOrder(favoriteViewSongPaths.value, localCustomOrder.value);
     }
 
     if (currentViewMode.value === 'playlist') {
-      return sortSongPathsByPlaylistMode(
-        resolvePlaylistSongPaths(),
-        playlistSortMode.value,
-      );
+      return playlistViewSongPaths.value;
     }
 
     return [];

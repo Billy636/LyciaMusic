@@ -139,7 +139,8 @@ describe('playerLibraryRuntime.scanLibrary', () => {
     await Promise.all([firstScanPromise, manualRefreshPromise]);
 
     expect(invokeMock.mock.calls.filter(([name]) => name === 'scan_library')).toHaveLength(2);
-    expect(libraryStore.librarySongs.map(song => song.path)).toEqual(['C:\\Music\\fresh.flac']);
+    expect(libraryStore.canonicalSongPaths).toEqual(['C:\\Music\\fresh.flac']);
+    expect(libraryStore.librarySongs).toEqual([]);
   });
 
   it('clears in-memory library songs when the last library folder has been removed', async () => {

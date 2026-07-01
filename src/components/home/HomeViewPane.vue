@@ -28,6 +28,7 @@ interface Props {
   currentFolderFilter: string;
   playlistDetail: PlaylistDetail | null;
   localSongList: Song[];
+  localSongPaths: string[];
   artistActiveTab: 'songs' | 'albums' | 'details';
   localFilterCondition: string;
   selectedAlbumSong: Song | null;
@@ -139,6 +140,7 @@ const songTableMemoryScopeKey = computed(() =>
         :localFilterCondition="localFilterCondition"
         :songTableMemoryScopeKey="songTableMemoryScopeKey"
         :localSongList="localSongList"
+        :localSongPaths="localSongPaths"
         :selectedCount="selectedCount"
         :selectedAlbumSong="selectedAlbumSong"
         :artistAlbumList="artistAlbumList"

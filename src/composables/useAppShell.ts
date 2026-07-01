@@ -24,7 +24,7 @@ import { useMainWindowRenderingPower } from './renderingPower';
 export function useAppShell() {
   const {
     init,
-    playQueue,
+    playQueuePaths,
     currentSong,
     isMiniMode,
     showPlayerDetail,
@@ -117,7 +117,7 @@ export function useAppShell() {
 
   init();
 
-  const isFooterVisible = computed(() => shouldShowPlayerFooter(playQueue.value, currentSong.value));
+  const isFooterVisible = computed(() => shouldShowPlayerFooter(playQueuePaths.value.length, currentSong.value));
   const libraryScanPercent = computed(() => {
     if (!libraryScanProgress.value) return 0;
     if (libraryScanProgress.value.total <= 0) return 8;

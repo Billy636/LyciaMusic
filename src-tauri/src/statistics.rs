@@ -966,6 +966,7 @@ pub struct PlaylistImportItem {
 #[serde(rename_all = "snake_case")]
 pub enum SongPathSortMode {
     Title,
+    Name,
     Artist,
     AddedAt,
     AddedAtAsc,
@@ -1113,6 +1114,18 @@ fn sort_song_view_rows(rows: &mut [SongViewRow], sort_mode: &SongPathSortMode) {
         SongPathSortMode::Title => song_title_label(left)
             .to_lowercase()
             .cmp(&song_title_label(right).to_lowercase()),
+        SongPathSortMode::Name => std::path::Path::new(&left.path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase()
+            .cmp(
+                &std::path::Path::new(&right.path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_lowercase(),
+            ),
         SongPathSortMode::Artist => left
             .artist
             .to_lowercase()

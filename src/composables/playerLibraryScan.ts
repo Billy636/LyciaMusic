@@ -3,7 +3,6 @@ import type {
   LibraryScanSession,
   LibraryScanTrigger,
   LibraryScanVisibility,
-  Song,
 } from '../types';
 
 const LIBRARY_SCAN_VISIBILITY_PRIORITY: Record<LibraryScanVisibility, number> = {
@@ -108,7 +107,7 @@ export const getLibraryAddScanOptions = (path: string): Required<ScanLibraryOpti
 };
 
 export const finalizeLibraryScanProgress = (
-  songs: Song[],
+  songs: ArrayLike<unknown>,
   failed = false,
   message?: string,
 ) => {

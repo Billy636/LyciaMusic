@@ -139,26 +139,12 @@ export const createPlayerFileManager = ({
   const { clearLibraryCollectionSongPathCache } = useLibraryCollectionSongPathCache();
   const { clearLibraryDetailSongPathCache } = useLibraryDetailSongPathCache();
   const { clearLibraryFolderSongPathCache } = useLibraryFolderSongPathCache();
-  const { canonicalSongs, libraryHierarchy, sourceSongs, watchedFolders } = storeToRefs(libraryStore);
+  const { canonicalSongPaths, libraryHierarchy, sourceSongPaths, watchedFolders } = storeToRefs(libraryStore);
   const { favoritePaths, playlists, recentSongs } = storeToRefs(collectionsStore);
-  const { currentSong, playQueue, tempQueue } = storeToRefs(playbackStore);
+  const { currentSong, playQueuePaths, tempQueuePaths } = storeToRefs(playbackStore);
 
-  const removeSongPathFromList = (songs: Song[], path: string) =>
-    songs.filter(song => song.path !== path);
-
-  const replaceSongPathInList = (songs: Song[], oldPath: string, newPath: string) => {
-    let changed = false;
-    const nextSongs = songs.map(song => {
-      if (song.path !== oldPath) {
-        return song;
-      }
-
-      changed = true;
-      return { ...song, path: newPath };
-    });
-
-    return changed ? nextSongs : songs;
-  };
+  const replacePathInList = (paths: string[], oldPath: string, newPath: string) =>
+    paths.map(path => path === oldPath ? newPath : path);
 
   const clearLibraryPathCaches = () => {
     clearLibraryAllSongPathCache();
@@ -186,7 +172,7 @@ export const createPlayerFileManager = ({
 
     await fileApi.moveFileToFolder(sourcePath, targetFolderPath);
 
-    sourceSongs.value = removeSongPathFromList(sourceSongs.value, sourcePath);
+    sourceSongPaths.value = sourceSongPaths.value.filter(path => path !== sourcePath);
 
     decrementNodeCount(libraryHierarchy.value, sourceFolderPath);
 
@@ -234,7 +220,7 @@ export const createPlayerFileManager = ({
     });
 
     const movedCount = moveResult.moved_paths.length;
-    sourceSongs.value = sourceSongs.value.filter(song => !movedOldPaths.has(song.path));
+    sourceSongPaths.value = sourceSongPaths.value.filter(path => !movedOldPaths.has(path));
 
     for (const [sourceFolder, entry] of sourceFolderMap) {
       for (let index = 0; index < entry.count; index += 1) {
@@ -270,14 +256,14 @@ export const createPlayerFileManager = ({
       folderPath,
       settingsStore.settings.libraryMinDurationSeconds,
     );
-    const removedPaths = canonicalSongs.value
-      .filter(song => isSongInFolderScope(folderPath, song.path))
-      .map(song => song.path)
+    const removedPaths = canonicalSongPaths.value
+      .filter(path => isSongInFolderScope(folderPath, path))
       .filter(path => !newSongs.some(song => song.path === path));
-    const keepSong = (song: Song) => !isSongInFolderScope(folderPath, song.path);
+    const keepPath = (path: string) => !isSongInFolderScope(folderPath, path);
+    const newPaths = newSongs.map(song => song.path);
 
-    sourceSongs.value = [...sourceSongs.value.filter(keepSong), ...newSongs];
-    canonicalSongs.value = [...canonicalSongs.value.filter(keepSong), ...newSongs];
+    libraryStore.setSourceSongOrder([...sourceSongPaths.value.filter(keepPath), ...newPaths]);
+    libraryStore.setCanonicalSongOrder([...canonicalSongPaths.value.filter(keepPath), ...newPaths]);
     clearLibraryPathCaches();
 
     if (removedPaths.length > 0) {
@@ -287,8 +273,8 @@ export const createPlayerFileManager = ({
         playlist.songPaths = playlist.songPaths.filter(path => !removedPathSet.has(path));
       });
       recentSongs.value = recentSongs.value.filter(item => !removedPathSet.has(item.path));
-      playQueue.value = playQueue.value.filter(song => !removedPathSet.has(song.path));
-      tempQueue.value = tempQueue.value.filter(song => !removedPathSet.has(song.path));
+      playQueuePaths.value = playQueuePaths.value.filter(path => !removedPathSet.has(path));
+      tempQueuePaths.value = tempQueuePaths.value.filter(path => !removedPathSet.has(path));
 
       if (currentSong.value && removedPathSet.has(currentSong.value.path)) {
         currentSong.value = null;
@@ -341,10 +327,11 @@ export const createPlayerFileManager = ({
       await fileApi.moveMusicFile(song.path, newPath);
 
       const oldPath = song.path;
-      sourceSongs.value = replaceSongPathInList(sourceSongs.value, oldPath, newPath);
-      canonicalSongs.value = replaceSongPathInList(canonicalSongs.value, oldPath, newPath);
-      playQueue.value = replaceSongPathInList(playQueue.value, oldPath, newPath);
-      tempQueue.value = replaceSongPathInList(tempQueue.value, oldPath, newPath);
+      libraryStore.setSourceSongOrder(replacePathInList(sourceSongPaths.value, oldPath, newPath));
+      libraryStore.setCanonicalSongOrder(replacePathInList(canonicalSongPaths.value, oldPath, newPath));
+      libraryStore.setSongRecord({ ...song, path: newPath });
+      playQueuePaths.value = playQueuePaths.value.map(path => path === oldPath ? newPath : path);
+      tempQueuePaths.value = tempQueuePaths.value.map(path => path === oldPath ? newPath : path);
       recentSongs.value = recentSongs.value.map(item =>
         item.path === oldPath
           ? { ...item, path: newPath }
@@ -384,10 +371,9 @@ export const createPlayerFileManager = ({
   const deleteFromDisk = async (song: Song) => {
     try {
       await fileApi.deleteMusicFile(song.path);
-      canonicalSongs.value = canonicalSongs.value.filter(item => item.path !== song.path);
-      sourceSongs.value = sourceSongs.value.filter(item => item.path !== song.path);
+      libraryStore.patchLibrarySongPaths({ added_paths: [], deleted_paths: [song.path] });
       favoritePaths.value = favoritePaths.value.filter(path => path !== song.path);
-      removeSongPathsFromPlaybackState({ playQueue, tempQueue, currentSong }, [song.path]);
+      removeSongPathsFromPlaybackState({ playQueuePaths, tempQueuePaths, currentSong }, [song.path]);
       await removeFromHistory([song.path]);
       playlists.value.forEach(playlist => {
         playlist.songPaths = playlist.songPaths.filter(path => path !== song.path);
@@ -399,10 +385,10 @@ export const createPlayerFileManager = ({
 
   const refreshAllFolders = async () => {
     try {
-      if (watchedFolders.value.length === 0 && sourceSongs.value.length > 0) {
+      if (watchedFolders.value.length === 0 && sourceSongPaths.value.length > 0) {
         const potentialFolders = new Set<string>();
-        sourceSongs.value.forEach(song => {
-          const parent = song.path.replace(/[/\\][^/\\]+$/, '');
+        sourceSongPaths.value.forEach(path => {
+          const parent = path.replace(/[/\\][^/\\]+$/, '');
           if (parent) {
             potentialFolders.add(parent);
           }
@@ -419,7 +405,7 @@ export const createPlayerFileManager = ({
         return;
       }
 
-      const previousPaths = sourceSongs.value.map(song => song.path);
+      const previousPaths = [...sourceSongPaths.value];
       const previousPathSet = new Set(previousPaths);
 
       let allNewSongs: Song[] = [];
@@ -428,22 +414,22 @@ export const createPlayerFileManager = ({
         allNewSongs = allNewSongs.concat(songs);
       }
 
-      const keptSongs = sourceSongs.value.filter(song => {
-        return !watchedFolders.value.some(folder => isSongInFolderScope(folder, song.path));
+      const keptSourcePaths = sourceSongPaths.value.filter(path => {
+        return !watchedFolders.value.some(folder => isSongInFolderScope(folder, path));
       });
-      sourceSongs.value = [...keptSongs, ...allNewSongs];
+      libraryStore.setSourceSongOrder([...keptSourcePaths, ...allNewSongs.map(song => song.path)]);
 
-      const keptCanonicalSongs = canonicalSongs.value.filter(song => {
-        return !watchedFolders.value.some(folder => isSongInFolderScope(folder, song.path));
+      const keptCanonicalPaths = canonicalSongPaths.value.filter(path => {
+        return !watchedFolders.value.some(folder => isSongInFolderScope(folder, path));
       });
-      canonicalSongs.value = [...keptCanonicalSongs, ...allNewSongs];
+      libraryStore.setCanonicalSongOrder([...keptCanonicalPaths, ...allNewSongs.map(song => song.path)]);
 
-      const currentPathSet = new Set(sourceSongs.value.map(song => song.path));
+      const currentPathSet = new Set(sourceSongPaths.value);
       const removedPaths = previousPaths.filter(path => !currentPathSet.has(path));
 
       const queuePathsToCheck = [
-        ...playQueue.value.map(s => s.path),
-        ...tempQueue.value.map(s => s.path),
+        ...playQueuePaths.value,
+        ...tempQueuePaths.value,
         ...(currentSong.value ? [currentSong.value.path] : []),
       ];
       const uniqueQueuePaths = Array.from(new Set(queuePathsToCheck));
@@ -463,7 +449,7 @@ export const createPlayerFileManager = ({
       }
 
       if (allRemovedPaths.length > 0) {
-        removeSongPathsFromPlaybackState({ playQueue, tempQueue, currentSong }, allRemovedPaths);
+        removeSongPathsFromPlaybackState({ playQueuePaths, tempQueuePaths, currentSong }, allRemovedPaths);
         await removeFromHistory(allRemovedPaths);
         playlists.value.forEach((playlist) => {
           const removedSet = new Set(allRemovedPaths);

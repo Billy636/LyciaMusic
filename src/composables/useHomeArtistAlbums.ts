@@ -1,6 +1,7 @@
-import { computed, watch, type Ref } from 'vue';
+import { ref, watch, type Ref } from 'vue';
 
-import type { Song } from '../types';
+import type { AlbumCatalogItem, Song } from '../types';
+import { tauriInvoke } from '../services/tauri/invoke';
 import { compareByAlphabetIndex } from '../utils/alphabetIndex';
 
 interface ArtistAlbumItem {
@@ -35,12 +36,10 @@ export function useHomeArtistAlbums({
   albumCustomOrder,
   preloadCovers,
 }: UseHomeArtistAlbumsOptions) {
-  const artistAlbumList = computed<ArtistAlbumItem[]>(() => {
-    const artistName = localFilterCondition.value || filterCondition.value;
-    if (!artistName) {
-      return [];
-    }
+  const artistAlbumList = ref<ArtistAlbumItem[]>([]);
+  let requestId = 0;
 
+  const buildLegacyAlbumList = (artistName: string) => {
     const albumMap = new Map<string, ArtistAlbumItem>();
 
     librarySongs.value.forEach(song => {
@@ -67,7 +66,11 @@ export function useHomeArtistAlbums({
       });
     });
 
-    const albums = Array.from(albumMap.values());
+    return Array.from(albumMap.values());
+  };
+
+  const sortAlbums = (items: AlbumCatalogItem[] | ArtistAlbumItem[]) => {
+    const albums: ArtistAlbumItem[] = items.map(item => ({ ...item }));
 
     if (albumSortMode.value === 'name') {
       albums.sort((left, right) => compareByAlphabetIndex(left.name, right.name));
@@ -97,7 +100,40 @@ export function useHomeArtistAlbums({
     }
 
     return albums;
-  });
+  };
+
+  watch(
+    [localFilterCondition, filterCondition],
+    async () => {
+      const currentRequestId = ++requestId;
+      const artistName = localFilterCondition.value || filterCondition.value;
+      if (!artistName) {
+        artistAlbumList.value = [];
+        return;
+      }
+
+      try {
+        const albums = await tauriInvoke('get_library_album_catalog_by_artist', { artistName });
+        if (currentRequestId === requestId) {
+          artistAlbumList.value = sortAlbums(albums);
+        }
+      } catch {
+        // Compatibility fallback for older backends and unit-test fixtures.
+        if (currentRequestId === requestId) {
+          artistAlbumList.value = sortAlbums(buildLegacyAlbumList(artistName));
+        }
+      }
+    },
+    { immediate: true },
+  );
+
+  watch(
+    [albumSortMode, albumCustomOrder],
+    () => {
+      artistAlbumList.value = sortAlbums(artistAlbumList.value);
+    },
+    { deep: true },
+  );
 
   watch(
     artistAlbumList,

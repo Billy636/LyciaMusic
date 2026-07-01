@@ -50,11 +50,18 @@ export type LibrarySong = Omit<
   | 'cue_start_offset'
   | 'cue_end_offset'
   | 'comment'
-  | 'bitrate'
-  | 'sample_rate'
-  | 'bit_depth'
-  | 'format'
 >;
+
+export interface LibrarySongPage {
+  total: number;
+  offset: number;
+  rows: LibrarySong[];
+}
+
+export interface LibrarySongLabel {
+  path: string;
+  label: string;
+}
 
 export interface SongRuntimeMetadata {
   id?: number;
@@ -62,14 +69,6 @@ export interface SongRuntimeMetadata {
   cue_source_path?: string;
   cue_start_offset?: number;
   cue_end_offset?: number;
-}
-
-export interface SongQualityMetadata {
-  path: string;
-  bitrate: number;
-  sample_rate: number;
-  bit_depth?: number;
-  format: string;
 }
 
 export interface SongDetail {

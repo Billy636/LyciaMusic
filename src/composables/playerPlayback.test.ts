@@ -102,7 +102,7 @@ describe('player playback domain', () => {
 
     await playerPlayback.playSong(firstSong);
 
-    expect(playbackStore.playQueue.map(song => song.path)).toEqual(displaySongList.map(song => song.path));
+    expect(playbackStore.playQueuePaths).toEqual(displaySongList.map(song => song.path));
     playerPlayback.dispose();
   });
 
@@ -126,7 +126,7 @@ describe('player playback domain', () => {
     await playerPlayback.playSong(searchedSong, { insertAfterCurrent: true });
 
     expect(playbackStore.currentSong?.path).toBe(searchedSong.path);
-    expect(playbackStore.playQueue.map(song => song.path)).toEqual([
+    expect(playbackStore.playQueuePaths).toEqual([
       songA.path,
       searchedSong.path,
       songB.path,

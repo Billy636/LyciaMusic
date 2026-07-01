@@ -2,7 +2,7 @@
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { dragSession } from '../../composables/dragState';
-import type { Song, SongQualityMetadata } from '../../types';
+import type { Song } from '../../types';
 import { songTableViewportCoverSnapshotCache } from '../../caches/imageCaches';
 import { useLibraryCollections } from '../../features/collections/useLibraryCollections';
 import { useSettings } from '../../features/settings/useSettings';
@@ -22,7 +22,7 @@ import { useLibraryStore } from '../../features/library/store';
 import { DEFAULT_SCROLLBAR_HOT_ZONE_PX, isPointerNearVerticalScrollbar } from '../../utils/scrollbarActivity';
 import { isRemoteSong } from '../../utils/remoteSong';
 import { useSongDetailCache } from '../../composables/useSongDetailCache';
-import { useSongQualityMetadata } from '../../composables/useSongQualityMetadata';
+import { useLibrarySongWindowCache } from '../../composables/useLibrarySongWindowCache';
 import { isProfilingEnabled } from '../../utils/profiling';
 
 const { settings } = useSettings();
@@ -32,6 +32,7 @@ const { currentSong, isPlaying, formatDuration } = usePlaybackController();
 
 const props = defineProps<{
   songs: Song[];
+  songPaths?: string[];
   isBatchMode: boolean;
   selectedPaths: Set<string>;
   memoryScopeKey: string;
@@ -68,7 +69,7 @@ const route = useRoute();
 const { openHomeArtist } = useHomeNavigation(router);
 const { coverCache, loadCover, touchCoverPaths, preloadPriorityCovers, primeCoverPath } = useCoverCache();
 const { loadSongDetail } = useSongDetailCache();
-const { loadSongQualityMetadata } = useSongQualityMetadata();
+const { ensureWindow: ensureSongWindow, getSongAt: getPagedSongAt } = useLibrarySongWindowCache();
 
 const ROW_HEIGHT = 72;
 const OVERSCAN = 20;
@@ -82,12 +83,14 @@ const isScrollbarScrolling = ref(false);
 const isScrollbarActive = computed(() => isScrollbarHot.value || isScrollbarScrolling.value);
 const displayedCoverUrls = reactive(new Map<string, string>());
 const songCommentCache = reactive(new Map<string, string>());
-const songQualityCache = reactive(new Map<string, SongQualityMetadata>());
 const loadingSongCommentPaths = new Set<string>();
 let visibleCoverPaths = new Set<string>();
-let qualityRequestId = 0;
 let scrollbarActiveTimer: ReturnType<typeof window.setTimeout> | null = null;
+let scrollVelocityResetTimer: ReturnType<typeof window.setTimeout> | null = null;
+let lastScrollSampleTop = 0;
+let lastScrollSampleAt = 0;
 let virtualDataProfileCount = 0;
+const scrollVelocityPxPerSecond = ref(0);
 const resolveListRoutePath = (path: string) =>
   ['/', '/favorites', '/recent'].includes(path) ? path : '/';
 const listRoutePath = ref(resolveListRoutePath(route.path));
@@ -125,33 +128,6 @@ const getDisplayedCoverUrl = (path: string | undefined) => {
 const getSongComment = (song: Song) => (
   song.comment?.trim() || songCommentCache.get(song.path)?.trim() || ''
 );
-
-const getSongQuality = (song: Song) => songQualityCache.get(song.path) ?? song;
-
-const loadVisibleSongQuality = (songs: Song[]) => {
-  if (!settings.value.showQualityBadges) {
-    return;
-  }
-  const requestId = ++qualityRequestId;
-  const visiblePaths = new Set(songs.map(song => song.path));
-  void loadSongQualityMetadata(Array.from(visiblePaths))
-    .then((metadata) => {
-      if (requestId !== qualityRequestId || !settings.value.showQualityBadges) {
-        return;
-      }
-      for (const path of Array.from(songQualityCache.keys())) {
-        if (!visiblePaths.has(path)) {
-          songQualityCache.delete(path);
-        }
-      }
-      metadata.forEach((value, path) => {
-        if (visiblePaths.has(path)) {
-          songQualityCache.set(path, value);
-        }
-      });
-    })
-    .catch(() => {});
-};
 
 const hasVisibleSongComment = (song: Song) => settings.value.showSongComments && getSongComment(song).length > 0;
 
@@ -315,18 +291,67 @@ const {
   restoreScrollPosition,
 } = useListScrollMemory(tableViewportKey, containerRef);
 
+const pagedRenderingEnabled = computed(() =>
+  Array.isArray(props.songPaths),
+);
+
+const createSongPlaceholder = (path: string): Song => ({
+  path,
+  name: path.split(/[\\/]/).pop() ?? path,
+  title: '',
+  artist: '',
+  artist_names: [],
+  effective_artist_names: [],
+  album: '',
+  album_artist: '',
+  album_key: '',
+  is_various_artists_album: false,
+  collapse_artist_credits: false,
+  duration: 0,
+});
+
+const displayedSongCount = computed(() =>
+  pagedRenderingEnabled.value ? (props.songPaths?.length ?? 0) : props.songs.length,
+);
+
+const resolveSongWindowMemoryBudget = () => {
+  if (typeof navigator === 'undefined') {
+    return undefined;
+  }
+  const deviceMemoryGb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  if (!deviceMemoryGb || !Number.isFinite(deviceMemoryGb)) {
+    return undefined;
+  }
+  const mebibyte = 1024 * 1024;
+  return Math.min(32 * mebibyte, Math.max(8 * mebibyte, deviceMemoryGb * 4 * mebibyte));
+};
+
 const virtualData = computed(() => {
   const profileStart = isProfilingEnabled() ? performance.now() : 0;
   const songs = Array.isArray(props.songs) ? props.songs : [];
-  const total = songs.length;
+  const songPaths = props.songPaths ?? [];
+  const total = displayedSongCount.value;
   const start = Math.floor(scrollTop.value / ROW_HEIGHT);
   const visibleCount = Math.ceil(containerHeight.value / ROW_HEIGHT);
   const renderStart = Math.max(0, start - OVERSCAN);
   const renderEnd = Math.min(total, start + visibleCount + OVERSCAN);
-  const items = songs.slice(renderStart, renderEnd).map((song, index) => ({
-    ...song,
-    virtualIndex: renderStart + index,
-  }));
+  const items = pagedRenderingEnabled.value
+    ? Array.from({ length: renderEnd - renderStart }, (_, relativeIndex) => {
+        const virtualIndex = renderStart + relativeIndex;
+        const expectedPath = songPaths[virtualIndex];
+        const pagedSong = getPagedSongAt(virtualIndex);
+        const fallbackSong = songs[virtualIndex];
+        const song = pagedSong?.path === expectedPath
+          ? pagedSong
+          : fallbackSong?.path === expectedPath
+            ? fallbackSong
+            : null;
+        return { ...(song ?? createSongPlaceholder(expectedPath ?? '')), virtualIndex };
+      })
+    : songs.slice(renderStart, renderEnd).map((song, index) => ({
+        ...song,
+        virtualIndex: renderStart + index,
+      }));
   const result = {
     items,
     paddingTop: renderStart * ROW_HEIGHT,
@@ -389,9 +414,50 @@ const handleSongTableMouseLeave = () => {
 };
 
 const onScroll = (event: Event) => {
-  scrollTop.value = (event.target as HTMLElement).scrollTop;
+  const nextScrollTop = (event.target as HTMLElement).scrollTop;
+  const now = performance.now();
+  if (lastScrollSampleAt > 0 && now > lastScrollSampleAt) {
+    scrollVelocityPxPerSecond.value = Math.abs(nextScrollTop - lastScrollSampleTop) * 1000 / (now - lastScrollSampleAt);
+  }
+  lastScrollSampleTop = nextScrollTop;
+  lastScrollSampleAt = now;
+  scrollTop.value = nextScrollTop;
+  if (scrollVelocityResetTimer !== null) {
+    window.clearTimeout(scrollVelocityResetTimer);
+  }
+  scrollVelocityResetTimer = window.setTimeout(() => {
+    scrollVelocityPxPerSecond.value = 0;
+    scrollVelocityResetTimer = null;
+  }, 160);
   showScrollbarDuringScroll();
 };
+
+watch(
+  [
+    pagedRenderingEnabled,
+    () => props.songPaths,
+    scrollTop,
+    containerHeight,
+    scrollVelocityPxPerSecond,
+  ],
+  () => {
+    if (!pagedRenderingEnabled.value || !props.songPaths) {
+      return;
+    }
+    const firstVisibleIndex = Math.floor(scrollTop.value / ROW_HEIGHT);
+    const visibleCount = Math.ceil(containerHeight.value / ROW_HEIGHT);
+    void ensureSongWindow({
+      paths: props.songPaths,
+      start: Math.max(0, firstVisibleIndex - OVERSCAN),
+      end: Math.min(props.songPaths.length, firstVisibleIndex + visibleCount + OVERSCAN),
+      viewportHeight: containerHeight.value,
+      rowHeight: ROW_HEIGHT,
+      scrollVelocityPxPerSecond: scrollVelocityPxPerSecond.value,
+      memoryBudgetBytes: resolveSongWindowMemoryBudget(),
+    });
+  },
+  { immediate: true },
+);
 
 const {
   showAlphabetIndex,
@@ -416,6 +482,7 @@ const {
   scrollToTop,
 } = useSongTableAlphabetIndex({
   songs: computed(() => props.songs),
+  songPaths: computed(() => props.songPaths ?? []),
   scrollTop,
   containerHeight,
   containerRef,
@@ -438,7 +505,6 @@ watch(
     const paths = newItems.map(song => song.path);
     preloadPriorityCovers(paths);
     loadVisibleSongComments(newItems);
-    loadVisibleSongQuality(newItems);
   },
   { immediate: true },
 );
@@ -448,18 +514,6 @@ watch(
   (showSongComments) => {
     if (showSongComments) {
       loadVisibleSongComments(virtualItems.value);
-    }
-  },
-);
-
-watch(
-  () => settings.value.showQualityBadges,
-  (showQualityBadges) => {
-    if (showQualityBadges) {
-      loadVisibleSongQuality(virtualItems.value);
-    } else {
-      qualityRequestId += 1;
-      songQualityCache.clear();
     }
   },
 );
@@ -512,7 +566,7 @@ const displayHeroTitle = computed(() => {
     return '\u8fd9\u6bb5\u97f3\u4e50\u4e4b\u65c5\u6682\u65f6\u88ab\u6253\u65ad\u4e86';
   }
   if (heroScanStatus.value === 'success') {
-    return librarySongs.value.length > 0
+    return libraryStore.canonicalSongPaths.length > 0
       ? '\u4e07\u7c41\u4ff1\u5bc2\uff0c\u9759\u5f85\u4e50\u8d77\u3002'
       : '\u8fd9\u6b21\u6ca1\u6709\u53d1\u73b0\u53ef\u5bfc\u5165\u7684\u6b4c\u66f2';
   }
@@ -535,7 +589,7 @@ const displayHeroProgressNote = computed(() => {
     return `${progress.current} / ${progress.total}`;
   }
   if (heroScanStatus.value === 'success') {
-    return librarySongs.value.length > 0 ? `${librarySongs.value.length} \u9996\u5df2\u5165\u5e93` : '\u672a\u53d1\u73b0\u6b4c\u66f2';
+    return libraryStore.canonicalSongPaths.length > 0 ? `${libraryStore.canonicalSongPaths.length} \u9996\u5df2\u5165\u5e93` : '\u672a\u53d1\u73b0\u6b4c\u66f2';
   }
   if (heroScanStatus.value === 'error') {
     return '\u5bfc\u5165\u5df2\u4e2d\u65ad';
@@ -601,6 +655,10 @@ onBeforeUnmount(() => {
   saveScrollPosition();
   saveViewportCoverSnapshot();
   clearScrollbarActiveTimer();
+  if (scrollVelocityResetTimer !== null) {
+    window.clearTimeout(scrollVelocityResetTimer);
+    scrollVelocityResetTimer = null;
+  }
   displayedCoverUrls.clear();
   songCommentCache.clear();
   loadingSongCommentPaths.clear();
@@ -744,12 +802,12 @@ const getRowStyle = (songIndex: number, songPath: string) => {
               <QualityBadge
                 v-if="settings.showQualityBadges"
                 class="shrink-0"
-                :bitrate="getSongQuality(song).bitrate || 0"
-                :sample-rate="getSongQuality(song).sample_rate || 0"
-                :bit-depth="getSongQuality(song).bit_depth || 0"
-                :format="getSongQuality(song).format || ''"
-                :codec="song.codec || ''"
-                :container="song.container || ''"
+                :bitrate="song.bitrate || 0"
+                :sample-rate="song.sample_rate || 0"
+                :bit-depth="song.bit_depth || 0"
+                :format="song.format || ''"
+                codec=""
+                container=""
               />
               <span
                 v-if="isRemoteSong(song)"
@@ -783,7 +841,7 @@ const getRowStyle = (songIndex: number, songPath: string) => {
         <div :style="{ height: virtualPaddingBottom }"></div>
       </div>
 
-      <div v-if="songs.length === 0" class="py-20 flex flex-col justify-center items-center select-none text-gray-500 dark:text-white/60">
+      <div v-if="displayedSongCount === 0" class="py-20 flex flex-col justify-center items-center select-none text-gray-500 dark:text-white/60">
         <template v-if="showLibraryOnboarding || showFolderEmpty || hasSearchQuery">
           <svg xmlns="http://www.w3.org/2000/svg" class="w-16 h-16 mb-4 text-gray-300 dark:text-white/20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M9 18V5l12-2v13"></path>

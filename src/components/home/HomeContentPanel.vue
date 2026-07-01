@@ -26,6 +26,7 @@ interface Props {
   localFilterCondition: string;
   songTableMemoryScopeKey: string;
   localSongList: Song[];
+  localSongPaths: string[];
   selectedCount: number;
   selectedAlbumSong: Song | null;
   artistAlbumList: ArtistAlbumItem[];
@@ -95,6 +96,7 @@ const handleTableDragStart = (...args: any[]) => {
         v-model:activeTab="artistActiveTabModel"
         :artistName="localFilterCondition || 'Unknown Artist'"
         :songs="localSongList"
+        :songPaths="localSongPaths"
         :selectedCount="selectedCount"
         @playAll="$emit('playAll')"
         @batchPlay="$emit('batchPlay')"
@@ -109,6 +111,7 @@ const handleTableDragStart = (...args: any[]) => {
         :albumName="selectedAlbumSong?.album || 'Unknown Album'"
         :albumArtist="selectedAlbumSong?.album_artist || selectedAlbumSong?.artist || 'Unknown Artist'"
         :songs="localSongList"
+        :songPaths="localSongPaths"
         :selectedCount="selectedCount"
         @playAll="$emit('playAll')"
         @batchPlay="$emit('batchPlay')"
@@ -138,6 +141,7 @@ const handleTableDragStart = (...args: any[]) => {
           v-else
           ref="localSongTableRef"
           :songs="localSongList"
+          :songPaths="localSongPaths"
           :isBatchMode="isBatchMode"
           :selectedPaths="selectedPaths"
           :memoryScopeKey="songTableMemoryScopeKey"

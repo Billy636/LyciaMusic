@@ -114,12 +114,12 @@ describe('playerFileManager.refreshFolder', () => {
       removedCount: 1,
       removedPaths: [removedSong.path],
     });
-    expect(libraryStore.librarySongs.map(song => song.path)).toEqual([
+    expect(libraryStore.canonicalSongPaths).toEqual([
       outsideSong.path,
       keptSong.path,
       addedSong.path,
     ]);
-    expect(libraryStore.songList.map(song => song.path)).toEqual([
+    expect(libraryStore.sourceSongPaths).toEqual([
       outsideSong.path,
       keptSong.path,
       addedSong.path,
@@ -224,8 +224,8 @@ describe('playerFileManager.refreshAllFolders', () => {
 
     await fileManager.refreshAllFolders();
 
-    expect(libraryStore.sourceSongs.map(song => song.path)).toEqual([outsideSong.path, keptSong.path]);
-    expect(libraryStore.canonicalSongs.map(song => song.path)).toEqual([outsideSong.path, keptSong.path]);
+    expect(libraryStore.sourceSongPaths).toEqual([outsideSong.path, keptSong.path]);
+    expect(libraryStore.canonicalSongPaths).toEqual([outsideSong.path, keptSong.path]);
     expect(playbackStore.playQueue.map(song => song.path)).toEqual([outsideSong.path]);
     expect(playbackStore.tempQueue).toEqual([]);
     expect(playbackStore.currentSong).toBeNull();

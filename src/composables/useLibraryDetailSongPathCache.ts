@@ -15,7 +15,7 @@ const inFlightRequests = new Map<string, Promise<string[]>>();
 const cacheVersion = ref(0);
 
 const makeArtistKey = (artistName: string) => `artist::${artistName}`;
-const makeAlbumKey = (albumKey: string) => `album::${albumKey}`;
+const makeAlbumKey = (albumKey: string, sortMode: string) => `album::${sortMode}::${albumKey}`;
 
 const loadWithCache = async (key: string, loader: () => Promise<string[]>) => {
   const cached = detailPathCache.get(key);
@@ -53,13 +53,16 @@ export function useLibraryDetailSongPathCache() {
     );
   };
 
-  const loadAlbumSongPaths = async (albumKey: string) => {
+  const loadAlbumSongPaths = async (
+    albumKey: string,
+    sortMode: 'title' | 'track_number' | 'track_number_desc' = 'title',
+  ) => {
     if (!albumKey) {
       return [];
     }
 
-    return loadWithCache(makeAlbumKey(albumKey), () =>
-      tauriInvoke('get_library_song_paths_by_album', { albumKey }),
+    return loadWithCache(makeAlbumKey(albumKey, sortMode), () =>
+      tauriInvoke('get_library_song_paths_by_album', { albumKey, sortMode }),
     );
   };
 
