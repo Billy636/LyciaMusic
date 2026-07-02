@@ -161,6 +161,10 @@ export function useSettingsThemeControls() {
     patchTheme({ windowBlurTint: clampFlowValue(value) });
   };
 
+  const toggleRetainMaterialOnUnfocus = () => {
+    patchTheme({ retainMaterialOnUnfocus: !theme.value.retainMaterialOnUnfocus });
+  };
+
   onMounted(() => {
     void loadWindowMaterialCapabilities();
   });
@@ -190,5 +194,6 @@ export function useSettingsThemeControls() {
     setFlowSpeed,
     setFlowTexture,
     setWindowBlurTint,
+    toggleRetainMaterialOnUnfocus,
   };
 }

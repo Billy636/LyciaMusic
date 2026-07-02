@@ -5,6 +5,8 @@ export type { ForegroundFullscreenState, WindowMaterialCapabilities } from './co
 export const windowApi = {
   setMiniBoundaryEnabled: (enabled: boolean) =>
     tauriInvoke('set_mini_boundary_enabled', { enabled }),
+  setRetainMaterialOnUnfocus: (enabled: boolean) =>
+    tauriInvoke('set_retain_material_on_unfocus', { enabled }),
   setDarkModeForWindow: (dark: boolean) =>
     tauriInvoke('set_dark_mode_for_window', { dark }),
   getWindowMaterialCapabilities: () =>

@@ -72,6 +72,7 @@ const {
   setFlowSpeed,
   setFlowTexture,
   setWindowBlurTint,
+  toggleRetainMaterialOnUnfocus,
 } = useSettingsThemeControls();
 </script>
 
@@ -419,6 +420,33 @@ const {
                 <span>{{ BLUR_TEXT.solid }}</span>
               </div>
             </label>
+          </div>
+        </transition>
+
+        <transition name="flow-panel">
+          <div
+            v-if="materialMode !== 'none'"
+            class="mt-4 flex items-center justify-between rounded-xl border border-gray-200/50 bg-white/20 px-4 py-3 shadow-xs dark:border-white/5 dark:bg-white/5"
+          >
+            <div class="space-y-0.5">
+              <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                失去焦点时保持材质效果
+              </div>
+              <div class="text-xs text-gray-500 dark:text-white/45">
+                关闭后，点击桌面等失焦情况下将变回系统默认的暗淡纯色背景
+              </div>
+            </div>
+            <button
+              type="button"
+              class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none shrink-0"
+              :class="theme.retainMaterialOnUnfocus ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'"
+              @click="toggleRetainMaterialOnUnfocus"
+            >
+              <span
+                class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm"
+                :class="theme.retainMaterialOnUnfocus ? 'translate-x-6' : 'translate-x-1'"
+              />
+            </button>
           </div>
         </transition>
       </div>

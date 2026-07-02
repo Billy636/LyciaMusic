@@ -3,6 +3,7 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 import { computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue';
 import { useWindowMaterial } from './windowMaterial';
 import { useThemeSettings } from './useThemeSettings';
+import { windowApi } from '../services/tauri/windowApi';
 
 export function useAppThemeSync() {
   const {
@@ -150,6 +151,14 @@ export function useAppThemeSync() {
     ],
     () => {
       void syncThemeAndMaterial();
+    },
+    { immediate: true },
+  );
+
+  watch(
+    () => theme.value.retainMaterialOnUnfocus,
+    (enabled) => {
+      void windowApi.setRetainMaterialOnUnfocus(enabled);
     },
     { immediate: true },
   );

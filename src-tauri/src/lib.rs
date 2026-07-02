@@ -65,7 +65,7 @@ use toolbox::{
 
 #[cfg(target_os = "windows")]
 use toolbox::{append_webview2_browser_arg, should_disable_gpu_for_startup};
-use window_boundary::set_mini_boundary_enabled;
+use window_boundary::{set_mini_boundary_enabled, set_retain_material_on_unfocus};
 use window_material::get_window_material_capabilities;
 use window_theme::set_dark_mode_for_window;
 use window_z_order::{refresh_current_window_topmost, start_topmost_guard, stop_topmost_guard};
@@ -199,6 +199,7 @@ pub fn run() {
             file_exists,
             refresh_folder_songs,
             set_mini_boundary_enabled,
+            set_retain_material_on_unfocus,
             get_window_material_capabilities,
             get_foreground_fullscreen_state,
             set_dark_mode_for_window,

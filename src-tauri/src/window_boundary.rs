@@ -5,11 +5,14 @@ use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
     Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST},
     UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
-    UI::WindowsAndMessaging::WM_MOVING,
+    UI::WindowsAndMessaging::{WM_MOVING, WM_NCACTIVATE},
 };
 
 /// 全局标志：是否启用 mini 窗口边界约束
 static BOUNDARY_ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// 全局标志：在应用不在焦点时是否保留窗口材质
+static RETAIN_MATERIAL_ON_UNFOCUS: AtomicBool = AtomicBool::new(false);
 
 /// Subclass ID（任意唯一常量）
 #[cfg(target_os = "windows")]
@@ -24,6 +27,13 @@ unsafe extern "system" fn boundary_subclass_proc(
     _uid_subclass: usize,
     _dw_ref_data: usize,
 ) -> LRESULT {
+    if msg == WM_NCACTIVATE && RETAIN_MATERIAL_ON_UNFOCUS.load(Ordering::Relaxed) {
+        if wparam == 0 {
+            // 维持激活信号的渲染，防止 DWM 失焦时取消 Acrylic/Mica 模糊效果
+            return DefSubclassProc(hwnd, msg, 1, lparam);
+        }
+    }
+
     if msg == WM_MOVING && BOUNDARY_ENABLED.load(Ordering::Relaxed) {
         // lparam 指向一个 RECT，表示窗口即将移动到的目标位置
         let rect = &mut *(lparam as *mut RECT);
@@ -84,3 +94,10 @@ pub fn _remove_boundary_subclass(hwnd: isize) {
 pub fn set_mini_boundary_enabled(enabled: bool) {
     BOUNDARY_ENABLED.store(enabled, Ordering::Relaxed);
 }
+
+/// Tauri 命令：设置在应用不在焦点时是否保留窗口材质
+#[tauri::command]
+pub fn set_retain_material_on_unfocus(enabled: bool) {
+    RETAIN_MATERIAL_ON_UNFOCUS.store(enabled, Ordering::Relaxed);
+}
+

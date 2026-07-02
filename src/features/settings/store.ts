@@ -69,6 +69,7 @@ export const defaultThemeSettings: ThemeSettings = {
   mode: 'light',
   dynamicBgType: 'none',
   windowMaterial: 'none',
+  retainMaterialOnUnfocus: false,
   flowColorBoost: 25,
   flowDepth: 30,
   flowSpeed: 52,

@@ -36,6 +36,12 @@ vi.mock('./windowMaterial', () => ({
   }),
 }));
 
+vi.mock('../services/tauri/windowApi', () => ({
+  windowApi: {
+    setRetainMaterialOnUnfocus: vi.fn(() => Promise.resolve()),
+  },
+}));
+
 async function flushThemeSync() {
   await nextTick();
   await Promise.resolve();

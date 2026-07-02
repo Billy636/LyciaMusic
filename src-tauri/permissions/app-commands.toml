@@ -99,6 +99,7 @@ commands.allow = [
   "open_external_program",
   "refresh_folder_songs",
   "set_mini_boundary_enabled",
+  "set_retain_material_on_unfocus",
   "get_window_material_capabilities",
   "get_foreground_fullscreen_state",
   "set_dark_mode_for_window",

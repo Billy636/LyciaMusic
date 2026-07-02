@@ -252,6 +252,7 @@ export interface ThemeSettings {
   mode: 'light' | 'dark' | 'custom';
   dynamicBgType: 'none' | 'flow' | 'blur';
   windowMaterial: 'none' | 'mica' | 'acrylic' | 'blur';
+  retainMaterialOnUnfocus: boolean;
   flowColorBoost: number;
   flowDepth: number;
   flowSpeed: number;
