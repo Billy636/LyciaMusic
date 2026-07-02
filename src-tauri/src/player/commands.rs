@@ -69,6 +69,11 @@ pub async fn play_audio(
     state: tauri::State<'_, PlayerState>,
 ) -> Result<u64, String> {
     let playback_id = state.playback_id.fetch_add(1, Ordering::Relaxed) + 1;
+    let cue_offset_ms = cue_start_offset_ms.unwrap_or(0);
+    let initial_media_seconds = start_offset_ms
+        .unwrap_or(cue_offset_ms)
+        .saturating_sub(cue_offset_ms) as f64
+        / 1000.0;
     let mut selected_output_mode = output_mode;
     let source = if is_remote_uri(&path) {
         match remote_playback_source(&db_state, &path)? {
@@ -103,6 +108,10 @@ pub async fn play_audio(
     }
 
     let normalized_cover = normalize_cover_for_smtc(&cover);
+    state
+        .progress
+        .cue_start_offset_ms
+        .store(cue_offset_ms, Ordering::Relaxed);
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
     tx.send(AudioCommand::Play {
         source,
@@ -129,7 +138,9 @@ pub async fn play_audio(
                 },
             });
             let _ = mc.set_playback(MediaPlayback::Playing {
-                progress: Some(MediaPosition(Duration::from_secs(0))),
+                progress: Some(MediaPosition(Duration::from_secs_f64(
+                    initial_media_seconds,
+                ))),
             });
         }
     }
@@ -252,10 +263,16 @@ pub fn update_playback_metadata(
             });
             let _ = mc.set_playback(if is_playing {
                 MediaPlayback::Playing {
-                    progress: Some(MediaPosition(Duration::from_secs(0))),
+                    progress: Some(MediaPosition(Duration::from_secs_f64(
+                        state.progress.media_seconds(),
+                    ))),
                 }
             } else {
-                MediaPlayback::Paused { progress: None }
+                MediaPlayback::Paused {
+                    progress: Some(MediaPosition(Duration::from_secs_f64(
+                        state.progress.media_seconds(),
+                    ))),
+                }
             });
         }
     }
@@ -269,7 +286,11 @@ pub fn pause_audio(state: tauri::State<PlayerState>) -> Result<(), String> {
     tx.send(AudioCommand::Pause).map_err(|e| e.to_string())?;
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
-            let _ = mc.set_playback(MediaPlayback::Paused { progress: None });
+            let _ = mc.set_playback(MediaPlayback::Paused {
+                progress: Some(MediaPosition(Duration::from_secs_f64(
+                    state.progress.media_seconds(),
+                ))),
+            });
         }
     }
     Ok(())
@@ -293,7 +314,11 @@ pub fn resume_audio(state: tauri::State<PlayerState>) -> Result<(), String> {
     tx.send(AudioCommand::Resume).map_err(|e| e.to_string())?;
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
-            let _ = mc.set_playback(MediaPlayback::Playing { progress: None });
+            let _ = mc.set_playback(MediaPlayback::Playing {
+                progress: Some(MediaPosition(Duration::from_secs_f64(
+                    state.progress.media_seconds(),
+                ))),
+            });
         }
     }
     Ok(())
@@ -316,7 +341,9 @@ pub fn seek_audio(
 
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
-            let progress = MediaPosition(Duration::from_secs_f64(time.max(0.0)));
+            let progress = MediaPosition(Duration::from_secs_f64(
+                state.progress.media_seconds_from_absolute(time),
+            ));
             if is_playing {
                 let _ = mc.set_playback(MediaPlayback::Playing {
                     progress: Some(progress),
@@ -342,16 +369,7 @@ pub fn set_volume(volume: f32, state: tauri::State<PlayerState>) -> Result<(), S
 
 #[tauri::command]
 pub fn get_playback_progress(state: tauri::State<PlayerState>) -> f64 {
-    let samples = state.progress.samples_played.load(Ordering::Relaxed);
-    let rate = state.progress.sample_rate.load(Ordering::Relaxed);
-    let channels = state.progress.channels.load(Ordering::Relaxed);
-
-    if rate == 0 || channels == 0 {
-        return 0.0;
-    }
-
-    let total_samples_per_sec = rate as u64 * channels as u64;
-    samples as f64 / total_samples_per_sec as f64
+    state.progress.absolute_seconds()
 }
 
 #[tauri::command]

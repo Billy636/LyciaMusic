@@ -680,6 +680,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
         samples_played: Arc::new(AtomicU64::new(0)),
         sample_rate: Arc::new(AtomicU32::new(44100)),
         channels: Arc::new(AtomicU32::new(2)),
+        cue_start_offset_ms: AtomicU64::new(0),
         visualizer: Arc::new(SharedVisualizer::new()),
     });
     let thread_progress = shared_progress.clone();
@@ -747,6 +748,9 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         current_volume_balance_gain = volume_balance_gain;
                         current_duration_ms = duration_ms;
                         current_cue_start_offset_ms = cue_start_offset_ms;
+                        thread_progress
+                            .cue_start_offset_ms
+                            .store(cue_start_offset_ms.unwrap_or(0), Ordering::Relaxed);
                         current_playback_id = playback_id;
                         let source_is_remote = source.is_remote();
                         let display_path = source.display_path();
@@ -1216,6 +1220,7 @@ mod tests {
             samples_played: Arc::new(AtomicU64::new(samples)),
             sample_rate: Arc::new(AtomicU32::new(sample_rate)),
             channels: Arc::new(AtomicU32::new(channels)),
+            cue_start_offset_ms: AtomicU64::new(0),
             visualizer: Arc::new(SharedVisualizer::new()),
         })
     }

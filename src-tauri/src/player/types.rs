@@ -11,6 +11,11 @@ use std::time::Duration;
 pub const VISUALIZER_BAND_COUNT: usize = 48;
 pub const VISUALIZER_WINDOW_SIZE: usize = 2048;
 
+fn relative_media_seconds(absolute_seconds: f64, cue_start_offset_ms: u64) -> f64 {
+    let cue_offset_seconds = cue_start_offset_ms as f64 / 1000.0;
+    (absolute_seconds - cue_offset_seconds).max(0.0)
+}
+
 pub struct SharedVisualizer {
     samples: Vec<AtomicU32>,
     pub cursor: AtomicU64,
@@ -140,7 +145,53 @@ pub struct SharedProgress {
     pub samples_played: Arc<AtomicU64>,
     pub sample_rate: Arc<AtomicU32>,
     pub channels: Arc<AtomicU32>,
+    pub cue_start_offset_ms: AtomicU64,
     pub visualizer: Arc<SharedVisualizer>,
+}
+
+impl SharedProgress {
+    pub fn absolute_seconds(&self) -> f64 {
+        let samples = self.samples_played.load(Ordering::Relaxed);
+        let rate = self.sample_rate.load(Ordering::Relaxed);
+        let channels = self.channels.load(Ordering::Relaxed);
+
+        if rate == 0 || channels == 0 {
+            return 0.0;
+        }
+
+        samples as f64 / (rate as f64 * channels as f64)
+    }
+
+    pub fn media_seconds_from_absolute(&self, absolute_seconds: f64) -> f64 {
+        relative_media_seconds(
+            absolute_seconds,
+            self.cue_start_offset_ms.load(Ordering::Relaxed),
+        )
+    }
+
+    pub fn media_seconds(&self) -> f64 {
+        self.media_seconds_from_absolute(self.absolute_seconds())
+    }
+}
+
+#[cfg(test)]
+mod shared_progress_tests {
+    use super::relative_media_seconds;
+
+    #[test]
+    fn converts_absolute_cue_position_to_track_position() {
+        assert_eq!(relative_media_seconds(73.5, 60_000), 13.5);
+    }
+
+    #[test]
+    fn clamps_positions_before_cue_start_to_zero() {
+        assert_eq!(relative_media_seconds(59.0, 60_000), 0.0);
+    }
+
+    #[test]
+    fn leaves_regular_track_position_unchanged() {
+        assert_eq!(relative_media_seconds(13.5, 0), 13.5);
+    }
 }
 
 pub enum AudioCommand {
