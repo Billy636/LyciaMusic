@@ -60,7 +60,7 @@ export function usePlaybackActions({
 }: UsePlaybackActionsOptions) {
   const handleAutoNext = () => {
     if (playMode.value === 1 && currentSong.value) {
-      void getPlayerPlayback().playSong(currentSong.value);
+      void getPlayerPlayback().playSong(currentSong.value, { preserveQueue: true });
       return;
     }
 

@@ -75,7 +75,7 @@ describe('player action hooks', () => {
     windowActions.toggleAlwaysOnTop(true);
     windowActions.toggleQueue();
 
-    expect(playSong).toHaveBeenCalledWith(demoSong);
+    expect(playSong).toHaveBeenCalledWith(demoSong, { preserveQueue: true });
     expect(nextSong).not.toHaveBeenCalled();
     expect(toggleAlwaysOnTop).toHaveBeenCalledWith(true);
     expect(toggleQueue).toHaveBeenCalledTimes(1);
