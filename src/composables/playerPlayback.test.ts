@@ -106,6 +106,34 @@ describe('player playback domain', () => {
     playerPlayback.dispose();
   });
 
+  it('preserves the restored queue when playback resumes before audio is loaded', async () => {
+    const playbackStore = usePlaybackStore();
+    const restoredSong = makeSong({ path: '/music/folder-a/restored.flac', title: 'Restored' });
+    const queuedSong = makeSong({ path: '/music/folder-a/queued.flac', title: 'Queued' });
+    const otherFolderSong = makeSong({ path: '/music/folder-b/other.flac', title: 'Other' });
+    const restoredQueuePaths = [restoredSong.path, queuedSong.path];
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [restoredSong, queuedSong, otherFolderSong],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext: vi.fn(),
+    });
+
+    playbackStore.currentSong = restoredSong;
+    playbackStore.currentTime = 42;
+    playbackStore.isSongLoaded = false;
+    playbackStore.playQueuePaths = restoredQueuePaths;
+
+    await playerPlayback.togglePlay();
+
+    expect(playbackStore.playQueuePaths).toEqual(restoredQueuePaths);
+    expect(playbackApi.playAudio).toHaveBeenCalledWith(expect.objectContaining({
+      path: restoredSong.path,
+      startOffsetMs: 42_000,
+    }));
+    playerPlayback.dispose();
+  });
+
   it('inserts a searched song directly after the previously playing song', async () => {
     const playbackStore = usePlaybackStore();
     const songA = makeSong({ path: '/music/a.flac', title: 'A' });

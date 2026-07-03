@@ -90,15 +90,19 @@ export const createPlayerQueue = ({
 
   const playPath = (path: string | undefined, options: QueuePlaySongOptions = {}) => {
     if (!path) return;
+    const playOptions: QueuePlaySongOptions = {
+      preserveQueue: true,
+      ...options,
+    };
     const cachedSong = getCachedSong(path);
     if (cachedSong) {
-      void playSong(cachedSong, options);
+      void playSong(cachedSong, playOptions);
       return;
     }
     void loadSong(path)
       .then((song) => {
         if (song) {
-          void playSong(song, options);
+          void playSong(song, playOptions);
         }
       })
       .catch(() => {});

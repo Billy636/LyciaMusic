@@ -67,7 +67,7 @@ const handleScroll = (event: Event) => {
 const handlePlayPath = async (path: string) => {
   const song = await loadSong(path);
   if (song) {
-    await playSong(song);
+    await playSong(song, { preserveQueue: true });
   }
 };
 

@@ -442,7 +442,10 @@ export const createPlayerPlayback = ({
     }
 
     if (!isSongLoaded.value) {
-      await playSong(currentSong.value, { startTime: currentTime.value });
+      await playSong(currentSong.value, {
+        startTime: currentTime.value,
+        preserveQueue: true,
+      });
     } else {
       await playbackApi.resumeAudio();
       sessionStartTime = Date.now();
