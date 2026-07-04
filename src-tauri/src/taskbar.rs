@@ -173,7 +173,7 @@ pub fn get_taskbar_tray_geometry(app: tauri::AppHandle) -> Result<TaskbarTrayGeo
         use windows_sys::Win32::Foundation::{GetLastError, HWND, RECT, SetLastError};
         use windows_sys::Win32::UI::Shell::{ABM_GETTASKBARPOS, APPBARDATA, SHAppBarMessage};
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            FindWindowW, GetWindowRect, SetWindowLongPtrW, GWLP_HWNDPARENT,
+            FindWindowExW, FindWindowW, GetWindowRect, SetWindowLongPtrW, GWLP_HWNDPARENT,
         };
 
         let window = app
@@ -246,16 +246,29 @@ pub fn get_taskbar_tray_geometry(app: tauri::AppHandle) -> Result<TaskbarTrayGeo
             }
         }
 
-        // 3. 递归安全深度查找托盘通知区域，限制在 3 层内，最多遍历 64 个节点
-        let tray_class_utf16: Vec<u16> = "TrayNotifyWnd".encode_utf16().collect();
-        let mut node_count = 0;
-        let hwnd_tray = find_window_recursive(
-            current_hwnd_taskbar,
-            &tray_class_utf16,
-            0,
-            3,
-            &mut node_count,
-        );
+        // 3. 优先使用 FindWindowExW 直接查找 TrayNotifyWnd 直系子窗口 (Fast-Path)
+        let tray_class_utf16: Vec<u16> = "TrayNotifyWnd\0".encode_utf16().collect();
+        let mut hwnd_tray = unsafe {
+            FindWindowExW(
+                current_hwnd_taskbar,
+                std::ptr::null_mut(),
+                tray_class_utf16.as_ptr(),
+                std::ptr::null(),
+            )
+        };
+
+        // 4. 若直系查找失败，则回退到 DFS 递归查找进行安全兜底 (Slow-Path)，并将限制放宽
+        if hwnd_tray.is_null() {
+            let mut node_count = 0;
+            // 递归比对不需要末尾的 \0
+            hwnd_tray = find_window_recursive(
+                current_hwnd_taskbar,
+                &tray_class_utf16[..tray_class_utf16.len() - 1],
+                0,
+                4,
+                &mut node_count,
+            );
+        }
 
         let mut tray_rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
         let got_tray = if !hwnd_tray.is_null() {
