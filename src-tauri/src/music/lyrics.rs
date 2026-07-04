@@ -6,6 +6,7 @@ use regex::Regex;
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 const MAX_GROUP_TOLERANCE_MS: u32 = 50;
 const MAX_GROUP_SIZE: usize = 3;
@@ -1284,6 +1285,46 @@ fn normalize_lyric_timestamps(source: &str) -> String {
     re_angle.replace_all(&step1, "<$1:$2.$3>").to_string()
 }
 
+fn lrc_offset_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    PATTERN.get_or_init(|| {
+        Regex::new(r"(?im)^[\t ]*\[offset[\t ]*:[\t ]*([+-]?\d+)[\t ]*(?:ms)?[\t ]*\][\t ]*$")
+            .expect("valid LRC offset regex")
+    })
+}
+
+fn parse_lrc_offset_ms(source: &str) -> i64 {
+    lrc_offset_pattern()
+        .captures_iter(source)
+        .filter_map(|captures| captures.get(1)?.as_str().parse::<i64>().ok())
+        .last()
+        .unwrap_or(0)
+}
+
+fn shift_lyric_timestamp(timestamp_ms: u32, offset_ms: i64) -> u32 {
+    (timestamp_ms as i64)
+        .saturating_add(offset_ms)
+        .clamp(0, u32::MAX as i64) as u32
+}
+
+fn apply_lrc_offset(lines: &mut [ParsedLine], offset_ms: i64) {
+    if offset_ms == 0 {
+        return;
+    }
+
+    for line in lines {
+        line.start_ms = shift_lyric_timestamp(line.start_ms, offset_ms);
+        line.end_ms = shift_lyric_timestamp(line.end_ms, offset_ms);
+
+        if let Some(words) = line.words.as_mut() {
+            for word in words {
+                word.start_ms = shift_lyric_timestamp(word.start_ms, offset_ms);
+                word.end_ms = shift_lyric_timestamp(word.end_ms, offset_ms);
+            }
+        }
+    }
+}
+
 fn parse_raw_lyrics(raw: &str) -> Vec<ParsedLine> {
     let raw_normalized = normalize_lyric_timestamps(raw);
     let normalized = raw_normalized
@@ -1368,11 +1409,13 @@ fn parse_raw_lyrics(raw: &str) -> Vec<ParsedLine> {
     );
 
     candidates.sort_by(compare_parser_candidates);
-    candidates
+    let mut lines = candidates
         .into_iter()
         .next()
         .map(|candidate| candidate.lines)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    apply_lrc_offset(&mut lines, parse_lrc_offset_ms(&normalized));
+    lines
 }
 
 fn track_source_format(lines: &[LyricTrackLine]) -> LyricTrackSourceFormat {
@@ -3654,6 +3697,47 @@ mod tests {
         assert_eq!(parsed[0].text, "上天啊");
         assert_eq!(parsed[1].start_ms, 25200);
         assert_eq!(parsed[1].text, "难道你看不出我很爱她");
+    }
+
+    #[test]
+    fn applies_positive_lrc_offset_to_line_timing() {
+        let parsed = parse_raw_lyrics("[offset:+200]\n[00:01.000]Hello");
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].start_ms, 1200);
+        assert_eq!(parsed[0].end_ms, 6200);
+    }
+
+    #[test]
+    fn supports_case_insensitive_lrc_offset_with_ms_suffix() {
+        let parsed = parse_raw_lyrics("[OFFSET : -200ms]\n[00:01.000]Hello");
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].start_ms, 800);
+        assert_eq!(parsed[0].end_ms, 5800);
+    }
+
+    #[test]
+    fn applies_lrc_offset_to_enhanced_word_timing_and_clamps_at_zero() {
+        let parsed =
+            parse_raw_lyrics("[offset:-500]\n[00:00.250]<00:00.250>A<00:00.750>B<00:01.250>");
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].start_ms, 0);
+        let words = parsed[0].words.as_ref().expect("enhanced words");
+        assert_eq!(words[0].start_ms, 0);
+        assert_eq!(words[0].end_ms, 250);
+        assert_eq!(words[1].start_ms, 250);
+        assert_eq!(words[1].end_ms, 750);
+    }
+
+    #[test]
+    fn uses_the_last_valid_lrc_offset_tag() {
+        let parsed =
+            parse_raw_lyrics("[offset:+100]\n[offset:invalid]\n[offset:+300ms]\n[00:01.000]Hello");
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].start_ms, 1300);
     }
 
     #[test]
