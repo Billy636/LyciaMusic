@@ -13,6 +13,7 @@ import SortModeIcon from '../components/common/SortModeIcon.vue';
 import { useLibraryBrowse } from '../features/library/useLibraryBrowse';
 import type { ArtistListItem } from '../features/library/playerLibraryViewShared';
 import { getAlphabetIndexKey } from '../utils/alphabetIndex';
+import ArtistAlbumContextMenu from '../components/overlays/ArtistAlbumContextMenu.vue';
 
 const { filteredArtistList, artistSortMode, updateArtistOrder, searchQuery } = useLibraryBrowse();
 const router = useRouter();
@@ -38,6 +39,20 @@ const ARTIST_ITEM_HEIGHT = 72;
 const ARTIST_ROW_SPAN = ARTIST_ITEM_HEIGHT + ARTIST_GRID_GAP_Y;
 const ARTIST_SECTION_HEADER_HEIGHT = 24;
 const ARTIST_OVERSCAN_ROWS = 2;
+
+const showContextMenu = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+const contextMenuTargetKey = ref('');
+const contextMenuTargetName = ref('');
+
+const handleContextMenu = (event: MouseEvent, artist: ArtistListItem) => {
+  contextMenuX.value = event.clientX;
+  contextMenuY.value = event.clientY;
+  contextMenuTargetKey.value = artist.name;
+  contextMenuTargetName.value = artist.name;
+  showContextMenu.value = true;
+};
 
 const handleArtistClick = (artist: ArtistListItem) => {
   const avatarUrl = getArtistAvatarUrl(artist);
@@ -675,6 +690,7 @@ onUnmounted(() => {
               @pointerdown="handlePointerDown($event, item.index, item.artist)"
               @pointermove="handleItemPointerMove($event, item.artist.name)"
               @click="handleArtistClick(item.artist)"
+              @contextmenu.prevent="handleContextMenu($event, item.artist)"
             >
               <div
                 class="relative w-12 h-12 md:w-14 md:h-14 shrink-0"
@@ -715,6 +731,7 @@ onUnmounted(() => {
           @pointerdown="handlePointerDown($event, item.index, item.artist)"
           @pointermove="handleItemPointerMove($event, item.artist.name)"
           @click="handleArtistClick(item.artist)"
+          @contextmenu.prevent="handleContextMenu($event, item.artist)"
         >
           <div
             class="relative w-12 h-12 md:w-14 md:h-14 shrink-0"
@@ -738,6 +755,16 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
+
+    <ArtistAlbumContextMenu
+      :visible="showContextMenu"
+      :x="contextMenuX"
+      :y="contextMenuY"
+      type="artist"
+      :targetKey="contextMenuTargetKey"
+      :targetName="contextMenuTargetName"
+      @close="showContextMenu = false"
+    />
   </div>
 </template>
 

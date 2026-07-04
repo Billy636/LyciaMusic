@@ -12,6 +12,7 @@ import SortModeIcon from '../components/common/SortModeIcon.vue';
 import { useLibraryBrowse } from '../features/library/useLibraryBrowse';
 import type { AlbumListItem } from '../features/library/playerLibraryViewShared';
 import { getAlphabetIndexKey } from '../utils/alphabetIndex';
+import ArtistAlbumContextMenu from '../components/overlays/ArtistAlbumContextMenu.vue';
 
 const { filteredAlbumList, albumSortMode, updateAlbumOrder, searchQuery } = useLibraryBrowse();
 const router = useRouter();
@@ -480,6 +481,20 @@ watch(
   { immediate: true, flush: 'post' },
 );
 
+const showContextMenu = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+const contextMenuTargetKey = ref('');
+const contextMenuTargetName = ref('');
+
+const handleContextMenu = (event: MouseEvent, album: AlbumListItem) => {
+  contextMenuX.value = event.clientX;
+  contextMenuY.value = event.clientY;
+  contextMenuTargetKey.value = album.key;
+  contextMenuTargetName.value = album.name;
+  showContextMenu.value = true;
+};
+
 let pointerDownInfo: { x: number; y: number; index: number; album: AlbumListItem } | null = null;
 
 const handlePointerDown = (event: PointerEvent, index: number, album: AlbumListItem) => {
@@ -705,6 +720,7 @@ onUnmounted(() => {
               @pointerdown="handlePointerDown($event, item.index, item.album)"
               @pointermove="handleItemPointerMove($event, item.album.key)"
               @click="handleAlbumClick(item.album.key)"
+              @contextmenu.prevent="handleContextMenu($event, item.album)"
             >
               <div class="relative w-full aspect-square mb-3 mt-1" :data-cover-path="item.album.firstSongPath">
                 <div class="absolute inset-x-2 top-0 bottom-1/2 bg-[#1c1c1c] rounded-t-full shadow-inner origin-bottom translate-y-[-10%] group-hover:translate-y-[-24%] transition-transform duration-500 ease-out z-0 flex items-center justify-center overflow-hidden border border-[#333]">
@@ -766,6 +782,7 @@ onUnmounted(() => {
           @pointerdown="handlePointerDown($event, item.index, item.album)"
           @pointermove="handleItemPointerMove($event, item.album.key)"
           @click="handleAlbumClick(item.album.key)"
+          @contextmenu.prevent="handleContextMenu($event, item.album)"
         >
           <div class="relative w-full aspect-square mb-3 mt-1" :data-cover-path="item.album.firstSongPath">
             <div class="absolute inset-x-2 top-0 bottom-1/2 bg-[#1c1c1c] rounded-t-full shadow-inner origin-bottom translate-y-[-10%] group-hover:translate-y-[-24%] transition-transform duration-500 ease-out z-0 flex items-center justify-center overflow-hidden border border-[#333]">
@@ -808,6 +825,16 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
+
+    <ArtistAlbumContextMenu
+      :visible="showContextMenu"
+      :x="contextMenuX"
+      :y="contextMenuY"
+      type="album"
+      :targetKey="contextMenuTargetKey"
+      :targetName="contextMenuTargetName"
+      @close="showContextMenu = false"
+    />
   </div>
 </template>
 

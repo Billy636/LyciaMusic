@@ -4,6 +4,7 @@ import { usePlayerViewState } from '../../composables/usePlayerViewState';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useCoverCache } from '../../composables/useCoverCache';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import ArtistAlbumContextMenu from '../overlays/ArtistAlbumContextMenu.vue';
 
 const { favTab } = usePlayerViewState();
 const { favArtistList, favAlbumList } = useLibraryBrowse();
@@ -235,6 +236,26 @@ watch([virtualGridState, favTab], async () => {
   initObserver();
 }, { immediate: true });
 
+const showContextMenu = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+const contextMenuTargetKey = ref('');
+const contextMenuTargetName = ref('');
+const contextMenuType = ref<'artist' | 'album'>('artist');
+
+const handleContextMenu = (event: MouseEvent, item: FavoriteGridItem) => {
+  contextMenuX.value = event.clientX;
+  contextMenuY.value = event.clientY;
+  contextMenuType.value = item.type;
+  if (item.type === 'artist') {
+    contextMenuTargetKey.value = item.name;
+  } else {
+    contextMenuTargetKey.value = item.album.key;
+  }
+  contextMenuTargetName.value = item.name;
+  showContextMenu.value = true;
+};
+
 onMounted(() => {
   scrollParentRef.value = findScrollParent(rootRef.value);
   updateLayoutMetrics();
@@ -283,6 +304,7 @@ onUnmounted(() => {
         v-show="item.type === 'artist'"
         :key="item.key"
         @click="item.type === 'artist' && emit('enterDetail', 'artist', item.name)"
+        @contextmenu.prevent="handleContextMenu($event, item)"
         class="group cursor-pointer"
       >
         <div
@@ -325,6 +347,7 @@ onUnmounted(() => {
         v-show="item.type === 'album'"
         :key="item.key"
         @click="item.type === 'album' && emit('enterDetail', 'album', item.name)"
+        @contextmenu.prevent="handleContextMenu($event, item)"
         class="group cursor-pointer"
       >
         <div
@@ -355,6 +378,16 @@ onUnmounted(() => {
         </div>
       </div>
     </template>
+
+    <ArtistAlbumContextMenu
+      :visible="showContextMenu"
+      :x="contextMenuX"
+      :y="contextMenuY"
+      :type="contextMenuType"
+      :targetKey="contextMenuTargetKey"
+      :targetName="contextMenuTargetName"
+      @close="showContextMenu = false"
+    />
   </div>
 </template>
 
