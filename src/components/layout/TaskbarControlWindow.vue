@@ -248,7 +248,7 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="w-[320px] h-[40px] relative flex items-center justify-between select-none overflow-hidden rounded-xl border pl-2 pr-3.5 transition-all duration-300 bg-transparent"
+    class="group w-[280px] h-[40px] relative flex items-center justify-between select-none overflow-hidden rounded-xl border pl-2 pr-3.5 transition-all duration-300 bg-transparent"
     :class="[
       isDragging 
         ? 'bg-[#121214]/65 border-white/5 shadow-2xl backdrop-blur-md' 
@@ -268,7 +268,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 左侧：封面与歌曲信息 -->
-    <div class="flex items-center gap-2.5 min-w-0 flex-1 mr-4 pointer-events-none">
+    <div class="flex items-center gap-2.5 min-w-0 flex-1 mr-1 pointer-events-none">
       <!-- 封面 -->
       <div 
         class="group/cover w-8 h-8 rounded-lg overflow-hidden shrink-0 bg-white/5 border border-white/5 flex items-center justify-center text-white/40 relative cursor-pointer pointer-events-auto"
@@ -323,7 +323,7 @@ onUnmounted(() => {
         <!-- 歌曲标题（带跑马灯逻辑） -->
         <div 
           ref="titleWrapperElement" 
-          class="text-xs text-white/95 font-semibold truncate max-w-[110px] w-full overflow-hidden relative"
+          class="text-xs text-white/95 font-semibold truncate max-w-[112px] w-full overflow-hidden relative"
         >
           <div
             ref="titleElement"
@@ -335,14 +335,14 @@ onUnmounted(() => {
         </div>
 
         <!-- 歌手名 -->
-        <div class="text-[10px] text-white/50 truncate max-w-[110px] w-full">
+        <div class="text-[10px] text-white/50 truncate max-w-[112px] w-full">
           {{ currentSong ? currentSong.artist : '享受音乐时光' }}
         </div>
       </div>
     </div>
 
     <!-- 右侧：上一首、播放/暂停、下一首控制 -->
-    <div class="flex items-center gap-2.5 shrink-0 z-20 mr-3">
+    <div class="flex items-center gap-2.5 shrink-0 z-20 mr-1">
       <!-- 上一首 -->
       <button 
         @click.stop="sendAction('prev-song')" 
@@ -380,21 +380,26 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- 右上角 x 退出按钮外层隐形大热区（28px x 28px，完美契合 40px 高度容器的右上角，保证优秀的盲操防滑体验） -->
+    <!-- 右上角 x 退出按钮外层隐形大热区（更偏右上角，且仅高亮 x 图标本身，并跟随主面板悬停阴影同步显隐） -->
     <div 
-      class="group/exit absolute top-0 right-0 w-7 h-7 flex items-center justify-center cursor-pointer z-30"
+      class="group/exit absolute top-0 right-0 w-7 h-7 flex items-start justify-end pt-1 pr-1.5 cursor-pointer z-30 transition-opacity duration-300"
+      :class="[isDragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100']"
       @click.stop="sendAction('close')"
       title="退出播控"
     >
-      <!-- 内层精致小巧的 x 按钮 -->
-      <div 
-        class="w-4 h-4 rounded-full flex items-center justify-center text-white/30 bg-white/5 opacity-0 group-hover/exit:opacity-100 hover:!text-white/90 hover:!bg-white/15 transition-all duration-300 active:scale-90"
+      <svg 
+        xmlns="http://www.w3.org/2000/svg" 
+        class="h-2 w-2 text-white/30 group-hover/exit:text-white/90 transition-colors duration-200 active:scale-95" 
+        viewBox="0 0 24 24" 
+        fill="none" 
+        stroke="currentColor" 
+        stroke-width="3.5" 
+        stroke-linecap="round" 
+        stroke-linejoin="round"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-2 w-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
-      </div>
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </svg>
     </div>
   </div>
 </template>

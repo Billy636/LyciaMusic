@@ -10,7 +10,7 @@ export const TASKBAR_PLAYER_VISIBILITY_EVENT = 'taskbar-player:visibility';
 export const TASKBAR_PLAYER_DRAG_EVENT = 'taskbar-player:drag';
 export const TASKBAR_PLAYER_POSITION_X_KEY = 'taskbar_player_window_position_x';
 
-export const TASKBAR_PLAYER_WINDOW_WIDTH = 320;
+export const TASKBAR_PLAYER_WINDOW_WIDTH = 280;
 export const TASKBAR_PLAYER_WINDOW_HEIGHT = 40;
 
 export interface TaskbarPlayerStatePayload {
