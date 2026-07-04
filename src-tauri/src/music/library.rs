@@ -251,11 +251,21 @@ fn is_direct_child_path(parent_path: &str, child_path: &str) -> bool {
     let normalized_parent = normalize_for_compare(parent_path);
     let normalized_child = child_path.replace('\\', "/");
 
-    match normalized_child.rfind('/') {
-        Some(index) => normalized_child[..index] == normalized_parent,
-        None => false,
+    let child_prefix = match normalized_child.rfind('/') {
+        Some(index) => &normalized_child[..index],
+        None => return false,
+    };
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        normalized_parent.to_lowercase() == child_prefix.to_lowercase()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        normalized_parent == child_prefix
     }
 }
+
 
 fn file_name_from_path(path: &str) -> String {
     std::path::Path::new(path)
@@ -2018,5 +2028,23 @@ mod tests {
         assert_eq!(songs[1].path, "/a/song2.flac");
         assert_eq!(songs[2].path, "/a/song4.flac");
         assert_eq!(songs[3].path, "/a/song1.flac");
+    }
+
+    #[test]
+    fn test_is_direct_child_path() {
+        assert!(is_direct_child_path("/a/b", "/a/b/c.mp3"));
+        assert!(is_direct_child_path("/a/b/", "/a/b/c.mp3"));
+        assert!(is_direct_child_path("C:\\a\\b", "C:\\a\\b\\c.mp3"));
+        assert!(is_direct_child_path("C:\\a\\b", "C:/a/b/c.mp3"));
+
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        {
+            assert!(is_direct_child_path("c:\\a\\b", "C:\\a\\B\\c.mp3"));
+            assert!(is_direct_child_path("C:\\A\\B", "c:\\a\\b\\c.mp3"));
+        }
+
+        assert!(!is_direct_child_path("/a/b", "/a/b/c/d.mp3"));
+        assert!(!is_direct_child_path("/a/b", "/a/c/d.mp3"));
+        assert!(!is_direct_child_path("/a/b", "/a/b"));
     }
 }
