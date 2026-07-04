@@ -35,7 +35,6 @@ const {
   playlists,
   createPlaylist,
   deletePlaylist,
-  viewPlaylist,
   reorderPlaylists,
   getSongsFromPlaylist,
 } = useLibraryCollections();
@@ -101,7 +100,6 @@ const {
 } = useSidebarPlaylistContextMenu({
   selectedPlaylistIds,
   ensurePlaylistSelected,
-  viewPlaylist,
   getSongsFromPlaylist,
   addSongsToQueue,
   clearQueue,
