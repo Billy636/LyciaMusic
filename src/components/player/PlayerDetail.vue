@@ -161,6 +161,68 @@ watch([showPlayerDetail, () => currentSong.value?.path ?? ''], async ([visible, 
   }
 }, { immediate: true });
 
+const isTypingTarget = (target: EventTarget | null) => {
+  const INTERACTIVE_SELECTOR = [
+    'input',
+    'textarea',
+    'select',
+    '[contenteditable="true"]',
+    '[contenteditable=""]',
+    '[role="textbox"]',
+    '[data-shortcut-capture="true"]',
+  ].join(', ');
+  return target instanceof HTMLElement && !!target.closest(INTERACTIVE_SELECTOR);
+};
+
+const isModalOrMenuOpen = () => {
+  const elements = document.querySelectorAll('[class*="z-["]');
+  for (const el of elements) {
+    const style = window.getComputedStyle(el);
+    if (style.pointerEvents === 'none' || style.display === 'none' || style.visibility === 'hidden') {
+      continue;
+    }
+    const zIndex = parseInt(style.zIndex, 10);
+    if (!isNaN(zIndex) && zIndex >= 9000) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const handleGlobalKeydown = (event: KeyboardEvent) => {
+  if (!showPlayerDetail.value) return;
+
+  if (event.key === 'Escape') {
+    if (isTypingTarget(event.target)) return;
+    if (isModalOrMenuOpen()) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    closePlayerDetail();
+  }
+};
+
+const handleGlobalMouseup = (event: MouseEvent) => {
+  if (!showPlayerDetail.value) return;
+
+  if (event.button === 3) {
+    if (isModalOrMenuOpen()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closePlayerDetail();
+  }
+};
+
+const handleGlobalMousedown = (event: MouseEvent) => {
+  if (!showPlayerDetail.value) return;
+
+  if (event.button === 3) {
+    if (isModalOrMenuOpen()) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+};
+
 onMounted(async () => {
   isFullscreen.value = await appWindow.isFullscreen();
 
@@ -169,6 +231,10 @@ onMounted(async () => {
     isFullscreen.value = await appWindow.isFullscreen();
   });
   unlistenResize = unlisten;
+
+  window.addEventListener('keydown', handleGlobalKeydown, true);
+  window.addEventListener('mouseup', handleGlobalMouseup, true);
+  window.addEventListener('mousedown', handleGlobalMousedown, true);
 });
 
 onBeforeUnmount(() => {
@@ -176,7 +242,11 @@ onBeforeUnmount(() => {
   if (unlistenResize) {
     unlistenResize();
   }
+  window.removeEventListener('keydown', handleGlobalKeydown, true);
+  window.removeEventListener('mouseup', handleGlobalMouseup, true);
+  window.removeEventListener('mousedown', handleGlobalMousedown, true);
 });
+
 
 const formatFileSize = (size: number | undefined) => {
   if (!size || size <= 0) {
