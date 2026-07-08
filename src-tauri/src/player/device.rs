@@ -6,7 +6,13 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 #[tauri::command]
-pub fn get_output_devices() -> Result<Vec<AudioDevice>, String> {
+pub async fn get_output_devices() -> Result<Vec<AudioDevice>, String> {
+    tauri::async_runtime::spawn_blocking(enumerate_output_devices)
+        .await
+        .map_err(|error| format!("Failed to enumerate audio output devices: {error}"))?
+}
+
+fn enumerate_output_devices() -> Result<Vec<AudioDevice>, String> {
     let host = cpal::default_host();
     let devices = host.output_devices().map_err(|e| e.to_string())?;
     let mut result = Vec::new();
