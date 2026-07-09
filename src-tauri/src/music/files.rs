@@ -26,7 +26,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use tauri::{State, Emitter};
+use tauri::{Emitter, State};
 use uuid::Uuid;
 
 use super::utils::normalize_path;
@@ -73,7 +73,9 @@ fn read_sidecar_lrc_with_path(path_obj: &Path) -> Option<(String, PathBuf)> {
             .extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| {
-                extensions.iter().any(|&valid_ext| ext.eq_ignore_ascii_case(valid_ext))
+                extensions
+                    .iter()
+                    .any(|&valid_ext| ext.eq_ignore_ascii_case(valid_ext))
             })
             .unwrap_or(false);
         if !is_valid_ext {
@@ -769,7 +771,8 @@ pub fn delete_music_file(path: String, db_state: State<'_, DbState>) -> Result<(
     let delete_sql = "DELETE FROM songs WHERE path = ?1";
 
     let mut stmt = conn.prepare(delete_sql).map_err(|e| e.to_string())?;
-    stmt.execute([&normalized_path]).map_err(|e| e.to_string())?;
+    stmt.execute([&normalized_path])
+        .map_err(|e| e.to_string())?;
 
     let _ = conn.execute(
         "DELETE FROM artists
@@ -931,7 +934,10 @@ mod tests {
 
         assert_eq!(metadata.id, Some(7));
         assert_eq!(metadata.remote_source_id.as_deref(), Some("remote-source"));
-        assert_eq!(metadata.cue_source_path.as_deref(), Some("/music/album.flac"));
+        assert_eq!(
+            metadata.cue_source_path.as_deref(),
+            Some("/music/album.flac")
+        );
         assert_eq!(metadata.cue_start_offset, Some(12000));
         assert_eq!(metadata.cue_end_offset, Some(34000));
     }
@@ -1040,7 +1046,9 @@ pub async fn save_artist_avatar(
 
     let mut file = fs::File::open(path).map_err(|e| format!("Failed to open image file: {}", e))?;
     let mut header = [0u8; 12];
-    let bytes_read = file.read(&mut header).map_err(|e| format!("Failed to read image header: {}", e))?;
+    let bytes_read = file
+        .read(&mut header)
+        .map_err(|e| format!("Failed to read image header: {}", e))?;
 
     if bytes_read < 3 {
         return Err("Invalid image file: too short".to_string());
@@ -1057,12 +1065,15 @@ pub async fn save_artist_avatar(
     };
 
     // Reset file read pointer to compute SHA-256
-    file.seek(std::io::SeekFrom::Start(0)).map_err(|e| format!("Failed to seek image file: {}", e))?;
+    file.seek(std::io::SeekFrom::Start(0))
+        .map_err(|e| format!("Failed to seek image file: {}", e))?;
 
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 8192];
     loop {
-        let n = file.read(&mut buffer).map_err(|e| format!("Failed to read image file for hashing: {}", e))?;
+        let n = file
+            .read(&mut buffer)
+            .map_err(|e| format!("Failed to read image file for hashing: {}", e))?;
         if n == 0 {
             break;
         }
@@ -1077,37 +1088,42 @@ pub async fn save_artist_avatar(
     let target_path = covers_dir.join(target_filename);
 
     // Copy file to target path
-    fs::copy(path, &target_path).map_err(|e| format!("Failed to copy image to covers directory: {}", e))?;
+    fs::copy(path, &target_path)
+        .map_err(|e| format!("Failed to copy image to covers directory: {}", e))?;
 
     let target_path_str = normalize_path(&target_path.to_string_lossy());
 
     // Update database & query song paths in a short-lived transaction block
     let (songs_info, task_id) = if write_to_tags {
         let conn = db_state.conn.lock().map_err(|e| e.to_string())?;
-        
+
         conn.execute(
             "UPDATE artists SET avatar_path = ?1 WHERE id = ?2",
             params![Some(&target_path_str), artist_id],
         )
         .map_err(|e| format!("Failed to update database: {}", e))?;
 
-        let mut stmt = conn.prepare(
-            "SELECT s.path, s.source_type, s.remote_source_id, s.cue_source_path, \
+        let mut stmt = conn
+            .prepare(
+                "SELECT s.path, s.source_type, s.remote_source_id, s.cue_source_path, \
              (SELECT COUNT(*) FROM song_artists sa2 WHERE sa2.song_id = s.id) AS artist_count \
              FROM songs s \
              INNER JOIN song_artists sa ON s.id = sa.song_id \
-             WHERE sa.artist_id = ?1"
-        ).map_err(|e| e.to_string())?;
-        
-        let rows = stmt.query_map(params![artist_id], |row| {
-            Ok(SongTagWriteInfo {
-                path: row.get(0)?,
-                source_type: row.get(1)?,
-                remote_source_id: row.get(2)?,
-                cue_source_path: row.get(3)?,
-                artist_count: row.get(4)?,
+             WHERE sa.artist_id = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map(params![artist_id], |row| {
+                Ok(SongTagWriteInfo {
+                    path: row.get(0)?,
+                    source_type: row.get(1)?,
+                    remote_source_id: row.get(2)?,
+                    cue_source_path: row.get(3)?,
+                    artist_count: row.get(4)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         let mut items = Vec::new();
         for r in rows {
@@ -1148,22 +1164,25 @@ pub async fn save_artist_avatar(
             let mut skipped_missing = 0;
 
             // Emit initial progress event
-            let _ = app_clone.emit("artist-avatar:write-tags-progress", super::types::WriteTagsProgressPayload {
-                task_id: task_id_clone.clone(),
-                artist_id,
-                current: 0,
-                total,
-                success_count: 0,
-                failure_count: 0,
-                skipped_count: 0,
-                skipped_multi_artist: 0,
-                skipped_remote: 0,
-                skipped_cue: 0,
-                skipped_readonly: 0,
-                skipped_missing: 0,
-                done: false,
-                error: None,
-            });
+            let _ = app_clone.emit(
+                "artist-avatar:write-tags-progress",
+                super::types::WriteTagsProgressPayload {
+                    task_id: task_id_clone.clone(),
+                    artist_id,
+                    current: 0,
+                    total,
+                    success_count: 0,
+                    failure_count: 0,
+                    skipped_count: 0,
+                    skipped_multi_artist: 0,
+                    skipped_remote: 0,
+                    skipped_cue: 0,
+                    skipped_readonly: 0,
+                    skipped_missing: 0,
+                    done: false,
+                    error: None,
+                },
+            );
 
             if total > 0 {
                 match fs::read(&avatar_path_clone) {
@@ -1194,7 +1213,7 @@ pub async fn save_artist_avatar(
                             let is_cue = match &item.cue_source_path {
                                 Some(s) => !s.is_empty(),
                                 None => false,
-                              };
+                            };
 
                             if is_remote {
                                 skipped_remote += 1;
@@ -1237,7 +1256,9 @@ pub async fn save_artist_avatar(
                                                 tag.remove_picture_type(PictureType::Artist);
                                                 tag.push_picture(picture);
 
-                                                match tagged_file.save_to_path(path_obj, WriteOptions::default()) {
+                                                match tagged_file
+                                                    .save_to_path(path_obj, WriteOptions::default())
+                                                {
                                                     Ok(_) => {
                                                         success_count += 1;
                                                     }
@@ -1257,64 +1278,73 @@ pub async fn save_artist_avatar(
                             }
 
                             // Emit periodic progress
-                            let _ = app_clone.emit("artist-avatar:write-tags-progress", super::types::WriteTagsProgressPayload {
-                                task_id: task_id_clone.clone(),
-                                artist_id,
-                                current: idx + 1,
-                                total,
-                                success_count,
-                                failure_count,
-                                skipped_count,
-                                skipped_multi_artist,
-                                skipped_remote,
-                                skipped_cue,
-                                skipped_readonly,
-                                skipped_missing,
-                                done: false,
-                                error: None,
-                            });
+                            let _ = app_clone.emit(
+                                "artist-avatar:write-tags-progress",
+                                super::types::WriteTagsProgressPayload {
+                                    task_id: task_id_clone.clone(),
+                                    artist_id,
+                                    current: idx + 1,
+                                    total,
+                                    success_count,
+                                    failure_count,
+                                    skipped_count,
+                                    skipped_multi_artist,
+                                    skipped_remote,
+                                    skipped_cue,
+                                    skipped_readonly,
+                                    skipped_missing,
+                                    done: false,
+                                    error: None,
+                                },
+                            );
                         }
                     }
                     Err(e) => {
                         let error_msg = format!("Failed to read avatar cache: {}", e);
-                        let _ = app_clone.emit("artist-avatar:write-tags-progress", super::types::WriteTagsProgressPayload {
-                            task_id: task_id_clone.clone(),
-                            artist_id,
-                            current: 0,
-                            total,
-                            success_count: 0,
-                            failure_count: total,
-                            skipped_count: 0,
-                            skipped_multi_artist: 0,
-                            skipped_remote: 0,
-                            skipped_cue: 0,
-                            skipped_readonly: 0,
-                            skipped_missing: 0,
-                            done: true,
-                            error: Some(error_msg),
-                        });
+                        let _ = app_clone.emit(
+                            "artist-avatar:write-tags-progress",
+                            super::types::WriteTagsProgressPayload {
+                                task_id: task_id_clone.clone(),
+                                artist_id,
+                                current: 0,
+                                total,
+                                success_count: 0,
+                                failure_count: total,
+                                skipped_count: 0,
+                                skipped_multi_artist: 0,
+                                skipped_remote: 0,
+                                skipped_cue: 0,
+                                skipped_readonly: 0,
+                                skipped_missing: 0,
+                                done: true,
+                                error: Some(error_msg),
+                            },
+                        );
                         return;
                     }
                 }
             }
 
             // Emit final done event
-            let _ = app_clone.emit("artist-avatar:write-tags-progress", super::types::WriteTagsProgressPayload {
-                task_id: task_id_clone,
-                artist_id,
-                current: total,
-                total,
-                success_count,
-                failure_count,
-                skipped_count,
-                skipped_multi_artist,
-                skipped_remote,
-                skipped_cue,
-                skipped_readonly,
-                skipped_missing,
-                done: true,
-                error: None,
-            });
+            let _ = app_clone.emit(
+                "artist-avatar:write-tags-progress",
+                super::types::WriteTagsProgressPayload {
+                    task_id: task_id_clone,
+                    artist_id,
+                    current: total,
+                    total,
+                    success_count,
+                    failure_count,
+                    skipped_count,
+                    skipped_multi_artist,
+                    skipped_remote,
+                    skipped_cue,
+                    skipped_readonly,
+                    skipped_missing,
+                    done: true,
+                    error: None,
+                },
+            );
         });
     }
 

@@ -134,9 +134,7 @@ fn remove_library_folder_from_conn(
         #[cfg(not(target_os = "windows"))]
         let query_songs_sql = "SELECT path FROM songs WHERE path = ?1 OR path LIKE ?2 ESCAPE '^' OR path LIKE ?3 ESCAPE '^'";
 
-        let mut stmt = tx
-            .prepare(query_songs_sql)
-            .map_err(|e| e.to_string())?;
+        let mut stmt = tx.prepare(query_songs_sql).map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(
                 rusqlite::params![folder_path, forward_like, backward_like],
@@ -163,9 +161,7 @@ fn remove_library_folder_from_conn(
         #[cfg(not(target_os = "windows"))]
         let delete_song_sql = "DELETE FROM songs WHERE path = ?1";
 
-        let mut delete_stmt = tx
-            .prepare(delete_song_sql)
-            .map_err(|e| e.to_string())?;
+        let mut delete_stmt = tx.prepare(delete_song_sql).map_err(|e| e.to_string())?;
         for path in &deleted_paths {
             delete_stmt
                 .execute([path])
@@ -224,9 +220,7 @@ fn cleanup_orphaned_local_songs(conn: &rusqlite::Connection) -> Result<Vec<Strin
     let delete_song_sql = "DELETE FROM songs WHERE path = ?1";
 
     {
-        let mut delete_stmt = conn
-            .prepare(delete_song_sql)
-            .map_err(|e| e.to_string())?;
+        let mut delete_stmt = conn.prepare(delete_song_sql).map_err(|e| e.to_string())?;
         for path in &delete_paths {
             delete_stmt
                 .execute([path])
@@ -265,7 +259,6 @@ fn is_direct_child_path(parent_path: &str, child_path: &str) -> bool {
         normalized_parent == child_prefix
     }
 }
-
 
 fn file_name_from_path(path: &str) -> String {
     std::path::Path::new(path)
@@ -401,7 +394,10 @@ fn load_library_songs_by_paths(
     );
     let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map(rusqlite::params_from_iter(paths.iter()), map_library_song_row)
+        .query_map(
+            rusqlite::params_from_iter(paths.iter()),
+            map_library_song_row,
+        )
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
@@ -1152,7 +1148,10 @@ fn load_all_view_song_page(
     );
     let mut statement = conn.prepare(&page_sql).map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map(rusqlite::params_from_iter(params.iter()), map_library_song_row)
+        .query_map(
+            rusqlite::params_from_iter(params.iter()),
+            map_library_song_row,
+        )
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
@@ -1193,7 +1192,8 @@ pub async fn get_library_song_page(
 
 fn parse_track_or_disc_number(val: &Option<String>) -> Option<i32> {
     val.as_ref().and_then(|s| {
-        let digits: String = s.chars()
+        let digits: String = s
+            .chars()
             .skip_while(|c| !c.is_ascii_digit())
             .take_while(|c| c.is_ascii_digit())
             .collect();
@@ -1731,16 +1731,9 @@ mod tests {
         )
         .expect("insert paged songs");
 
-        let page = load_all_view_song_page(
-            &conn,
-            None,
-            None,
-            None,
-            LibrarySongSortMode::Title,
-            1,
-            1,
-        )
-        .expect("load song page");
+        let page =
+            load_all_view_song_page(&conn, None, None, None, LibrarySongSortMode::Title, 1, 1)
+                .expect("load song page");
 
         assert_eq!(page.total, 3);
         assert_eq!(page.offset, 1);
@@ -1936,8 +1929,14 @@ mod tests {
     #[test]
     fn test_parse_track_or_disc_number() {
         assert_eq!(parse_track_or_disc_number(&Some("02".to_string())), Some(2));
-        assert_eq!(parse_track_or_disc_number(&Some("1/12".to_string())), Some(1));
-        assert_eq!(parse_track_or_disc_number(&Some("Disc 2".to_string())), Some(2));
+        assert_eq!(
+            parse_track_or_disc_number(&Some("1/12".to_string())),
+            Some(1)
+        );
+        assert_eq!(
+            parse_track_or_disc_number(&Some("Disc 2".to_string())),
+            Some(2)
+        );
         assert_eq!(parse_track_or_disc_number(&Some("A".to_string())), None);
         assert_eq!(parse_track_or_disc_number(&None), None);
     }
@@ -2006,22 +2005,23 @@ mod tests {
                 (None, None) => std::cmp::Ordering::Equal,
             };
 
-            disc_cmp.then_with(|| {
-                let left_track = parse_track_or_disc_number(&left.track_number);
-                let right_track = parse_track_or_disc_number(&right.track_number);
-                match (left_track, right_track) {
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (Some(l), Some(r)) => l.cmp(&r),
-                    (None, None) => std::cmp::Ordering::Equal,
-                }
-            }).then_with(|| {
-                song_title_label(&left.title, &left.path)
-                    .to_lowercase()
-                    .cmp(&song_title_label(&right.title, &right.path).to_lowercase())
-            }).then_with(|| {
-                left.path.cmp(&right.path)
-            })
+            disc_cmp
+                .then_with(|| {
+                    let left_track = parse_track_or_disc_number(&left.track_number);
+                    let right_track = parse_track_or_disc_number(&right.track_number);
+                    match (left_track, right_track) {
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (Some(l), Some(r)) => l.cmp(&r),
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                })
+                .then_with(|| {
+                    song_title_label(&left.title, &left.path)
+                        .to_lowercase()
+                        .cmp(&song_title_label(&right.title, &right.path).to_lowercase())
+                })
+                .then_with(|| left.path.cmp(&right.path))
         });
 
         assert_eq!(songs[0].path, "/a/song3.flac");

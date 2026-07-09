@@ -1992,10 +1992,7 @@ pub fn get_favorite_artist_catalog(
     for (name, (count, first_song_path)) in map {
         let (id, avatar_path) = stmt
             .query_row([&name], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
+                Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
             })
             .unwrap_or((0, None));
 

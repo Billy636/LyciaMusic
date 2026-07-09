@@ -310,10 +310,7 @@ pub fn append_webview2_browser_arg(arg: &str) {
 }
 
 #[tauri::command]
-pub fn set_gpu_acceleration(
-    app_handle: tauri::AppHandle,
-    enabled: bool,
-) -> Result<(), String> {
+pub fn set_gpu_acceleration(app_handle: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     use tauri::Manager;
 
@@ -322,7 +319,7 @@ pub fn set_gpu_acceleration(
         let _ = app_handle;
         gpu_config_path()?
     };
-    
+
     #[cfg(not(target_os = "windows"))]
     let path = app_handle
         .path()
@@ -355,14 +352,10 @@ pub enum UpdateSource {
 }
 
 #[tauri::command]
-pub async fn check_update_by_rust(
-    source: UpdateSource,
-) -> Result<String, String> {
+pub async fn check_update_by_rust(source: UpdateSource) -> Result<String, String> {
     let url = match source {
         UpdateSource::Official => "https://lycia.prettyboy.fun/latest.json",
-        UpdateSource::Github => {
-            "https://api.github.com/repos/Billy636/LyciaMusic/releases/latest"
-        }
+        UpdateSource::Github => "https://api.github.com/repos/Billy636/LyciaMusic/releases/latest",
     };
 
     let client = reqwest::Client::builder()
@@ -397,10 +390,10 @@ pub async fn download_update_file(
     app_handle: tauri::AppHandle,
     url: String,
 ) -> Result<String, String> {
+    use std::time::Instant;
     use tauri::{Emitter, Manager};
     use tokio::fs::File;
     use tokio::io::AsyncWriteExt;
-    use std::time::Instant;
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(300))
@@ -413,13 +406,20 @@ pub async fn download_update_file(
         download_url = format!("https://gh-proxy.com/{}", download_url);
     }
 
-    let response = client.get(&download_url).send().await.map_err(|e| format!("发送下载请求失败: {e}"))?;
+    let response = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| format!("发送下载请求失败: {e}"))?;
     if !response.status().is_success() {
         return Err(format!("下载服务器返回错误状态: {}", response.status()));
     }
 
     let total_size = response.content_length().unwrap_or(0);
-    let download_dir = app_handle.path().download_dir().map_err(|e| e.to_string())?;
+    let download_dir = app_handle
+        .path()
+        .download_dir()
+        .map_err(|e| e.to_string())?;
 
     let filename = if url.ends_with(".exe") {
         if url.contains("portable") {
@@ -432,21 +432,37 @@ pub async fn download_update_file(
     };
     let dest_path = download_dir.join(filename);
 
-    let mut file = File::create(&dest_path).await.map_err(|e| format!("创建目标文件失败: {e}"))?;
+    let mut file = File::create(&dest_path)
+        .await
+        .map_err(|e| format!("创建目标文件失败: {e}"))?;
     let mut downloaded: u64 = 0;
     let start_time = Instant::now();
     let mut last_emit = Instant::now();
 
     let mut response = response;
-    while let Some(chunk) = response.chunk().await.map_err(|e| format!("下载数据分块失败: {e}"))? {
-        file.write_all(&chunk).await.map_err(|e| format!("写入文件失败: {e}"))?;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("下载数据分块失败: {e}"))?
+    {
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("写入文件失败: {e}"))?;
         downloaded += chunk.len() as u64;
 
         let now = Instant::now();
         if now.duration_since(last_emit).as_millis() >= 100 || downloaded == total_size {
             let elapsed = start_time.elapsed().as_secs_f64();
-            let speed = if elapsed > 0.0 { downloaded as f64 / elapsed } else { 0.0 };
-            let progress = if total_size > 0 { (downloaded as f64 / total_size as f64) * 100.0 } else { 0.0 };
+            let speed = if elapsed > 0.0 {
+                downloaded as f64 / elapsed
+            } else {
+                0.0
+            };
+            let progress = if total_size > 0 {
+                (downloaded as f64 / total_size as f64) * 100.0
+            } else {
+                0.0
+            };
 
             let payload = DownloadProgress {
                 progress,
@@ -459,7 +475,9 @@ pub async fn download_update_file(
         }
     }
 
-    file.flush().await.map_err(|e| format!("刷新文件缓存失败: {e}"))?;
+    file.flush()
+        .await
+        .map_err(|e| format!("刷新文件缓存失败: {e}"))?;
 
     Ok(dest_path.to_string_lossy().to_string())
 }
@@ -467,7 +485,7 @@ pub async fn download_update_file(
 #[tauri::command]
 pub fn run_installer(path: String) -> Result<(), String> {
     use std::process::Command;
-    
+
     #[cfg(target_os = "windows")]
     {
         Command::new("cmd")
@@ -475,16 +493,13 @@ pub fn run_installer(path: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("启动安装程序失败: {e}"))?;
     }
-    
+
     #[cfg(not(target_os = "windows"))]
     {
         Command::new(&path)
             .spawn()
             .map_err(|e| format!("启动安装程序失败: {e}"))?;
     }
-    
+
     Ok(())
 }
-
-
-

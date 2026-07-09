@@ -150,8 +150,14 @@ impl ScanProgressReporter {
             let mut songs_guard = self.buffered_songs.lock().ok();
             let mut deleted_guard = self.buffered_deleted.lock().ok();
 
-            let songs = songs_guard.as_mut().map(|g| std::mem::take(&mut **g)).unwrap_or_default();
-            let deleted = deleted_guard.as_mut().map(|g| std::mem::take(&mut **g)).unwrap_or_default();
+            let songs = songs_guard
+                .as_mut()
+                .map(|g| std::mem::take(&mut **g))
+                .unwrap_or_default();
+            let deleted = deleted_guard
+                .as_mut()
+                .map(|g| std::mem::take(&mut **g))
+                .unwrap_or_default();
             (songs, deleted)
         };
 

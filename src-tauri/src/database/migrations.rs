@@ -393,7 +393,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         // 初始化基线 Schema
         crate::database::schema::ensure_base_schema(&conn).unwrap();
-        
+
         // 模拟旧版本库：重建 artists 表并去掉 avatar_path 列
         conn.execute("DROP TABLE artists", []).unwrap();
         conn.execute(
@@ -406,11 +406,8 @@ mod tests {
         .unwrap();
 
         // 插入测试数据，确保迁移时老数据不丢失
-        conn.execute(
-            "INSERT INTO artists (name) VALUES ('测试歌手')",
-            [],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO artists (name) VALUES ('测试歌手')", [])
+            .unwrap();
 
         // 运行迁移逻辑
         run_migrations(&conn).unwrap();
@@ -421,13 +418,17 @@ mod tests {
 
         // 验证旧数据依然完好
         let artist_name: String = conn
-            .query_row("SELECT name FROM artists WHERE id = 1", [], |row| row.get(0))
+            .query_row("SELECT name FROM artists WHERE id = 1", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(artist_name, "测试歌手");
 
         // 验证新列初始值为 NULL
         let avatar_path: Option<String> = conn
-            .query_row("SELECT avatar_path FROM artists WHERE id = 1", [], |row| row.get(0))
+            .query_row("SELECT avatar_path FROM artists WHERE id = 1", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert!(avatar_path.is_none());
     }

@@ -3689,9 +3689,7 @@ mod tests {
 
     #[test]
     fn parses_colons_timestamp_lrc() {
-        let parsed = parse_raw_lyrics(
-            "[00:22:05]上天啊\n[00:25:20]难道你看不出我很爱她",
-        );
+        let parsed = parse_raw_lyrics("[00:22:05]上天啊\n[00:25:20]难道你看不出我很爱她");
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].start_ms, 22050);
         assert_eq!(parsed[0].text, "上天啊");

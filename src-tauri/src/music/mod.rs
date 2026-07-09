@@ -18,17 +18,18 @@ pub use types::*;
 pub use covers::{clear_cover_cache, get_song_cover, get_song_cover_thumbnail, run_cache_cleanup};
 pub use files::{
     batch_move_music_files, create_folder, delete_folder, delete_music_file, get_song_detail,
-    get_song_lyrics, get_song_lyrics_for_edit, get_song_lyrics_payload,
-    get_song_runtime_metadata, is_directory,
-    move_file_to_folder, move_music_file, save_artist_avatar, save_song_info, save_song_lyrics, show_in_folder,
+    get_song_lyrics, get_song_lyrics_for_edit, get_song_lyrics_payload, get_song_runtime_metadata,
+    is_directory, move_file_to_folder, move_music_file, save_artist_avatar, save_song_info,
+    save_song_lyrics, show_in_folder,
 };
 pub use library::{
-    add_library_folder, get_folder_children, get_library_album_catalog, get_library_album_catalog_by_artist, get_library_artist_catalog,
-    get_library_folders, get_library_hierarchy, get_library_song_paths_by_album,
-    get_library_song_paths_by_artist, get_library_song_paths_for_all_view,
-    get_library_song_labels_for_all_view, get_library_song_paths_cached,
-    get_library_song_paths_for_folder_view, get_library_song_page, get_library_songs_by_paths,
-    get_library_songs_cached, remove_library_folder, scan_library,
+    add_library_folder, get_folder_children, get_library_album_catalog,
+    get_library_album_catalog_by_artist, get_library_artist_catalog, get_library_folders,
+    get_library_hierarchy, get_library_song_labels_for_all_view, get_library_song_page,
+    get_library_song_paths_by_album, get_library_song_paths_by_artist,
+    get_library_song_paths_cached, get_library_song_paths_for_all_view,
+    get_library_song_paths_for_folder_view, get_library_songs_by_paths, get_library_songs_cached,
+    remove_library_folder, scan_library,
 };
 pub use scanner::{
     get_folder_first_song, parse_audio_files, scan_folder_as_playlists, scan_music_folder,

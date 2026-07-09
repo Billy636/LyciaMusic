@@ -6,8 +6,8 @@ use crate::player::output::shared::{restore_current_playback, SharedOutputBacken
 use crate::player::output::wasapi_exclusive::{ExclusivePlayRequest, WasapiExclusivePlayback};
 use crate::player::output::OutputBackend;
 use crate::player::types::{
-    AudioCommand, AudioOutputMode, AudioOutputStatus, AudioSource, PlayerState,
-    SeekCompletedPayload, PlaybackFinishedPayload, SharedProgress, SharedVisualizer, TimedSource,
+    AudioCommand, AudioOutputMode, AudioOutputStatus, AudioSource, PlaybackFinishedPayload,
+    PlayerState, SeekCompletedPayload, SharedProgress, SharedVisualizer, TimedSource,
 };
 use crate::remote::cache::RemoteStreamSource;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -608,8 +608,10 @@ fn handle_seek(
 
                                 let skipped_source =
                                     source.convert_samples::<f32>().skip_duration(jump_target);
-                                let mut source_chain: Box<dyn Source<Item = f32> + Send> = Box::new(skipped_source);
-                                let cue_start_offset = Duration::from_millis(cue_start_offset_ms.unwrap_or(0));
+                                let mut source_chain: Box<dyn Source<Item = f32> + Send> =
+                                    Box::new(skipped_source);
+                                let cue_start_offset =
+                                    Duration::from_millis(cue_start_offset_ms.unwrap_or(0));
                                 let total_duration = duration_ms.map(Duration::from_millis);
                                 if let Some(tot_dur) = total_duration {
                                     let resume_time = jump_target.saturating_sub(cue_start_offset);
@@ -766,7 +768,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         if output_mode == AudioOutputMode::WasapiExclusive && !source_is_remote {
                             let exclusive_start =
                                 start_offset_ms.map_or(Duration::ZERO, Duration::from_millis);
-                            let cue_start_offset = Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
+                            let cue_start_offset =
+                                Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
                             let total_duration = current_duration_ms.map(Duration::from_millis);
 
                             match start_exclusive_playback(
@@ -956,7 +959,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         #[cfg(target_os = "windows")]
                         stop_exclusive_playback(&mut exclusive_playback);
 
-                        let cue_start_offset = Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
+                        let cue_start_offset =
+                            Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
                         let total_duration = current_duration_ms.map(Duration::from_millis);
 
                         restore_preferred_output(
@@ -1004,7 +1008,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         #[cfg(target_os = "windows")]
                         stop_exclusive_playback(&mut exclusive_playback);
 
-                        let cue_start_offset = Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
+                        let cue_start_offset =
+                            Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
                         let total_duration = current_duration_ms.map(Duration::from_millis);
 
                         restore_preferred_output(
@@ -1088,7 +1093,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             Err(error) => {
                                 active_output_mode = AudioOutputMode::Shared;
                                 fallback_reason = Some(error);
-                                let cue_start_offset = Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
+                                let cue_start_offset =
+                                    Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
                                 let total_duration = current_duration_ms.map(Duration::from_millis);
 
                                 restore_shared_output(
@@ -1130,7 +1136,10 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                     #[cfg(not(target_os = "windows"))]
                     let should_check_shared = true;
 
-                    if should_check_shared && is_playing_flag && current_sink.as_ref().map_or(false, |sink| sink.empty()) {
+                    if should_check_shared
+                        && is_playing_flag
+                        && current_sink.as_ref().map_or(false, |sink| sink.empty())
+                    {
                         is_playing_flag = false;
                         let _ = thread_app_handle.emit(
                             "playback-finished",
@@ -1156,7 +1165,8 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             #[cfg(target_os = "windows")]
                             stop_exclusive_playback(&mut exclusive_playback);
 
-                            let cue_start_offset = Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
+                            let cue_start_offset =
+                                Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
                             let total_duration = current_duration_ms.map(Duration::from_millis);
 
                             restore_preferred_output(

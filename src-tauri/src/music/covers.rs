@@ -486,7 +486,10 @@ pub fn save_artist_avatar_auto(bytes: &[u8], covers_dir: &std::path::Path) -> Op
 
     if !covers_dir.exists() {
         if let Err(e) = std::fs::create_dir_all(covers_dir) {
-            eprintln!("[头像缓存] 警告：创建缓存目录失败: {}, 路径: {:?}", e, covers_dir);
+            eprintln!(
+                "[头像缓存] 警告：创建缓存目录失败: {}, 路径: {:?}",
+                e, covers_dir
+            );
             return None;
         }
     }
@@ -497,4 +500,3 @@ pub fn save_artist_avatar_auto(bytes: &[u8], covers_dir: &std::path::Path) -> Op
         None
     }
 }
-

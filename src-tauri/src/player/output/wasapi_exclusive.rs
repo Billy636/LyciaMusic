@@ -196,7 +196,7 @@ impl ExclusiveSource {
         // 按照管线顺序装配: Decoder -> VolumeNormalizer -> Equalizer -> UserVolumeSource -> ClipGuardSource
         let decoded = decoder.convert_samples::<f32>().skip_duration(start_time);
         let mut source_chain: Box<dyn Source<Item = f32> + Send> = Box::new(decoded);
-        
+
         if let Some(tot_dur) = total_duration {
             let resume_time = start_time.saturating_sub(cue_start_offset);
             let remaining = tot_dur.saturating_sub(resume_time);

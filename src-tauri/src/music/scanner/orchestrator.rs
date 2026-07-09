@@ -26,7 +26,12 @@ pub fn scan_single_directory_internal(
 
     let normalized_folder = normalize_path(&folder_path);
     let reporter = app.as_ref().map(|app| {
-        ScanProgressReporter::new(app.clone(), normalized_folder.clone(), folder_index, folder_total)
+        ScanProgressReporter::new(
+            app.clone(),
+            normalized_folder.clone(),
+            folder_index,
+            folder_total,
+        )
     });
 
     let db_snapshot = {
@@ -35,7 +40,8 @@ pub fn scan_single_directory_internal(
     };
 
     let original_db_count = db_snapshot.len();
-    let mut scan_diff = collect_scan_diff(&normalized_folder, db_snapshot, reporter.as_ref(), options)?;
+    let mut scan_diff =
+        collect_scan_diff(&normalized_folder, db_snapshot, reporter.as_ref(), options)?;
 
     let folder_is_accessible =
         Path::new(&normalized_folder).is_dir() && fs::read_dir(&normalized_folder).is_ok();
@@ -48,18 +54,25 @@ pub fn scan_single_directory_internal(
         return Err(error);
     }
 
-    let covers_dir = app.as_ref().map(|a| crate::music::covers::get_cover_cache_dir(a));
+    let covers_dir = app
+        .as_ref()
+        .map(|a| crate::music::covers::get_cover_cache_dir(a));
 
     // 按歌曲规范化路径进行稳定排序，保证入库及头像更新时序的唯一性
     scan_diff.to_add.sort_by(|a, b| a.path.cmp(&b.path));
     scan_diff.to_update.sort_by(|a, b| a.path.cmp(&b.path));
 
     // 缓存写盘并在结束后无条件释放字节内存
-    for song in scan_diff.to_add.iter_mut().chain(scan_diff.to_update.iter_mut()) {
+    for song in scan_diff
+        .to_add
+        .iter_mut()
+        .chain(scan_diff.to_update.iter_mut())
+    {
         if let Some(ref bytes) = song.artist_avatar_bytes {
             if let Some(ref dir) = covers_dir {
                 if super::get_song_single_valid_artist(song).is_some() {
-                    song.artist_avatar_path = crate::music::covers::save_artist_avatar_auto(bytes, dir);
+                    song.artist_avatar_path =
+                        crate::music::covers::save_artist_avatar_auto(bytes, dir);
                 }
             }
         }

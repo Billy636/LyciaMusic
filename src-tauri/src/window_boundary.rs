@@ -100,4 +100,3 @@ pub fn set_mini_boundary_enabled(enabled: bool) {
 pub fn set_retain_material_on_unfocus(enabled: bool) {
     RETAIN_MATERIAL_ON_UNFOCUS.store(enabled, Ordering::Relaxed);
 }
-

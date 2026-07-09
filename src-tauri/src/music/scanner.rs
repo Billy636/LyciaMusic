@@ -578,13 +578,13 @@ mod tests {
         assert_eq!(remaining_artists, 0);
         assert_eq!(remaining_links, 0);
     }
-      
+
     #[test]
     fn large_import_chunk_size_stays_under_sqlite_variable_limit() {
         assert!(scan_change_chunk_size(0, 6000) <= 999);
     }
-  
-   #[test]
+
+    #[test]
     fn split_artist_names_chinese_enumeration_comma() {
         let names = super::split_artist_names("周杰伦、林俊杰、王力宏");
         assert_eq!(names, vec!["周杰伦", "林俊杰", "王力宏"]);
@@ -634,11 +634,11 @@ mod tests {
 
     // 最小真实可解码的 1x1 透明 PNG 图片数据 (真实为 68 字节)
     const MINIMAL_PNG: &[u8] = &[
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-        0x89, 0x00, 0x00, 0x00, 0x0B, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x60, 0x00, 0x02, 0x00,
-        0x00, 0x05, 0x00, 0x01, 0xE7, 0x2A, 0x24, 0x8C, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,
-        0xAE, 0x42, 0x60, 0x82
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0B, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x60,
+        0x00, 0x02, 0x00, 0x00, 0x05, 0x00, 0x01, 0xE7, 0x2A, 0x24, 0x8C, 0x00, 0x00, 0x00, 0x00,
+        0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ];
 
     #[test]
@@ -646,7 +646,10 @@ mod tests {
         // 复用 make_song
         let mut song_single = make_song("/music/test.flac");
         song_single.artist_names = vec!["周杰伦".to_string()];
-        assert_eq!(super::get_song_single_valid_artist(&song_single), Some("周杰伦".to_string()));
+        assert_eq!(
+            super::get_song_single_valid_artist(&song_single),
+            Some("周杰伦".to_string())
+        );
 
         let mut song_multi = make_song("/music/test.flac");
         song_multi.artist_names = vec!["周杰伦".to_string(), "方文山".to_string()];
@@ -686,7 +689,11 @@ mod tests {
         // 首次写入
         super::apply_scan_changes(&mut conn, &[song.clone()], &[], &[], None).unwrap();
         let db_path: Option<String> = conn
-            .query_row("SELECT avatar_path FROM artists WHERE name = '周杰伦'", [], |row| row.get(0))
+            .query_row(
+                "SELECT avatar_path FROM artists WHERE name = '周杰伦'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(db_path, Some("/cache/avatar.jpg".to_string()));
 
@@ -696,7 +703,11 @@ mod tests {
         super::apply_scan_changes(&mut conn, &[], &[song_new], &[], None).unwrap();
 
         let db_path_after: Option<String> = conn
-            .query_row("SELECT avatar_path FROM artists WHERE name = '周杰伦'", [], |row| row.get(0))
+            .query_row(
+                "SELECT avatar_path FROM artists WHERE name = '周杰伦'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(db_path_after, Some("/cache/avatar.jpg".to_string()));
     }

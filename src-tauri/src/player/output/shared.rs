@@ -104,7 +104,8 @@ pub(crate) fn restore_current_playback(
                 }
 
                 // 1. Equalizer
-                let eq_source = crate::player::equalizer::Equalizer::new(source_chain, equalizer_handle);
+                let eq_source =
+                    crate::player::equalizer::Equalizer::new(source_chain, equalizer_handle);
 
                 // 2. UserVolumeSource
                 let vol_source =

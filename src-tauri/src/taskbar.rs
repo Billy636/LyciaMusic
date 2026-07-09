@@ -64,7 +64,8 @@ fn find_window_recursive(
     };
     if len > 0 {
         let actual_len = len as usize;
-        if actual_len == target_class_utf16.len() && &class_name[..actual_len] == target_class_utf16 {
+        if actual_len == target_class_utf16.len() && &class_name[..actual_len] == target_class_utf16
+        {
             return hwnd;
         }
     }
@@ -108,52 +109,54 @@ pub fn setup_taskbar_window(app: tauri::AppHandle) -> OwnerBindingState {
     {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
         use tauri::Manager;
-        use windows_sys::Win32::Foundation::{GetLastError, HWND, SetLastError};
+        use windows_sys::Win32::Foundation::{GetLastError, SetLastError, HWND};
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            FindWindowW, GetWindowLongW, SetWindowLongPtrW, SetWindowLongW, GWL_EXSTYLE,
-            GWLP_HWNDPARENT, WS_EX_NOACTIVATE,
+            FindWindowW, GetWindowLongW, SetWindowLongPtrW, SetWindowLongW, GWLP_HWNDPARENT,
+            GWL_EXSTYLE, WS_EX_NOACTIVATE,
         };
 
         if let Some(window) = app.get_webview_window(TASKBAR_PLAYER_WINDOW_LABEL) {
             if let Ok(handle) = window.as_ref().window().window_handle() {
-            if let RawWindowHandle::Win32(win32) = handle.as_raw() {
-                let hwnd = win32.hwnd.get() as HWND;
+                if let RawWindowHandle::Win32(win32) = handle.as_raw() {
+                    let hwnd = win32.hwnd.get() as HWND;
 
-                // 1. 设置 WS_EX_NOACTIVATE 扩展样式以尽量避免抢占焦点
-                unsafe {
-                    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-                    SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE as i32);
-                }
-
-                // 2. 绑定 Owner 到 Shell_TrayWnd（主任务栏）
-                let shell_tray_class: Vec<u16> = "Shell_TrayWnd\0".encode_utf16().collect();
-                let hwnd_taskbar = unsafe { FindWindowW(shell_tray_class.as_ptr(), std::ptr::null()) };
-
-                if !hwnd_taskbar.is_null() {
-                    let mut bound_success = false;
+                    // 1. 设置 WS_EX_NOACTIVATE 扩展样式以尽量避免抢占焦点
                     unsafe {
-                        SetLastError(0);
-                        let prev = SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, hwnd_taskbar as isize);
-                        if prev == 0 {
-                            let err = GetLastError();
-                            if err == 0 {
-                                bound_success = true;
-                            }
-                        } else {
-                            bound_success = true;
-                        }
+                        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+                        SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE as i32);
                     }
 
-                    if bound_success {
-                        LAST_TASKBAR_HWND.store(hwnd_taskbar as isize, Ordering::SeqCst);
-                        return OwnerBindingState::Bound;
+                    // 2. 绑定 Owner 到 Shell_TrayWnd（主任务栏）
+                    let shell_tray_class: Vec<u16> = "Shell_TrayWnd\0".encode_utf16().collect();
+                    let hwnd_taskbar =
+                        unsafe { FindWindowW(shell_tray_class.as_ptr(), std::ptr::null()) };
+
+                    if !hwnd_taskbar.is_null() {
+                        let mut bound_success = false;
+                        unsafe {
+                            SetLastError(0);
+                            let prev =
+                                SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, hwnd_taskbar as isize);
+                            if prev == 0 {
+                                let err = GetLastError();
+                                if err == 0 {
+                                    bound_success = true;
+                                }
+                            } else {
+                                bound_success = true;
+                            }
+                        }
+
+                        if bound_success {
+                            LAST_TASKBAR_HWND.store(hwnd_taskbar as isize, Ordering::SeqCst);
+                            return OwnerBindingState::Bound;
+                        } else {
+                            return OwnerBindingState::Failed;
+                        }
                     } else {
                         return OwnerBindingState::Failed;
                     }
-                } else {
-                    return OwnerBindingState::Failed;
                 }
-            }
             }
         }
         OwnerBindingState::Unsupported
@@ -170,8 +173,8 @@ pub fn get_taskbar_tray_geometry(app: tauri::AppHandle) -> Result<TaskbarTrayGeo
     {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
         use tauri::Manager;
-        use windows_sys::Win32::Foundation::{GetLastError, HWND, RECT, SetLastError};
-        use windows_sys::Win32::UI::Shell::{ABM_GETTASKBARPOS, APPBARDATA, SHAppBarMessage};
+        use windows_sys::Win32::Foundation::{GetLastError, SetLastError, HWND, RECT};
+        use windows_sys::Win32::UI::Shell::{SHAppBarMessage, ABM_GETTASKBARPOS, APPBARDATA};
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             FindWindowExW, FindWindowW, GetWindowRect, SetWindowLongPtrW, GWLP_HWNDPARENT,
         };
@@ -182,7 +185,8 @@ pub fn get_taskbar_tray_geometry(app: tauri::AppHandle) -> Result<TaskbarTrayGeo
 
         // 1. 查找当前主系统任务栏句柄
         let shell_tray_class: Vec<u16> = "Shell_TrayWnd\0".encode_utf16().collect();
-        let current_hwnd_taskbar = unsafe { FindWindowW(shell_tray_class.as_ptr(), std::ptr::null()) };
+        let current_hwnd_taskbar =
+            unsafe { FindWindowW(shell_tray_class.as_ptr(), std::ptr::null()) };
 
         if current_hwnd_taskbar.is_null() {
             return Err("Taskbar window not found".to_string());
@@ -201,7 +205,8 @@ pub fn get_taskbar_tray_geometry(app: tauri::AppHandle) -> Result<TaskbarTrayGeo
                     let mut bound_success = false;
                     unsafe {
                         SetLastError(0);
-                        let prev = SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, current_hwnd_taskbar as isize);
+                        let prev =
+                            SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, current_hwnd_taskbar as isize);
                         if prev == 0 {
                             let err = GetLastError();
                             if err == 0 {
@@ -232,10 +237,20 @@ pub fn get_taskbar_tray_geometry(app: tauri::AppHandle) -> Result<TaskbarTrayGeo
             hWnd: current_hwnd_taskbar,
             uCallbackMessage: 0,
             uEdge: 0,
-            rc: RECT { left: 0, top: 0, right: 0, bottom: 0 },
+            rc: RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
             lParam: 0,
         };
-        let mut taskbar_rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut taskbar_rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
         let got_taskbar = unsafe { SHAppBarMessage(ABM_GETTASKBARPOS, &mut abd) != 0 };
         if got_taskbar {
             taskbar_rect = abd.rc;
@@ -270,7 +285,12 @@ pub fn get_taskbar_tray_geometry(app: tauri::AppHandle) -> Result<TaskbarTrayGeo
             );
         }
 
-        let mut tray_rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut tray_rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
         let got_tray = if !hwnd_tray.is_null() {
             unsafe { GetWindowRect(hwnd_tray, &mut tray_rect) != 0 }
         } else {
@@ -334,8 +354,8 @@ mod zorder_guard {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         DispatchMessageW, GetAncestor, GetClassNameW, GetMessageW, IsWindow, PeekMessageW,
         PostThreadMessageW, SetWindowPos, TranslateMessage, GA_ROOT, HWND_TOPMOST, MSG,
-        PM_NOREMOVE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
-        SWP_NOSENDCHANGING, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP,
+        PM_NOREMOVE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSENDCHANGING, SWP_NOSIZE,
+        WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP,
     };
 
     /// 播控窗口 HWND（跨线程原子存储）
@@ -374,7 +394,11 @@ mod zorder_guard {
         }
         unsafe {
             let root = GetAncestor(hwnd, GA_ROOT);
-            if root.is_null() { hwnd } else { root }
+            if root.is_null() {
+                hwnd
+            } else {
+                root
+            }
         }
     }
 
@@ -417,7 +441,10 @@ mod zorder_guard {
             SetWindowPos(
                 player,
                 HWND_TOPMOST,
-                0, 0, 0, 0,
+                0,
+                0,
+                0,
+                0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING | SWP_NOOWNERZORDER,
             );
         }
@@ -492,9 +519,9 @@ mod zorder_guard {
                 let _ = tx.send(tid);
 
                 // 同时维护三个 hook 句柄，对应三类事件
-                let mut hook_fg: HWINEVENTHOOK = std::ptr::null_mut();   // EVENT_SYSTEM_FOREGROUND
+                let mut hook_fg: HWINEVENTHOOK = std::ptr::null_mut(); // EVENT_SYSTEM_FOREGROUND
                 let mut hook_focus: HWINEVENTHOOK = std::ptr::null_mut(); // EVENT_OBJECT_FOCUS
-                let mut hook_menu: HWINEVENTHOOK = std::ptr::null_mut();  // EVENT_SYSTEM_MENUSTART
+                let mut hook_menu: HWINEVENTHOOK = std::ptr::null_mut(); // EVENT_SYSTEM_MENUSTART
 
                 let install_hook = |event: u32| -> HWINEVENTHOOK {
                     SetWinEventHook(
@@ -527,9 +554,9 @@ mod zorder_guard {
                             unhook(&mut hook_focus);
                             unhook(&mut hook_menu);
 
-                            hook_fg    = install_hook(EVENT_SYSTEM_FOREGROUND);
+                            hook_fg = install_hook(EVENT_SYSTEM_FOREGROUND);
                             hook_focus = install_hook(EVENT_OBJECT_FOCUS);
-                            hook_menu  = install_hook(EVENT_SYSTEM_MENUSTART);
+                            hook_menu = install_hook(EVENT_SYSTEM_MENUSTART);
                         }
                         WM_UNINSTALL => {
                             unhook(&mut hook_fg);
