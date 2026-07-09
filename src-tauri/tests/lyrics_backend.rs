@@ -506,3 +506,34 @@ fn parses_enhanced_lrc_line_without_trailing_timestamp() {
     let capped_words = capped_line.words.as_ref().unwrap();
     assert_eq!((capped_words[1].end * 1000.0).round() as i64, 1000);
 }
+
+#[test]
+fn parses_voice_prefixed_enhanced_lrc_payload() {
+    let payload = build_structured_lyrics_payload(
+        [
+            "[00:13.749]v1:<00:13.749>海<00:14.062>平<00:14.409>面<00:14.867>远<00:15.359>方<00:15.691>开<00:16.027>始<00:16.589>阴<00:17.060>霾<00:18.432>",
+            "[00:13.749]海平面远方开始阴霾",
+            "[00:20.280]v1:<00:20.280>悲<00:20.599>伤<00:21.018>要<00:21.441><00:21.442>怎么<00:22.263>平静<00:23.121>纯<00:23.755>白<00:24.659>",
+            "[00:20.280]悲伤要怎么平静纯白",
+        ]
+        .join("\n"),
+    );
+
+    assert_eq!(payload.display_lines.len(), 2);
+
+    let first_line = find_display_line_by_time(&payload, 13.749).expect("first line exists");
+    assert_eq!(first_line.text, "海平面远方开始阴霾");
+    let first_words = first_line.words.as_ref().expect("first line has words");
+    assert_eq!(
+        first_words
+            .iter()
+            .map(|word| word.text.as_str())
+            .collect::<String>(),
+        "海平面远方开始阴霾"
+    );
+    assert_eq!((first_words[0].start * 1000.0).round() as i64, 13749);
+    assert_eq!((first_words[0].end * 1000.0).round() as i64, 14062);
+
+    let second_line = find_display_line_by_time(&payload, 20.280).expect("second line exists");
+    assert_eq!(second_line.text, "悲伤要怎么平静纯白");
+}

@@ -109,6 +109,19 @@ describe('enhanced lrc parser', async () => {
     ]);
   });
 
+  it('parses enhanced lrc lines with voice prefixes before word timing', () => {
+    const parsed = parseEnhancedLrcLine('[00:13.749]v1:<00:13.749>海<00:14.062>平<00:14.409>面<00:14.867>远<00:15.359>方<00:15.691>开<00:16.027>始<00:16.589>阴<00:17.060>霾<00:18.432>');
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.startTime).toBe(13749);
+    expect(parsed?.words.map((word) => word.word).join('')).toBe('海平面远方开始阴霾');
+    expect(parsed?.words[0]).toMatchObject({
+      startTime: 13749,
+      endTime: 14062,
+      word: '海',
+    });
+  });
+
   it('infers the final word end time when the closing timestamp is missing', () => {
     const parsed = parseEnhancedLrcLine('[00:10.000]<00:10.000>A<00:10.400>B<00:11.001>C');
 
@@ -1235,6 +1248,20 @@ describe('raw lyrics samples from the common formats checklist', async () => {
       { text: '许', start: 2.625, end: 3 },
       { text: '嵩', start: 3, end: 3.375 },
     ]);
+  });
+
+  it('parses voice-prefixed enhanced lrc with same-time plain fallback lines', async () => {
+    const lines = await parseRawToLyricLines([
+      '[00:13.749]v1:<00:13.749>海<00:14.062>平<00:14.409>面<00:14.867>远<00:15.359>方<00:15.691>开<00:16.027>始<00:16.589>阴<00:17.060>霾<00:18.432>',
+      '[00:13.749]海平面远方开始阴霾',
+      '[00:20.280]v1:<00:20.280>悲<00:20.599>伤<00:21.018>要<00:21.441><00:21.442>怎么<00:22.263>平静<00:23.121>纯<00:23.755>白<00:24.659>',
+      '[00:20.280]悲伤要怎么平静纯白',
+    ].join('\n'));
+
+    expect(lines).toHaveLength(2);
+    expect(lines[0]?.text).toBe('海平面远方开始阴霾');
+    expect(lines[0]?.words?.map((word) => word.text).join('')).toBe('海平面远方开始阴霾');
+    expect(lines[1]?.text).toBe('悲伤要怎么平静纯白');
   });
 
   it('classifies latin plus chinese bilingual lyrics as main plus translation across raw lrc input', async () => {

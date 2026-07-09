@@ -16,6 +16,7 @@ const ESLRC_GAP_PLACEHOLDER = '\u2063';
 const ENHANCED_TIMESTAMP_PATTERN = /<(\d{1,}:\d{2}(?:[.:]\d+)?)>/g;
 const ENHANCED_TIMESTAMP_TEXT_PATTERN = /<\d{1,}:\d{2}(?:[.:]\d+)?>/;
 const LRC_LINE_TIMESTAMP_PATTERN = /^\[(\d{1,}:\d{2}(?:[.:]\d+)?)\](.*)$/;
+const ENHANCED_LRC_VOICE_PREFIX_PATTERN = /^\s*v\d+\s*:\s*(?=<\d{1,}:\d{2}(?:[.:]\d+)?>)/i;
 const ENHANCED_EMPTY_BACKWARD_TOLERANCE_MS = 5;
 const ENHANCED_INFERRED_WORD_DEFAULT_DURATION_MS = 300;
 const ENHANCED_INFERRED_WORD_MIN_DURATION_MS = 150;
@@ -113,7 +114,11 @@ export function isEnhancedLrcLine(line: string): boolean {
   const match = LRC_LINE_TIMESTAMP_PATTERN.exec(line);
   if (!match) return false;
 
-  return ENHANCED_TIMESTAMP_TEXT_PATTERN.test(match[2]);
+  return ENHANCED_TIMESTAMP_TEXT_PATTERN.test(stripEnhancedLrcVoicePrefix(match[2]));
+}
+
+function stripEnhancedLrcVoicePrefix(body: string): string {
+  return body.replace(ENHANCED_LRC_VOICE_PREFIX_PATTERN, '');
 }
 
 function parseEnhancedLrcLineInternal(line: string): EnhancedLrcParseResult | null {
@@ -123,7 +128,7 @@ function parseEnhancedLrcLineInternal(line: string): EnhancedLrcParseResult | nu
   const lineStartTime = parseTimestampToMs(lineMatch[1]);
   if (lineStartTime === null) return null;
 
-  const body = lineMatch[2];
+  const body = stripEnhancedLrcVoicePrefix(lineMatch[2]);
   const markers = [...body.matchAll(ENHANCED_TIMESTAMP_PATTERN)];
   if (markers.length < 1) return null;
 

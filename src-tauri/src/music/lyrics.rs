@@ -338,6 +338,36 @@ fn sanitize_word_text(text: &str) -> String {
     text.replace(['\u{200b}', '\u{2063}'], "")
 }
 
+fn strip_enhanced_lrc_voice_prefix(body: &str) -> String {
+    let leading_whitespace_len = body.len() - body.trim_start().len();
+    let trimmed = &body[leading_whitespace_len..];
+    let Some(rest) = trimmed.strip_prefix(['v', 'V']) else {
+        return body.to_string();
+    };
+
+    let digit_len = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .map(char::len_utf8)
+        .sum::<usize>();
+    if digit_len == 0 {
+        return body.to_string();
+    }
+
+    let after_digits = &rest[digit_len..];
+    let after_digits = after_digits.trim_start();
+    let Some(after_colon) = after_digits.strip_prefix(':') else {
+        return body.to_string();
+    };
+
+    let after_prefix = after_colon.trim_start();
+    if after_prefix.starts_with('<') && collect_markers(after_prefix, '<', '>').first().is_some() {
+        return after_prefix.to_string();
+    }
+
+    body.to_string()
+}
+
 fn consume_square_timestamp_block(source: &str) -> Option<(usize, String)> {
     if !source.starts_with('[') {
         return None;
@@ -913,7 +943,8 @@ fn parse_enhanced_lrc_line_internal(
 ) -> Option<EnhancedLrcParseResult> {
     let leading = collect_markers(line, '[', ']');
     let (_, body_start, line_start_ms) = *leading.first()?;
-    let body = &line[body_start..];
+    let body = strip_enhanced_lrc_voice_prefix(&line[body_start..]);
+    let body = body.as_str();
     let markers = collect_markers(body, '<', '>');
     if markers.is_empty() {
         return None;
