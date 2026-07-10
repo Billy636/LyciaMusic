@@ -22,4 +22,8 @@ describe('Tauri app command permissions', () => {
       expect(permissionFile).toContain(`"${command}"`);
     });
   });
+
+  it('allows the native immersive fullscreen transition', () => {
+    expect(permissionFile).toContain('"set_immersive_fullscreen"');
+  });
 });

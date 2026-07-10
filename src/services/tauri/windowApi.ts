@@ -1,6 +1,6 @@
 import { tauriInvoke } from './invoke';
-import type { ForegroundFullscreenState, WindowMaterialCapabilities } from './contracts';
-export type { ForegroundFullscreenState, WindowMaterialCapabilities } from './contracts';
+import type { ForegroundFullscreenState, ImmersiveFullscreenState, WindowMaterialCapabilities } from './contracts';
+export type { ForegroundFullscreenState, ImmersiveFullscreenState, WindowMaterialCapabilities } from './contracts';
 
 export const windowApi = {
   setMiniBoundaryEnabled: (enabled: boolean) =>
@@ -13,6 +13,11 @@ export const windowApi = {
     tauriInvoke('get_window_material_capabilities') as Promise<WindowMaterialCapabilities>,
   getForegroundFullscreenState: () =>
     tauriInvoke('get_foreground_fullscreen_state') as Promise<ForegroundFullscreenState>,
+  setImmersiveFullscreen: (fullscreen: boolean, restoreMaximized: boolean) =>
+    tauriInvoke('set_immersive_fullscreen', {
+      fullscreen,
+      restoreMaximized,
+    }) as Promise<ImmersiveFullscreenState>,
   refreshCurrentWindowTopmost: (enabled: boolean) =>
     tauriInvoke('refresh_current_window_topmost', { enabled }),
   startTopmostGuard: () =>

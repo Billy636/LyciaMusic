@@ -182,6 +182,11 @@ export interface ForegroundFullscreenState {
   isFullscreen: boolean;
 }
 
+export interface ImmersiveFullscreenState {
+  isFullscreen: boolean;
+  wasMaximizedBeforeFullscreen: boolean;
+}
+
 export interface TauriCommandMap {
   add_library_folder: { payload: { path: string }; response: void };
   // Deprecated compat command. Do not use in new main-flow code.
@@ -401,6 +406,10 @@ export interface TauriCommandMap {
   get_foreground_fullscreen_state: {
     payload: undefined;
     response: ForegroundFullscreenState;
+  };
+  set_immersive_fullscreen: {
+    payload: { fullscreen: boolean; restoreMaximized: boolean };
+    response: ImmersiveFullscreenState;
   };
   refresh_current_window_topmost: {
     payload: { enabled: boolean };

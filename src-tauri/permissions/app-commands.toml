@@ -102,6 +102,7 @@ commands.allow = [
   "set_retain_material_on_unfocus",
   "get_window_material_capabilities",
   "get_foreground_fullscreen_state",
+  "set_immersive_fullscreen",
   "set_dark_mode_for_window",
   "refresh_current_window_topmost",
   "start_topmost_guard",

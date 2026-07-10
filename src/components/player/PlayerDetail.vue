@@ -6,6 +6,8 @@ import { useSongDetailCache } from '../../composables/useSongDetailCache';
 import { usePlaybackController } from '../../features/playback/usePlaybackController';
 import { useSettings } from '../../features/settings/useSettings';
 import { useSharedTransition } from '../../composables/useSharedTransition';
+import { useToast } from '../../composables/toast';
+import { windowApi } from '../../services/tauri/windowApi';
 import type { SongDetail } from '../../types';
 import LyricsView from './LyricsView.vue';
 import PlayerDetailBackground from './PlayerDetailBackground.vue';
@@ -25,6 +27,7 @@ const { settings } = useSettings();
 const { parsedLyrics } = useLyrics();
 const { staggerPhase } = useSharedTransition();
 const { loadSongDetail, clearSongDetailCache } = useSongDetailCache();
+const { showToast } = useToast();
 
 const TOP_CHROME_HIDE_DELAY = 2500;
 
@@ -37,33 +40,65 @@ const appWindow = getCurrentWindow();
 
 const isFullscreen = ref(false);
 const wasMaximizedBeforeFullscreen = ref(false);
+const isFullscreenTransitioning = ref(false);
 let unlistenResize: (() => void) | null = null;
+let pendingFullscreenTransitions = 0;
+let fullscreenTransitionQueue = Promise.resolve();
+
+const enqueueFullscreenTransition = (operation: () => Promise<void>) => {
+  pendingFullscreenTransitions += 1;
+  isFullscreenTransitioning.value = true;
+
+  const result = fullscreenTransitionQueue.then(operation);
+  fullscreenTransitionQueue = result.catch(() => undefined);
+
+  return result.finally(() => {
+    pendingFullscreenTransitions -= 1;
+    isFullscreenTransitioning.value = pendingFullscreenTransitions > 0;
+  });
+};
 
 const toggleFullscreen = async () => {
   try {
-    const currentFullscreen = await appWindow.isFullscreen();
-    if (!currentFullscreen) {
-      try {
-        wasMaximizedBeforeFullscreen.value = await appWindow.isMaximized();
-      } catch (e) {
-        console.error('Failed to check if window is maximized:', e);
-        wasMaximizedBeforeFullscreen.value = false;
-      }
-      await appWindow.setFullscreen(true);
-      isFullscreen.value = true;
-    } else {
-      await appWindow.setFullscreen(false);
-      isFullscreen.value = false;
-      if (wasMaximizedBeforeFullscreen.value) {
-        try {
-          await appWindow.maximize();
-        } catch (e) {
-          console.error('Failed to maximize window:', e);
-        }
-      }
-    }
+    await enqueueFullscreenTransition(async () => {
+      const currentFullscreen = await appWindow.isFullscreen();
+      const state = await windowApi.setImmersiveFullscreen(
+        !currentFullscreen,
+        currentFullscreen && wasMaximizedBeforeFullscreen.value,
+      );
+
+      isFullscreen.value = state.isFullscreen;
+      wasMaximizedBeforeFullscreen.value = state.wasMaximizedBeforeFullscreen;
+      showTopChrome();
+      scheduleTopChromeHide();
+    });
   } catch (error) {
     console.error('Failed to toggle fullscreen:', error);
+    isFullscreen.value = await appWindow.isFullscreen().catch(() => false);
+    showToast('沉浸模式切换失败，请重试', 'error');
+  }
+};
+
+const exitImmersiveFullscreen = async () => {
+  try {
+    await enqueueFullscreenTransition(async () => {
+      const currentFullscreen = await appWindow.isFullscreen();
+      if (!currentFullscreen && !wasMaximizedBeforeFullscreen.value) {
+        isFullscreen.value = false;
+        return;
+      }
+
+      const state = await windowApi.setImmersiveFullscreen(
+        false,
+        wasMaximizedBeforeFullscreen.value,
+      );
+      isFullscreen.value = state.isFullscreen;
+      wasMaximizedBeforeFullscreen.value = false;
+    });
+  } catch (error) {
+    console.error('Failed to exit fullscreen:', error);
+    isFullscreen.value = await appWindow.isFullscreen().catch(() => false);
+    showToast('退出沉浸模式失败，请重试', 'error');
   }
 };
 
@@ -122,11 +157,7 @@ watch(showPlayerDetail, async (visible) => {
   clearSongDetailCache();
 
   // Exit fullscreen if we collapse the player details page
-  const isCurrentFullscreen = await appWindow.isFullscreen();
-  if (isCurrentFullscreen) {
-    await appWindow.setFullscreen(false);
-    isFullscreen.value = false;
-  }
+  await exitImmersiveFullscreen();
 });
 
 watch([showPlayerDetail, () => currentSong.value?.path ?? ''], async ([visible, path]) => {
@@ -362,8 +393,11 @@ const metaInfo = computed(() => {
 
           <div class="relative z-10 flex w-1/4 items-center justify-end gap-2">
             <button
-              :title="isFullscreen ? '退出沉浸模式' : '沉浸模式 (全屏)'"
+              :title="isFullscreenTransitioning ? '正在切换沉浸模式' : isFullscreen ? '退出沉浸模式' : '沉浸模式 (全屏)'"
+              :aria-label="isFullscreen ? '退出沉浸模式' : '进入沉浸模式'"
+              :disabled="isFullscreenTransitioning"
               class="rounded-lg p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
+              :class="isFullscreenTransitioning ? 'cursor-wait opacity-50' : ''"
               @click="toggleFullscreen"
             >
               <svg v-if="isFullscreen" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -384,7 +418,7 @@ const metaInfo = computed(() => {
                 <path d="M5 12h14" />
               </svg>
             </button>
-            <button class="rounded-lg p-2 text-white/50 transition hover:bg-white/10 hover:text-white" @click="toggleMaximize">
+            <button v-if="!isFullscreen" class="rounded-lg p-2 text-white/50 transition hover:bg-white/10 hover:text-white" @click="toggleMaximize">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
               </svg>
