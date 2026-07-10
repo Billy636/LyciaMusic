@@ -1,4 +1,7 @@
-import type { LyricLine as CoreAmlLyricLine } from '@applemusic-like-lyrics/core';
+import type {
+  LyricLine as CoreAmlLyricLine,
+  LyricWord as CoreAmlLyricWord,
+} from '@applemusic-like-lyrics/core';
 
 import type {
   CurrentLyricDisplayLine,
@@ -18,7 +21,15 @@ const AML_LINE_LEAD_IN_RATIO = 0.25;
 const MIN_AML_LINE_DURATION_MS = 40;
 const AML_ROMAJI_FRAGMENT_SEPARATOR = '\u00a0';
 
-type AmlLineWithTimedRomaji = CoreAmlLyricLine & {
+type AmlLineWithTimedRomaji = Omit<CoreAmlLyricLine, 'words'> & {
+  words: Array<CoreAmlLyricWord & {
+    ruby?: Array<{
+      word: string;
+      startTime: number;
+      endTime: number;
+    }>;
+    emptyBeat?: number;
+  }>;
   romajiWords?: Array<{
     text: string;
     startTime: number;
@@ -261,7 +272,13 @@ export function convertLyricsToAmlLines(
         startTime: wordStart,
         endTime: wordEnd,
         romanWord: canRenderAlignedRomaji ? getAmlRomanWord(sourceWords, wordIndex) : '',
-        obscene: false,
+        ruby: word.ruby?.map((ruby) => ({
+          word: ruby.text,
+          startTime: toMs(ruby.start),
+          endTime: toMs(ruby.end),
+        })),
+        obscene: word.obscene ?? false,
+        emptyBeat: word.emptyBeat,
       };
     }).filter((word) => word.word.length > 0);
 
@@ -281,8 +298,8 @@ export function convertLyricsToAmlLines(
       romanLyric: showRomaji && !canRenderAlignedRomaji ? (line.romaji || '') : '',
       startTime,
       endTime,
-      isBG: false,
-      isDuet: false,
+      isBG: line.isBG ?? false,
+      isDuet: line.isDuet ?? false,
     };
 
     if (showRomaji && !canRenderAlignedRomaji && line.romajiWords && line.romajiWords.length > 0) {

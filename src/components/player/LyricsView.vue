@@ -27,6 +27,7 @@ import {
   MIN_PLAYER_OFFSET_Y,
   loadSystemLyricsFonts,
   normalizeLyricsFontPreset,
+  selectAmlLyricLines,
   systemLyricsFontOptions,
   type LyricLine,
   type LyricsFontPreset,
@@ -43,6 +44,8 @@ import LightLyricPlayer from './LightLyricPlayer.vue';
 
 const {
   parsedLyrics,
+  activeLyricsFormat,
+  nativeAmlLyrics,
   lyricsSettings,
   lyricsStatus,
   showLyricsPlayerSettingsPanel,
@@ -85,10 +88,13 @@ const previewPlayerOffsetY = ref(lyricsSettings.playerOffsetY);
 let lyricsSettingsCommitTimer: ReturnType<typeof setTimeout> | null = null;
 
 const amllLines = computed<AmlLyricLine[]>(() => {
-  return convertLyricsToAmlLines(
+  return selectAmlLyricLines(
+    activeLyricsFormat.value,
+    nativeAmlLyrics.value,
     parsedLyrics.value,
     lyricsSettings.showTranslation,
     lyricsSettings.showRomaji,
+    convertLyricsToAmlLines,
   );
 });
 
@@ -1272,4 +1278,3 @@ onUnmounted(() => {
   }
 }
 </style>
-

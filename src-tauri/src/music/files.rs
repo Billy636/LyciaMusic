@@ -50,45 +50,35 @@ fn read_sidecar_lrc_with_path(path_obj: &Path) -> Option<(String, PathBuf)> {
     let stem = path_obj.file_stem()?.to_string_lossy().to_string();
     let parent = path_obj.parent()?;
 
-    // 支持的侧边歌词文件后缀，按照优先级排序
-    let extensions = ["lrc", "ttml", "qrc", "yrc", "lys", "txt"];
+    // 仅自动发现同名侧边文件时按信息完整度排序；用户指定的 source_path 不走这里。
+    let extensions = ["ttml", "yrc", "qrc", "lys", "lrc", "txt"];
+    let candidates = fs::read_dir(parent)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|candidate| candidate.is_file())
+        .collect::<Vec<_>>();
 
-    // 1. 优先尝试精确匹配
     for ext in &extensions {
         let exact_path = parent.join(format!("{}.{}", stem, ext));
         if let Ok(content) = fs::read_to_string(&exact_path) {
             return Some((content, exact_path));
         }
-    }
 
-    // 2. 如果没有精确匹配到，进行目录遍历（不区分后缀大小写）
-    let entries = fs::read_dir(parent).ok()?;
-    for entry in entries.flatten() {
-        let candidate = entry.path();
-        if !candidate.is_file() {
-            continue;
-        }
-
-        let is_valid_ext = candidate
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| {
-                extensions
-                    .iter()
-                    .any(|&valid_ext| ext.eq_ignore_ascii_case(valid_ext))
-            })
-            .unwrap_or(false);
-        if !is_valid_ext {
-            continue;
-        }
-
-        let candidate_stem = candidate.file_stem()?.to_string_lossy().to_string();
-        if !candidate_stem.eq_ignore_ascii_case(&stem) {
-            continue;
-        }
-
-        if let Ok(content) = fs::read_to_string(&candidate) {
-            return Some((content, candidate));
+        if let Some(candidate) = candidates.iter().find(|candidate| {
+            let candidate_stem = candidate
+                .file_stem()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let candidate_ext = candidate
+                .extension()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            candidate_stem.eq_ignore_ascii_case(&stem) && candidate_ext.eq_ignore_ascii_case(ext)
+        }) {
+            if let Ok(content) = fs::read_to_string(candidate) {
+                return Some((content, candidate.clone()));
+            }
         }
     }
 
@@ -830,6 +820,30 @@ mod tests {
             remote_sidecar_lrc_path("/Artist/Album/Demo.flac").as_deref(),
             Some("/Artist/Album/Demo.lrc")
         );
+    }
+
+    #[test]
+    fn local_sidecar_discovery_prefers_ttml_even_with_uppercase_extension() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("lycia_sidecar_priority_test_{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("Demo.flac");
+        let lrc = dir.join("Demo.lrc");
+        let ttml = dir.join("Demo.TTML");
+        fs::write(&audio, b"not real audio").unwrap();
+        fs::write(&lrc, "[00:01.00]lrc").unwrap();
+        fs::write(&ttml, "<tt></tt>").unwrap();
+
+        let (lyrics, path) = read_sidecar_lrc_with_path(&audio).expect("sidecar lyrics");
+
+        assert_eq!(lyrics, "<tt></tt>");
+        assert!(path
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(ttml.file_name().unwrap())));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[tokio::test]

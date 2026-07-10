@@ -4,5 +4,6 @@ export * from './fontUtils';
 export * from './parser';
 export * from './classifier';
 export * from './converters';
+export * from './ttml';
 export * from './compat';
 export * from './state';

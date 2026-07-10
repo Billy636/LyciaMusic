@@ -8,6 +8,34 @@ function stripAmlRomajiSeparators(text: string) {
 }
 
 describe('convertLyricsToAmlLines', () => {
+  it('preserves duet, background, and compatible word extension fields', () => {
+    const [line] = convertLyricsToAmlLines([{
+      time: 1,
+      endTime: 3,
+      text: 'test',
+      translation: '',
+      romaji: '',
+      isBG: true,
+      isDuet: true,
+      words: [{
+        text: 'test',
+        start: 1,
+        end: 3,
+        obscene: true,
+        emptyBeat: 7,
+        ruby: [{ text: 'ruby', start: 1.1, end: 2.9 }],
+      }],
+    }], true, true);
+
+    expect(line?.isBG).toBe(true);
+    expect(line?.isDuet).toBe(true);
+    expect(line?.words[0]).toMatchObject({
+      obscene: true,
+      emptyBeat: 7,
+      ruby: [{ word: 'ruby', startTime: 1100, endTime: 2900 }],
+    });
+  });
+
   it('limits plain lyric lead-in before dense bilingual lines', () => {
     const lines: LyricLine[] = [
       {

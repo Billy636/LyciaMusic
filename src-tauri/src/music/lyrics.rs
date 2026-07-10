@@ -1155,6 +1155,8 @@ fn strip_xml_tags(raw: &str) -> String {
     sanitize_line_text(&re.replace_all(raw, "").to_string())
 }
 
+// 仅供非 AMLL 的结构化/轻量歌词路径降级使用。
+// 完整 TTML 语义由前端官方 parseTTML 解析器负责，勿在此扩展正则解析能力。
 fn parse_ttml(raw: &str) -> Vec<ParsedLine> {
     let paragraph_re = Regex::new(r#"(?s)<p\b([^>]*)>(.*?)</p>"#).expect("valid paragraph regex");
     let begin_re = Regex::new(r#"(?i)\bbegin="([^"]+)""#).expect("valid begin regex");
