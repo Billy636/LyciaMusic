@@ -58,3 +58,16 @@ button:focus {
   outline: none !important;
 }
 
+html,
+body,
+#app {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}

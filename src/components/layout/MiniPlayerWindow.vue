@@ -4,7 +4,7 @@ import { emitTo, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 
-import { getNextWheelVolume } from '../../composables/playerUiShell';
+import { getNextWheelVolume } from '../../utils/volume';
 import {
   MINI_PLAYER_ACTION_EVENT,
   MINI_PLAYER_BOUNDS_EVENT,

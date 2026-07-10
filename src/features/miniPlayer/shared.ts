@@ -1,6 +1,6 @@
 import type { Song } from '../../types';
 
-export const MINI_PLAYER_WINDOW_LABEL = 'mini-player';
+export { MINI_PLAYER_WINDOW_LABEL } from '../../windowLabels';
 export const MINI_PLAYER_STATE_EVENT = 'mini-player:state';
 export const MINI_PLAYER_STATE_APPLIED_EVENT = 'mini-player:state-applied';
 export const MINI_PLAYER_ACTION_EVENT = 'mini-player:action';

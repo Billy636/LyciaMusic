@@ -6,7 +6,7 @@ import type {
 } from '../../composables/lyrics';
 import type { Song } from '../../types';
 
-export const DESKTOP_LYRICS_WINDOW_LABEL = 'desktop-lyrics';
+export { DESKTOP_LYRICS_WINDOW_LABEL } from '../../windowLabels';
 export const DESKTOP_LYRICS_STATE_EVENT = 'desktop-lyrics:state';
 export const DESKTOP_LYRICS_PLAYBACK_EVENT = 'desktop-lyrics:playback';
 export const DESKTOP_LYRICS_READY_EVENT = 'desktop-lyrics:ready';

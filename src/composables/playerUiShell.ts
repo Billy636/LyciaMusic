@@ -8,6 +8,7 @@ import { useLibraryStore } from '../features/library/store';
 import { useNavigationStore } from '../shared/stores/navigation';
 import { usePlaybackStore } from '../features/playback/store';
 import { useUiStore } from '../shared/stores/ui';
+import { getNextWheelVolume } from '../utils/volume';
 
 interface CreatePlayerUiShellDeps {
   addFolder: () => void | Promise<void>;
@@ -15,14 +16,6 @@ interface CreatePlayerUiShellDeps {
 }
 
 const clampVolumePercent = (volume: number) => Math.max(0, Math.min(100, Math.round(volume)));
-
-export const getNextWheelVolume = (currentVolume: number, deltaY: number) => {
-  if (deltaY === 0) {
-    return clampVolumePercent(currentVolume);
-  }
-
-  return clampVolumePercent(currentVolume + (deltaY < 0 ? 1 : -1));
-};
 
 export const createPlayerUiShell = ({
   addFolder,

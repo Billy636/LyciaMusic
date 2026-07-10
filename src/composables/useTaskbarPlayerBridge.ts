@@ -19,31 +19,13 @@ import {
   TASKBAR_PLAYER_READY_EVENT,
   TASKBAR_PLAYER_VISIBILITY_EVENT,
   TASKBAR_PLAYER_DRAG_EVENT,
-  TASKBAR_PLAYER_POSITION_X_KEY,
   TASKBAR_PLAYER_WINDOW_WIDTH,
   TASKBAR_PLAYER_WINDOW_HEIGHT,
+  readSavedTaskbarPositionX,
+  type TaskbarTrayGeometry,
   type TaskbarPlayerStatePayload,
   type TaskbarPlayerAction,
 } from '../features/taskbarPlayer/shared';
-
-export type OwnerBindingState = 'bound' | 'failed' | 'unsupported' | 'already_bound';
-export type GeometrySource = 'tray' | 'taskbar_fallback';
-
-export interface RectPhysical {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
-export interface TaskbarTrayGeometry {
-  taskbar_rect_physical: RectPhysical;
-  tray_rect_physical: RectPhysical | null;
-  taskbar_hwnd_changed: boolean;
-  owner_binding: OwnerBindingState;
-  source: GeometrySource;
-  scale_factor: number;
-}
 
 let taskbarPlayerWindowPromise: Promise<WebviewWindow> | null = null;
 let isTaskbarPlayerReady = false;
@@ -87,21 +69,6 @@ function scheduleTaskbarWindowGeometryStabilization(targetWindow: WebviewWindow)
       void stabilizeTaskbarWindowGeometry(targetWindow);
     }, delay);
   }
-}
-
-// 读取保存的 x 坐标
-function readSavedPositionX(): number | null {
-  if (typeof localStorage === 'undefined') return null;
-  const stored = localStorage.getItem(TASKBAR_PLAYER_POSITION_X_KEY);
-  if (!stored) return null;
-  const parsed = parseInt(stored, 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-// 写入保存的 x 坐标
-export function writeSavedPositionX(x: number) {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(TASKBAR_PLAYER_POSITION_X_KEY, String(Math.round(x)));
 }
 
 // 核心自愈与几何定位控制器（带 pending 控制的并发锁机制）
@@ -181,7 +148,7 @@ async function updatePosition() {
       let x = 0;
       let y = 0;
 
-      const savedX = readSavedPositionX();
+      const savedX = readSavedTaskbarPositionX();
 
       // 多边定位公式单独定义与精细避让
       if (isBottom) {

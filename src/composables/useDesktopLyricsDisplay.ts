@@ -30,17 +30,21 @@ import {
   MIN_PLAYER_OFFSET_Y,
   MIN_DESKTOP_TEXT_OPACITY,
   MIN_DESKTOP_TEXT_SHADOW_STRENGTH,
-  buildImportedLyricsFontOptions,
-  getLyricsFontFamily,
   normalizeHexColor,
   normalizeDesktopPlayerAlignment,
   normalizeLyricsFontPreset,
+} from './lyrics/constants';
+import {
+  buildImportedLyricsFontOptions,
+  getLyricsFontFamily,
   registerImportedLyricsFonts,
   systemLyricsFontOptions,
-  type LyricsStatus,
-  type LyricLine,
-  type LyricWord,
-} from './lyrics';
+} from './lyrics/fontUtils';
+import type {
+  LyricsStatus,
+  LyricLine,
+  LyricWord,
+} from './lyrics/types';
 import type { ImportedLyricsFont } from '../types';
 import {
   DESKTOP_LYRICS_ACTION_EVENT,

@@ -13,10 +13,11 @@ import {
   TASKBAR_PLAYER_DRAG_EVENT,
   TASKBAR_PLAYER_WINDOW_HEIGHT,
   TASKBAR_PLAYER_WINDOW_WIDTH,
+  writeSavedTaskbarPositionX,
+  type TaskbarTrayGeometry,
   type TaskbarPlayerStatePayload,
   type TaskbarPlayerAction,
 } from '../../features/taskbarPlayer/shared';
-import { writeSavedPositionX, type TaskbarTrayGeometry } from '../../composables/useTaskbarPlayerBridge';
 import { windowApi } from '../../services/tauri/windowApi';
 import type { Song } from '../../types';
 
@@ -50,7 +51,7 @@ const finishDrag = async () => {
   void emitTo('main', TASKBAR_PLAYER_DRAG_EVENT, { dragging: false });
   const factor = await appWindow.scaleFactor();
   const position = (await appWindow.outerPosition()).toLogical(factor);
-  writeSavedPositionX(position.x);
+  writeSavedTaskbarPositionX(position.x);
 };
 
 const scheduleDragPosition = (position: LogicalPosition) => {
