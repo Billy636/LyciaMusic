@@ -373,6 +373,7 @@ export interface AudioSettings {
 }
 
 export type ShortcutActionId =
+  | 'toggleMainWindow'
   | 'togglePlay'
   | 'prevSong'
   | 'nextSong'

@@ -3,7 +3,6 @@ import { LogicalPosition } from '@tauri-apps/api/dpi';
 import { invoke } from '@tauri-apps/api/core';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 
 import {
@@ -141,24 +140,6 @@ const startDrag = async (event: PointerEvent) => {
   };
 };
 
-const restoreMainWindow = async () => {
-  try {
-    const mainWin = await WebviewWindow.getByLabel('main');
-    if (!mainWin) {
-      console.warn('[TaskbarPlayer] Main window not found');
-      return;
-    }
-    await mainWin.show();
-    const minimized = await mainWin.isMinimized();
-    if (minimized) {
-      await mainWin.unminimize();
-    }
-    await mainWin.setFocus();
-  } catch (error) {
-    console.error('[TaskbarPlayer] Failed to restore main window:', error);
-  }
-};
-
 const titleElement = ref<HTMLElement | null>(null);
 const titleWrapperElement = ref<HTMLElement | null>(null);
 const shouldScroll = ref(false);
@@ -167,7 +148,7 @@ let unlistenState: (() => void) | null = null;
 let unlistenVisibility: (() => void) | null = null;
 let unlistenMoved: (() => void) | null = null;
 
-const sendAction = (actionType: 'prev-song' | 'next-song' | 'toggle-play' | 'close') => {
+const sendAction = (actionType: TaskbarPlayerAction['type']) => {
   void emitTo<TaskbarPlayerAction>('main', TASKBAR_PLAYER_ACTION_EVENT, { type: actionType });
 };
 
@@ -273,7 +254,8 @@ onUnmounted(() => {
       <div 
         class="group/cover w-8 h-8 rounded-lg overflow-hidden shrink-0 bg-white/5 border border-white/5 flex items-center justify-center text-white/40 relative cursor-pointer pointer-events-auto"
         @mousedown.stop.prevent
-        @click.stop="restoreMainWindow"
+        title="显示/收起主窗口"
+        @click.stop="sendAction('toggle-main-window')"
       >
         <img 
           v-if="localCoverUrl" 

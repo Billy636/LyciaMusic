@@ -6,6 +6,7 @@ import type {
 } from '../../types';
 
 export const shortcutActionOrder: ShortcutActionId[] = [
+  'toggleMainWindow',
   'togglePlay',
   'prevSong',
   'nextSong',
@@ -18,6 +19,7 @@ export const shortcutActionOrder: ShortcutActionId[] = [
 ];
 
 export const shortcutActionLabels: Record<ShortcutActionId, string> = {
+  toggleMainWindow: '显示/收起主窗口',
   togglePlay: '播放/暂停',
   prevSong: '上一首',
   nextSong: '下一首',
@@ -45,6 +47,7 @@ const cloneShortcutBinding = (binding: ShortcutBinding | null): ShortcutBinding 
 );
 
 const createShortcutBindingMap = (bindings: ShortcutBindingMap): ShortcutBindingMap => ({
+  toggleMainWindow: cloneShortcutBinding(bindings.toggleMainWindow),
   togglePlay: cloneShortcutBinding(bindings.togglePlay),
   prevSong: cloneShortcutBinding(bindings.prevSong),
   nextSong: cloneShortcutBinding(bindings.nextSong),
@@ -57,6 +60,7 @@ const createShortcutBindingMap = (bindings: ShortcutBindingMap): ShortcutBinding
 });
 
 export const defaultLocalShortcutBindings: ShortcutBindingMap = {
+  toggleMainWindow: createShortcutBinding('KeyW', { ctrl: true }),
   togglePlay: createShortcutBinding('Space'),
   prevSong: createShortcutBinding('ArrowLeft', { ctrl: true }),
   nextSong: createShortcutBinding('ArrowRight', { ctrl: true }),
@@ -69,6 +73,7 @@ export const defaultLocalShortcutBindings: ShortcutBindingMap = {
 };
 
 export const defaultGlobalShortcutBindings: ShortcutBindingMap = {
+  toggleMainWindow: null,
   togglePlay: createShortcutBinding('KeyP', { ctrl: true, alt: true }),
   prevSong: createShortcutBinding('ArrowLeft', { ctrl: true, alt: true }),
   nextSong: createShortcutBinding('ArrowRight', { ctrl: true, alt: true }),

@@ -8,6 +8,7 @@ import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useCoverCache } from './useCoverCache';
 import { usePlayer } from './player';
 import { useThemeSettings } from './useThemeSettings';
+import { toggleMainWindowVisibility } from './mainWindowVisibility';
 import { useSettings } from '../features/settings/useSettings';
 import {
   TASKBAR_PLAYER_WINDOW_LABEL,
@@ -503,6 +504,9 @@ export function useTaskbarPlayerBridge() {
 
   const handleAction = async (action: TaskbarPlayerAction) => {
     switch (action.type) {
+      case 'toggle-main-window':
+        await toggleMainWindowVisibility(mainWindow);
+        break;
       case 'toggle-play':
         await togglePlay();
         break;

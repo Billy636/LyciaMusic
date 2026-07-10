@@ -1,5 +1,6 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import { useLibraryCollections } from '../features/collections/useLibraryCollections';
 import { usePlaybackController } from '../features/playback/usePlaybackController';
@@ -13,6 +14,7 @@ import type { ShortcutActionId, ShortcutSettings } from '../types';
 import { useLyrics } from './lyrics';
 import { useUiStore } from '../shared/stores/ui';
 import { useToast } from './toast';
+import { toggleMainWindowVisibility } from './mainWindowVisibility';
 
 const INTERACTIVE_SELECTOR = [
   'input',
@@ -57,6 +59,7 @@ export function createGlobalShortcutSyncKey(shortcuts: ShortcutSettings) {
 }
 
 export function useKeyboardShortcuts() {
+  const mainWindow = getCurrentWindow();
   const { settings } = useSettings();
   const { currentSong, volume, togglePlay, nextSong, prevSong, handleVolume } = usePlaybackController();
   const { toggleFavorite } = useLibraryCollections();
@@ -74,6 +77,9 @@ export function useKeyboardShortcuts() {
   };
 
   const actionHandlers: Record<ShortcutActionId, () => void | Promise<void>> = {
+    toggleMainWindow: async () => {
+      await toggleMainWindowVisibility(mainWindow);
+    },
     togglePlay: () => togglePlay(),
     prevSong: () => prevSong(),
     nextSong: () => nextSong(),

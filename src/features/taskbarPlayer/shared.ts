@@ -21,6 +21,7 @@ export interface TaskbarPlayerStatePayload {
 }
 
 export type TaskbarPlayerAction =
+  | { type: 'toggle-main-window' }
   | { type: 'toggle-play' }
   | { type: 'prev-song' }
   | { type: 'next-song' }
