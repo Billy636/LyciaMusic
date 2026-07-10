@@ -13,6 +13,7 @@ import LyricsView from './LyricsView.vue';
 import PlayerDetailBackground from './PlayerDetailBackground.vue';
 import PlayerDetailLeft from './PlayerDetailLeft.vue';
 import QueueList from './QueueList.vue';
+import { resolvePlayerDetailEscapeAction } from './playerDetailKeyboard';
 import { hideMainWindowToTray } from '../../composables/renderingPower';
 
 const {
@@ -229,6 +230,16 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
 
     event.preventDefault();
     event.stopPropagation();
+
+    const action = resolvePlayerDetailEscapeAction(
+      isFullscreen.value,
+      isFullscreenTransitioning.value,
+    );
+    if (action === 'exit-immersive') {
+      void exitImmersiveFullscreen();
+      return;
+    }
+
     closePlayerDetail();
   }
 };
