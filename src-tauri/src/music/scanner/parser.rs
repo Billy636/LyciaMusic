@@ -69,10 +69,14 @@ pub(super) fn preferred_parse_workers_for_available(task_count: usize, available
         return 1;
     }
 
-    let reserved = if available <= 8 { 1 } else { 2 };
-    let usable = available.saturating_sub(reserved).max(1);
+    let available = available.max(1);
+    let responsive_budget = if available <= 2 {
+        1
+    } else {
+        (available / 2).max(2).min(8)
+    };
 
-    task_count.min(usable).max(1)
+    task_count.min(responsive_budget).min(available).max(1)
 }
 
 pub(super) fn song_metadata_incomplete(song: &Song) -> bool {

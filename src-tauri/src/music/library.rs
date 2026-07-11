@@ -1,7 +1,7 @@
 // music/library.rs - 音乐库管理命令
 
 use super::scanner::ScanOptions;
-use super::scanner::{scan_folder_recursive, scan_single_directory_internal};
+use super::scanner::{scan_folder_recursive, scan_single_directory_summary_internal};
 use super::types::{
     AlbumCatalogItem, ArtistCatalogItem, FolderNode, LibraryFolder, LibrarySong, LibrarySongLabel,
     LibrarySongPage,
@@ -1353,7 +1353,7 @@ pub async fn scan_library(
 
         let folder_total = folder_paths.len();
         for (index, folder) in folder_paths.into_iter().enumerate() {
-            let _ = scan_single_directory_internal(
+            let _ = scan_single_directory_summary_internal(
                 folder,
                 db_conn.clone(),
                 Some(app.clone()),

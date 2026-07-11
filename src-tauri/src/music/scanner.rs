@@ -17,6 +17,7 @@ mod progress;
 #[path = "scanner/repository.rs"]
 mod repository;
 
+pub(crate) use orchestrator::scan_single_directory_summary_internal;
 pub use orchestrator::{
     get_folder_first_song, parse_audio_files, scan_folder_as_playlists, scan_folder_recursive,
     scan_music_folder, scan_single_directory_internal,
@@ -223,6 +224,7 @@ pub(super) fn fill_text_fields_from_tags(
 #[cfg(test)]
 mod tests {
     use super::diff::{collect_scan_diff, DbSongSnapshot};
+    use super::orchestrator::scan_single_directory_summary_internal;
     use super::parser::{
         preferred_parse_workers_for_available, song_identity_missing, song_metadata_incomplete,
     };
@@ -234,6 +236,7 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn make_song(path: &str) -> Song {
@@ -348,20 +351,38 @@ mod tests {
     }
 
     #[test]
-    fn parse_workers_reserve_one_core_on_smaller_cpus() {
-        assert_eq!(preferred_parse_workers_for_available(10, 8), 7);
-        assert_eq!(preferred_parse_workers_for_available(10, 4), 3);
+    fn parse_workers_use_at_most_half_of_smaller_cpus() {
+        assert_eq!(preferred_parse_workers_for_available(10, 8), 4);
+        assert_eq!(preferred_parse_workers_for_available(10, 4), 2);
+        assert_eq!(preferred_parse_workers_for_available(10, 2), 1);
     }
 
     #[test]
-    fn parse_workers_reserve_two_cores_on_larger_cpus() {
-        assert_eq!(preferred_parse_workers_for_available(32, 16), 14);
-        assert_eq!(preferred_parse_workers_for_available(32, 24), 22);
+    fn parse_workers_cap_large_cpu_scans_to_eight_workers() {
+        assert_eq!(preferred_parse_workers_for_available(32, 16), 8);
+        assert_eq!(preferred_parse_workers_for_available(32, 24), 8);
     }
 
     #[test]
     fn parse_workers_never_exceed_task_count() {
         assert_eq!(preferred_parse_workers_for_available(3, 16), 3);
+    }
+
+    #[test]
+    fn summary_scan_returns_count_without_a_song_result_vector() {
+        let temp_dir = create_empty_temp_dir();
+        let count = scan_single_directory_summary_internal(
+            temp_dir.to_string_lossy().into_owned(),
+            Arc::new(Mutex::new(setup_test_db())),
+            None,
+            1,
+            1,
+            ScanOptions::default(),
+        )
+        .expect("scan summary");
+
+        assert_eq!(count, 0);
+        fs::remove_dir_all(temp_dir).expect("remove temp dir");
     }
 
     #[test]

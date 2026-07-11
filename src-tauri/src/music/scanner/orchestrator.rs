@@ -13,6 +13,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
 
+struct ScanDirectoryOutcome {
+    songs: Option<Vec<Song>>,
+    song_count: usize,
+}
+
 pub fn scan_single_directory_internal(
     folder_path: String,
     db_conn: Arc<Mutex<rusqlite::Connection>>,
@@ -21,6 +26,47 @@ pub fn scan_single_directory_internal(
     folder_total: usize,
     options: ScanOptions,
 ) -> Result<Vec<Song>, String> {
+    scan_single_directory_with_mode(
+        folder_path,
+        db_conn,
+        app,
+        folder_index,
+        folder_total,
+        options,
+        true,
+    )
+    .map(|outcome| outcome.songs.unwrap_or_default())
+}
+
+pub(crate) fn scan_single_directory_summary_internal(
+    folder_path: String,
+    db_conn: Arc<Mutex<rusqlite::Connection>>,
+    app: Option<AppHandle>,
+    folder_index: usize,
+    folder_total: usize,
+    options: ScanOptions,
+) -> Result<usize, String> {
+    scan_single_directory_with_mode(
+        folder_path,
+        db_conn,
+        app,
+        folder_index,
+        folder_total,
+        options,
+        false,
+    )
+    .map(|outcome| outcome.song_count)
+}
+
+fn scan_single_directory_with_mode(
+    folder_path: String,
+    db_conn: Arc<Mutex<rusqlite::Connection>>,
+    app: Option<AppHandle>,
+    folder_index: usize,
+    folder_total: usize,
+    options: ScanOptions,
+    return_songs: bool,
+) -> Result<ScanDirectoryOutcome, String> {
     #[cfg(debug_assertions)]
     let start_time = std::time::Instant::now();
 
@@ -42,6 +88,10 @@ pub fn scan_single_directory_internal(
     let original_db_count = db_snapshot.len();
     let mut scan_diff =
         collect_scan_diff(&normalized_folder, db_snapshot, reporter.as_ref(), options)?;
+    let song_count = scan_diff.songs.len();
+    if !return_songs {
+        scan_diff.songs = Vec::new();
+    }
 
     let folder_is_accessible =
         Path::new(&normalized_folder).is_dir() && fs::read_dir(&normalized_folder).is_ok();
@@ -103,7 +153,7 @@ pub fn scan_single_directory_internal(
     }
 
     if let Some(reporter) = reporter.as_ref() {
-        reporter.emit_complete(scan_diff.songs.len());
+        reporter.emit_complete(song_count);
     }
 
     #[cfg(debug_assertions)]
@@ -118,7 +168,14 @@ pub fn scan_single_directory_internal(
         );
     }
 
-    Ok(scan_diff.songs)
+    Ok(ScanDirectoryOutcome {
+        songs: if return_songs {
+            Some(scan_diff.songs)
+        } else {
+            None
+        },
+        song_count,
+    })
 }
 
 #[tauri::command]
