@@ -34,6 +34,9 @@ let resolveTaskbarPlayerReady: (() => void) | null = null;
 let resolveTaskbarPlayerStateApplied: (() => void) | null = null;
 let unlistenScaleChange: (() => void) | null = null;
 
+const TASKBAR_FULLSCREEN_CHECK_INTERVAL_MS = 1_000;
+const TASKBAR_GEOMETRY_FALLBACK_INTERVAL_MS = 10_000;
+
 // 高可用定位并发控制锁
 let isPositioning = false;
 let pendingPositionUpdate = false;
@@ -316,6 +319,7 @@ export function useTaskbarPlayerBridge() {
   const isTaskbarPlayerVisible = ref(false);
   const unlisteners: Array<() => void> = [];
   let checkTimer: number | null = null;
+  let lastGeometryFallbackAt = 0;
   let isMainWindowClosing = false;
   let updateSequence = 0;
 
@@ -363,6 +367,7 @@ export function useTaskbarPlayerBridge() {
     await emitTo(TASKBAR_PLAYER_WINDOW_LABEL, TASKBAR_PLAYER_VISIBILITY_EVENT, { visible: true });
     await targetWindow.show();
     await stabilizeTaskbarWindowGeometry(targetWindow);
+    lastGeometryFallbackAt = Date.now();
     isTaskbarPlayerVisible.value = true;
 
     // 安装 Z-order 守护，防止点击任务栏时播控窗口被遮盖
@@ -415,7 +420,7 @@ export function useTaskbarPlayerBridge() {
     }
   };
 
-  // 全屏屏蔽防盖以及秒级自愈对齐复合轮询机制
+  // 全屏切换保持秒级响应；较重的托盘几何查询只做低频兜底，DPI 变化仍由事件立即处理。
   const startCheckLoop = () => {
     if (checkTimer) return;
 
@@ -438,15 +443,19 @@ export function useTaskbarPlayerBridge() {
             await targetWindow.show();
             await stabilizeTaskbarWindowGeometry(targetWindow);
             isTaskbarPlayerVisible.value = true;
-          } else if (!isTaskbarPlayerDragging) {
-            // 正常显示状态下，每 1 秒进行位置的静默校验和动态纠偏（应对托盘变化或 Explorer 重建）
+          } else if (
+            !isTaskbarPlayerDragging
+            && Date.now() - lastGeometryFallbackAt >= TASKBAR_GEOMETRY_FALLBACK_INTERVAL_MS
+          ) {
+            // 低频兜底应对托盘变化或 Explorer 重建，避免每秒重复 Win32 几何查询。
+            lastGeometryFallbackAt = Date.now();
             void stabilizeTaskbarWindowGeometry(targetWindow);
           }
         }
       } catch (error) {
         console.warn('Failed in check loop:', error);
       }
-    }, 1000);
+    }, TASKBAR_FULLSCREEN_CHECK_INTERVAL_MS);
   };
 
   const stopCheckLoop = () => {

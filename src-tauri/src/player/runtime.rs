@@ -24,7 +24,16 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
-const PLAYER_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const ACTIVE_PLAYER_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const IDLE_PLAYER_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+fn player_poll_interval(is_playing: bool) -> Duration {
+    if is_playing {
+        ACTIVE_PLAYER_POLL_INTERVAL
+    } else {
+        IDLE_PLAYER_POLL_INTERVAL
+    }
+}
 
 fn progress_duration(progress: &Arc<SharedProgress>) -> Duration {
     let current_samples = progress.samples_played.load(Ordering::Relaxed);
@@ -737,7 +746,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
         );
 
         loop {
-            match rx.recv_timeout(PLAYER_POLL_INTERVAL) {
+            match rx.recv_timeout(player_poll_interval(is_playing_flag)) {
                 Ok(cmd) => match cmd {
                     AudioCommand::Play {
                         source,
@@ -1286,5 +1295,11 @@ mod tests {
             &next_default_device_name,
             &active_device_name,
         ));
+    }
+
+    #[test]
+    fn player_polling_slows_down_only_while_idle() {
+        assert_eq!(player_poll_interval(true), Duration::from_millis(150));
+        assert_eq!(player_poll_interval(false), Duration::from_secs(1));
     }
 }

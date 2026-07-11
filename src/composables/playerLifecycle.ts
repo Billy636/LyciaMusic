@@ -503,6 +503,7 @@ export const createPlayerLifecycle = ({
     // 流光/桌面歌词封面取色共用主色，参数微调时 debounce 延迟重提取，避免拖动滑块时频繁触发层切换闪烁
     let flowTweakTimer: ReturnType<typeof setTimeout> | null = null;
     let lastPersistedPlaybackTime = Number.NaN;
+    let playbackStateRestored = false;
 
     const persistCurrentPlaybackTime = () => {
       if (!currentSong.value) return;
@@ -548,7 +549,19 @@ export const createPlayerLifecycle = ({
       }
     });
 
-    const playbackTimePersistTimer = setInterval(persistCurrentPlaybackTime, 2000);
+    watch(currentSongPath, () => {
+      if (!playbackStateRestored) return;
+      lastPersistedPlaybackTime = Number.NaN;
+      queueMicrotask(persistCurrentPlaybackTime);
+    });
+
+    const playbackTimePersistTimer = setInterval(persistCurrentPlaybackTime, 5000);
+
+    const visibilityChangeHandler = () => {
+      if (document.visibilityState === 'hidden') {
+        persistCurrentPlaybackTime();
+      }
+    };
 
     const beforeUnloadHandler = () => {
       flushPersistedState();
@@ -608,8 +621,10 @@ export const createPlayerLifecycle = ({
       if (storedLastTime !== null) {
         currentTime.value = storedLastTime;
       }
+      playbackStateRestored = true;
 
       window.addEventListener('beforeunload', beforeUnloadHandler);
+      document.addEventListener('visibilitychange', visibilityChangeHandler);
       window.setTimeout(() => void runRemoteAutoSync(), 30_000);
       remoteAutoSyncTimer = setInterval(() => void runRemoteAutoSync(), 60 * 60 * 1000);
     });
@@ -629,6 +644,7 @@ export const createPlayerLifecycle = ({
         unlisteners.forEach(unlisten => unlisten());
       });
       window.removeEventListener('beforeunload', beforeUnloadHandler);
+      document.removeEventListener('visibilitychange', visibilityChangeHandler);
       disposePlayerPlayback();
       disposeLibraryRuntime();
       disposePlayerPersistence();
