@@ -26,4 +26,8 @@ describe('Tauri app command permissions', () => {
   it('allows the native immersive fullscreen transition', () => {
     expect(permissionFile).toContain('"set_immersive_fullscreen"');
   });
+
+  it('allows on-demand audio visualizer sampling control', () => {
+    expect(permissionFile).toContain('"set_audio_visualizer_enabled"');
+  });
 });

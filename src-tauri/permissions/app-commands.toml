@@ -28,6 +28,7 @@ commands.allow = [
   "set_volume",
   "get_playback_progress",
   "get_audio_visualizer_samples",
+  "set_audio_visualizer_enabled",
   "get_track_loudness_info",
   "update_loudness_settings",
   "set_equalizer_settings",

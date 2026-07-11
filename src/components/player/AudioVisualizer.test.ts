@@ -14,5 +14,21 @@ describe('AudioVisualizer low power rendering', () => {
     expect(source).toContain('const VISUALIZER_TARGET_FPS = 30;');
     expect(source).toContain('const FETCH_INTERVAL_MS = Math.round(1000 / VISUALIZER_TARGET_FPS);');
     expect(source).toContain('const shouldFetchSamples = () => props.active && props.isPlaying && !isMainWindowLowPower.value;');
+    expect(source).toContain('timestamp - lastDrawTimestamp < DRAW_INTERVAL_MS - 1');
+    expect(source).toContain('fetchInFlight');
+  });
+
+  it('enables backend sampling only while the visualizer is actually active', () => {
+    expect(source).toContain('playbackApi.setAudioVisualizerEnabled(enabled)');
+    expect(source).toContain('playbackApi.setAudioVisualizerEnabled(false)');
+    expect(source).toContain('syncBackendVisualizer();');
+  });
+
+  it('reuses fixed level buffers, canvas size, and quantized gradients', () => {
+    expect(source).toContain('new Float32Array(BAR_COUNT)');
+    expect(source).toContain('new Float32Array(DISPLAY_BAR_COUNT)');
+    expect(source).toContain('const gradientCache = new Map<string, CanvasGradient>();');
+    expect(source).toContain('resizeObserver = new ResizeObserver(() => {');
+    expect(source).toContain('context.fillStyle = getBarGradient');
   });
 });

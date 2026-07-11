@@ -149,6 +149,7 @@ struct ExclusiveSource {
     channels: u16,
     channel_sum: f32,
     channel_samples: u16,
+    visualizer_enabled_for_frame: bool,
     normalizer_handle: crate::player::loudness::VolumeNormalizerHandle,
 }
 
@@ -220,6 +221,7 @@ impl ExclusiveSource {
                 channels,
                 channel_sum: 0.0,
                 channel_samples: 0,
+                visualizer_enabled_for_frame: false,
                 normalizer_handle,
             },
             sample_rate,
@@ -241,12 +243,19 @@ impl ExclusiveSource {
                 let sample = match self.source.next() {
                     Some(sample) => {
                         self.progress.samples_played.fetch_add(1, Ordering::Relaxed);
-                        self.channel_sum += sample;
+                        if self.channel_samples == 0 {
+                            self.visualizer_enabled_for_frame = self.visualizer.is_enabled();
+                        }
+                        if self.visualizer_enabled_for_frame {
+                            self.channel_sum += sample;
+                        }
                         self.channel_samples += 1;
 
                         if self.channel_samples >= self.channels {
-                            self.visualizer
-                                .push_sample(self.channel_sum / self.channel_samples as f32);
+                            if self.visualizer_enabled_for_frame {
+                                self.visualizer
+                                    .push_sample(self.channel_sum / self.channel_samples as f32);
+                            }
                             self.channel_sum = 0.0;
                             self.channel_samples = 0;
                         }

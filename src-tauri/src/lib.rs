@@ -38,8 +38,8 @@ use music::{
 use player::{
     get_audio_visualizer_samples, get_current_output_device, get_output_devices,
     get_playback_progress, get_track_loudness_info, pause_audio, play_audio, resume_audio,
-    seek_audio, set_audio_output_mode, set_equalizer_settings, set_output_device, set_volume,
-    stop_audio, update_loudness_settings, update_playback_metadata,
+    seek_audio, set_audio_output_mode, set_audio_visualizer_enabled, set_equalizer_settings,
+    set_output_device, set_volume, stop_audio, update_loudness_settings, update_playback_metadata,
 };
 use remote::{
     add_remote_source, clear_remote_cache, get_remote_cache_usage, get_remote_sources,
@@ -134,6 +134,7 @@ pub fn run() {
             set_volume,
             get_playback_progress,
             get_audio_visualizer_samples,
+            set_audio_visualizer_enabled,
             get_track_loudness_info,
             update_loudness_settings,
             set_equalizer_settings,

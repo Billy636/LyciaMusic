@@ -5,9 +5,11 @@ use crate::player::output::shared::{restore_current_playback, SharedOutputBacken
 #[cfg(target_os = "windows")]
 use crate::player::output::wasapi_exclusive::{ExclusivePlayRequest, WasapiExclusivePlayback};
 use crate::player::output::OutputBackend;
+use crate::player::spectrum::SpectrumAnalyzer;
 use crate::player::types::{
     AudioCommand, AudioOutputMode, AudioOutputStatus, AudioSource, PlaybackFinishedPayload,
     PlayerState, SeekCompletedPayload, SharedProgress, SharedVisualizer, TimedSource,
+    VISUALIZER_BAND_COUNT, VISUALIZER_WINDOW_SIZE,
 };
 use crate::remote::cache::RemoteStreamSource;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -1214,6 +1216,10 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
         playback_id: Arc::new(AtomicU64::new(0)),
         controls,
         output_status,
+        visualizer_analysis: Mutex::new(SpectrumAnalyzer::new(
+            VISUALIZER_WINDOW_SIZE,
+            VISUALIZER_BAND_COUNT,
+        )),
     }
 }
 

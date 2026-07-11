@@ -5,7 +5,6 @@ use crate::player::equalizer::EqualizerSettings;
 use crate::player::loudness::{
     calculate_playback_gain, get_song_loudness_record, process_song_on_play, LoudnessRecord,
 };
-use crate::player::spectrum::build_frequency_bands;
 use crate::player::types::{
     AudioCommand, AudioOutputMode, AudioSource, PlayerState, VISUALIZER_BAND_COUNT,
 };
@@ -376,7 +375,16 @@ pub fn get_playback_progress(state: tauri::State<PlayerState>) -> f64 {
 pub fn get_audio_visualizer_samples(state: tauri::State<PlayerState>) -> Vec<f32> {
     let visualizer = &state.progress.visualizer;
     let sample_rate = state.progress.sample_rate.load(Ordering::Relaxed);
-    build_frequency_bands(&visualizer.snapshot(), sample_rate, VISUALIZER_BAND_COUNT)
+    state
+        .visualizer_analysis
+        .lock()
+        .map(|mut analyzer| analyzer.bands_for(visualizer, sample_rate).to_vec())
+        .unwrap_or_else(|_| vec![0.0; VISUALIZER_BAND_COUNT])
+}
+
+#[tauri::command]
+pub fn set_audio_visualizer_enabled(enabled: bool, state: tauri::State<PlayerState>) {
+    state.progress.visualizer.set_enabled(enabled);
 }
 
 #[tauri::command]
