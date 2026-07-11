@@ -1873,6 +1873,135 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "manual 50k/100k search and SQLite memory baseline"]
+    fn benchmark_large_library_search_and_sort_memory() {
+        use rusqlite::ffi;
+        use std::time::{Duration, Instant};
+
+        fn sqlite_memory_status(reset_highwater: bool) -> (i64, i64) {
+            let mut current = 0_i64;
+            let mut highwater = 0_i64;
+            let result = unsafe {
+                ffi::sqlite3_status64(
+                    ffi::SQLITE_STATUS_MEMORY_USED,
+                    &mut current,
+                    &mut highwater,
+                    i32::from(reset_highwater),
+                )
+            };
+            assert_eq!(result, ffi::SQLITE_OK);
+            (current, highwater)
+        }
+
+        fn percentile_95(samples: &mut [Duration]) -> Duration {
+            samples.sort_unstable();
+            samples[((samples.len() * 95).div_ceil(100)).saturating_sub(1)]
+        }
+
+        for song_count in [50_000_usize, 100_000] {
+            let mut conn = Connection::open_in_memory().expect("open in-memory db");
+            create_cached_song_schema(&conn);
+            conn.pragma_update(None, "temp_store", "MEMORY")
+                .expect("configure temp store");
+            conn.execute(
+                "CREATE INDEX idx_songs_all_view_title
+                 ON songs (
+                   COALESCE(NULLIF(TRIM(title), ''), path) COLLATE NOCASE,
+                   path COLLATE NOCASE
+                 )",
+                [],
+            )
+            .expect("create title index");
+
+            let transaction = conn.transaction().expect("start synthetic insert");
+            {
+                let mut insert = transaction
+                    .prepare(
+                        "INSERT INTO songs (
+                            path, title, artist, album, album_artist, added_at,
+                            file_modified_at, source_type
+                         ) VALUES (?1, ?2, ?3, ?4, ?3, ?5, ?5, 'local')",
+                    )
+                    .expect("prepare synthetic insert");
+                for index in 0..song_count {
+                    insert
+                        .execute(rusqlite::params![
+                            format!(
+                                "C:/Synthetic/Artist-{}/track-{index:06}.flac",
+                                index % 2_000
+                            ),
+                            format!("Track {index:06}"),
+                            format!("Artist {:04}", index % 2_000),
+                            format!("Album {:05}", index % 10_000),
+                            index as i64,
+                        ])
+                        .expect("insert synthetic song");
+                }
+            }
+            transaction.commit().expect("commit synthetic songs");
+
+            sqlite_memory_status(true);
+            let mut title_samples = Vec::new();
+            let mut title_without_index_samples = Vec::new();
+            let mut search_samples = Vec::new();
+            for index in 0..20 {
+                let started = Instant::now();
+                let page = load_all_view_song_page(
+                    &conn,
+                    None,
+                    None,
+                    None,
+                    LibrarySongSortMode::Title,
+                    (index % 4 * 128) as u32,
+                    128,
+                )
+                .expect("load sorted page");
+                assert_eq!(page.rows.len(), 128);
+                title_samples.push(started.elapsed());
+
+                let started = Instant::now();
+                let mut statement = conn
+                    .prepare(
+                        "SELECT path FROM songs NOT INDEXED
+                         ORDER BY COALESCE(NULLIF(TRIM(title), ''), path) COLLATE NOCASE ASC,
+                                  path COLLATE NOCASE ASC
+                         LIMIT 128",
+                    )
+                    .expect("prepare unindexed title page");
+                let unindexed_paths = statement
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .expect("load unindexed title page")
+                    .collect::<Result<Vec<_>, _>>()
+                    .expect("collect unindexed title page");
+                assert_eq!(unindexed_paths.len(), 128);
+                title_without_index_samples.push(started.elapsed());
+
+                let started = Instant::now();
+                let search_page = load_all_view_song_page(
+                    &conn,
+                    Some(format!("track {:03}", index % 10)),
+                    None,
+                    None,
+                    LibrarySongSortMode::Title,
+                    0,
+                    128,
+                )
+                .expect("load search page");
+                assert!(search_page.rows.len() <= 128);
+                search_samples.push(started.elapsed());
+            }
+            let (memory_current, memory_highwater) = sqlite_memory_status(false);
+            let title_p95 = percentile_95(&mut title_samples);
+            let title_without_index_p95 = percentile_95(&mut title_without_index_samples);
+            let search_p95 = percentile_95(&mut search_samples);
+
+            eprintln!(
+                "{song_count} songs: title_page_p95={title_p95:?}, title_without_index_p95={title_without_index_p95:?}, search_p95={search_p95:?}, sqlite_memory_current={memory_current}, sqlite_memory_highwater={memory_highwater}"
+            );
+        }
+    }
+
+    #[test]
     fn album_catalog_groups_songs_and_selects_the_latest_representative() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         create_album_catalog_schema(&conn);

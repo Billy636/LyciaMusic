@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Moon, Sun } from 'lucide-vue-next';
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePlayerViewState } from '../../composables/usePlayerViewState';
 import { useThemeSettings } from '../../composables/useThemeSettings';
@@ -18,6 +18,9 @@ const rotation = ref(0); // For settings icon animation
 const lastNonSettingsRoute = ref(route.path === '/settings' ? '/' : route.fullPath);
 const isSettingsRoute = computed(() => route.path === '/settings');
 const themeToggleTitle = computed(() => (isDarkTheme.value ? '切换浅色' : '切换深色'));
+const SEARCH_COMMIT_DELAY_MS = 150;
+const searchDraft = ref(searchQuery.value);
+let searchCommitTimer: ReturnType<typeof window.setTimeout> | null = null;
 
 const rotateSettings = () => {
   rotation.value += 180;
@@ -76,7 +79,42 @@ const closeWindow = async () => {
   }
 };
 
-const handleInput = (e: Event) => { setSearch((e.target as HTMLInputElement).value); };
+const cancelSearchCommit = () => {
+  if (searchCommitTimer === null) return;
+  window.clearTimeout(searchCommitTimer);
+  searchCommitTimer = null;
+};
+
+const commitSearch = (value: string) => {
+  cancelSearchCommit();
+  searchDraft.value = value;
+  setSearch(value);
+};
+
+const handleInput = (event: Event) => {
+  const value = (event.target as HTMLInputElement).value;
+  searchDraft.value = value;
+  cancelSearchCommit();
+
+  if (!value) {
+    setSearch('');
+    return;
+  }
+
+  searchCommitTimer = window.setTimeout(() => {
+    searchCommitTimer = null;
+    setSearch(searchDraft.value);
+  }, SEARCH_COMMIT_DELAY_MS);
+};
+
+watch(searchQuery, (value) => {
+  if (value !== searchDraft.value) {
+    cancelSearchCommit();
+    searchDraft.value = value;
+  }
+});
+
+onUnmounted(cancelSearchCommit);
 const goBack = () => { router.back(); };
 </script>
 
@@ -104,10 +142,10 @@ const goBack = () => { router.back(); };
           type="text" 
           placeholder="搜索音乐..." 
           class="bg-transparent outline-none w-full placeholder-gray-700 dark:placeholder-gray-300 text-gray-800 dark:text-gray-100 text-xs font-medium"
-          :value="searchQuery"
+          :value="searchDraft"
           @input="handleInput"
         />
-        <button v-if="searchQuery" @click="setSearch('')" class="text-gray-500 dark:text-gray-400 hover:text-[#EC4141] ml-1 cursor-pointer">
+        <button v-if="searchDraft" @click="commitSearch('')" class="text-gray-500 dark:text-gray-400 hover:text-[#EC4141] ml-1 cursor-pointer">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
           </svg>

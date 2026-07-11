@@ -101,6 +101,18 @@ pub(crate) fn ensure_base_schema(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
 
+    // Matches the default all-songs ORDER BY exactly, avoiding a temporary sort B-tree
+    // for the most common first-page query without changing title ordering semantics.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_songs_all_view_title
+         ON songs (
+           COALESCE(NULLIF(TRIM(title), ''), path) COLLATE NOCASE,
+           path COLLATE NOCASE
+         )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS song_artists (
             song_id INTEGER NOT NULL,
@@ -347,4 +359,40 @@ pub(crate) fn ensure_base_schema(conn: &Connection) -> Result<(), String> {
     .ok();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_all_view_order_uses_covering_expression_index() {
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+        ensure_base_schema(&conn).expect("create schema");
+        let mut statement = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT path FROM songs
+                 ORDER BY COALESCE(NULLIF(TRIM(title), ''), path) COLLATE NOCASE ASC,
+                          path COLLATE NOCASE ASC
+                 LIMIT 128",
+            )
+            .expect("prepare query plan");
+        let plan = statement
+            .query_map([], |row| row.get::<_, String>(3))
+            .expect("load query plan")
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+
+        assert!(
+            plan.iter()
+                .any(|detail| detail.contains("idx_songs_all_view_title")),
+            "title index missing from query plan: {plan:?}"
+        );
+        assert!(
+            plan.iter()
+                .all(|detail| !detail.contains("USE TEMP B-TREE")),
+            "default title order still allocates a temp sort: {plan:?}"
+        );
+    }
 }
