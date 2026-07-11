@@ -385,28 +385,12 @@ export function useTaskbarPlayerBridge() {
     startCheckLoop();
   };
 
-  const hideTaskbarPlayerWindow = async () => {
-    const targetWindow = await getTaskbarPlayerWindow();
-    if (!targetWindow) {
-      isTaskbarPlayerVisible.value = false;
-      return;
-    }
-
-    stopCheckLoop();
-    if (unlistenScaleChange) {
-      unlistenScaleChange();
-      unlistenScaleChange = null;
-    }
-    // 卸载 Z-order 守护
-    void invoke('uninstall_taskbar_zorder_guard').catch(() => {});
-    await emitTo(TASKBAR_PLAYER_WINDOW_LABEL, TASKBAR_PLAYER_VISIBILITY_EVENT, { visible: false });
-    await targetWindow.hide();
-    isTaskbarPlayerVisible.value = false;
-  };
-
   const destroyTaskbarPlayerWindow = async () => {
     const targetWindow = await getTaskbarPlayerWindow();
     if (!targetWindow) {
+      isTaskbarPlayerReady = false;
+      taskbarPlayerReadyPromise = null;
+      resolveTaskbarPlayerReady = null;
       isTaskbarPlayerVisible.value = false;
       return;
     }
@@ -424,6 +408,9 @@ export function useTaskbarPlayerBridge() {
       console.warn('Failed to destroy taskbar player window:', error);
     } finally {
       taskbarPlayerWindowPromise = null;
+      isTaskbarPlayerReady = false;
+      taskbarPlayerReadyPromise = null;
+      resolveTaskbarPlayerReady = null;
       isTaskbarPlayerVisible.value = false;
     }
   };
@@ -541,7 +528,7 @@ export function useTaskbarPlayerBridge() {
         if (enabled) {
           await openTaskbarPlayerWindow();
         } else {
-          await hideTaskbarPlayerWindow();
+          await destroyTaskbarPlayerWindow();
         }
       },
       { immediate: true }

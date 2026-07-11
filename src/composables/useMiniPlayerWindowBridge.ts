@@ -10,6 +10,7 @@ import { usePlayer } from './player';
 import { useThemeSettings } from './useThemeSettings';
 import { useLibrarySongResolver } from './useLibrarySongResolver';
 import { useSettings } from '../features/settings/useSettings';
+import { AuxWindowLease } from '../utils/auxWindowLease';
 import {
   MINI_PLAYER_ACTION_EVENT,
   MINI_PLAYER_BOUNDS_EVENT,
@@ -36,6 +37,7 @@ let resolveMiniPlayerReady: (() => void) | null = null;
 let resolveMiniPlayerStateApplied: (() => void) | null = null;
 
 const MINI_PLAYER_PREWARM_DELAY_MS = 3_200;
+const MINI_PLAYER_IDLE_LEASE_MS = 2 * 60 * 1000;
 let miniPlayerPrewarmTimer: ReturnType<typeof window.setTimeout> | null = null;
 
 function clearMiniPlayerPrewarmTimer() {
@@ -278,6 +280,7 @@ export function useMiniPlayerWindowBridge() {
   let isMainWindowClosing = false;
   let keepMiniPlayerVisibleOnMiniModeExit = false;
   const isMiniPlayerWindowVisible = ref(false);
+  const miniPlayerLease = new AuxWindowLease(MINI_PLAYER_IDLE_LEASE_MS);
   const unlisteners: Array<() => void> = [];
 
   const createStatePayload = async (): Promise<MiniPlayerStatePayload> => {
@@ -317,6 +320,7 @@ export function useMiniPlayerWindowBridge() {
 
   const openMiniPlayerWindow = async () => {
     clearMiniPlayerPrewarmTimer();
+    miniPlayerLease.cancel();
 
     const targetWindow = await ensureMiniPlayerWindow();
     await waitForMiniPlayerReady();
@@ -340,6 +344,7 @@ export function useMiniPlayerWindowBridge() {
       await emitMiniPlayerVisibility(false);
       await targetWindow.hide();
       isMiniPlayerWindowVisible.value = false;
+      scheduleMiniPlayerDestruction();
     } catch (error) {
       console.warn('Failed to prewarm mini player window:', error);
     }
@@ -355,11 +360,16 @@ export function useMiniPlayerWindowBridge() {
     await emitMiniPlayerVisibility(false);
     await targetWindow.hide();
     isMiniPlayerWindowVisible.value = false;
+    scheduleMiniPlayerDestruction();
   };
 
   const destroyMiniPlayerWindow = async () => {
+    miniPlayerLease.cancel();
     const targetWindow = await getMiniPlayerWindow();
     if (!targetWindow) {
+      isMiniPlayerReady = false;
+      miniPlayerReadyPromise = null;
+      resolveMiniPlayerReady = null;
       isMiniPlayerWindowVisible.value = false;
       return;
     }
@@ -370,8 +380,18 @@ export function useMiniPlayerWindowBridge() {
       console.warn('Failed to destroy mini player window:', error);
     } finally {
       miniPlayerWindowPromise = null;
+      isMiniPlayerReady = false;
+      miniPlayerReadyPromise = null;
+      resolveMiniPlayerReady = null;
       isMiniPlayerWindowVisible.value = false;
     }
+  };
+
+  const scheduleMiniPlayerDestruction = () => {
+    miniPlayerLease.schedule(() => {
+      if (isMiniMode.value || isMiniPlayerWindowVisible.value) return;
+      void destroyMiniPlayerWindow();
+    });
   };
 
   const revealMainWindowFromTray = async () => {
@@ -473,6 +493,7 @@ export function useMiniPlayerWindowBridge() {
 
   onUnmounted(() => {
     clearMiniPlayerPrewarmTimer();
+    miniPlayerLease.cancel();
     unlisteners.splice(0).forEach((unlisten) => unlisten());
   });
 
