@@ -61,6 +61,46 @@ describe('convertLyricsToAmlLines', () => {
     expect(amlLines[1]?.startTime).toBe(19830);
   });
 
+  it('keeps overlapping vocal words inside their AMLL line boundary', () => {
+    const lines: LyricLine[] = [
+      {
+        time: 66.768,
+        endTime: 70.465,
+        text: '你有话说不出来',
+        translation: '',
+        romaji: '',
+        words: [
+          { text: '你', start: 66.768, end: 67.582 },
+          { text: '有话', start: 67.582, end: 68.243 },
+          { text: '说', start: 68.243, end: 68.734 },
+          { text: '不', start: 68.734, end: 69.110 },
+          { text: '出', start: 69.110, end: 69.790 },
+          { text: '来', start: 69.790, end: 70.465 },
+        ],
+      },
+      {
+        time: 67.586,
+        endTime: 70.538,
+        text: '分手说不出来',
+        translation: '',
+        romaji: '',
+        words: [
+          { text: '分手', start: 67.586, end: 68.275 },
+          { text: '说不', start: 68.275, end: 69.105 },
+          { text: '出', start: 69.105, end: 69.841 },
+          { text: '来', start: 69.841, end: 70.538 },
+        ],
+      },
+    ];
+
+    const amlLines = convertLyricsToAmlLines(lines, true, true);
+
+    expect(amlLines[0]?.endTime).toBe(70465);
+    expect(amlLines[0]?.words.every((word) => word.endTime <= amlLines[0]!.endTime)).toBe(true);
+    expect(amlLines[1]?.endTime).toBe(70586);
+    expect(amlLines[1]?.words.every((word) => word.endTime <= amlLines[1]!.endTime)).toBe(true);
+  });
+
   it('carries independent timed romaji words for player-side karaoke rendering', () => {
     const lines = [
       {

@@ -247,7 +247,11 @@ export function convertLyricsToAmlLines(
     } satisfies RenderLine;
 
     const startTime = renderLine.startMs;
-    const parsedEndTime = renderLine.endMs;
+    const latestWordEndTime = line.words?.reduce(
+      (latestEndTime, word) => Math.max(latestEndTime, toMs(word.end)),
+      startTime,
+    ) ?? startTime;
+    const parsedEndTime = Math.max(renderLine.endMs, latestWordEndTime);
     const nextLine = lines[lineIndex + 1];
     const nextStartTime = toMs(nextLine?.time ?? line.time + 3);
     const adaptiveLeadIn = nextLine
@@ -256,7 +260,14 @@ export function convertLyricsToAmlLines(
     const lineBoundaryEndTime = nextLine
       ? nextStartTime - adaptiveLeadIn
       : Math.max(parsedEndTime, nextStartTime);
-    const endTime = Math.max(startTime + MIN_AML_LINE_DURATION_MS, lineBoundaryEndTime);
+    // Overlapping vocal parts can start before the current singer has finished.
+    // Keep every timed word inside its AMLL line instead of truncating the line
+    // at the next vocal part and producing an invalid word timeline.
+    const endTime = Math.max(
+      startTime + MIN_AML_LINE_DURATION_MS,
+      lineBoundaryEndTime,
+      latestWordEndTime,
+    );
 
     const sourceWords = line.words ?? [];
     const convertedWords = sourceWords.map((word, wordIndex) => {
