@@ -2,6 +2,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { getCurrentWindow, type Window } from '@tauri-apps/api/window';
 import { storeToRefs } from 'pinia';
 
+import { setLibrarySongPathCacheLowPower } from '../caches/librarySongPathCache';
 import { useUiStore } from '../shared/stores/ui';
 
 export interface MainWindowRenderingSnapshot {
@@ -34,6 +35,7 @@ export function setMainWindowRenderingSnapshot(patch: Partial<MainWindowRenderin
     ...mainWindowRenderingSnapshot.value,
     ...patch,
   };
+  setLibrarySongPathCacheLowPower(resolveMainWindowLowPower(mainWindowRenderingSnapshot.value));
 }
 
 const isMainWindowLowPower = computed(() => resolveMainWindowLowPower(mainWindowRenderingSnapshot.value));
