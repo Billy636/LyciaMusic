@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 
 import { useAppShell } from '../../composables/useAppShell';
@@ -10,9 +10,8 @@ import TitleBar from './TitleBar.vue';
 import PlayerFooter from './PlayerFooter.vue';
 import GlobalBackground from './GlobalBackground.vue';
 
-const loadPlayerDetail = () => import('../player/PlayerDetail.vue');
 const PlayQueueSidebar = defineAsyncComponent(() => import('../player/PlayQueueSidebar.vue'));
-const PlayerDetail = defineAsyncComponent(loadPlayerDetail);
+const PlayerDetail = defineAsyncComponent(() => import('../player/PlayerDetail.vue'));
 const AddToPlaylistModal = defineAsyncComponent(() => import('../overlays/AddToPlaylistModal.vue'));
 const Toast = defineAsyncComponent(() => import('../common/Toast.vue'));
 const SongInfoModal = defineAsyncComponent(() => import('../overlays/SongInfoModal.vue'));
@@ -38,23 +37,18 @@ const {
 import { useSongInfoDialog } from '../../composables/useSongInfoDialog';
 const { isSongInfoVisible, currentSongInfo, closeSongInfo } = useSongInfoDialog();
 const {
-  showPlayerDetail,
   showPlaylist,
   skipNextPageTransition,
   startupCompositionMaskVisible,
 } = storeToRefs(useUiStore());
 
-const PLAYER_DETAIL_LEAVE_MS = 650;
 const PLAY_QUEUE_LEAVE_MS = 300;
-const isPlayerDetailMounted = ref(showPlayerDetail.value);
 const isPlayQueueMounted = ref(showPlaylist.value);
-let playerDetailLeaveTimer: ReturnType<typeof window.setTimeout> | null = null;
 let playQueueLeaveTimer: ReturnType<typeof window.setTimeout> | null = null;
-let cancelPlayerDetailPrefetch: (() => void) | null = null;
 
 const updateDeferredMount = (
   visible: boolean,
-  mounted: typeof isPlayerDetailMounted,
+  mounted: typeof isPlayQueueMounted,
   delayMs: number,
   getTimer: () => ReturnType<typeof window.setTimeout> | null,
   setTimer: (timer: ReturnType<typeof window.setTimeout> | null) => void,
@@ -77,16 +71,6 @@ const updateDeferredMount = (
   }, delayMs));
 };
 
-watch(showPlayerDetail, (visible) => {
-  updateDeferredMount(
-    visible,
-    isPlayerDetailMounted,
-    PLAYER_DETAIL_LEAVE_MS,
-    () => playerDetailLeaveTimer,
-    (timer) => { playerDetailLeaveTimer = timer; },
-  );
-});
-
 watch(showPlaylist, (visible) => {
   updateDeferredMount(
     visible,
@@ -97,24 +81,7 @@ watch(showPlaylist, (visible) => {
   );
 });
 
-onMounted(() => {
-  const idleWindow = window as Window & {
-    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
-    cancelIdleCallback?: (handle: number) => void;
-  };
-  if (typeof idleWindow.requestIdleCallback === 'function') {
-    const idleId = idleWindow.requestIdleCallback(() => { void loadPlayerDetail(); }, { timeout: 4_000 });
-    cancelPlayerDetailPrefetch = () => idleWindow.cancelIdleCallback?.(idleId);
-    return;
-  }
-
-  const timer = globalThis.setTimeout(() => { void loadPlayerDetail(); }, 4_000);
-  cancelPlayerDetailPrefetch = () => globalThis.clearTimeout(timer);
-});
-
 onBeforeUnmount(() => {
-  cancelPlayerDetailPrefetch?.();
-  if (playerDetailLeaveTimer !== null) window.clearTimeout(playerDetailLeaveTimer);
   if (playQueueLeaveTimer !== null) window.clearTimeout(playQueueLeaveTimer);
 });
 
@@ -244,7 +211,7 @@ useDesktopLyricsWindowBridge();
       :class="footerContainerClass"
       :style="{ backdropFilter: footerBlurStyle }"
     >
-      <PlayerDetail v-if="isPlayerDetailMounted" />
+      <PlayerDetail />
 
       <transition name="footer-slide">
         <PlayerFooter />
