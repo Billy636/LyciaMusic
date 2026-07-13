@@ -363,16 +363,16 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- 右上角 x 退出按钮外层隐形大热区（更偏右上角，且仅高亮 x 图标本身，并跟随主面板悬停阴影同步显隐） -->
+    <!-- 右上角 x 退出按钮定位容器（跟随主面板悬停阴影同步显隐） -->
     <div 
-      class="group/exit absolute top-0 right-0 w-7 h-7 flex items-start justify-end pt-1 pr-1.5 cursor-pointer z-30 transition-opacity duration-300"
+      class="absolute top-0 right-0 w-7 h-7 flex items-start justify-end pt-1 pr-1.5 pointer-events-none z-30 transition-opacity duration-300"
       :class="[isDragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100']"
-      @click.stop="sendAction('close')"
-      title="退出播控"
     >
       <svg 
         xmlns="http://www.w3.org/2000/svg" 
-        class="h-2 w-2 text-white/30 group-hover/exit:text-white/90 transition-colors duration-200 active:scale-95" 
+        class="h-2.5 w-2.5 text-white/30 hover:text-white/90 cursor-pointer pointer-events-auto transition-colors duration-200 active:scale-95"
+        @click.stop="sendAction('close')"
+        title="退出播控"
         viewBox="0 0 24 24" 
         fill="none" 
         stroke="currentColor" 
