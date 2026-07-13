@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { open } from '@tauri-apps/plugin-dialog';
 import { Trash2 } from 'lucide-vue-next';
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import type { LyricLine as AmlLyricLine, LyricLineMouseEvent } from '@applemusic-like-lyrics/core';
 import {
@@ -38,10 +38,9 @@ import {
 import { usePlayer } from '../../composables/player';
 import { useRenderingPower } from '../../composables/renderingPower';
 import { useSettingsStore } from '../../features/settings/store';
+import AmlLyricPlayer from './AmlLyricPlayer.vue';
 import { getPlaybackSeekSecondsForAmlLine } from './amllSeekLayout';
-
-const AmlLyricPlayer = defineAsyncComponent(() => import('./AmlLyricPlayer.vue'));
-const LightLyricPlayer = defineAsyncComponent(() => import('./LightLyricPlayer.vue'));
+import LightLyricPlayer from './LightLyricPlayer.vue';
 
 const {
   parsedLyrics,

@@ -67,8 +67,9 @@ describe('LyricsView custom font import', () => {
 
   it('switches the player lyrics renderer based on the persisted render mode', () => {
     expect(source).toContain('LightLyricPlayer');
-    expect(source).toContain("defineAsyncComponent(() => import('./AmlLyricPlayer.vue'))");
-    expect(source).toContain("defineAsyncComponent(() => import('./LightLyricPlayer.vue'))");
+    expect(source).toContain("import AmlLyricPlayer from './AmlLyricPlayer.vue'");
+    expect(source).toContain("import LightLyricPlayer from './LightLyricPlayer.vue'");
+    expect(source).not.toContain('defineAsyncComponent');
     expect(source).toContain('lyricsSettings.playerRenderMode === \'amll\'');
     expect(source).toContain('lyricsSettings.playerRenderMode === \'light\'');
   });

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useLyrics } from '../../composables/lyrics';
 import { useSongDetailCache } from '../../composables/useSongDetailCache';
@@ -9,13 +9,12 @@ import { useSharedTransition } from '../../composables/useSharedTransition';
 import { useToast } from '../../composables/toast';
 import { windowApi } from '../../services/tauri/windowApi';
 import type { SongDetail } from '../../types';
+import LyricsView from './LyricsView.vue';
 import PlayerDetailBackground from './PlayerDetailBackground.vue';
 import PlayerDetailLeft from './PlayerDetailLeft.vue';
 import QueueList from './QueueList.vue';
 import { resolvePlayerDetailEscapeAction } from './playerDetailKeyboard';
 import { hideMainWindowToTray } from '../../composables/renderingPower';
-
-const LyricsView = defineAsyncComponent(() => import('./LyricsView.vue'));
 
 const {
   showPlayerDetail,

@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import source from './PlayerDetail.vue?raw';
 
 describe('PlayerDetail hidden runtime boundaries', () => {
-  it('unmounts the lyrics view while the detail page is closed', () => {
-    expect(source).toContain("defineAsyncComponent(() => import('./LyricsView.vue'))");
+  it('keeps the lyrics view reliable while unmounting it with the closed detail page', () => {
+    expect(source).toContain("import LyricsView from './LyricsView.vue'");
+    expect(source).not.toContain("defineAsyncComponent(() => import('./LyricsView.vue'))");
     expect(source).toContain('v-else-if="showPlayerDetail && parsedLyrics.length > 0"');
   });
 
