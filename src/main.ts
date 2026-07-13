@@ -3,6 +3,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import './style.css'
 import { applyPersistedStartupTheme, shouldApplyStartupThemePaint } from './composables/startupTheme'
 import { loadWindowRoot, resolveWindowKind, windowUsesPinia, windowUsesRouter } from './windowBootstrap'
+import { installTouchClickSupport } from './utils/touchClickSupport'
+
+installTouchClickSupport()
 
 const currentWindowLabel = (() => {
   try {

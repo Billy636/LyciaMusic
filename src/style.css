@@ -23,6 +23,16 @@ body {
   background: transparent;
 }
 
+/* Prefer low-latency taps on interactive controls while keeping page scrolling native. */
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+  touch-action: manipulation;
+}
+
 /* 🟢 全局自定义滚动条样式 */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
