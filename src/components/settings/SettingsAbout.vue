@@ -107,10 +107,10 @@ async function handleCheckUpdate() {
     let latestRelease;
 
     try {
-      latestRelease = await fetchOfficialLatestRelease();
-    } catch (officialError) {
-      console.warn('Failed to fetch official latest release:', officialError);
       latestRelease = await fetchLatestRelease(REPO_OWNER, REPO_NAME);
+    } catch (githubError) {
+      console.warn('Failed to fetch GitHub latest release:', githubError);
+      latestRelease = await fetchOfficialLatestRelease();
     }
 
     const comparison = compareVersions(latestRelease.version, appVersion.value);
@@ -161,7 +161,7 @@ async function handleCheckUpdate() {
     console.error('Failed to check updates:', error);
     showDialog({
       title: '检查更新失败',
-      content: '无法连接到官网更新接口或 GitHub Releases。请确认网络可用，或稍后再试。',
+      content: '无法连接到 GitHub Releases 或官网更新接口。请确认网络可用，或稍后再试。',
       confirmText: '知道了',
       cancelText: '关闭'
     });
