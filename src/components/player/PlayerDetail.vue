@@ -31,9 +31,12 @@ const { loadSongDetail, clearSongDetailCache } = useSongDetailCache();
 const { showToast } = useToast();
 
 const TOP_CHROME_HIDE_DELAY = 2500;
+const IMMERSIVE_CURSOR_HIDE_DELAY = 2500;
 
 const isTopChromeVisible = ref(false);
 let topChromeHideTimer: ReturnType<typeof setTimeout> | null = null;
+const isImmersiveCursorHidden = ref(false);
+let immersiveCursorHideTimer: ReturnType<typeof setTimeout> | null = null;
 const currentSongDetail = ref<SongDetail | null>(null);
 let detailRequestId = 0;
 
@@ -143,6 +146,42 @@ const showTopChrome = () => {
 const handleTopChromeLeave = () => {
   scheduleTopChromeHide();
 };
+
+const clearImmersiveCursorHideTimer = () => {
+  if (immersiveCursorHideTimer) {
+    clearTimeout(immersiveCursorHideTimer);
+    immersiveCursorHideTimer = null;
+  }
+};
+
+const scheduleImmersiveCursorHide = () => {
+  clearImmersiveCursorHideTimer();
+  if (!showPlayerDetail.value || !isFullscreen.value) {
+    isImmersiveCursorHidden.value = false;
+    return;
+  }
+
+  immersiveCursorHideTimer = setTimeout(() => {
+    isImmersiveCursorHidden.value = true;
+    immersiveCursorHideTimer = null;
+  }, IMMERSIVE_CURSOR_HIDE_DELAY);
+};
+
+const handleGlobalMousemove = () => {
+  if (!showPlayerDetail.value || !isFullscreen.value) return;
+
+  isImmersiveCursorHidden.value = false;
+  scheduleImmersiveCursorHide();
+};
+
+watch([showPlayerDetail, isFullscreen], ([visible, fullscreen]) => {
+  clearImmersiveCursorHideTimer();
+  isImmersiveCursorHidden.value = false;
+
+  if (visible && fullscreen) {
+    scheduleImmersiveCursorHide();
+  }
+});
 
 watch(showPlayerDetail, async (visible) => {
   clearTopChromeHideTimer();
@@ -275,16 +314,20 @@ onMounted(async () => {
   unlistenResize = unlisten;
 
   window.addEventListener('keydown', handleGlobalKeydown, true);
+  window.addEventListener('mousemove', handleGlobalMousemove, true);
   window.addEventListener('mouseup', handleGlobalMouseup, true);
   window.addEventListener('mousedown', handleGlobalMousedown, true);
 });
 
 onBeforeUnmount(() => {
   clearTopChromeHideTimer();
+  clearImmersiveCursorHideTimer();
+  isImmersiveCursorHidden.value = false;
   if (unlistenResize) {
     unlistenResize();
   }
   window.removeEventListener('keydown', handleGlobalKeydown, true);
+  window.removeEventListener('mousemove', handleGlobalMousemove, true);
   window.removeEventListener('mouseup', handleGlobalMouseup, true);
   window.removeEventListener('mousedown', handleGlobalMousedown, true);
 });
@@ -348,7 +391,10 @@ const metaInfo = computed(() => {
 <template>
   <div
     class="fixed inset-x-0 bottom-0 z-[50] flex h-[100vh] flex-col overflow-visible font-sans select-none text-white"
-    :class="showPlayerDetail ? 'pointer-events-auto' : 'pointer-events-none'"
+    :class="[
+      showPlayerDetail ? 'pointer-events-auto' : 'pointer-events-none',
+      isImmersiveCursorHidden ? 'immersive-cursor-hidden' : '',
+    ]"
   >
     <div class="relative flex h-[100vh] w-full flex-col pt-[calc(100vh-100%)]">
       <div
@@ -495,5 +541,10 @@ const metaInfo = computed(() => {
 
 .text-shadow-sm {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.immersive-cursor-hidden,
+.immersive-cursor-hidden :deep(*) {
+  cursor: none !important;
 }
 </style>

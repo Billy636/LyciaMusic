@@ -14,4 +14,12 @@ describe('PlayerDetail hidden runtime boundaries', () => {
     expect(source).not.toContain('appWindow.setFullscreen(');
     expect(source).toContain('await exitImmersiveFullscreen();');
   });
+
+  it('hides the cursor after inactivity only while immersive mode is active', () => {
+    expect(source).toContain('const IMMERSIVE_CURSOR_HIDE_DELAY = 2500;');
+    expect(source).toContain('watch([showPlayerDetail, isFullscreen]');
+    expect(source).toContain("window.addEventListener('mousemove', handleGlobalMousemove, true);");
+    expect(source).toContain("isImmersiveCursorHidden ? 'immersive-cursor-hidden' : ''");
+    expect(source).toContain('cursor: none !important;');
+  });
 });
