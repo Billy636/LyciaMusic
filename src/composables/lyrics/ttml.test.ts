@@ -149,7 +149,7 @@ describe('native TTML parsing', () => {
     const [line] = sanitizeNativeTtmlLines([source]);
 
     expect(line?.startTime).toBe(0);
-    expect(line?.endTime).toBe(0);
+    expect(line?.endTime).toBe(2500);
     expect(line?.words[0]?.startTime).toBe(2500);
     expect(line?.words[0]?.endTime).toBe(2500);
     expect(line?.words[0]?.romanWord).toBe('ge ci');
@@ -159,6 +159,26 @@ describe('native TTML parsing', () => {
     expect((line as typeof line & { customLineField: string }).customLineField).toBe('keep-line');
     expect((line?.words[0] as typeof line.words[0] & { customWordField: string }).customWordField)
       .toBe('keep-word');
+  });
+
+  it('keeps overlapping vocal words inside their native AMLL line boundary', () => {
+    const source = [{
+      startTime: 66768,
+      endTime: 67586,
+      translatedLyric: '',
+      romanLyric: '',
+      isBG: false,
+      isDuet: false,
+      words: [
+        { word: '你有话', startTime: 66768, endTime: 68243, romanWord: '' },
+        { word: '说不出来', startTime: 68243, endTime: 70465, romanWord: '' },
+      ],
+    }] as ParsedTtmlLine[];
+
+    const [line] = sanitizeNativeTtmlLines(source);
+
+    expect(line?.endTime).toBe(70465);
+    expect(line?.words.every(word => word.endTime <= line.endTime)).toBe(true);
   });
 });
 

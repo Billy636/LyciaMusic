@@ -55,8 +55,6 @@ export function isTtmlLyrics(raw: string): boolean {
 export function sanitizeNativeTtmlLines(lines: ParsedTtmlLine[]): NativeAmlLyricLine[] {
   return lines.map((line) => {
     const startTime = sanitizeTime(line.startTime, 0);
-    const rawEndTime = sanitizeTime(line.endTime, startTime);
-    const endTime = Math.max(startTime, rawEndTime);
     const words = (line.words ?? []).map((word) => {
       const wordStartTime = sanitizeTime(word.startTime, startTime);
       const rawWordEndTime = sanitizeTime(word.endTime, wordStartTime);
@@ -70,6 +68,15 @@ export function sanitizeNativeTtmlLines(lines: ParsedTtmlLine[]): NativeAmlLyric
         obscene: word.obscene ?? false,
       };
     });
+    const latestWordEndTime = words.reduce(
+      (latestEndTime, word) => Math.max(latestEndTime, word.endTime),
+      startTime,
+    );
+    const rawEndTime = sanitizeTime(line.endTime, startTime);
+    // AMLL requires every timed word to stay inside its parent line. Overlapping
+    // TTML vocal parts can make the parser-provided line end precede its final
+    // word; passing that invalid timeline through can collapse the whole layout.
+    const endTime = Math.max(startTime, rawEndTime, latestWordEndTime);
 
     return {
       ...line,
