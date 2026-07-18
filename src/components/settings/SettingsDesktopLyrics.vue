@@ -10,10 +10,13 @@ import {
   DEFAULT_DESKTOP_CUSTOM_TRANSLATION_COLOR,
   DEFAULT_DESKTOP_CUSTOM_UNPLAYED_COLOR,
   DEFAULT_DESKTOP_TEXT_SHADOW_COLOR,
+  DEFAULT_DESKTOP_TEXT_STROKE_COLOR,
   buildImportedLyricsFontOptions,
   LYRICS_FONT_OPTIONS,
   MAX_DESKTOP_TEXT_SHADOW_STRENGTH,
   MIN_DESKTOP_TEXT_SHADOW_STRENGTH,
+  MAX_DESKTOP_TEXT_STROKE_DEPTH,
+  MIN_DESKTOP_TEXT_STROKE_DEPTH,
   getLyricsFontFamily,
   loadSystemLyricsFonts,
   normalizeHexColor,
@@ -59,6 +62,8 @@ const SHADOW_COLOR_PRESETS = [
   { label: '红', value: DEFAULT_DESKTOP_CUSTOM_PLAYED_COLOR },
 ];
 
+const STROKE_COLOR_PRESETS = SHADOW_COLOR_PRESETS;
+
 const { settings } = useSettings();
 const { lyricsSettings, desktopLyricsSettings } = useLyrics();
 
@@ -73,6 +78,8 @@ const localSettings = ref({
   firstLineTextShadowStrength: desktopLyricsSettings.firstLineTextShadowStrength,
   secondLineTextShadowStrength: desktopLyricsSettings.secondLineTextShadowStrength,
   textShadowColor: desktopLyricsSettings.textShadowColor,
+  textStrokeDepth: desktopLyricsSettings.textStrokeDepth,
+  textStrokeColor: desktopLyricsSettings.textStrokeColor,
   playerAlignment: desktopLyricsSettings.playerAlignment,
   playerFontPreset: desktopLyricsSettings.playerFontPreset,
   colorScheme: desktopLyricsSettings.colorScheme,
@@ -96,6 +103,8 @@ const isModified = computed(() => {
     isNumChanged(localSettings.value.firstLineTextShadowStrength, desktopLyricsSettings.firstLineTextShadowStrength) ||
     isNumChanged(localSettings.value.secondLineTextShadowStrength, desktopLyricsSettings.secondLineTextShadowStrength) ||
     localSettings.value.textShadowColor !== desktopLyricsSettings.textShadowColor ||
+    isNumChanged(localSettings.value.textStrokeDepth, desktopLyricsSettings.textStrokeDepth) ||
+    localSettings.value.textStrokeColor !== desktopLyricsSettings.textStrokeColor ||
     localSettings.value.playerAlignment !== desktopLyricsSettings.playerAlignment ||
     localSettings.value.playerFontPreset !== desktopLyricsSettings.playerFontPreset ||
     localSettings.value.colorScheme !== desktopLyricsSettings.colorScheme ||
@@ -118,6 +127,8 @@ watch(
     desktopLyricsSettings.firstLineTextShadowStrength,
     desktopLyricsSettings.secondLineTextShadowStrength,
     desktopLyricsSettings.textShadowColor,
+    desktopLyricsSettings.textStrokeDepth,
+    desktopLyricsSettings.textStrokeColor,
     desktopLyricsSettings.playerAlignment,
     desktopLyricsSettings.playerFontPreset,
     desktopLyricsSettings.colorScheme,
@@ -139,15 +150,17 @@ watch(
         firstLineTextShadowStrength: newVal[5] as number,
         secondLineTextShadowStrength: newVal[6] as number,
         textShadowColor: newVal[7] as string,
-        playerAlignment: newVal[8] as any,
-        playerFontPreset: newVal[9] as any,
-        colorScheme: newVal[10] as any,
-        customPlayedColor: newVal[11] as string,
-        customUnplayedColor: newVal[12] as string,
-        customRomajiPlayedColor: newVal[13] as string,
-        customRomajiUnplayedColor: newVal[14] as string,
-        customRomajiColor: newVal[15] as string,
-        customTranslationColor: newVal[16] as string,
+        textStrokeDepth: newVal[8] as number,
+        textStrokeColor: newVal[9] as string,
+        playerAlignment: newVal[10] as any,
+        playerFontPreset: newVal[11] as any,
+        colorScheme: newVal[12] as any,
+        customPlayedColor: newVal[13] as string,
+        customUnplayedColor: newVal[14] as string,
+        customRomajiPlayedColor: newVal[15] as string,
+        customRomajiUnplayedColor: newVal[16] as string,
+        customRomajiColor: newVal[17] as string,
+        customTranslationColor: newVal[18] as string,
       };
     }
   },
@@ -168,6 +181,8 @@ function cancelChanges() {
     firstLineTextShadowStrength: desktopLyricsSettings.firstLineTextShadowStrength,
     secondLineTextShadowStrength: desktopLyricsSettings.secondLineTextShadowStrength,
     textShadowColor: desktopLyricsSettings.textShadowColor,
+    textStrokeDepth: desktopLyricsSettings.textStrokeDepth,
+    textStrokeColor: desktopLyricsSettings.textStrokeColor,
     playerAlignment: desktopLyricsSettings.playerAlignment,
     playerFontPreset: desktopLyricsSettings.playerFontPreset,
     colorScheme: desktopLyricsSettings.colorScheme,
@@ -191,6 +206,8 @@ function resetToDefault() {
     firstLineTextShadowStrength: defaults.firstLineTextShadowStrength,
     secondLineTextShadowStrength: defaults.secondLineTextShadowStrength,
     textShadowColor: defaults.textShadowColor,
+    textStrokeDepth: defaults.textStrokeDepth,
+    textStrokeColor: defaults.textStrokeColor,
     playerAlignment: defaults.playerAlignment,
     playerFontPreset: defaults.playerFontPreset,
     colorScheme: defaults.colorScheme,
@@ -281,6 +298,8 @@ const previewWidgetStyle = computed(() => {
     '--desktop-first-line-text-shadow-blur': `${Math.round(localSettings.value.firstLineTextShadowStrength * 0.24)}px`,
     '--desktop-second-line-text-shadow-alpha': (localSettings.value.secondLineTextShadowStrength / 100).toString(),
     '--desktop-second-line-text-shadow-blur': `${Math.round(localSettings.value.secondLineTextShadowStrength * 0.24)}px`,
+    '--desktop-text-stroke-color': localSettings.value.textStrokeColor,
+    '--desktop-text-stroke-width': `${(localSettings.value.textStrokeDepth * 0.03).toFixed(2)}px`,
     textAlign: localSettings.value.playerAlignment === 'right'
       ? 'right'
       : localSettings.value.playerAlignment === 'left'
@@ -363,9 +382,12 @@ const selectedFontFamily = computed(() => {
     ?? getLyricsFontFamily(localSettings.value.playerFontPreset);
 });
 
-
 const isCustomShadowColor = computed(() => {
   return !SHADOW_COLOR_PRESETS.some((preset) => preset.value === localSettings.value.textShadowColor);
+});
+
+const isCustomStrokeColor = computed(() => {
+  return !STROKE_COLOR_PRESETS.some((preset) => preset.value === localSettings.value.textStrokeColor);
 });
 const customPreviewPlayedStyle = computed(() => ({
   color: localSettings.value.customPlayedColor,
@@ -437,6 +459,10 @@ const customPickerRgb = computed(() => hexToRgb(customPickerColor.value));
 
 function clampTextShadowStrength(value: number) {
   return Math.min(MAX_DESKTOP_TEXT_SHADOW_STRENGTH, Math.max(MIN_DESKTOP_TEXT_SHADOW_STRENGTH, value));
+}
+
+function clampTextStrokeDepth(value: number) {
+  return Math.min(MAX_DESKTOP_TEXT_STROKE_DEPTH, Math.max(MIN_DESKTOP_TEXT_STROKE_DEPTH, value));
 }
 
 function clampLyricsSyncOffset(value: number) {
@@ -538,6 +564,14 @@ function setDesktopTextShadowStrength(value: number) {
 
 function setDesktopTextShadowColor(value: string) {
   localSettings.value.textShadowColor = normalizeHexColor(value, DEFAULT_DESKTOP_TEXT_SHADOW_COLOR);
+}
+
+function setDesktopTextStrokeDepth(value: number) {
+  localSettings.value.textStrokeDepth = Number(clampTextStrokeDepth(value).toFixed(0));
+}
+
+function setDesktopTextStrokeColor(value: string) {
+  localSettings.value.textStrokeColor = normalizeHexColor(value, DEFAULT_DESKTOP_TEXT_STROKE_COLOR);
 }
 
 function setDesktopAlignment(value: DesktopLyricsPlayerAlignment) {
@@ -1223,7 +1257,56 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 行五：显示翻译 & 显示罗马音 -->
+        <!-- 行五：描边深度 & 描边颜色 -->
+        <div class="desktop-compact-row">
+          <div class="desktop-compact-slider-cell">
+            <div class="desktop-compact-label shrink-0 text-left">描边深度</div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              :value="localSettings.textStrokeDepth"
+              @input="setDesktopTextStrokeDepth(Number(($event.target as HTMLInputElement).value))"
+              aria-label="描边深度"
+              class="desktop-compact-range-slider"
+            />
+            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-300">
+              {{ localSettings.textStrokeDepth }}
+            </span>
+          </div>
+
+          <div class="desktop-compact-cell flex items-center justify-between">
+            <div class="desktop-compact-label">描边颜色</div>
+            <div class="desktop-compact-selector-shadow flex items-center gap-1.5">
+              <button
+                v-for="preset in STROKE_COLOR_PRESETS"
+                :key="preset.value"
+                type="button"
+                class="desktop-compact-color-preset"
+                :class="{ 'desktop-compact-color-preset--active': localSettings.textStrokeColor === preset.value }"
+                :style="{ backgroundColor: preset.value }"
+                :title="'切换描边颜色: ' + preset.label"
+                @click="setDesktopTextStrokeColor(preset.value)"
+              />
+              <label
+                class="desktop-compact-color-custom flex items-center justify-center cursor-pointer"
+                :class="{ 'desktop-compact-color-custom--active': isCustomStrokeColor }"
+                title="自定义描边颜色"
+              >
+                <input
+                  type="color"
+                  :value="localSettings.textStrokeColor"
+                  aria-label="自定义描边颜色"
+                  @input="setDesktopTextStrokeColor(($event.target as HTMLInputElement).value)"
+                >
+                <span class="desktop-compact-color-custom-swatch" :style="{ backgroundColor: localSettings.textStrokeColor }" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 行六：显示翻译 & 显示罗马音 -->
         <div class="desktop-compact-row">
           <div class="desktop-compact-cell flex items-center justify-between">
             <div class="desktop-compact-label shrink-0">显示翻译</div>
@@ -2560,6 +2643,8 @@ onUnmounted(() => {
   text-align: var(--lyrics-text-align, center);
   font-family: var(--lyrics-font-family, system-ui, sans-serif);
   opacity: var(--desktop-text-opacity, 1);
+  -webkit-text-stroke: var(--desktop-text-stroke-width, 0px) var(--desktop-text-stroke-color, #000000);
+  paint-order: stroke fill;
   transition: opacity 220ms ease;
 }
 

@@ -53,6 +53,8 @@ function createPayload(enableWordEffect: boolean): DesktopLyricsStatePayload {
       textShadowColor: '#000000',
       firstLineTextShadowStrength: 0,
       secondLineTextShadowStrength: 0,
+      textStrokeColor: '#000000',
+      textStrokeDepth: 0,
       playerFontScale: 1,
       playerLineGap: 1,
       playerOffsetX: 0,
@@ -146,6 +148,8 @@ describe('useDesktopLyricsDisplay', () => {
         textShadowColor: '#112233',
         firstLineTextShadowStrength: 25,
         secondLineTextShadowStrength: 75,
+        textStrokeColor: '#445566',
+        textStrokeDepth: 50,
       } as any,
     });
 
@@ -156,6 +160,8 @@ describe('useDesktopLyricsDisplay', () => {
       '--desktop-first-line-text-shadow-blur': '6px',
       '--desktop-second-line-text-shadow-alpha': '0.75',
       '--desktop-second-line-text-shadow-blur': '18px',
+      '--desktop-text-stroke-color': '#445566',
+      '--desktop-text-stroke-width': '1.50px',
     });
   });
 

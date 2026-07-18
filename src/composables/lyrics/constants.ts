@@ -41,6 +41,10 @@ export const DEFAULT_DESKTOP_TEXT_SHADOW_COLOR = '#000000';
 export const DEFAULT_DESKTOP_TEXT_SHADOW_STRENGTH = 0;
 export const MIN_DESKTOP_TEXT_SHADOW_STRENGTH = 0;
 export const MAX_DESKTOP_TEXT_SHADOW_STRENGTH = 100;
+export const DEFAULT_DESKTOP_TEXT_STROKE_COLOR = '#000000';
+export const DEFAULT_DESKTOP_TEXT_STROKE_DEPTH = 0;
+export const MIN_DESKTOP_TEXT_STROKE_DEPTH = 0;
+export const MAX_DESKTOP_TEXT_STROKE_DEPTH = 100;
 
 export interface LyricsFontOption {
   value: LyricsFontPreset;
@@ -131,6 +135,8 @@ export const defaultDesktopLyricsSettings: DesktopLyricsSettings = {
   textShadowColor: DEFAULT_DESKTOP_TEXT_SHADOW_COLOR,
   firstLineTextShadowStrength: DEFAULT_DESKTOP_TEXT_SHADOW_STRENGTH,
   secondLineTextShadowStrength: DEFAULT_DESKTOP_TEXT_SHADOW_STRENGTH,
+  textStrokeColor: DEFAULT_DESKTOP_TEXT_STROKE_COLOR,
+  textStrokeDepth: DEFAULT_DESKTOP_TEXT_STROKE_DEPTH,
   playerFontScale: DEFAULT_PLAYER_FONT_SCALE,
   playerLineGap: DEFAULT_PLAYER_LINE_GAP,
   playerOffsetX: DEFAULT_PLAYER_OFFSET_X,
@@ -177,6 +183,14 @@ export function clampDesktopTextShadowStrength(value: number) {
   return Math.min(
     MAX_DESKTOP_TEXT_SHADOW_STRENGTH,
     Math.max(MIN_DESKTOP_TEXT_SHADOW_STRENGTH, Math.round(value)),
+  );
+}
+
+export function clampDesktopTextStrokeDepth(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_DESKTOP_TEXT_STROKE_DEPTH;
+  return Math.min(
+    MAX_DESKTOP_TEXT_STROKE_DEPTH,
+    Math.max(MIN_DESKTOP_TEXT_STROKE_DEPTH, Math.round(value)),
   );
 }
 
@@ -370,6 +384,13 @@ export function normalizeDesktopLyricsSettingsPatch(
     ),
     secondLineTextShadowStrength: clampDesktopTextShadowStrength(
       patch.secondLineTextShadowStrength ?? legacyTextShadowStrength ?? DEFAULT_DESKTOP_TEXT_SHADOW_STRENGTH,
+    ),
+    textStrokeColor: normalizeHexColor(
+      patch.textStrokeColor,
+      defaultDesktopLyricsSettings.textStrokeColor,
+    ),
+    textStrokeDepth: clampDesktopTextStrokeDepth(
+      patch.textStrokeDepth ?? DEFAULT_DESKTOP_TEXT_STROKE_DEPTH,
     ),
     playerFontScale: clampPlayerFontScale(patch.playerFontScale ?? DEFAULT_PLAYER_FONT_SCALE),
     playerLineGap: clampPlayerLineGap(patch.playerLineGap ?? DEFAULT_PLAYER_LINE_GAP),

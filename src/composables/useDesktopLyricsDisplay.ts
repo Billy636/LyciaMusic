@@ -12,6 +12,8 @@ import {
   DEFAULT_DESKTOP_TEXT_OPACITY,
   DEFAULT_DESKTOP_TEXT_SHADOW_COLOR,
   DEFAULT_DESKTOP_TEXT_SHADOW_STRENGTH,
+  DEFAULT_DESKTOP_TEXT_STROKE_COLOR,
+  DEFAULT_DESKTOP_TEXT_STROKE_DEPTH,
   DEFAULT_PLAYER_FONT_PRESET,
   DEFAULT_PLAYER_FONT_SCALE,
   DEFAULT_PLAYER_LINE_GAP,
@@ -19,6 +21,7 @@ import {
   DEFAULT_PLAYER_OFFSET_Y,
   MAX_DESKTOP_TEXT_OPACITY,
   MAX_DESKTOP_TEXT_SHADOW_STRENGTH,
+  MAX_DESKTOP_TEXT_STROKE_DEPTH,
   LYRICS_FONT_OPTIONS,
   MAX_PLAYER_FONT_SCALE,
   MAX_PLAYER_LINE_GAP,
@@ -30,6 +33,7 @@ import {
   MIN_PLAYER_OFFSET_Y,
   MIN_DESKTOP_TEXT_OPACITY,
   MIN_DESKTOP_TEXT_SHADOW_STRENGTH,
+  MIN_DESKTOP_TEXT_STROKE_DEPTH,
   normalizeHexColor,
   normalizeDesktopPlayerAlignment,
   normalizeLyricsFontPreset,
@@ -125,6 +129,8 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     textShadowColor: DEFAULT_DESKTOP_TEXT_SHADOW_COLOR,
     firstLineTextShadowStrength: DEFAULT_DESKTOP_TEXT_SHADOW_STRENGTH,
     secondLineTextShadowStrength: DEFAULT_DESKTOP_TEXT_SHADOW_STRENGTH,
+    textStrokeColor: DEFAULT_DESKTOP_TEXT_STROKE_COLOR,
+    textStrokeDepth: DEFAULT_DESKTOP_TEXT_STROKE_DEPTH,
     playerFontScale: DEFAULT_PLAYER_FONT_SCALE,
     playerLineGap: DEFAULT_PLAYER_LINE_GAP,
     playerOffsetX: DEFAULT_PLAYER_OFFSET_X,
@@ -237,6 +243,22 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
       normalizedPatch.textShadowColor = normalizeHexColor(
         normalizedPatch.textShadowColor,
         DEFAULT_DESKTOP_TEXT_SHADOW_COLOR,
+      );
+    }
+
+    if (typeof normalizedPatch.textStrokeDepth === 'number') {
+      normalizedPatch.textStrokeDepth = Math.round(
+        Math.min(
+          MAX_DESKTOP_TEXT_STROKE_DEPTH,
+          Math.max(MIN_DESKTOP_TEXT_STROKE_DEPTH, normalizedPatch.textStrokeDepth),
+        ),
+      );
+    }
+
+    if (typeof normalizedPatch.textStrokeColor === 'string') {
+      normalizedPatch.textStrokeColor = normalizeHexColor(
+        normalizedPatch.textStrokeColor,
+        DEFAULT_DESKTOP_TEXT_STROKE_COLOR,
       );
     }
 
@@ -525,6 +547,8 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
       '--desktop-first-line-text-shadow-blur': `${Math.round(settings.value.firstLineTextShadowStrength * 0.24)}px`,
       '--desktop-second-line-text-shadow-alpha': formatCssNumber(settings.value.secondLineTextShadowStrength / 100),
       '--desktop-second-line-text-shadow-blur': `${Math.round(settings.value.secondLineTextShadowStrength * 0.24)}px`,
+      '--desktop-text-stroke-color': settings.value.textStrokeColor,
+      '--desktop-text-stroke-width': `${(settings.value.textStrokeDepth * 0.03).toFixed(2)}px`,
       outline: shouldShowSurface ? '1px solid rgba(255, 255, 255, 0.16)' : 'none',
     } as Record<string, string>;
   });

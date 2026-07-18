@@ -334,6 +334,8 @@ export interface DesktopLyricsSettings {
   textShadowColor: string;
   firstLineTextShadowStrength: number;
   secondLineTextShadowStrength: number;
+  textStrokeColor: string;
+  textStrokeDepth: number;
   playerFontScale: number;
   playerLineGap: number;
   playerOffsetX: number;

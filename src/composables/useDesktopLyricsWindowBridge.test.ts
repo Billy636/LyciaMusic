@@ -45,6 +45,8 @@ const mocks = vi.hoisted(() => {
       textShadowColor: '#000000',
       firstLineTextShadowStrength: 0,
       secondLineTextShadowStrength: 0,
+      textStrokeColor: '#000000',
+      textStrokeDepth: 0,
       playerFontScale: 1,
       playerLineGap: 1,
       playerOffsetX: 0,

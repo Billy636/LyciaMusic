@@ -1143,6 +1143,8 @@ describe('lyrics settings normalization', async () => {
     expect(normalized.textShadowColor).toBe('#000000');
     expect(normalized.firstLineTextShadowStrength).toBe(0);
     expect(normalized.secondLineTextShadowStrength).toBe(0);
+    expect(normalized.textStrokeColor).toBe('#000000');
+    expect(normalized.textStrokeDepth).toBe(0);
   });
 
   it('normalizes desktop readability settings from migrated values', () => {
@@ -1151,12 +1153,16 @@ describe('lyrics settings normalization', async () => {
       textShadowColor: 'not-a-color',
       firstLineTextShadowStrength: 180,
       secondLineTextShadowStrength: -20,
+      textStrokeColor: '#123abc',
+      textStrokeDepth: 180,
     } as any);
 
     expect(normalized.textOpacity).toBe(1);
     expect(normalized.textShadowColor).toBe('#000000');
     expect(normalized.firstLineTextShadowStrength).toBe(100);
     expect(normalized.secondLineTextShadowStrength).toBe(0);
+    expect(normalized.textStrokeColor).toBe('#123ABC');
+    expect(normalized.textStrokeDepth).toBe(100);
   });
 
   it('maps legacy desktop text shadow strength to both lyric lines', () => {
@@ -1166,6 +1172,7 @@ describe('lyrics settings normalization', async () => {
 
     expect(normalized.firstLineTextShadowStrength).toBe(45);
     expect(normalized.secondLineTextShadowStrength).toBe(45);
+    expect(normalized.textStrokeDepth).toBe(0);
   });
 });
 
