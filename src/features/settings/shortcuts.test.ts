@@ -63,6 +63,29 @@ describe('shortcut settings helpers', () => {
     expect(defaults.global.toggleDesktopLyricsLock).toBeNull();
   });
 
+  it('offers local song highlight shortcuts while leaving global bindings empty', () => {
+    const defaults = createDefaultShortcutSettings();
+
+    expect(shortcutActionLabels.addSongHighlight).toBe('添加/更新高潮点');
+    expect(shortcutActionLabels.playSongHighlight).toBe('跳到主高潮并播放');
+    expect(defaults.local.addSongHighlight).toEqual({
+      code: 'KeyM',
+      ctrl: false,
+      alt: false,
+      shift: false,
+      meta: false,
+    });
+    expect(defaults.local.playSongHighlight).toEqual({
+      code: 'KeyM',
+      ctrl: false,
+      alt: false,
+      shift: true,
+      meta: false,
+    });
+    expect(defaults.global.addSongHighlight).toBeNull();
+    expect(defaults.global.playSongHighlight).toBeNull();
+  });
+
   it('converts shortcut bindings to tauri global accelerators', () => {
     expect(toGlobalShortcutAccelerator({
       code: 'KeyP',

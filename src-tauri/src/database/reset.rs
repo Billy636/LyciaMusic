@@ -20,6 +20,9 @@ pub async fn clear_all_app_data(
 
             tx.execute_batch(
                 "
+                DELETE FROM song_highlight_markers;
+                DELETE FROM song_highlight_paths;
+                DELETE FROM song_highlight_identities;
                 DELETE FROM play_history;
                 DELETE FROM song_artists;
                 DELETE FROM artists;

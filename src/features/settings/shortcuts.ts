@@ -14,6 +14,8 @@ export const shortcutActionOrder: ShortcutActionId[] = [
   'volumeDown',
   'toggleMiniMode',
   'toggleFavorite',
+  'addSongHighlight',
+  'playSongHighlight',
   'toggleDesktopLyrics',
   'toggleDesktopLyricsLock',
 ];
@@ -27,6 +29,8 @@ export const shortcutActionLabels: Record<ShortcutActionId, string> = {
   volumeDown: '音量减',
   toggleMiniMode: 'mini/完整模式',
   toggleFavorite: '喜欢歌曲',
+  addSongHighlight: '添加/更新高潮点',
+  playSongHighlight: '跳到主高潮并播放',
   toggleDesktopLyrics: '打开/关闭歌词',
   toggleDesktopLyricsLock: '锁定/解锁桌面歌词',
 };
@@ -55,6 +59,8 @@ const createShortcutBindingMap = (bindings: ShortcutBindingMap): ShortcutBinding
   volumeDown: cloneShortcutBinding(bindings.volumeDown),
   toggleMiniMode: cloneShortcutBinding(bindings.toggleMiniMode),
   toggleFavorite: cloneShortcutBinding(bindings.toggleFavorite),
+  addSongHighlight: cloneShortcutBinding(bindings.addSongHighlight),
+  playSongHighlight: cloneShortcutBinding(bindings.playSongHighlight),
   toggleDesktopLyrics: cloneShortcutBinding(bindings.toggleDesktopLyrics),
   toggleDesktopLyricsLock: cloneShortcutBinding(bindings.toggleDesktopLyricsLock),
 });
@@ -68,6 +74,8 @@ export const defaultLocalShortcutBindings: ShortcutBindingMap = {
   volumeDown: createShortcutBinding('ArrowDown', { ctrl: true }),
   toggleMiniMode: createShortcutBinding('KeyM', { ctrl: true }),
   toggleFavorite: createShortcutBinding('KeyL', { ctrl: true }),
+  addSongHighlight: createShortcutBinding('KeyM'),
+  playSongHighlight: createShortcutBinding('KeyM', { shift: true }),
   toggleDesktopLyrics: createShortcutBinding('KeyD', { ctrl: true }),
   toggleDesktopLyricsLock: createShortcutBinding('KeyD', { ctrl: true, shift: true }),
 };
@@ -81,6 +89,8 @@ export const defaultGlobalShortcutBindings: ShortcutBindingMap = {
   volumeDown: createShortcutBinding('ArrowDown', { ctrl: true, alt: true }),
   toggleMiniMode: createShortcutBinding('KeyM', { ctrl: true, alt: true }),
   toggleFavorite: createShortcutBinding('KeyL', { ctrl: true, alt: true }),
+  addSongHighlight: null,
+  playSongHighlight: null,
   toggleDesktopLyrics: createShortcutBinding('KeyD', { ctrl: true, alt: true }),
   toggleDesktopLyricsLock: null,
 };

@@ -3,6 +3,7 @@ mod custom_fonts;
 mod database;
 pub mod error;
 mod foreground_window;
+mod highlights;
 mod music;
 mod player;
 mod remote;
@@ -20,6 +21,10 @@ use app_runtime::{consume_pending_open_paths, exit_app, handle_single_instance, 
 use custom_fonts::{import_lyrics_font, read_lyrics_font_data_url};
 use database::clear_all_app_data;
 use foreground_window::get_foreground_fullscreen_state;
+use highlights::{
+    add_song_highlight_marker, delete_song_highlight_marker, get_song_highlight_markers,
+    set_song_highlight_marker_position, set_song_highlight_primary, undo_song_highlight_add,
+};
 use music::{
     add_library_folder, add_sidebar_folder, batch_move_music_files, clear_cover_cache,
     create_folder, delete_folder, delete_music_file, get_folder_children, get_folder_first_song,
@@ -104,6 +109,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| setup_app(app))
@@ -121,6 +127,12 @@ pub fn run() {
             save_song_info,
             get_song_detail,
             get_song_runtime_metadata,
+            get_song_highlight_markers,
+            add_song_highlight_marker,
+            set_song_highlight_marker_position,
+            set_song_highlight_primary,
+            delete_song_highlight_marker,
+            undo_song_highlight_add,
             batch_move_music_files,
             move_music_file,
             show_in_folder,

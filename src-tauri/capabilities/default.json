@@ -53,6 +53,7 @@
     "global-shortcut:allow-register-all",
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-unregister-all",
+    "notification:default",
     "opener:default",
     "dialog:default",
     "window-state:default",

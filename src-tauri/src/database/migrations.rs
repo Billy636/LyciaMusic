@@ -349,6 +349,42 @@ fn migrate_artists_columns(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+fn migrate_song_highlights(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS song_highlight_identities (
+            content_hash TEXT PRIMARY KEY,
+            file_size INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS song_highlight_paths (
+            path TEXT PRIMARY KEY,
+            content_hash TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            file_modified_at INTEGER NOT NULL,
+            FOREIGN KEY(content_hash) REFERENCES song_highlight_identities(content_hash) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_song_highlight_paths_hash
+            ON song_highlight_paths(content_hash);
+        CREATE TABLE IF NOT EXISTS song_highlight_markers (
+            id TEXT PRIMARY KEY,
+            content_hash TEXT NOT NULL,
+            position_ms INTEGER NOT NULL,
+            is_primary INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(content_hash) REFERENCES song_highlight_identities(content_hash) ON DELETE CASCADE,
+            CONSTRAINT check_song_highlight_position CHECK (position_ms >= 0),
+            CONSTRAINT check_song_highlight_primary CHECK (is_primary IN (0, 1))
+        );
+        CREATE INDEX IF NOT EXISTS idx_song_highlight_markers_hash_position
+            ON song_highlight_markers(content_hash, position_ms);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_song_highlight_one_primary
+            ON song_highlight_markers(content_hash) WHERE is_primary = 1;",
+    )
+    .map_err(|error| error.to_string())
+}
+
 pub(crate) fn run_migrations(conn: &Connection) -> Result<(), String> {
     migrate_library_folders(conn)?;
     merge_legacy_sidebar_roots(conn);
@@ -358,6 +394,7 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<(), String> {
     migrate_play_history(conn)?;
     migrate_song_loudness(conn)?;
     migrate_artists_columns(conn)?;
+    migrate_song_highlights(conn)?;
     Ok(())
 }
 
@@ -386,6 +423,9 @@ mod tests {
         // 验证 avatar_path 字段存在
         let columns = get_table_columns(&conn, "artists").unwrap();
         assert!(columns.iter().any(|c| c == "avatar_path"));
+
+        let marker_columns = get_table_columns(&conn, "song_highlight_markers").unwrap();
+        assert!(marker_columns.iter().any(|c| c == "position_ms"));
     }
 
     #[test]

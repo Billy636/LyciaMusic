@@ -71,6 +71,12 @@ export interface SongRuntimeMetadata {
   cue_end_offset?: number;
 }
 
+export interface SongHighlightMarker {
+  id: string;
+  positionMs: number;
+  isPrimary: boolean;
+}
+
 export interface SongDetail {
   path: string;
   genre?: string;
@@ -384,6 +390,8 @@ export type ShortcutActionId =
   | 'volumeDown'
   | 'toggleMiniMode'
   | 'toggleFavorite'
+  | 'addSongHighlight'
+  | 'playSongHighlight'
   | 'toggleDesktopLyrics'
   | 'toggleDesktopLyricsLock';
 
