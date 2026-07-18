@@ -260,6 +260,7 @@ const handleOpenStatisticsView = () => {
       />
 
       <SidebarPlaylists
+        v-if="settings.sidebar.showPlaylists"
         v-model:isOpen="isPlaylistOpen"
         :playlists="playlists"
         :selectedPlaylistIds="selectedPlaylistIds"

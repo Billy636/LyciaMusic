@@ -99,6 +99,7 @@ export const defaultSidebarSettings: SidebarSettings = {
   showRecent: true,
   showFolders: true,
   showStatistics: true,
+  showPlaylists: false,
 };
 
 export const defaultAudioSettings: AudioSettings = {

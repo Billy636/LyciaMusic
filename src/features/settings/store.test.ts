@@ -132,6 +132,28 @@ describe('settings store', () => {
     expect(settingsStore.settings.enableScrollToTopButton).toBe(true);
   });
 
+  it('hides sidebar playlists by default and preserves the visibility setting', () => {
+    const settingsStore = useSettingsStore();
+
+    expect(settingsStore.settings.sidebar.showPlaylists).toBe(false);
+
+    const mergedLegacySettings = mergeAppSettings(createDefaultAppSettings(), {
+      sidebar: {
+        showArtists: false,
+      },
+    });
+
+    expect(mergedLegacySettings.sidebar.showPlaylists).toBe(false);
+
+    const merged = mergeAppSettings(settingsStore.settings, {
+      sidebar: {
+        showPlaylists: true,
+      },
+    });
+
+    expect(merged.sidebar.showPlaylists).toBe(true);
+  });
+
   it('shows song comments by default', () => {
     const settingsStore = useSettingsStore();
 
