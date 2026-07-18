@@ -642,75 +642,29 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     '--desktop-line-gap': settings.value.playerLineGap.toString(),
   }));
 
-  function getWordStyle(start: number, end: number): CSSProperties {
+  function getKaraokeProgressStyle(start: number, end: number): CSSProperties {
     const duration = Math.max(0.001, end - start);
     const progress = Math.max(0, Math.min(1, (syncedCurrentTime.value - start) / duration));
-
-    if (progress <= 0) {
-      return {
-        color: 'var(--desktop-text-primary)',
-        textShadow: 'none',
-      };
-    }
-
-    const highlightStop = `${Math.round(progress * 100)}%`;
+    const progressPercent = Math.round(progress * 10000) / 100;
 
     return {
-      backgroundImage: `linear-gradient(90deg, var(--desktop-accent-a) 0%, var(--desktop-accent-b) ${highlightStop}, var(--desktop-text-primary) ${highlightStop}, var(--desktop-text-primary) 100%)`,
-      WebkitBackgroundClip: 'text',
-      backgroundClip: 'text',
-      color: 'transparent',
-      WebkitTextFillColor: 'transparent',
+      '--desktop-karaoke-progress': `${progressPercent}%`,
       textShadow: 'none',
-    };
+    } as CSSProperties;
+  }
+
+  function getWordStyle(start: number, end: number): CSSProperties {
+    return getKaraokeProgressStyle(start, end);
   }
 
   function getRomajiWordStyle(start: number, end: number): CSSProperties {
-    const duration = Math.max(0.001, end - start);
-    const progress = Math.max(0, Math.min(1, (syncedCurrentTime.value - start) / duration));
-
-    if (progress <= 0) {
-      return {
-        color: 'var(--desktop-romaji-unplayed-color)',
-        textShadow: 'none',
-      };
-    }
-
-    const highlightStop = `${Math.round(progress * 100)}%`;
-
-    return {
-      backgroundImage: `linear-gradient(90deg, var(--desktop-romaji-played-color) 0%, var(--desktop-romaji-played-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) 100%)`,
-      WebkitBackgroundClip: 'text',
-      backgroundClip: 'text',
-      color: 'transparent',
-      WebkitTextFillColor: 'transparent',
-      textShadow: 'none',
-    };
+    return getKaraokeProgressStyle(start, end);
   }
 
   function getRomajiLineStyle(line: LyricLine, lineIndex: number): CSSProperties {
     const start = Number.isFinite(line.time) ? line.time : 0;
     const end = Math.max(start + 0.001, getPseudoWordEnd(line, lineIndex, start));
-    const duration = Math.max(0.001, end - start);
-    const progress = Math.max(0, Math.min(1, (syncedCurrentTime.value - start) / duration));
-
-    if (progress <= 0) {
-      return {
-        color: 'var(--desktop-romaji-unplayed-color)',
-        textShadow: 'none',
-      };
-    }
-
-    const highlightStop = `${Math.round(progress * 100)}%`;
-
-    return {
-      backgroundImage: `linear-gradient(90deg, var(--desktop-romaji-played-color) 0%, var(--desktop-romaji-played-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) 100%)`,
-      WebkitBackgroundClip: 'text',
-      backgroundClip: 'text',
-      color: 'transparent',
-      WebkitTextFillColor: 'transparent',
-      textShadow: 'none',
-    };
+    return getKaraokeProgressStyle(start, end);
   }
 
   return {

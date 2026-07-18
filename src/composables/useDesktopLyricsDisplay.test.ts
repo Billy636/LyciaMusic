@@ -212,8 +212,27 @@ describe('useDesktopLyricsDisplay', () => {
       '--desktop-romaji-played-color': '#123456',
       '--desktop-romaji-unplayed-color': '#ABCDEF',
     });
-    expect(display.getRomajiWordStyle(1, 3).backgroundImage).toContain('var(--desktop-romaji-played-color) 0%');
-    expect(display.getRomajiWordStyle(1, 3).backgroundImage).toContain('var(--desktop-romaji-unplayed-color) 50%');
+    expect(display.getRomajiWordStyle(1, 3)).toMatchObject({
+      '--desktop-karaoke-progress': '50%',
+      textShadow: 'none',
+    });
+  });
+
+  it('keeps karaoke word painting stable and only updates the clipped progress', () => {
+    const display = useDesktopLyricsDisplay(ref(false));
+    const payload = createPayload(true);
+
+    display.handlePayload({ ...payload, playbackTime: 1 });
+    expect(display.getWordStyle(1, 3)).toEqual({
+      '--desktop-karaoke-progress': '0%',
+      textShadow: 'none',
+    });
+
+    display.playbackTime.value = 1.6789;
+    expect(display.getWordStyle(1, 3)).toEqual({
+      '--desktop-karaoke-progress': '33.95%',
+      textShadow: 'none',
+    });
   });
 
   it('uses word-level romaji on desktop only when every displayed word has romaji', () => {
