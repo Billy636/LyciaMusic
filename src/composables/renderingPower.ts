@@ -38,6 +38,17 @@ export function setMainWindowRenderingSnapshot(patch: Partial<MainWindowRenderin
   setLibrarySongPathCacheLowPower(resolveMainWindowLowPower(mainWindowRenderingSnapshot.value));
 }
 
+export function setMainWindowFocusState(windowFocused: boolean) {
+  setMainWindowRenderingSnapshot(windowFocused
+    ? {
+        documentHidden: false,
+        windowFocused: true,
+        windowVisible: true,
+        windowMinimized: false,
+      }
+    : { windowFocused: false });
+}
+
 const isMainWindowLowPower = computed(() => resolveMainWindowLowPower(mainWindowRenderingSnapshot.value));
 
 export function useRenderingPower() {
@@ -91,7 +102,10 @@ export function useMainWindowRenderingPower() {
     window.addEventListener('blur', syncWindowState);
 
     unlisteners.push(await appWindow.onFocusChanged(({ payload }) => {
-      setMainWindowRenderingSnapshot({ windowFocused: payload });
+      // A focused native window is necessarily visible. Clear the explicit
+      // documentHidden flag set by close-to-tray even when WebView2 omits the
+      // matching visibilitychange event during restoration.
+      setMainWindowFocusState(payload);
       void syncWindowState();
     }));
     unlisteners.push(await appWindow.onResized(() => {

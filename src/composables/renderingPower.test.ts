@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   hideMainWindowToTray,
   resolveMainWindowLowPower,
+  setMainWindowFocusState,
   setMainWindowRenderingSnapshot,
   useRenderingPower,
   type MainWindowRenderingSnapshot,
@@ -48,6 +49,21 @@ describe('main window rendering power', () => {
       documentHidden: true,
       windowFocused: false,
       windowVisible: false,
+    });
+  });
+
+  it('leaves low power when the native main window regains focus after tray restore', async () => {
+    setMainWindowRenderingSnapshot(foregroundSnapshot());
+    await hideMainWindowToTray({ hide: async () => undefined } as never);
+
+    setMainWindowFocusState(true);
+
+    expect(useRenderingPower().isMainWindowLowPower.value).toBe(false);
+    expect(useRenderingPower().mainWindowRenderingSnapshot.value).toMatchObject({
+      documentHidden: false,
+      windowFocused: true,
+      windowVisible: true,
+      windowMinimized: false,
     });
   });
 });
