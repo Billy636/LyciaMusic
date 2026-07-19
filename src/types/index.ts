@@ -269,6 +269,7 @@ export interface ThemeSettings {
   blur: number;         // Legacy field
   customBackground: {
     imagePath: string;
+    mediaType?: 'image' | 'video';
     blur: number;
     opacity: number;
     maskColor: string;

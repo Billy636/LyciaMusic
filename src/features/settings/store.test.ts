@@ -29,6 +29,30 @@ describe('settings store', () => {
     expect(settingsStore.theme.customBackground.maskColor).toBe('#000000');
   });
 
+  it('preserves video custom background settings while defaulting legacy entries to images', () => {
+    const settingsStore = useSettingsStore();
+
+    settingsStore.patchTheme({
+      customBackground: {
+        imagePath: 'C:\\wallpapers\\loop.mp4',
+        mediaType: 'video',
+      },
+    });
+
+    expect(settingsStore.theme.customBackground.mediaType).toBe('video');
+
+    settingsStore.replaceTheme({
+      ...settingsStore.theme,
+      customBackground: {
+        ...settingsStore.theme.customBackground,
+        imagePath: 'C:\\wallpapers\\legacy.jpg',
+        mediaType: undefined,
+      },
+    });
+
+    expect(settingsStore.theme.customBackground.mediaType).toBe('image');
+  });
+
   it('replaces theme through the settings domain instead of mutating ui state', () => {
     const settingsStore = useSettingsStore();
 

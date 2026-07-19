@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { effectScope, nextTick, type EffectScope } from 'vue';
+import { open } from '@tauri-apps/plugin-dialog';
 
 import { useSettingsStore } from '../features/settings/store';
 import { useCustomThemeModal } from './useCustomThemeModal';
@@ -89,5 +90,19 @@ describe('useCustomThemeModal', () => {
     expect(settingsStore.theme.mode).toBe('light');
     expect(settingsStore.theme.customBackground.blur).toBe(20);
     expect(settingsStore.theme.customBackground.foregroundStyle).toBe('light');
+  });
+
+  it('returns a video selection without applying it before save', async () => {
+    vi.mocked(open).mockResolvedValue('C:\\wallpapers\\ambient.mp4');
+    const settingsStore = useSettingsStore();
+    const modal = scope!.run(() => useCustomThemeModal())!;
+
+    const selected = await modal.handleSelectMedia();
+
+    expect(selected).toEqual({
+      path: 'C:\\wallpapers\\ambient.mp4',
+      mediaType: 'video',
+    });
+    expect(settingsStore.theme.customBackground.imagePath).toBe('');
   });
 });

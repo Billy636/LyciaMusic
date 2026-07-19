@@ -2,6 +2,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { ref } from 'vue';
 
 import { normalizeForegroundStyle } from '../features/settings/store';
+import { resolveCustomBackgroundMediaType } from './customBackgroundMedia';
 import { useThemeSettings } from './useThemeSettings';
 
 export function useCustomThemeModal() {
@@ -11,19 +12,27 @@ export function useCustomThemeModal() {
     foregroundStyle: normalizeForegroundStyle(theme.value.customBackground.foregroundStyle),
   });
 
-  const handleSelectImage = async () => {
+  const handleSelectMedia = async () => {
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+        filters: [
+          { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] },
+          { name: '视频', extensions: ['mp4', 'webm'] },
+        ],
       });
 
       if (selected && typeof selected === 'string') {
-        preview.value.imagePath = selected;
+        return {
+          path: selected,
+          mediaType: resolveCustomBackgroundMediaType(selected),
+        };
       }
     } catch {
       // Ignore dialog cancellation.
     }
+
+    return null;
   };
 
   const handleSave = () => {
@@ -41,7 +50,7 @@ export function useCustomThemeModal() {
 
   return {
     preview,
-    handleSelectImage,
+    handleSelectMedia,
     handleCancel: () => undefined,
     handleSave,
   };

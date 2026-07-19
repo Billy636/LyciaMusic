@@ -3,15 +3,53 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 
 import { useCustomThemeModal } from '../../composables/useCustomThemeModal';
+import {
+  loadCustomBackgroundMediaMetadata,
+  resolveCustomBackgroundMediaType,
+  type CustomBackgroundMediaType,
+} from '../../composables/customBackgroundMedia';
+import { useCustomBackgroundPreviewState } from '../../composables/customBackgroundPreviewState';
 import { calculateCoverGeometry } from '../../composables/useThemeBackgroundGeometry';
+import { useRenderingPower } from '../../composables/renderingPower';
 
 const emit = defineEmits(['close']);
 const {
   preview,
-  handleSelectImage,
+  handleSelectMedia,
   handleCancel: discardThemeDraft,
   handleSave: applyThemeDraft,
 } = useCustomThemeModal();
+const { setCustomBackgroundPreviewOpen } = useCustomBackgroundPreviewState();
+const { isMainWindowLowPower } = useRenderingPower();
+const mediaError = ref('');
+const previewVideoRef = ref<HTMLVideoElement | null>(null);
+const previewMediaType = computed(() => resolveCustomBackgroundMediaType(
+  preview.value.imagePath,
+  preview.value.mediaType,
+));
+const isVideoPreview = computed(() => previewMediaType.value === 'video');
+
+const syncPreviewVideoPlayback = async () => {
+  const video = previewVideoRef.value;
+  if (!video) return;
+
+  if (isMainWindowLowPower.value) {
+    video.pause();
+    return;
+  }
+
+  try {
+    await video.play();
+  } catch {
+    // A later canplay event will retry playback.
+  }
+};
+
+watch(
+  [previewVideoRef, isMainWindowLowPower],
+  () => { void syncPreviewVideoPlayback(); },
+  { immediate: true },
+);
 
 const foregroundOptions = [
   { value: 'light', label: '浅色' },
@@ -248,7 +286,16 @@ watch(
 // --- 挂载与销毁生命周期生命体征 ---
 let resizeObserver: ResizeObserver | null = null;
 
+const applyMediaMetadata = async (path: string, mediaType: CustomBackgroundMediaType) => {
+  const metadata = await loadCustomBackgroundMediaMetadata(convertFileSrc(path), mediaType);
+  imageNaturalWidth.value = metadata.width;
+  imageNaturalHeight.value = metadata.height;
+  preview.value.imageWidth = metadata.width;
+  preview.value.imageHeight = metadata.height;
+};
+
 onMounted(async () => {
+  setCustomBackgroundPreviewOpen(true);
   updateViewportSize();
   window.addEventListener('resize', updateViewportSize);
 
@@ -259,24 +306,18 @@ onMounted(async () => {
     resizeObserver.observe(containerRef.value);
   }
 
-  // 旧皮肤配置的异步高度模糊补偿与尺寸补齐回写机制
-  if (preview.value.imagePath && (!imageNaturalWidth.value || !imageNaturalHeight.value)) {
+  // 旧皮肤配置的异步尺寸补齐，以及已保存媒体的可用性检查。
+  if (preview.value.imagePath) {
     try {
-      const img = new Image();
-      img.src = convertFileSrc(preview.value.imagePath);
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-      });
-      imageNaturalWidth.value = img.naturalWidth;
-      imageNaturalHeight.value = img.naturalHeight;
-      preview.value.imageWidth = img.naturalWidth;
-      preview.value.imageHeight = img.naturalHeight;
-    } catch {}
+      await applyMediaMetadata(preview.value.imagePath, previewMediaType.value);
+    } catch (error) {
+      mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
+    }
   }
 });
 
 onUnmounted(() => {
+  setCustomBackgroundPreviewOpen(false);
   window.removeEventListener('resize', updateViewportSize);
   if (resizeObserver) {
     resizeObserver.disconnect();
@@ -284,35 +325,20 @@ onUnmounted(() => {
   }
 });
 
-const handleSelectNewImage = async () => {
-  const oldImagePath = preview.value.imagePath;
-  await handleSelectImage();
-  const newImagePath = preview.value.imagePath;
+const handleSelectNewMedia = async () => {
+  const selected = await handleSelectMedia();
+  if (!selected) return;
 
-  if (newImagePath && newImagePath !== oldImagePath) {
+  mediaError.value = '';
+  try {
+    await applyMediaMetadata(selected.path, selected.mediaType);
+    preview.value.imagePath = selected.path;
+    preview.value.mediaType = selected.mediaType;
     preview.value.scale = 1.0;
     preview.value.translateX = 0;
     preview.value.translateY = 0;
-
-    // 获取新选图片的真实宽高并写入持久化 preview 对象中
-    try {
-      const img = new Image();
-      img.src = convertFileSrc(newImagePath);
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-      });
-      imageNaturalWidth.value = img.naturalWidth;
-      imageNaturalHeight.value = img.naturalHeight;
-      preview.value.imageWidth = img.naturalWidth;
-      preview.value.imageHeight = img.naturalHeight;
-    } catch (err) {
-      console.error('Failed to load image size metadata', err);
-      imageNaturalWidth.value = 0;
-      imageNaturalHeight.value = 0;
-      preview.value.imageWidth = 0;
-      preview.value.imageHeight = 0;
-    }
+  } catch (error) {
+    mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
   }
 };
 </script>
@@ -325,13 +351,13 @@ const handleSelectNewImage = async () => {
           <div class="flex items-center gap-3">
             <span class="text-base font-bold">自定义皮肤</span>
             <button
-              @click="handleSelectNewImage"
+              @click="handleSelectNewMedia"
               class="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold text-white/90 backdrop-blur-md transition hover:bg-white/10 active:scale-95 shadow-sm cursor-pointer"
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-white/70" viewBox="0 0 20 20" fill="currentColor">
                 <path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clip-rule="evenodd" />
               </svg>
-              <span>选择本地图片</span>
+              <span>选择背景文件</span>
             </button>
           </div>
           <button @click="handleCancel" class="text-white/50 transition hover:text-white">
@@ -381,7 +407,28 @@ const handleSelectNewImage = async () => {
                       transform: 'translate(-50%, -50%)',
                     }"
                   >
+                    <video
+                      v-if="isVideoPreview"
+                      ref="previewVideoRef"
+                      :src="convertFileSrc(preview.imagePath)"
+                      autoplay
+                      loop
+                      muted
+                      playsinline
+                      class="absolute block max-w-none max-h-none select-none pointer-events-none"
+                      :style="{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'fill',
+                        transform: `translate3d(${(preview.translateX || 0) * viewportWidth}px, ${(preview.translateY || 0) * viewportHeight}px, 0) scale(${renderScale})`,
+                        transformOrigin: 'center center',
+                        filter: `blur(${preview.blur}px)`,
+                        opacity: preview.opacity ?? 1.0,
+                      }"
+                      @canplay="syncPreviewVideoPlayback"
+                    />
                     <img
+                      v-else
                       :src="convertFileSrc(preview.imagePath)"
                       class="absolute block max-w-none max-h-none select-none pointer-events-none"
                       :style="{
@@ -406,7 +453,7 @@ const handleSelectNewImage = async () => {
                   <svg xmlns="http://www.w3.org/2000/svg" class="mb-2 h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  <span class="text-xs">未选择图片</span>
+                  <span class="text-xs">未选择背景文件</span>
                 </div>
 
                 <!-- 镂空遮罩与 dashed 虚线框层，z-index: 10 -->
@@ -461,6 +508,13 @@ const handleSelectNewImage = async () => {
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div
+              v-if="mediaError"
+              class="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-100"
+            >
+              {{ mediaError }}
             </div>
 
             <div class="space-y-5">
@@ -550,7 +604,7 @@ const handleSelectNewImage = async () => {
           </button>
           <button
             @click="handleSave"
-            :disabled="!preview.imagePath"
+            :disabled="!preview.imagePath || !!mediaError"
             class="flex-1 rounded-full bg-[#EC4141] py-2.5 text-sm font-bold text-white transition hover:bg-[#d13a3a] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#EC4141]"
           >
             保存并使用

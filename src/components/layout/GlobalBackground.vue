@@ -10,12 +10,19 @@ import { useWindowMaterial } from '../../composables/windowMaterial';
 import { getPreblurredBackgroundUrl } from '../../composables/preblurredBackgroundCache';
 import { useRenderingPower } from '../../composables/renderingPower';
 import { calculateCoverGeometry } from '../../composables/useThemeBackgroundGeometry';
+import {
+  loadCustomBackgroundMediaMetadata,
+  resolveCustomBackgroundMediaType,
+  type CustomBackgroundMediaType,
+} from '../../composables/customBackgroundMedia';
+import { useCustomBackgroundPreviewState } from '../../composables/customBackgroundPreviewState';
 
 const { currentCover, currentCoverFull, dominantColors, showPlayerDetail, isMiniMode } = usePlayer();
 const { theme, isDarkTheme, patchTheme } = useThemeSettings();
 const { activeWindowMaterial } = useWindowMaterial();
 const { loadFullCover } = useCoverCache();
 const { isMainWindowLowPower } = useRenderingPower();
+const { isCustomBackgroundPreviewOpen } = useCustomBackgroundPreviewState();
 const playbackStore = usePlaybackStore();
 const { currentSongPath } = storeToRefs(playbackStore);
 
@@ -40,49 +47,52 @@ const updateContainerSize = () => {
 // --- 图片物理原始宽高元数据管理 ---
 const imageNaturalWidth = ref(theme.value.customBackground?.imageWidth || 0);
 const imageNaturalHeight = ref(theme.value.customBackground?.imageHeight || 0);
+const customVideoRef = ref<HTMLVideoElement | null>(null);
+const customMediaReady = ref(false);
+let customMediaRequestId = 0;
 
-// 监听自定义背景图片路径及尺寸
+interface RenderedCustomMedia {
+  path: string;
+  mediaType: CustomBackgroundMediaType;
+}
+
+const renderedCustomMedia = ref<RenderedCustomMedia | null>(null);
+
+// 媒体加载成功前保留上一份可用背景，避免切换或文件失效时出现黑屏。
 watch(
   [
+    () => theme.value.mode,
     () => theme.value.customBackground?.imagePath,
-    () => theme.value.customBackground?.imageWidth,
-    () => theme.value.customBackground?.imageHeight
+    () => theme.value.customBackground?.mediaType,
   ],
-  async ([path, w, h]) => {
-    if (!path) {
-      imageNaturalWidth.value = 0;
-      imageNaturalHeight.value = 0;
+  async ([mode, path, configuredMediaType]) => {
+    const requestId = ++customMediaRequestId;
+    if (mode !== 'custom' || !path) {
       return;
     }
 
-    // 如果配置中已经带有尺寸，直接使用
-    if (w && h) {
-      imageNaturalWidth.value = w;
-      imageNaturalHeight.value = h;
-      return;
-    }
-
-    // 否则为旧版配置，需要异步加载元数据并写回
+    const mediaType = resolveCustomBackgroundMediaType(path, configuredMediaType);
     try {
-      const img = new Image();
-      img.src = convertFileSrc(path);
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-      });
-      imageNaturalWidth.value = img.naturalWidth;
-      imageNaturalHeight.value = img.naturalHeight;
-      
-      // 回写补齐配置
+      const metadata = await loadCustomBackgroundMediaMetadata(convertFileSrc(path), mediaType);
+      if (requestId !== customMediaRequestId) return;
+
+      imageNaturalWidth.value = metadata.width;
+      imageNaturalHeight.value = metadata.height;
+      customMediaReady.value = false;
+      renderedCustomMedia.value = { path, mediaType };
+
       patchTheme({
         customBackground: {
           ...theme.value.customBackground,
-          imageWidth: img.naturalWidth,
-          imageHeight: img.naturalHeight
+          mediaType,
+          imageWidth: metadata.width,
+          imageHeight: metadata.height,
         }
       });
     } catch (err) {
-      console.error('Failed to load old custom theme background image size', err);
+      if (requestId === customMediaRequestId) {
+        console.error('Failed to load custom theme background media', err);
+      }
     }
   },
   { immediate: true }
@@ -127,6 +137,10 @@ const activeBackgroundInfo = computed(() => {
       scale: currentTheme.customBackground.scale,
       translateX: currentTheme.customBackground.translateX,
       translateY: currentTheme.customBackground.translateY,
+      mediaType: resolveCustomBackgroundMediaType(
+        currentTheme.customBackground.imagePath,
+        currentTheme.customBackground.mediaType,
+      ),
       isDynamic: false,
       type: 'custom' as const,
     };
@@ -168,6 +182,34 @@ const bgImageSrc = computed(() => {
 
   return convertFileSrc(activeBackgroundInfo.value.src);
 });
+
+const customMediaSrc = computed(() => {
+  const path = renderedCustomMedia.value?.path;
+  if (!path) return '';
+  return path.startsWith('http') || path.startsWith('data:') ? path : convertFileSrc(path);
+});
+
+const syncCustomVideoPlayback = async () => {
+  const video = customVideoRef.value;
+  if (!video) return;
+
+  if (isMainWindowLowPower.value || isCustomBackgroundPreviewOpen.value || isMiniMode.value) {
+    video.pause();
+    return;
+  }
+
+  try {
+    await video.play();
+  } catch {
+    // A later canplay event will retry playback.
+  }
+};
+
+watch(
+  [customVideoRef, isMainWindowLowPower, isCustomBackgroundPreviewOpen, isMiniMode],
+  () => { void syncCustomVideoPlayback(); },
+  { immediate: true },
+);
 
 const dynamicShellClass = computed(() => {
   if (isMicaWindowMaterial.value) return 'bg-white/40 dark:bg-black/8';
@@ -564,7 +606,7 @@ const customBgTransform = computed(() => {
     class="fixed inset-0 z-0 overflow-hidden pointer-events-none transition-colors duration-500"
     :class="[
       theme.mode === 'custom'
-        ? 'bg-black'
+        ? theme.customBackground.foregroundStyle === 'dark' ? 'bg-white' : 'bg-black'
         : hasWindowMaterial
           ? 'bg-transparent'
           : 'bg-[#fafafa] dark:bg-[#121212]',
@@ -655,7 +697,10 @@ const customBgTransform = computed(() => {
     </transition>
 
     <transition name="fade">
-      <div v-if="activeBackgroundInfo?.type === 'custom' && bgImageSrc" class="absolute inset-0 global-background-container overflow-hidden">
+      <div
+        v-if="activeBackgroundInfo?.type === 'custom' && customMediaSrc && !isMiniMode"
+        class="absolute inset-0 global-background-container overflow-hidden"
+      >
         <div
           v-if="activeBackgroundInfo.maskAlpha !== undefined && activeBackgroundInfo.maskAlpha > 0"
           class="absolute inset-0 z-10 transition-all duration-300 pointer-events-none"
@@ -678,8 +723,31 @@ const customBgTransform = computed(() => {
             transform: 'translate(-50%, -50%)',
           }"
         >
+          <video
+            v-if="renderedCustomMedia?.mediaType === 'video'"
+            ref="customVideoRef"
+            :src="customMediaSrc"
+            autoplay
+            loop
+            muted
+            playsinline
+            preload="auto"
+            class="absolute block max-w-none max-h-none select-none pointer-events-none transition-opacity duration-700"
+            :style="{
+              width: '100%',
+              height: '100%',
+              objectFit: 'fill',
+              transform: `translate3d(${customBgTransform.tx}px, ${customBgTransform.ty}px, 0) scale(${customBgTransform.scale})`,
+              transformOrigin: 'center center',
+              filter: `blur(${activeBackgroundInfo.blur}px)`,
+              opacity: customMediaReady ? (activeBackgroundInfo.opacity ?? 1.0) : 0,
+            }"
+            @canplay="customMediaReady = true; syncCustomVideoPlayback()"
+            @error="customMediaReady = false"
+          />
           <img
-            :src="bgImageSrc"
+            v-else
+            :src="customMediaSrc"
             class="absolute block max-w-none max-h-none select-none pointer-events-none transition-all duration-700"
             :style="{
               width: '100%',
@@ -687,8 +755,10 @@ const customBgTransform = computed(() => {
               transform: `translate3d(${customBgTransform.tx}px, ${customBgTransform.ty}px, 0) scale(${customBgTransform.scale})`,
               transformOrigin: 'center center',
               filter: `blur(${activeBackgroundInfo.blur}px)`,
-              opacity: activeBackgroundInfo.opacity ?? 1.0,
+              opacity: customMediaReady ? (activeBackgroundInfo.opacity ?? 1.0) : 0,
             }"
+            @load="customMediaReady = true"
+            @error="customMediaReady = false"
           />
         </div>
       </div>

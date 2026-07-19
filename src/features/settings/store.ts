@@ -80,6 +80,7 @@ export const defaultThemeSettings: ThemeSettings = {
   blur: 20,
   customBackground: {
     imagePath: '',
+    mediaType: 'image',
     blur: 20,
     opacity: 1,
     maskColor: '#000000',
@@ -198,11 +199,14 @@ export const mergeThemeSettings = (
     ...(patch.customBackground ?? {}),
   };
 
+  const mediaType = mergedCustomBackground.mediaType === 'video' ? 'video' : 'image';
+
   return {
     ...base,
     ...patch,
     customBackground: {
       ...mergedCustomBackground,
+      mediaType,
       foregroundStyle: normalizeForegroundStyle(mergedCustomBackground.foregroundStyle),
     },
   };
