@@ -4,7 +4,6 @@ use std::time::Duration;
 
 const CENTER_GAIN: f32 = std::f32::consts::FRAC_1_SQRT_2;
 const SURROUND_GAIN: f32 = std::f32::consts::FRAC_1_SQRT_2;
-const LFE_GAIN: f32 = 0.5;
 const BACK_CENTER_GAIN: f32 = 0.5;
 
 pub(crate) fn into_stereo(
@@ -91,8 +90,9 @@ where
     }
 }
 
-/// Converts FLAC/surround channel layouts to stereo without dropping the
-/// center, LFE, or surround channels.
+/// Converts standard FLAC/surround channel layouts to an ITU-style Lo/Ro
+/// stereo mix. LFE is intentionally omitted because it is an optional
+/// enhancement channel rather than essential programme content.
 pub(crate) struct StereoDownmixer<S> {
     inner: S,
     input_channels: u16,
@@ -138,43 +138,33 @@ where
             ),
             // FL, FR, FC, LFE, BL, BR. This is the layout used by 5.1 FLAC.
             6 => (
-                channel(0)
-                    + CENTER_GAIN * channel(2)
-                    + LFE_GAIN * channel(3)
-                    + SURROUND_GAIN * channel(4),
-                channel(1)
-                    + CENTER_GAIN * channel(2)
-                    + LFE_GAIN * channel(3)
-                    + SURROUND_GAIN * channel(5),
-                1.0 + CENTER_GAIN + LFE_GAIN + SURROUND_GAIN,
+                channel(0) + CENTER_GAIN * channel(2) + SURROUND_GAIN * channel(4),
+                channel(1) + CENTER_GAIN * channel(2) + SURROUND_GAIN * channel(5),
+                1.0 + CENTER_GAIN + SURROUND_GAIN,
             ),
             // FL, FR, FC, LFE, BC, SL, SR (6.1 FLAC).
             7 => (
                 channel(0)
                     + CENTER_GAIN * channel(2)
-                    + LFE_GAIN * channel(3)
                     + BACK_CENTER_GAIN * channel(4)
                     + SURROUND_GAIN * channel(5),
                 channel(1)
                     + CENTER_GAIN * channel(2)
-                    + LFE_GAIN * channel(3)
                     + BACK_CENTER_GAIN * channel(4)
                     + SURROUND_GAIN * channel(6),
-                1.0 + CENTER_GAIN + LFE_GAIN + BACK_CENTER_GAIN + SURROUND_GAIN,
+                1.0 + CENTER_GAIN + BACK_CENTER_GAIN + SURROUND_GAIN,
             ),
             // FL, FR, FC, LFE, BL, BR, SL, SR (7.1 FLAC).
             8 => (
                 channel(0)
                     + CENTER_GAIN * channel(2)
-                    + LFE_GAIN * channel(3)
                     + SURROUND_GAIN * channel(4)
                     + SURROUND_GAIN * channel(6),
                 channel(1)
                     + CENTER_GAIN * channel(2)
-                    + LFE_GAIN * channel(3)
                     + SURROUND_GAIN * channel(5)
                     + SURROUND_GAIN * channel(7),
-                1.0 + CENTER_GAIN + LFE_GAIN + SURROUND_GAIN * 2.0,
+                1.0 + CENTER_GAIN + SURROUND_GAIN * 2.0,
             ),
             // For uncommon layouts, retain every channel by distributing
             // additional channels alternately between left and right.
@@ -280,20 +270,14 @@ mod tests {
     fn downmixes_all_six_flac_channels_to_stereo() {
         let input = SamplesBuffer::new(6, 44_100, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
         let output = StereoDownmixer::new(input).collect::<Vec<_>>();
-        let gain_sum = 1.0 + CENTER_GAIN + LFE_GAIN + SURROUND_GAIN;
+        let gain_sum = 1.0 + CENTER_GAIN + SURROUND_GAIN;
 
         assert_eq!(output.len(), 2);
         assert!(
-            (output[0]
-                - (1.0 + 3.0 * CENTER_GAIN + 4.0 * LFE_GAIN + 5.0 * SURROUND_GAIN) / gain_sum)
-                .abs()
-                < 1e-6
+            (output[0] - (1.0 + 3.0 * CENTER_GAIN + 5.0 * SURROUND_GAIN) / gain_sum).abs() < 1e-6
         );
         assert!(
-            (output[1]
-                - (2.0 + 3.0 * CENTER_GAIN + 4.0 * LFE_GAIN + 6.0 * SURROUND_GAIN) / gain_sum)
-                .abs()
-                < 1e-6
+            (output[1] - (2.0 + 3.0 * CENTER_GAIN + 6.0 * SURROUND_GAIN) / gain_sum).abs() < 1e-6
         );
     }
 
@@ -307,7 +291,15 @@ mod tests {
     }
 
     #[test]
-    fn seven_channel_center_and_lfe_are_balanced() {
+    fn lfe_is_omitted_from_the_stereo_downmix() {
+        let input = SamplesBuffer::new(6, 44_100, vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let output = StereoDownmixer::new(input).collect::<Vec<_>>();
+
+        assert_eq!(output, vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn seven_channel_center_and_back_center_are_balanced() {
         let input = SamplesBuffer::new(7, 44_100, vec![0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
         let output = StereoDownmixer::new(input).collect::<Vec<_>>();
 
