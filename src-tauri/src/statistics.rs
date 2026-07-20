@@ -1,4 +1,5 @@
 use crate::database::DbState;
+use crate::music::search::load_matching_song_paths;
 use crate::music::utils::{format_distribution_bucket, is_lossless_audio, normalize_path};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -1085,24 +1086,6 @@ fn song_title_label(row: &SongViewRow) -> String {
     }
 }
 
-fn song_matches_query(row: &SongViewRow, query: &str) -> bool {
-    let lowered_query = query.trim().to_lowercase();
-    if lowered_query.is_empty() {
-        return true;
-    }
-
-    path_file_name(&row.path)
-        .to_lowercase()
-        .contains(&lowered_query)
-        || row.title.to_lowercase().contains(&lowered_query)
-        || row.artist.to_lowercase().contains(&lowered_query)
-        || row.album.to_lowercase().contains(&lowered_query)
-        || row.album_artist.to_lowercase().contains(&lowered_query)
-        || preferred_view_artist_names(row)
-            .iter()
-            .any(|name| name.to_lowercase().contains(&lowered_query))
-}
-
 fn song_has_artist(row: &SongViewRow, artist_name: &str) -> bool {
     preferred_view_artist_names(row)
         .iter()
@@ -2143,13 +2126,19 @@ pub fn get_favorite_song_paths_view(
     sort_mode: SongPathSortMode,
     detail_filter_type: Option<String>,
     detail_filter_value: Option<String>,
+    offset: Option<u32>,
+    limit: Option<u32>,
 ) -> Result<Vec<String>, String> {
     if favorite_paths.is_empty() {
         return Ok(Vec::new());
     }
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let lowered_query = query.map(|value| value.trim().to_lowercase());
+    let matching_paths = query
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| load_matching_song_paths(&conn, value))
+        .transpose()?;
     let normalized_filter_type = detail_filter_type
         .map(|value| value.trim().to_lowercase())
         .filter(|value| !value.is_empty());
@@ -2181,9 +2170,9 @@ pub fn get_favorite_song_paths_view(
             continue;
         }
 
-        let matches_search = lowered_query
-            .as_deref()
-            .map(|value| song_matches_query(&row, value))
+        let matches_search = matching_paths
+            .as_ref()
+            .map(|paths| paths.contains(&row.path))
             .unwrap_or(true);
 
         if matches_search {
@@ -2192,7 +2181,16 @@ pub fn get_favorite_song_paths_view(
     }
 
     sort_song_view_rows(&mut rows, &sort_mode);
-    Ok(rows.into_iter().map(|row| row.path).collect())
+    let offset = offset.unwrap_or(0) as usize;
+    let limit = limit
+        .map(|value| value.clamp(1, 512) as usize)
+        .unwrap_or(usize::MAX);
+    Ok(rows
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|row| row.path)
+        .collect())
 }
 
 #[tauri::command]
@@ -2201,13 +2199,19 @@ pub fn get_recent_song_paths_view(
     recent_entries: Vec<RecentHistoryImportEntry>,
     query: Option<String>,
     sort_mode: SongPathSortMode,
+    offset: Option<u32>,
+    limit: Option<u32>,
 ) -> Result<Vec<String>, String> {
     if recent_entries.is_empty() {
         return Ok(Vec::new());
     }
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let lowered_query = query.map(|value| value.trim().to_lowercase());
+    let matching_paths = query
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| load_matching_song_paths(&conn, value))
+        .transpose()?;
     let mut latest_entries = HashMap::<String, i64>::new();
 
     for entry in recent_entries {
@@ -2230,9 +2234,9 @@ pub fn get_recent_song_paths_view(
             continue;
         };
 
-        let matches_search = lowered_query
-            .as_deref()
-            .map(|value| song_matches_query(&row, value))
+        let matches_search = matching_paths
+            .as_ref()
+            .map(|paths| paths.contains(&row.path))
             .unwrap_or(true);
 
         if matches_search {
@@ -2241,7 +2245,16 @@ pub fn get_recent_song_paths_view(
     }
 
     sort_song_view_rows(&mut rows, &sort_mode);
-    Ok(rows.into_iter().map(|row| row.path).collect())
+    let offset = offset.unwrap_or(0) as usize;
+    let limit = limit
+        .map(|value| value.clamp(1, 512) as usize)
+        .unwrap_or(usize::MAX);
+    Ok(rows
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|row| row.path)
+        .collect())
 }
 
 #[tauri::command]

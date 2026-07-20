@@ -93,7 +93,13 @@ const createPlayerLibraryView = () => {
     songLookup,
   });
 
-  const { currentViewSongPaths, currentViewSongs } = useLibraryCurrentViewSongs({
+  const {
+    currentViewSongPaths,
+    currentViewSongs,
+    loadMoreCurrentSearchResults,
+    hasMoreCurrentSearchResults,
+    currentSearchResultTotal,
+  } = useLibraryCurrentViewSongs({
     canonicalSongPaths,
     playlists,
     recentSongs,
@@ -131,6 +137,9 @@ const createPlayerLibraryView = () => {
     currentFolderSongs: folderSelectors.currentFolderSongs,
     currentViewSongPaths,
     currentViewSongs,
+    loadMoreCurrentSearchResults,
+    hasMoreCurrentSearchResults,
+    currentSearchResultTotal,
     favAlbumList: collectionSelectors.favAlbumList,
     favArtistList: collectionSelectors.favArtistList,
     favoriteSongList: collectionSelectors.favoriteSongList,

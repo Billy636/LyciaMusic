@@ -56,6 +56,8 @@ const {
   folderTree,
   searchQuery,
   librarySongs,
+  loadMoreCurrentSearchResults,
+  hasMoreCurrentSearchResults,
 } = usePlayerLibraryView();
 const {
   addLibraryFolder,
@@ -455,6 +457,13 @@ watch(
       scrollVelocityPxPerSecond: scrollVelocityPxPerSecond.value,
       memoryBudgetBytes: resolveSongWindowMemoryBudget(),
     });
+    if (
+      searchQuery.value.trim()
+      && hasMoreCurrentSearchResults.value
+      && firstVisibleIndex + visibleCount + OVERSCAN >= props.songPaths.length - 32
+    ) {
+      void loadMoreCurrentSearchResults();
+    }
   },
   { immediate: true },
 );

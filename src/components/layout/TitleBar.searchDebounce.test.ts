@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import source from './TitleBar.vue?raw';
 
-describe('TitleBar search request pacing', () => {
-  it('debounces non-empty queries while keeping clear immediate', () => {
-    expect(source).toContain('SEARCH_COMMIT_DELAY_MS = 150');
+describe('TitleBar explicit search submission', () => {
+  it('keeps a draft until Enter or the search button submits it', () => {
     expect(source).toContain('searchDraft.value = value');
-    expect(source).toContain('searchCommitTimer = window.setTimeout');
-    expect(source).toContain("if (!value) {");
-    expect(source).toContain("setSearch('');");
+    expect(source).toContain('@keydown.enter.prevent="commitSearch(searchDraft)"');
+    expect(source).toContain('@click="commitSearch(searchDraft)"');
     expect(source).toContain("@click=\"commitSearch('')\"");
+    expect(source).toContain('v-if="searchDraft || searchQuery"');
+    expect(source).not.toContain('SEARCH_COMMIT_DELAY_MS');
   });
 });

@@ -2,9 +2,12 @@
 
 use super::scanner::ScanOptions;
 use super::scanner::{scan_folder_recursive, scan_single_directory_summary_internal};
+use super::search::{
+    build_song_search_predicate, load_matching_song_paths, search_index_is_complete,
+};
 use super::types::{
     AlbumCatalogItem, ArtistCatalogItem, FolderNode, LibraryFolder, LibrarySong, LibrarySongLabel,
-    LibrarySongPage,
+    LibrarySongPage, LibrarySongPathPage,
 };
 use super::utils::{descendant_like_patterns, is_dot_prefixed_path, normalize_path};
 use crate::database::DbState;
@@ -52,6 +55,8 @@ pub enum LibrarySongSortMode {
     AddedAtAsc,
     FileModifiedAt,
     FileModifiedAtAsc,
+    TrackNumber,
+    TrackNumberDesc,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -70,10 +75,6 @@ struct FolderViewSongRow {
     path: String,
     title: String,
     artist: String,
-    album: String,
-    album_artist: String,
-    artist_names: Vec<String>,
-    effective_artist_names: Vec<String>,
     added_at: Option<u64>,
     track_number: Option<String>,
     disc_number: Option<String>,
@@ -273,36 +274,6 @@ fn song_title_label(title: &str, path: &str) -> String {
     } else {
         title.to_string()
     }
-}
-
-fn preferred_artist_search_names(row: &FolderViewSongRow) -> Vec<String> {
-    if !row.effective_artist_names.is_empty() {
-        return row.effective_artist_names.clone();
-    }
-
-    if !row.artist_names.is_empty() {
-        return row.artist_names.clone();
-    }
-
-    vec![row.artist.clone()]
-}
-
-fn folder_song_matches_query(row: &FolderViewSongRow, query: &str) -> bool {
-    let lowered_query = query.trim().to_lowercase();
-    if lowered_query.is_empty() {
-        return true;
-    }
-
-    file_name_from_path(&row.path)
-        .to_lowercase()
-        .contains(&lowered_query)
-        || row.title.to_lowercase().contains(&lowered_query)
-        || row.artist.to_lowercase().contains(&lowered_query)
-        || row.album.to_lowercase().contains(&lowered_query)
-        || row.album_artist.to_lowercase().contains(&lowered_query)
-        || preferred_artist_search_names(row)
-            .iter()
-            .any(|name| name.to_lowercase().contains(&lowered_query))
 }
 
 fn load_cached_songs(conn: &rusqlite::Connection) -> Result<Vec<LibrarySong>, String> {
@@ -782,7 +753,7 @@ pub async fn get_library_song_paths_by_album(
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
-                "SELECT path, title, artist, artist_names, effective_artist_names, album, album_artist, added_at, track_number, disc_number
+                "SELECT path, title, artist, added_at, track_number, disc_number
                  FROM songs
                  WHERE LOWER(
                     COALESCE(
@@ -800,34 +771,35 @@ pub async fn get_library_song_paths_by_album(
                     path: row.get::<_, String>(0)?,
                     title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                     artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    artist_names: deserialize_string_list(row.get::<_, Option<String>>(3)?),
-                    effective_artist_names: deserialize_string_list(row.get::<_, Option<String>>(4)?),
-                    album: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                    album_artist: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                    added_at: i64_to_u64_opt(row.get::<_, Option<i64>>(7)?),
-                    track_number: row.get::<_, Option<String>>(8)?,
-                    disc_number: row.get::<_, Option<String>>(9)?,
+                    added_at: i64_to_u64_opt(row.get::<_, Option<i64>>(3)?),
+                    track_number: row.get::<_, Option<String>>(4)?,
+                    disc_number: row.get::<_, Option<String>>(5)?,
                 })
             })
             .map_err(|e| e.to_string())?;
         let mut songs: Vec<FolderViewSongRow> = rows.filter_map(Result::ok).collect();
         songs.sort_by(|left, right| {
-            let compare_number = |left: &Option<String>, right: &Option<String>| {
-                match (parse_track_or_disc_number(left), parse_track_or_disc_number(right)) {
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (Some(left), Some(right)) => left.cmp(&right),
-                    (None, None) => std::cmp::Ordering::Equal,
-                }
+            let compare_number = |left: &Option<String>, right: &Option<String>| match (
+                parse_track_or_disc_number(left),
+                parse_track_or_disc_number(right),
+            ) {
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (Some(left), Some(right)) => left.cmp(&right),
+                (None, None) => std::cmp::Ordering::Equal,
             };
             let track_order = compare_number(&left.disc_number, &right.disc_number)
                 .then_with(|| compare_number(&left.track_number, &right.track_number))
-                .then_with(|| song_title_label(&left.title, &left.path).to_lowercase()
-                    .cmp(&song_title_label(&right.title, &right.path).to_lowercase()));
+                .then_with(|| {
+                    song_title_label(&left.title, &left.path)
+                        .to_lowercase()
+                        .cmp(&song_title_label(&right.title, &right.path).to_lowercase())
+                });
             match sort_mode.as_deref() {
                 Some("track_number_desc") => track_order.reverse(),
                 Some("track_number") => track_order,
-                _ => song_title_label(&left.title, &left.path).to_lowercase()
+                _ => song_title_label(&left.title, &left.path)
+                    .to_lowercase()
                     .cmp(&song_title_label(&right.title, &right.path).to_lowercase()),
             }
         });
@@ -891,31 +863,13 @@ pub async fn get_library_song_paths_for_all_view(
             params.push(album_key);
         }
 
-        if let Some(search_query) = query
-            .map(|value| value.trim().to_lowercase())
-            .filter(|value| !value.is_empty())
-        {
-            let like = format!("%{}%", search_query);
-            sql.push_str(
-                " AND (
-                    LOWER(COALESCE(songs.title, '')) LIKE ?
-                    OR LOWER(COALESCE(songs.artist, '')) LIKE ?
-                    OR LOWER(COALESCE(songs.album, '')) LIKE ?
-                    OR LOWER(COALESCE(songs.album_artist, '')) LIKE ?
-                    OR LOWER(COALESCE(songs.path, '')) LIKE ?
-                    OR EXISTS (
-                        SELECT 1
-                        FROM song_artists
-                        JOIN artists ON artists.id = song_artists.artist_id
-                        WHERE song_artists.song_id = songs.id
-                          AND LOWER(artists.name) LIKE ?
-                    )
-                )",
-            );
-            for _ in 0..6 {
-                params.push(like.clone());
-            }
-        }
+        let (search_predicate, search_params) = build_song_search_predicate(
+            "songs",
+            query.as_deref(),
+            search_index_is_complete(&conn),
+        );
+        sql.push_str(&search_predicate);
+        params.extend(search_params);
 
         match sort_mode {
             LibrarySongSortMode::Title => {
@@ -953,6 +907,20 @@ pub async fn get_library_song_paths_for_all_view(
                              COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC",
                 );
             }
+            LibrarySongSortMode::TrackNumber => {
+                sql.push_str(
+                    " ORDER BY CAST(COALESCE(NULLIF(songs.disc_number, ''), '0') AS INTEGER) ASC,
+                             CAST(COALESCE(NULLIF(songs.track_number, ''), '0') AS INTEGER) ASC,
+                             COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC",
+                );
+            }
+            LibrarySongSortMode::TrackNumberDesc => {
+                sql.push_str(
+                    " ORDER BY CAST(COALESCE(NULLIF(songs.disc_number, ''), '0') AS INTEGER) DESC,
+                             CAST(COALESCE(NULLIF(songs.track_number, ''), '0') AS INTEGER) DESC,
+                             COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC",
+                );
+            }
         }
 
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
@@ -980,6 +948,7 @@ fn build_all_view_page_filter(
     query: Option<String>,
     artist_filter: Option<String>,
     album_filter: Option<String>,
+    index_complete: bool,
 ) -> (String, Vec<String>) {
     let mut filter = String::from(" WHERE 1 = 1");
     let mut params = Vec::new();
@@ -1016,31 +985,10 @@ fn build_all_view_page_filter(
         params.push(album_key);
     }
 
-    if let Some(search_query) = query
-        .map(|value| value.trim().to_lowercase())
-        .filter(|value| !value.is_empty())
-    {
-        let like = format!("%{search_query}%");
-        filter.push_str(
-            " AND (
-                LOWER(COALESCE(songs.title, '')) LIKE ?
-                OR LOWER(COALESCE(songs.artist, '')) LIKE ?
-                OR LOWER(COALESCE(songs.album, '')) LIKE ?
-                OR LOWER(COALESCE(songs.album_artist, '')) LIKE ?
-                OR LOWER(COALESCE(songs.path, '')) LIKE ?
-                OR EXISTS (
-                    SELECT 1
-                    FROM song_artists
-                    JOIN artists ON artists.id = song_artists.artist_id
-                    WHERE song_artists.song_id = songs.id
-                      AND LOWER(artists.name) LIKE ?
-                )
-            )",
-        );
-        for _ in 0..6 {
-            params.push(like.clone());
-        }
-    }
+    let (search_predicate, search_params) =
+        build_song_search_predicate("songs", query.as_deref(), index_complete);
+    filter.push_str(&search_predicate);
+    params.extend(search_params);
 
     (filter, params)
 }
@@ -1051,7 +999,12 @@ fn load_all_view_song_labels(
     artist_filter: Option<String>,
     album_filter: Option<String>,
 ) -> Result<Vec<LibrarySongLabel>, String> {
-    let (filter, params) = build_all_view_page_filter(query, artist_filter, album_filter);
+    let (filter, params) = build_all_view_page_filter(
+        query,
+        artist_filter,
+        album_filter,
+        search_index_is_complete(conn),
+    );
     let sql = format!("SELECT songs.path, songs.title FROM songs{filter}");
     let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
     let labels = statement
@@ -1118,6 +1071,22 @@ fn all_view_page_order(sort_mode: &LibrarySongSortMode) -> &'static str {
                        COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC,
                        songs.path COLLATE NOCASE ASC"
         }
+        LibrarySongSortMode::TrackNumber => {
+            " ORDER BY CASE WHEN NULLIF(TRIM(songs.disc_number), '') IS NULL THEN 1 ELSE 0 END ASC,
+                       CAST(songs.disc_number AS INTEGER) ASC,
+                       CASE WHEN NULLIF(TRIM(songs.track_number), '') IS NULL THEN 1 ELSE 0 END ASC,
+                       CAST(songs.track_number AS INTEGER) ASC,
+                       COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC,
+                       songs.path COLLATE NOCASE ASC"
+        }
+        LibrarySongSortMode::TrackNumberDesc => {
+            " ORDER BY CASE WHEN NULLIF(TRIM(songs.disc_number), '') IS NULL THEN 0 ELSE 1 END ASC,
+                       CAST(songs.disc_number AS INTEGER) DESC,
+                       CASE WHEN NULLIF(TRIM(songs.track_number), '') IS NULL THEN 0 ELSE 1 END ASC,
+                       CAST(songs.track_number AS INTEGER) DESC,
+                       COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE DESC,
+                       songs.path COLLATE NOCASE DESC"
+        }
     }
 }
 
@@ -1131,7 +1100,12 @@ fn load_all_view_song_page(
     limit: u32,
 ) -> Result<LibrarySongPage, String> {
     let limit = limit.clamp(1, LIBRARY_SONG_PAGE_MAX_SIZE);
-    let (filter, params) = build_all_view_page_filter(query, artist_filter, album_filter);
+    let (filter, params) = build_all_view_page_filter(
+        query,
+        artist_filter,
+        album_filter,
+        search_index_is_complete(conn),
+    );
     let count_sql = format!("SELECT COUNT(*) FROM songs{filter}");
     let total = conn
         .query_row(
@@ -1161,6 +1135,87 @@ fn load_all_view_song_page(
         offset,
         rows,
     })
+}
+
+fn load_all_view_song_path_page(
+    conn: &rusqlite::Connection,
+    query: Option<String>,
+    artist_filter: Option<String>,
+    album_filter: Option<String>,
+    sort_mode: LibrarySongSortMode,
+    offset: u32,
+    limit: u32,
+) -> Result<LibrarySongPathPage, String> {
+    let limit = limit.clamp(1, LIBRARY_SONG_PAGE_MAX_SIZE);
+    let has_query = query
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
+    let (filter, params) = build_all_view_page_filter(
+        query,
+        artist_filter,
+        album_filter,
+        search_index_is_complete(conn),
+    );
+    let total = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM songs{filter}"),
+            rusqlite::params_from_iter(params.iter()),
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())?
+        .max(0) as u64;
+
+    let (join, order) = if has_query && matches!(sort_mode, LibrarySongSortMode::Title) {
+        (
+            " LEFT JOIN song_search_index ON song_search_index.song_id = songs.id",
+            " ORDER BY COALESCE(NULLIF(song_search_index.title_sort_key, ''), LOWER(COALESCE(NULLIF(TRIM(songs.title), ''), songs.path))) ASC,
+                       songs.path COLLATE NOCASE ASC",
+        )
+    } else {
+        ("", all_view_page_order(&sort_mode))
+    };
+    let sql =
+        format!("SELECT songs.path FROM songs{join}{filter}{order} LIMIT {limit} OFFSET {offset}");
+    let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
+    let paths = statement
+        .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(LibrarySongPathPage {
+        total,
+        offset,
+        paths,
+    })
+}
+
+#[tauri::command]
+pub async fn get_library_song_path_page_for_all_view(
+    query: Option<String>,
+    artist_filter: Option<String>,
+    album_filter: Option<String>,
+    sort_mode: LibrarySongSortMode,
+    offset: u32,
+    limit: u32,
+    db_state: State<'_, DbState>,
+) -> Result<LibrarySongPathPage, String> {
+    let db_conn = db_state.conn.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        load_all_view_song_path_page(
+            &conn,
+            query,
+            artist_filter,
+            album_filter,
+            sort_mode,
+            offset,
+            limit,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1206,6 +1261,8 @@ pub async fn get_library_song_paths_for_folder_view(
     folder_path: String,
     query: Option<String>,
     sort_mode: FolderSongSortMode,
+    offset: Option<u32>,
+    limit: Option<u32>,
     db_state: State<'_, DbState>,
 ) -> Result<Vec<String>, String> {
     let db_conn = db_state.conn.clone();
@@ -1213,10 +1270,11 @@ pub async fn get_library_song_paths_for_folder_view(
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
-        let (forward_like, backward_like) = super::utils::descendant_like_patterns(&normalized_folder);
+        let (forward_like, backward_like) =
+            super::utils::descendant_like_patterns(&normalized_folder);
         let mut stmt = conn
             .prepare(
-                "SELECT path, title, artist, artist_names, effective_artist_names, album, album_artist, added_at, track_number, disc_number
+                "SELECT path, title, artist, added_at, track_number, disc_number
                  FROM songs
                  WHERE path = ?1
                     OR path LIKE ?2 ESCAPE '^'
@@ -1232,26 +1290,26 @@ pub async fn get_library_song_paths_for_folder_view(
                         path: row.get::<_, String>(0)?,
                         title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                         artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                        artist_names: deserialize_string_list(row.get::<_, Option<String>>(3)?),
-                        effective_artist_names: deserialize_string_list(row.get::<_, Option<String>>(4)?),
-                        album: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                        album_artist: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                        added_at: i64_to_u64_opt(row.get::<_, Option<i64>>(7)?),
-                        track_number: row.get::<_, Option<String>>(8)?,
-                        disc_number: row.get::<_, Option<String>>(9)?,
+                        added_at: i64_to_u64_opt(row.get::<_, Option<i64>>(3)?),
+                        track_number: row.get::<_, Option<String>>(4)?,
+                        disc_number: row.get::<_, Option<String>>(5)?,
                     })
                 },
             )
             .map_err(|e| e.to_string())?;
 
-        let lowered_query = query.map(|value| value.trim().to_lowercase());
+        let matching_paths = query
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| load_matching_song_paths(&conn, value))
+            .transpose()?;
         let mut song_rows: Vec<FolderViewSongRow> = rows
             .filter_map(Result::ok)
             .filter(|row| is_direct_child_path(&normalized_folder, &row.path))
             .filter(|row| {
-                lowered_query
-                    .as_deref()
-                    .map(|value| folder_song_matches_query(row, value))
+                matching_paths
+                    .as_ref()
+                    .map(|paths| paths.contains(&row.path))
                     .unwrap_or(true)
             })
             .collect();
@@ -1301,26 +1359,38 @@ pub async fn get_library_song_paths_for_folder_view(
                     (None, None) => std::cmp::Ordering::Equal,
                 };
 
-                disc_cmp.then_with(|| {
-                    let left_track = parse_track_or_disc_number(&left.track_number);
-                    let right_track = parse_track_or_disc_number(&right.track_number);
-                    match (left_track, right_track) {
-                        (None, Some(_)) => std::cmp::Ordering::Greater,
-                        (Some(_), None) => std::cmp::Ordering::Less,
-                        (Some(l), Some(r)) => l.cmp(&r),
-                        (None, None) => std::cmp::Ordering::Equal,
-                    }
-                }).then_with(|| {
-                    song_title_label(&left.title, &left.path)
-                        .to_lowercase()
-                        .cmp(&song_title_label(&right.title, &right.path).to_lowercase())
-                }).then_with(|| {
-                    left.path.cmp(&right.path)
-                })
+                disc_cmp
+                    .then_with(|| {
+                        let left_track = parse_track_or_disc_number(&left.track_number);
+                        let right_track = parse_track_or_disc_number(&right.track_number);
+                        match (left_track, right_track) {
+                            (None, Some(_)) => std::cmp::Ordering::Greater,
+                            (Some(_), None) => std::cmp::Ordering::Less,
+                            (Some(l), Some(r)) => l.cmp(&r),
+                            (None, None) => std::cmp::Ordering::Equal,
+                        }
+                    })
+                    .then_with(|| {
+                        song_title_label(&left.title, &left.path)
+                            .to_lowercase()
+                            .cmp(&song_title_label(&right.title, &right.path).to_lowercase())
+                    })
+                    .then_with(|| left.path.cmp(&right.path))
             }
         });
 
-        Ok::<Vec<String>, String>(song_rows.into_iter().map(|row| row.path).collect())
+        let offset = offset.unwrap_or(0) as usize;
+        let limit = limit
+            .map(|value| value.clamp(1, 512) as usize)
+            .unwrap_or(usize::MAX);
+        Ok::<Vec<String>, String>(
+            song_rows
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .map(|row| row.path)
+                .collect(),
+        )
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1537,6 +1607,19 @@ mod tests {
             [],
         )
         .expect("create cached song artist schema");
+        conn.execute(
+            "CREATE VIRTUAL TABLE song_search_fts USING fts5(
+                title_full, title_initials, artist_full, artist_initials,
+                album_full, album_initials, album_artist_full, album_artist_initials
+            )",
+            [],
+        )
+        .expect("create cached song search index");
+        conn.execute(
+            "CREATE VIRTUAL TABLE song_search_literal_fts USING fts5(literal_text, tokenize='trigram')",
+            [],
+        )
+        .expect("create cached literal search index");
     }
 
     fn create_album_catalog_schema(conn: &Connection) {
@@ -2077,10 +2160,6 @@ mod tests {
                 path: "/a/song1.flac".to_string(),
                 title: "Song 1".to_string(),
                 artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                album_artist: "Artist".to_string(),
-                artist_names: vec![],
-                effective_artist_names: vec![],
                 added_at: None,
                 track_number: Some("1".to_string()),
                 disc_number: Some("2".to_string()),
@@ -2089,10 +2168,6 @@ mod tests {
                 path: "/a/song2.flac".to_string(),
                 title: "Song 2".to_string(),
                 artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                album_artist: "Artist".to_string(),
-                artist_names: vec![],
-                effective_artist_names: vec![],
                 added_at: None,
                 track_number: Some("2".to_string()),
                 disc_number: Some("1".to_string()),
@@ -2101,10 +2176,6 @@ mod tests {
                 path: "/a/song3.flac".to_string(),
                 title: "Song 3".to_string(),
                 artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                album_artist: "Artist".to_string(),
-                artist_names: vec![],
-                effective_artist_names: vec![],
                 added_at: None,
                 track_number: Some("1".to_string()),
                 disc_number: Some("1".to_string()),
@@ -2113,10 +2184,6 @@ mod tests {
                 path: "/a/song4.flac".to_string(),
                 title: "Song 4".to_string(),
                 artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                album_artist: "Artist".to_string(),
-                artist_names: vec![],
-                effective_artist_names: vec![],
                 added_at: None,
                 track_number: None,
                 disc_number: Some("1".to_string()),

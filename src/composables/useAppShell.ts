@@ -20,6 +20,7 @@ import { releaseStartupCompositionMask, waitForStartupRevealReadiness } from './
 import { clearStartupThemePaint } from './startupTheme';
 import { useUiStore } from '../shared/stores/ui';
 import { useMainWindowRenderingPower } from './renderingPower';
+import { useLibrarySearchIndex } from './useLibrarySearchIndex';
 
 export function useAppShell() {
   const {
@@ -63,6 +64,7 @@ export function useAppShell() {
   let startupCompositionMaskStartedAt = 0;
 
   useMainWindowRenderingPower();
+  useLibrarySearchIndex();
 
   const prepareStartupTransparentComposition = async () => {
     await whenInitialThemeSynced();

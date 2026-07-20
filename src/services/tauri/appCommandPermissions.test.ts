@@ -12,8 +12,12 @@ describe('Tauri app command permissions', () => {
     const requiredCommands = [
       'get_library_song_paths_cached',
       'get_library_song_page',
+      'get_library_song_path_page_for_all_view',
       'get_library_songs_by_paths',
       'get_library_song_labels_for_all_view',
+      'get_search_index_status',
+      'get_search_index_batch',
+      'upsert_search_index_batch',
       'get_library_album_catalog_by_artist',
       'get_song_runtime_metadata',
     ];

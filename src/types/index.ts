@@ -58,9 +58,46 @@ export interface LibrarySongPage {
   rows: LibrarySong[];
 }
 
+export interface LibrarySongPathPage {
+  total: number;
+  offset: number;
+  paths: string[];
+}
+
 export interface LibrarySongLabel {
   path: string;
   label: string;
+}
+
+export interface SearchIndexStatus {
+  total: number;
+  indexed: number;
+  version: number;
+}
+
+export interface SearchIndexSource {
+  songId: number;
+  path: string;
+  title: string;
+  artistNames: string[];
+  album: string;
+  albumArtist: string;
+  sourceSignature: string;
+}
+
+export interface SearchIndexEntry {
+  songId: number;
+  titleFull: string;
+  titleInitials: string;
+  artistFull: string;
+  artistInitials: string;
+  albumFull: string;
+  albumInitials: string;
+  albumArtistFull: string;
+  albumArtistInitials: string;
+  literalText: string;
+  titleSortKey: string;
+  sourceSignature: string;
 }
 
 export interface SongRuntimeMetadata {

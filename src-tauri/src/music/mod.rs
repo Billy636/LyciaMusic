@@ -6,6 +6,7 @@ pub mod files;
 pub mod library;
 pub mod lyrics;
 pub mod scanner;
+pub mod search;
 pub mod sidebar;
 pub mod tags;
 pub mod types;
@@ -26,14 +27,15 @@ pub use library::{
     add_library_folder, get_folder_children, get_library_album_catalog,
     get_library_album_catalog_by_artist, get_library_artist_catalog, get_library_folders,
     get_library_hierarchy, get_library_song_labels_for_all_view, get_library_song_page,
-    get_library_song_paths_by_album, get_library_song_paths_by_artist,
-    get_library_song_paths_cached, get_library_song_paths_for_all_view,
-    get_library_song_paths_for_folder_view, get_library_songs_by_paths, get_library_songs_cached,
-    remove_library_folder, scan_library,
+    get_library_song_path_page_for_all_view, get_library_song_paths_by_album,
+    get_library_song_paths_by_artist, get_library_song_paths_cached,
+    get_library_song_paths_for_all_view, get_library_song_paths_for_folder_view,
+    get_library_songs_by_paths, get_library_songs_cached, remove_library_folder, scan_library,
 };
 pub use scanner::{
     get_folder_first_song, parse_audio_files, scan_folder_as_playlists, scan_music_folder,
 };
+pub use search::{get_search_index_batch, get_search_index_status, upsert_search_index_batch};
 // Deprecated compatibility exports. Keep registered for legacy data/tools only.
 pub use sidebar::{
     add_sidebar_folder, get_sidebar_folders, get_sidebar_hierarchy, remove_sidebar_folder,

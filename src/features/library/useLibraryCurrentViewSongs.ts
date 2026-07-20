@@ -1,5 +1,8 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue';
 import { useLibraryStore } from './store';
+import { storeToRefs } from 'pinia';
+import { useNavigationStore } from '../../shared/stores/navigation';
+import { tauriInvoke } from '../../services/tauri/invoke';
 
 import {
   isStaleLibraryPathRequestError,
@@ -64,6 +67,7 @@ export function useLibraryCurrentViewSongs({
   debugOwnerId = 0,
 }: UseLibraryCurrentViewSongsOptions) {
   const libraryStore = useLibraryStore();
+  const { searchRevision } = storeToRefs(useNavigationStore());
 
   const allViewLoading = ref(false);
   const allViewUseCanonicalFallback = ref(false);
@@ -72,14 +76,23 @@ export function useLibraryCurrentViewSongs({
 
   const { loadAllViewSongPaths } = useLibraryAllSongPathCache();
   const { loadFavoriteSongPaths, loadRecentSongPaths } = useLibraryCollectionSongPathCache();
-  const { loadArtistSongPaths, loadAlbumSongPaths } = useLibraryDetailSongPathCache();
+  const { loadAlbumSongPaths } = useLibraryDetailSongPathCache();
   const { loadFolderViewSongPaths } = useLibraryFolderSongPathCache();
   const allViewSongPaths = ref<string[]>([]);
+  const allSearchTotal = ref(0);
+  const allSearchLoadingMore = ref(false);
+  const activeAllSearchKey = ref('');
   const favoriteViewSongPaths = ref<string[]>([]);
   const recentViewSongPaths = ref<string[]>([]);
   const folderViewSongPaths = ref<string[]>([]);
   const playlistViewSongPaths = ref<string[]>([]);
   const detailViewSongPaths = ref<string[]>([]);
+  const favoriteSearchHasMore = ref(false);
+  const recentSearchHasMore = ref(false);
+  const folderSearchHasMore = ref(false);
+  const playlistSearchHasMore = ref(false);
+  const detailSearchHasMore = ref(false);
+  const secondarySearchLoadingMore = ref(false);
   let allViewRequestId = 0;
   let favoriteViewRequestId = 0;
   let recentViewRequestId = 0;
@@ -97,6 +110,7 @@ export function useLibraryCurrentViewSongs({
       currentAlbumFilter,
       localSortMode,
       canonicalSongPaths,
+      searchRevision,
     ],
     async ([viewMode, query, musicTab, artistFilter, albumFilter, sortMode]) => {
       const requestId = ++allViewRequestId;
@@ -144,6 +158,38 @@ export function useLibraryCurrentViewSongs({
       }
 
       allViewLoading.value = true;
+
+      if (query.trim() && sortMode !== 'custom') {
+        activeAllSearchKey.value = nextQueryKey;
+        try {
+          const page = await tauriInvoke('get_library_song_path_page_for_all_view', {
+            query,
+            artistFilter: musicTab === 'artist' ? artistFilter : '',
+            albumFilter: musicTab === 'album' ? albumFilter : '',
+            sortMode,
+            offset: 0,
+            limit: 256,
+          });
+          if (requestId === allViewRequestId && activeAllSearchKey.value === nextQueryKey) {
+            allViewSongPaths.value = page.paths;
+            allSearchTotal.value = page.total;
+            lastSuccessfulAllViewSongPaths.value = page.paths;
+          }
+        } catch {
+          if (requestId === allViewRequestId) {
+            allViewSongPaths.value = [];
+            allSearchTotal.value = 0;
+          }
+        } finally {
+          if (requestId === allViewRequestId) {
+            allViewLoading.value = false;
+          }
+        }
+        return;
+      }
+
+      activeAllSearchKey.value = '';
+      allSearchTotal.value = 0;
 
       // 扫描导入版本风暴控制：若正处于扫描中且已有旧成功数据，为防 batch 频繁失效风暴，延迟加载并使用旧列表做过渡渲染
       const isScanning = !!libraryStore.libraryScanProgress && !libraryStore.libraryScanProgress.done;
@@ -226,18 +272,21 @@ export function useLibraryCurrentViewSongs({
       favDetailFilter,
       localSortMode,
       canonicalSongPaths,
+      searchRevision,
     ],
     async ([viewMode, paths, query, currentFavTab, detailFilter, sortMode]) => {
       const requestId = ++favoriteViewRequestId;
 
       if (viewMode !== 'favorites') {
         favoriteViewSongPaths.value = [];
+        favoriteSearchHasMore.value = false;
         return;
       }
 
       const effectiveDetailFilter = currentFavTab === 'songs' ? null : detailFilter;
       if (paths.length === 0 || (currentFavTab !== 'songs' && !effectiveDetailFilter)) {
         favoriteViewSongPaths.value = [];
+        favoriteSearchHasMore.value = false;
         return;
       }
 
@@ -247,7 +296,23 @@ export function useLibraryCurrentViewSongs({
           : effectiveDetailFilter?.type === 'album'
             ? { type: 'album' as const, name: effectiveDetailFilter.name }
             : { type: 'artist' as const, name: effectiveDetailFilter!.name };
-
+        if (query.trim() && sortMode !== 'custom') {
+          const nextPaths = await tauriInvoke('get_favorite_song_paths_view', {
+            favoritePaths: paths,
+            query,
+            sortMode,
+            detailFilterType: resolvedDetailFilter?.type,
+            detailFilterValue: resolvedDetailFilter?.name,
+            offset: 0,
+            limit: 256,
+          });
+          if (requestId === favoriteViewRequestId) {
+            favoriteViewSongPaths.value = nextPaths;
+            favoriteSearchHasMore.value = nextPaths.length === 256;
+          }
+          return;
+        }
+        favoriteSearchHasMore.value = false;
         const nextPaths = await loadFavoriteSongPaths({
           favoritePaths: paths,
           query,
@@ -278,21 +343,39 @@ export function useLibraryCurrentViewSongs({
       searchQuery,
       localSortMode,
       canonicalSongPaths,
+      searchRevision,
     ],
     async ([viewMode, items, query, sortMode]) => {
       const requestId = ++recentViewRequestId;
 
       if (viewMode !== 'recent') {
         recentViewSongPaths.value = [];
+        recentSearchHasMore.value = false;
         return;
       }
 
       if (items.length === 0) {
         recentViewSongPaths.value = [];
+        recentSearchHasMore.value = false;
         return;
       }
 
       try {
+        if (query.trim() && sortMode !== 'custom') {
+          const nextPaths = await tauriInvoke('get_recent_song_paths_view', {
+            recentEntries: items.map(item => ({ songPath: item.path, playedAt: item.playedAt })),
+            query,
+            sortMode,
+            offset: 0,
+            limit: 256,
+          });
+          if (requestId === recentViewRequestId) {
+            recentViewSongPaths.value = nextPaths;
+            recentSearchHasMore.value = nextPaths.length === 256;
+          }
+          return;
+        }
+        recentSearchHasMore.value = false;
         const nextPaths = await loadRecentSongPaths({
           recentSongs: items,
           query,
@@ -322,16 +405,33 @@ export function useLibraryCurrentViewSongs({
       searchQuery,
       folderSortMode,
       currentFolderSongPaths,
+      searchRevision,
     ],
     async ([viewMode, folderFilter, query, sortMode]) => {
       const requestId = ++folderViewRequestId;
 
       if (viewMode !== 'folder' || !folderFilter) {
         folderViewSongPaths.value = [];
+        folderSearchHasMore.value = false;
         return;
       }
 
       try {
+        if (query.trim() && sortMode !== 'custom') {
+          const nextPaths = await tauriInvoke('get_library_song_paths_for_folder_view', {
+            folderPath: folderFilter,
+            query,
+            sortMode,
+            offset: 0,
+            limit: 256,
+          });
+          if (requestId === folderViewRequestId) {
+            folderViewSongPaths.value = nextPaths;
+            folderSearchHasMore.value = nextPaths.length === 256;
+          }
+          return;
+        }
+        folderSearchHasMore.value = false;
         const nextPaths = await loadFolderViewSongPaths({
           folderPath: folderFilter,
           query,
@@ -355,11 +455,12 @@ export function useLibraryCurrentViewSongs({
   );
 
   watch(
-    [currentViewMode, playlists, filterCondition, searchQuery, playlistSortMode, canonicalSongPaths],
+    [currentViewMode, playlists, filterCondition, searchQuery, playlistSortMode, canonicalSongPaths, searchRevision],
     async ([viewMode, , , query, sortMode]) => {
       const requestId = ++playlistViewRequestId;
       if (viewMode !== 'playlist') {
         playlistViewSongPaths.value = [];
+        playlistSearchHasMore.value = false;
         return;
       }
 
@@ -367,10 +468,26 @@ export function useLibraryCurrentViewSongs({
       const paths = playlist?.songPaths.filter(path => canonicalPathSet.value.has(path)) ?? [];
       if (paths.length === 0) {
         playlistViewSongPaths.value = [];
+        playlistSearchHasMore.value = false;
         return;
       }
 
       try {
+        if (query.trim() && sortMode !== 'custom') {
+          const resolvedPaths = await tauriInvoke('get_favorite_song_paths_view', {
+            favoritePaths: paths,
+            query,
+            sortMode,
+            offset: 0,
+            limit: 256,
+          });
+          if (requestId === playlistViewRequestId) {
+            playlistViewSongPaths.value = resolvedPaths;
+            playlistSearchHasMore.value = resolvedPaths.length === 256;
+          }
+          return;
+        }
+        playlistSearchHasMore.value = false;
         const resolvedPaths = await loadFavoriteSongPaths({
           favoritePaths: paths,
           query,
@@ -399,19 +516,44 @@ export function useLibraryCurrentViewSongs({
       localSortMode,
       albumDetailSortMode,
       canonicalSongPaths,
+      searchRevision,
     ],
     async ([viewMode, filter, query, currentLocalSortMode, currentAlbumSortMode]) => {
       const requestId = ++detailViewRequestId;
 
       if (!filter || (viewMode !== 'artist' && viewMode !== 'album')) {
         detailViewSongPaths.value = [];
+        detailSearchHasMore.value = false;
         return;
       }
 
       try {
+        if (query.trim() && !(viewMode === 'artist' && currentLocalSortMode === 'custom')) {
+          const sortMode = viewMode === 'artist'
+            ? currentLocalSortMode === 'custom' ? 'title' : currentLocalSortMode
+            : currentAlbumSortMode;
+          const page = await tauriInvoke('get_library_song_path_page_for_all_view', {
+            query,
+            artistFilter: viewMode === 'artist' ? filter : '',
+            albumFilter: viewMode === 'album' ? filter : '',
+            sortMode,
+            offset: 0,
+            limit: 256,
+          });
+          if (requestId === detailViewRequestId) {
+            detailViewSongPaths.value = page.paths;
+            detailSearchHasMore.value = page.paths.length < page.total;
+          }
+          return;
+        }
+        detailSearchHasMore.value = false;
         const paths = viewMode === 'artist'
           ? currentLocalSortMode === 'custom'
-            ? await loadArtistSongPaths(filter)
+            ? await loadAllViewSongPaths({
+                query,
+                artistFilter: filter,
+                sortMode: 'title',
+              })
             : await loadAllViewSongPaths({
                 query,
                 artistFilter: filter,
@@ -511,6 +653,7 @@ export function useLibraryCurrentViewSongs({
   };
 
   const currentViewSongPaths = computed(() => {
+    searchRevision.value;
     const profileStart = isProfilingEnabled() ? performance.now() : 0;
     const result = (() => {
     if (searchQuery.value.trim()) {
@@ -558,21 +701,13 @@ export function useLibraryCurrentViewSongs({
       }
 
       if (currentViewMode.value === 'artist') {
-        const filteredPaths = songLookup.value.size === 0
-          ? detailViewSongPaths.value
-          : detailViewSongPaths.value.filter(matchesQuery);
         return localSortMode.value === 'custom'
-          ? filteredPaths
-          : sortSongPathsByLocalMode(filteredPaths, localSortMode.value);
+          ? applyCustomPathOrder(detailViewSongPaths.value, localCustomOrder.value)
+          : detailViewSongPaths.value;
       }
 
       if (currentViewMode.value === 'album') {
-        return sortSongPathsByAlbumDetailMode(
-          songLookup.value.size === 0
-            ? detailViewSongPaths.value
-            : detailViewSongPaths.value.filter(matchesQuery),
-          albumDetailSortMode.value,
-        );
+        return detailViewSongPaths.value;
       }
 
       if (currentViewMode.value === 'playlist') {
@@ -668,8 +803,146 @@ export function useLibraryCurrentViewSongs({
     return songs;
   });
 
+  const loadMoreCurrentSearchResults = async () => {
+    if (!searchQuery.value.trim()) {
+      return;
+    }
+
+    if (currentViewMode.value === 'all') {
+      if (
+        localSortMode.value === 'custom'
+        || allSearchLoadingMore.value
+        || allViewSongPaths.value.length >= allSearchTotal.value
+      ) {
+        return;
+      }
+      const queryKey = activeAllSearchKey.value;
+      const offset = allViewSongPaths.value.length;
+      allSearchLoadingMore.value = true;
+      try {
+        const page = await tauriInvoke('get_library_song_path_page_for_all_view', {
+          query: searchQuery.value,
+          artistFilter: localMusicTab.value === 'artist' ? currentArtistFilter.value : '',
+          albumFilter: localMusicTab.value === 'album' ? currentAlbumFilter.value : '',
+          sortMode: localSortMode.value,
+          offset,
+          limit: 256,
+        });
+        if (queryKey === activeAllSearchKey.value && offset === allViewSongPaths.value.length) {
+          allViewSongPaths.value = [...allViewSongPaths.value, ...page.paths];
+          allSearchTotal.value = page.total;
+        }
+      } finally {
+        if (queryKey === activeAllSearchKey.value) {
+          allSearchLoadingMore.value = false;
+        }
+      }
+      return;
+    }
+
+    if (secondarySearchLoadingMore.value) {
+      return;
+    }
+    const query = searchQuery.value;
+    const viewMode = currentViewMode.value;
+    secondarySearchLoadingMore.value = true;
+    try {
+      if (viewMode === 'favorites' && favoriteSearchHasMore.value && localSortMode.value !== 'custom') {
+        const effectiveDetailFilter = favTab.value === 'songs' ? null : favDetailFilter.value;
+        const paths = await tauriInvoke('get_favorite_song_paths_view', {
+          favoritePaths: favoriteSongPaths.value,
+          query,
+          sortMode: localSortMode.value,
+          detailFilterType: effectiveDetailFilter?.type,
+          detailFilterValue: effectiveDetailFilter?.name,
+          offset: favoriteViewSongPaths.value.length,
+          limit: 256,
+        });
+        if (query === searchQuery.value && viewMode === currentViewMode.value) {
+          favoriteViewSongPaths.value = [...favoriteViewSongPaths.value, ...paths];
+          favoriteSearchHasMore.value = paths.length === 256;
+        }
+      } else if (viewMode === 'recent' && recentSearchHasMore.value && localSortMode.value !== 'custom') {
+        const paths = await tauriInvoke('get_recent_song_paths_view', {
+          recentEntries: recentSongs.value.map(item => ({ songPath: item.path, playedAt: item.playedAt })),
+          query,
+          sortMode: localSortMode.value,
+          offset: recentViewSongPaths.value.length,
+          limit: 256,
+        });
+        if (query === searchQuery.value && viewMode === currentViewMode.value) {
+          recentViewSongPaths.value = [...recentViewSongPaths.value, ...paths];
+          recentSearchHasMore.value = paths.length === 256;
+        }
+      } else if (viewMode === 'folder' && folderSearchHasMore.value && folderSortMode.value !== 'custom') {
+        const paths = await tauriInvoke('get_library_song_paths_for_folder_view', {
+          folderPath: currentFolderFilter.value,
+          query,
+          sortMode: folderSortMode.value,
+          offset: folderViewSongPaths.value.length,
+          limit: 256,
+        });
+        if (query === searchQuery.value && viewMode === currentViewMode.value) {
+          folderViewSongPaths.value = [...folderViewSongPaths.value, ...paths];
+          folderSearchHasMore.value = paths.length === 256;
+        }
+      } else if (viewMode === 'playlist' && playlistSearchHasMore.value && playlistSortMode.value !== 'custom') {
+        const playlist = playlists.value.find(item => item.id === filterCondition.value);
+        const paths = await tauriInvoke('get_favorite_song_paths_view', {
+          favoritePaths: playlist?.songPaths ?? [],
+          query,
+          sortMode: playlistSortMode.value,
+          offset: playlistViewSongPaths.value.length,
+          limit: 256,
+        });
+        if (query === searchQuery.value && viewMode === currentViewMode.value) {
+          playlistViewSongPaths.value = [...playlistViewSongPaths.value, ...paths];
+          playlistSearchHasMore.value = paths.length === 256;
+        }
+      } else if ((viewMode === 'artist' || viewMode === 'album') && detailSearchHasMore.value) {
+        if (viewMode === 'artist' && localSortMode.value === 'custom') {
+          return;
+        }
+        const page = await tauriInvoke('get_library_song_path_page_for_all_view', {
+          query,
+          artistFilter: viewMode === 'artist' ? filterCondition.value : '',
+          albumFilter: viewMode === 'album' ? filterCondition.value : '',
+          sortMode: viewMode === 'artist'
+            ? localSortMode.value === 'custom' ? 'title' : localSortMode.value
+            : albumDetailSortMode.value,
+          offset: detailViewSongPaths.value.length,
+          limit: 256,
+        });
+        if (query === searchQuery.value && viewMode === currentViewMode.value) {
+          detailViewSongPaths.value = [...detailViewSongPaths.value, ...page.paths];
+          detailSearchHasMore.value = detailViewSongPaths.value.length < page.total;
+        }
+      }
+    } finally {
+      secondarySearchLoadingMore.value = false;
+    }
+  };
+
+  const hasMoreCurrentSearchResults = computed(() => {
+    if (!searchQuery.value.trim()) return false;
+    if (currentViewMode.value === 'all') return allViewSongPaths.value.length < allSearchTotal.value;
+    if (currentViewMode.value === 'favorites') return favoriteSearchHasMore.value;
+    if (currentViewMode.value === 'recent') return recentSearchHasMore.value;
+    if (currentViewMode.value === 'folder') return folderSearchHasMore.value;
+    if (currentViewMode.value === 'playlist') return playlistSearchHasMore.value;
+    if (currentViewMode.value === 'artist' || currentViewMode.value === 'album') return detailSearchHasMore.value;
+    return false;
+  });
+
   return {
     currentViewSongPaths,
     currentViewSongs,
+    loadMoreCurrentSearchResults,
+    hasMoreCurrentSearchResults,
+    currentSearchResultTotal: computed(() => (
+      currentViewMode.value === 'all' && searchQuery.value.trim()
+        ? allSearchTotal.value
+        : currentViewSongPaths.value.length
+    )),
   };
 }

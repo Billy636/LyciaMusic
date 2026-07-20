@@ -6,6 +6,10 @@ import type {
   LibrarySong,
   LibrarySongLabel,
   LibrarySongPage,
+  LibrarySongPathPage,
+  SearchIndexEntry,
+  SearchIndexSource,
+  SearchIndexStatus,
   RecentAlbumCatalogItem,
   RecentPlaylistCatalogItem,
   Playlist,
@@ -215,6 +219,8 @@ export interface TauriCommandMap {
       folderPath: string;
       query?: string;
       sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'track_number';
+      offset?: number;
+      limit?: number;
     };
     response: string[];
   };
@@ -314,6 +320,26 @@ export interface TauriCommandMap {
     };
     response: LibrarySongPage;
   };
+  get_library_song_path_page_for_all_view: {
+    payload: {
+      query?: string;
+      artistFilter?: string;
+      albumFilter?: string;
+      sortMode: 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc' | 'track_number' | 'track_number_desc';
+      offset: number;
+      limit: number;
+    };
+    response: LibrarySongPathPage;
+  };
+  get_search_index_status: { payload: undefined; response: SearchIndexStatus };
+  get_search_index_batch: {
+    payload: { limit: number };
+    response: SearchIndexSource[];
+  };
+  upsert_search_index_batch: {
+    payload: { entries: SearchIndexEntry[] };
+    response: SearchIndexStatus;
+  };
   get_library_songs_by_paths: { payload: { paths: string[] }; response: LibrarySong[] };
   get_library_song_paths_cached: { payload: undefined; response: string[] };
   get_library_song_labels_for_all_view: {
@@ -344,6 +370,8 @@ export interface TauriCommandMap {
       sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
       detailFilterType?: 'artist' | 'album';
       detailFilterValue?: string;
+      offset?: number;
+      limit?: number;
     };
     response: string[];
   };
@@ -356,6 +384,8 @@ export interface TauriCommandMap {
       recentEntries: RecentHistoryImportRecord[];
       query?: string;
       sortMode: 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
+      offset?: number;
+      limit?: number;
     };
     response: string[];
   };

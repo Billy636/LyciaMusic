@@ -118,6 +118,13 @@ pub struct LibrarySongPage {
 }
 
 #[derive(Serialize, Clone, Debug)]
+pub struct LibrarySongPathPage {
+    pub total: u64,
+    pub offset: u32,
+    pub paths: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
 pub struct LibrarySongLabel {
     pub path: String,
     pub label: String,
