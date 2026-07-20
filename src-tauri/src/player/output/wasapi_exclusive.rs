@@ -183,18 +183,8 @@ impl ExclusiveSource {
         let reader = BufReader::with_capacity(512 * 1024, file);
         let decoder = Decoder::new(reader).map_err(|error| error.to_string())?;
         let sample_rate = decoder.sample_rate();
-        let channels = decoder.channels();
-        let samples_at_target =
-            (start_time.as_secs_f64() * sample_rate as f64 * channels as f64).round() as u64;
 
-        progress.sample_rate.store(sample_rate, Ordering::Relaxed);
-        progress.channels.store(channels as u32, Ordering::Relaxed);
-        progress
-            .samples_played
-            .store(samples_at_target, Ordering::Relaxed);
-        progress.visualizer.reset();
-
-        // 按照管线顺序装配: Decoder -> VolumeNormalizer -> Equalizer -> UserVolumeSource -> ClipGuardSource
+        // 按照管线顺序装配: Decoder -> Stereo -> VolumeNormalizer -> Equalizer -> UserVolumeSource -> ClipGuardSource
         let decoded = decoder.convert_samples::<f32>().skip_duration(start_time);
         let mut source_chain: Box<dyn Source<Item = f32> + Send> = Box::new(decoded);
 
@@ -203,6 +193,17 @@ impl ExclusiveSource {
             let remaining = tot_dur.saturating_sub(resume_time);
             source_chain = Box::new(source_chain.take_duration(remaining));
         }
+        source_chain = crate::player::downmix::into_stereo(source_chain);
+
+        let channels = source_chain.channels();
+        let samples_at_target =
+            (start_time.as_secs_f64() * sample_rate as f64 * channels as f64).round() as u64;
+        progress.sample_rate.store(sample_rate, Ordering::Relaxed);
+        progress.channels.store(channels as u32, Ordering::Relaxed);
+        progress
+            .samples_played
+            .store(samples_at_target, Ordering::Relaxed);
+        progress.visualizer.reset();
 
         let (normalized, normalizer_handle) = crate::player::loudness::VolumeNormalizer::new(
             source_chain,

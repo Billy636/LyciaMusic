@@ -50,10 +50,6 @@ impl<S> DynamicMixerController<S>
 where
     S: Sample + Send + 'static,
 {
-    pub(crate) fn channels(&self) -> u16 {
-        self.channels
-    }
-
     /// Adds a new source to mix to the existing ones.
     #[inline]
     pub fn add<T>(&self, source: T)

@@ -439,7 +439,6 @@ fn append_decoded_source<R>(
         let reader = BufReader::with_capacity(512 * 1024, reader);
         if let Ok(source) = Decoder::new(reader) {
             let rate = source.sample_rate();
-            let source_channels = source.channels();
 
             let offset = start_offset.unwrap_or(Duration::ZERO);
             if start_offset.is_none() {
@@ -453,9 +452,7 @@ fn append_decoded_source<R>(
                 let remaining = tot_dur.saturating_sub(resume_time);
                 source_chain = Box::new(source_chain.take_duration(remaining));
             }
-            if output.needs_stereo_downmix(source_channels) {
-                source_chain = Box::new(crate::player::downmix::StereoDownmixer::new(source_chain));
-            }
+            source_chain = crate::player::downmix::into_stereo(source_chain);
 
             let playback_channels = source_chain.channels();
             progress.sample_rate.store(rate, Ordering::Relaxed);

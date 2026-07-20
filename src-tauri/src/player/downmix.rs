@@ -6,6 +6,90 @@ const CENTER_GAIN: f32 = std::f32::consts::FRAC_1_SQRT_2;
 const SURROUND_GAIN: f32 = std::f32::consts::FRAC_1_SQRT_2;
 const LFE_GAIN: f32 = 0.5;
 
+pub(crate) fn into_stereo(
+    source: Box<dyn Source<Item = f32> + Send>,
+) -> Box<dyn Source<Item = f32> + Send> {
+    match source.channels() {
+        1 => Box::new(MonoToStereo::new(source)),
+        2 => source,
+        _ => Box::new(StereoDownmixer::new(source)),
+    }
+}
+
+struct MonoToStereo<S> {
+    inner: S,
+    pending_repeat: Option<f32>,
+}
+
+impl<S> MonoToStereo<S>
+where
+    S: Source<Item = f32>,
+{
+    fn new(inner: S) -> Self {
+        assert_eq!(inner.channels(), 1);
+        Self {
+            inner,
+            pending_repeat: None,
+        }
+    }
+}
+
+impl<S> Iterator for MonoToStereo<S>
+where
+    S: Source<Item = f32>,
+{
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(sample) = self.pending_repeat.take() {
+            return Some(sample);
+        }
+
+        let sample = self.inner.next()?;
+        self.pending_repeat = Some(sample);
+        Some(sample)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (min, max) = self.inner.size_hint();
+        let pending = usize::from(self.pending_repeat.is_some());
+        (
+            min.saturating_mul(2).saturating_add(pending),
+            max.map(|samples| samples.saturating_mul(2).saturating_add(pending)),
+        )
+    }
+}
+
+impl<S> Source for MonoToStereo<S>
+where
+    S: Source<Item = f32>,
+{
+    fn channels(&self) -> u16 {
+        2
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.inner.sample_rate()
+    }
+
+    fn current_frame_len(&self) -> Option<usize> {
+        self.inner.current_frame_len().map(|samples| {
+            samples
+                .saturating_mul(2)
+                .saturating_add(usize::from(self.pending_repeat.is_some()))
+        })
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
+        self.pending_repeat = None;
+        self.inner.try_seek(pos)
+    }
+}
+
 /// Converts FLAC/surround channel layouts to stereo without dropping the
 /// center, LFE, or surround channels.
 pub(crate) struct StereoDownmixer<S> {
@@ -146,6 +230,22 @@ where
 mod tests {
     use super::*;
     use rodio::buffer::SamplesBuffer;
+
+    #[test]
+    fn mono_is_duplicated_to_both_stereo_channels() {
+        let input = SamplesBuffer::new(1, 44_100, vec![0.25, -0.5]);
+        let output = into_stereo(Box::new(input)).collect::<Vec<_>>();
+
+        assert_eq!(output, vec![0.25, 0.25, -0.5, -0.5]);
+    }
+
+    #[test]
+    fn stereo_samples_are_left_unchanged() {
+        let input = SamplesBuffer::new(2, 44_100, vec![0.1, 0.2, 0.3, 0.4]);
+        let output = into_stereo(Box::new(input)).collect::<Vec<_>>();
+
+        assert_eq!(output, vec![0.1, 0.2, 0.3, 0.4]);
+    }
 
     #[test]
     fn downmixes_all_six_flac_channels_to_stereo() {

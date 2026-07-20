@@ -24,11 +24,6 @@ pub struct OutputStreamHandle {
 }
 
 impl OutputStream {
-    /// Returns the channel count of the format opened for this stream.
-    pub fn channels(&self) -> u16 {
-        self.mixer.channels()
-    }
-
     /// Returns a new stream & handle using the given output device and the default output
     /// configuration.
     pub fn try_from_device(
