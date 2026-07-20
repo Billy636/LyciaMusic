@@ -5,6 +5,7 @@ use std::time::Duration;
 const CENTER_GAIN: f32 = std::f32::consts::FRAC_1_SQRT_2;
 const SURROUND_GAIN: f32 = std::f32::consts::FRAC_1_SQRT_2;
 const LFE_GAIN: f32 = 0.5;
+const BACK_CENTER_GAIN: f32 = 0.5;
 
 pub(crate) fn into_stereo(
     source: Box<dyn Source<Item = f32> + Send>,
@@ -147,6 +148,34 @@ where
                     + SURROUND_GAIN * channel(5),
                 1.0 + CENTER_GAIN + LFE_GAIN + SURROUND_GAIN,
             ),
+            // FL, FR, FC, LFE, BC, SL, SR (6.1 FLAC).
+            7 => (
+                channel(0)
+                    + CENTER_GAIN * channel(2)
+                    + LFE_GAIN * channel(3)
+                    + BACK_CENTER_GAIN * channel(4)
+                    + SURROUND_GAIN * channel(5),
+                channel(1)
+                    + CENTER_GAIN * channel(2)
+                    + LFE_GAIN * channel(3)
+                    + BACK_CENTER_GAIN * channel(4)
+                    + SURROUND_GAIN * channel(6),
+                1.0 + CENTER_GAIN + LFE_GAIN + BACK_CENTER_GAIN + SURROUND_GAIN,
+            ),
+            // FL, FR, FC, LFE, BL, BR, SL, SR (7.1 FLAC).
+            8 => (
+                channel(0)
+                    + CENTER_GAIN * channel(2)
+                    + LFE_GAIN * channel(3)
+                    + SURROUND_GAIN * channel(4)
+                    + SURROUND_GAIN * channel(6),
+                channel(1)
+                    + CENTER_GAIN * channel(2)
+                    + LFE_GAIN * channel(3)
+                    + SURROUND_GAIN * channel(5)
+                    + SURROUND_GAIN * channel(7),
+                1.0 + CENTER_GAIN + LFE_GAIN + SURROUND_GAIN * 2.0,
+            ),
             // For uncommon layouts, retain every channel by distributing
             // additional channels alternately between left and right.
             _ => {
@@ -275,5 +304,23 @@ mod tests {
 
         assert!(output[0] > 0.0);
         assert_eq!(output[0], output[1]);
+    }
+
+    #[test]
+    fn seven_channel_center_and_lfe_are_balanced() {
+        let input = SamplesBuffer::new(7, 44_100, vec![0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
+        let output = StereoDownmixer::new(input).collect::<Vec<_>>();
+
+        assert_eq!(output[0], output[1]);
+        assert!(output[0] > 0.0);
+    }
+
+    #[test]
+    fn eight_channel_surrounds_are_routed_to_the_matching_side() {
+        let input = SamplesBuffer::new(8, 44_100, vec![0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0]);
+        let output = StereoDownmixer::new(input).collect::<Vec<_>>();
+
+        assert!(output[1] > output[0]);
+        assert!(output[0] > 0.0);
     }
 }
