@@ -13,6 +13,7 @@ pub(crate) struct SharedOutputBackend {
     _stream: OutputStream,
     handle: OutputStreamHandle,
     active_device_name: String,
+    channels: u16,
 }
 
 impl SharedOutputBackend {
@@ -41,12 +42,18 @@ impl SharedOutputBackend {
     fn from_device(device: &cpal::Device, active_device_name: String) -> Result<Self, OutputError> {
         let (stream, handle) = OutputStream::try_from_device(device)
             .map_err(|error| OutputError::Stream(error.to_string()))?;
+        let channels = stream.channels();
 
         Ok(Self {
             _stream: stream,
             handle,
             active_device_name,
+            channels,
         })
+    }
+
+    pub(crate) fn needs_stereo_downmix(&self, source_channels: u16) -> bool {
+        self.channels == 2 && source_channels > 2
     }
 }
 
@@ -95,12 +102,17 @@ pub(crate) fn restore_current_playback(
         if let Ok(file) = File::open(current_path) {
             let reader = BufReader::with_capacity(512 * 1024, file);
             if let Ok(source) = Decoder::new(reader) {
+                let source_channels = source.channels();
                 let skipped = source.convert_samples::<f32>().skip_duration(jump_target);
                 let mut source_chain: Box<dyn Source<Item = f32> + Send> = Box::new(skipped);
                 if let Some(tot_dur) = total_duration {
                     let resume_time = jump_target.saturating_sub(cue_start_offset);
                     let remaining = tot_dur.saturating_sub(resume_time);
                     source_chain = Box::new(source_chain.take_duration(remaining));
+                }
+                if output.needs_stereo_downmix(source_channels) {
+                    source_chain =
+                        Box::new(crate::player::downmix::StereoDownmixer::new(source_chain));
                 }
 
                 // 1. Equalizer

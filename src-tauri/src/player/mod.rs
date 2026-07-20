@@ -1,5 +1,6 @@
 mod commands;
 mod device;
+mod downmix;
 pub mod equalizer;
 pub mod loudness;
 mod output;

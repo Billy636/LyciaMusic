@@ -439,16 +439,9 @@ fn append_decoded_source<R>(
         let reader = BufReader::with_capacity(512 * 1024, reader);
         if let Ok(source) = Decoder::new(reader) {
             let rate = source.sample_rate();
-            let channels = source.channels();
-            progress.sample_rate.store(rate, Ordering::Relaxed);
-            progress.channels.store(channels as u32, Ordering::Relaxed);
+            let source_channels = source.channels();
 
             let offset = start_offset.unwrap_or(Duration::ZERO);
-            let skip_samples =
-                (offset.as_secs_f64() * rate as f64 * channels as f64).round() as u64;
-            progress
-                .samples_played
-                .store(skip_samples, Ordering::Relaxed);
             if start_offset.is_none() {
                 progress.visualizer.reset();
             }
@@ -460,6 +453,20 @@ fn append_decoded_source<R>(
                 let remaining = tot_dur.saturating_sub(resume_time);
                 source_chain = Box::new(source_chain.take_duration(remaining));
             }
+            if output.needs_stereo_downmix(source_channels) {
+                source_chain = Box::new(crate::player::downmix::StereoDownmixer::new(source_chain));
+            }
+
+            let playback_channels = source_chain.channels();
+            progress.sample_rate.store(rate, Ordering::Relaxed);
+            progress
+                .channels
+                .store(playback_channels as u32, Ordering::Relaxed);
+            let skip_samples =
+                (offset.as_secs_f64() * rate as f64 * playback_channels as f64).round() as u64;
+            progress
+                .samples_played
+                .store(skip_samples, Ordering::Relaxed);
 
             // 1. VolumeNormalizer 音量平衡节点
             let (normalized_source, handle) = VolumeNormalizer::new(
