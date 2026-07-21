@@ -42,19 +42,33 @@ describe('useThemeSettings', () => {
     expect(isDarkTheme.value).toBe(false);
   });
 
-  it('toggles custom themes from the current resolved display mode', () => {
+  it('toggles only the foreground style while preserving a custom background', () => {
     const settingsStore = useSettingsStore();
-    const { theme, toggleThemeMode } = useThemeSettings();
+    const { theme, isDarkTheme, toggleThemeMode } = useThemeSettings();
 
     settingsStore.patchTheme({
       mode: 'custom',
       customBackground: {
+        imagePath: '/covers/custom.jpg',
+        blur: 28,
         foregroundStyle: 'light',
       },
     });
 
+    expect(isDarkTheme.value).toBe(true);
+
     toggleThemeMode();
 
-    expect(theme.value.mode).toBe('light');
+    expect(theme.value.mode).toBe('custom');
+    expect(theme.value.customBackground.foregroundStyle).toBe('dark');
+    expect(theme.value.customBackground.imagePath).toBe('/covers/custom.jpg');
+    expect(theme.value.customBackground.blur).toBe(28);
+    expect(isDarkTheme.value).toBe(false);
+
+    toggleThemeMode();
+
+    expect(theme.value.mode).toBe('custom');
+    expect(theme.value.customBackground.foregroundStyle).toBe('light');
+    expect(isDarkTheme.value).toBe(true);
   });
 });

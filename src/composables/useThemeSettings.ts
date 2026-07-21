@@ -63,6 +63,16 @@ export function useThemeSettings() {
   };
 
   const toggleThemeMode = () => {
+    if (theme.value.mode === 'custom') {
+      const foregroundStyle = normalizeForegroundStyle(
+        theme.value.customBackground.foregroundStyle,
+      );
+      updateCustomBackground({
+        foregroundStyle: foregroundStyle === 'light' ? 'dark' : 'light',
+      });
+      return;
+    }
+
     setThemeMode(isDarkTheme.value ? 'light' : 'dark');
   };
 
