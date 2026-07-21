@@ -33,10 +33,24 @@ const readPersistedSettings = (): PersistedSettings | null => {
   }
 };
 
+const prefersDarkColorScheme = () => (
+  typeof window !== 'undefined'
+  && typeof window.matchMedia === 'function'
+  && window.matchMedia('(prefers-color-scheme: dark)').matches
+);
+
 const isPersistedDarkTheme = (settings: PersistedSettings | null) => {
+  if (!settings) {
+    return prefersDarkColorScheme();
+  }
+
   const theme = settings?.theme;
   if (!theme || typeof theme !== 'object') {
     return false;
+  }
+
+  if (theme.mode === 'system') {
+    return prefersDarkColorScheme();
   }
 
   if (theme.mode === 'dark') {

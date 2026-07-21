@@ -6,6 +6,7 @@ const TEXT = {
   paletteTitle: '\u914d\u8272\u65b9\u6848',
   darkScheme: '\u6df1\u8272',
   lightScheme: '\u6d45\u8272',
+  systemScheme: '\u8ddf\u968f\u7cfb\u7edf',
   customEmoji: '\u{1F3A8}',
   customTitle: '\u81ea\u5b9a\u4e49\u76ae\u80a4',
   customHint: '\u4f7f\u7528\u56fe\u7247\u3001\u906e\u7f69\u548c\u524d\u666f\u6837\u5f0f',
@@ -84,7 +85,17 @@ const {
         {{ TEXT.paletteTitle }}
       </h2>
       <div class="">
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <button
+            type="button"
+            class="group flex flex-col items-start gap-2 rounded-xl border px-4 py-3 text-left transition-all"
+            :class="colorScheme === 'system' ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm text-[#EC4141]' : 'border-white/30 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/5 dark:hover:border-white/10 dark:hover:bg-white/10 text-gray-800 dark:text-gray-200'"
+            @click="setColorScheme('system')"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 opacity-90 transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8"></path><path d="M12 16v4"></path></svg>
+            <span class="text-sm font-semibold">{{ TEXT.systemScheme }}</span>
+          </button>
+
           <button
             type="button"
             class="group flex flex-col items-start gap-2 rounded-xl border px-4 py-3 text-left transition-all"

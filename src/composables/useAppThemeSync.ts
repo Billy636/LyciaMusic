@@ -12,13 +12,14 @@ export function useAppThemeSync() {
     rebuildWindowMaterialForCompositor,
     loadWindowMaterialCapabilities,
   } = useWindowMaterial();
-  const { theme, isDarkTheme } = useThemeSettings();
+  const { theme, isDarkTheme, setResolvedSystemTheme } = useThemeSettings();
   const appWindow = getCurrentWindow();
 
   const hasWindowMaterial = computed(() => activeWindowMaterial.value !== 'none');
   const isMicaWindowMaterial = computed(() => activeWindowMaterial.value === 'mica');
   let restoreSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let unlistenFocusChanged: UnlistenFn | null = null;
+  let unlistenThemeChanged: UnlistenFn | null = null;
   let syncGeneration = 0;
   let skipNextFocusRestore = false;
   let resolveInitialThemeSync: (() => void) | null = null;
@@ -32,21 +33,35 @@ export function useAppThemeSync() {
   };
 
   const applyTheme = async () => {
+    if (theme.value.mode === 'system') {
+      try {
+        await appWindow.setTheme(null);
+        setResolvedSystemTheme(await appWindow.theme());
+      } catch (error) {
+        setResolvedSystemTheme('light');
+        console.warn('Failed to follow system theme:', error);
+      }
+    }
+
     if (isDarkTheme.value) {
       document.documentElement.classList.add('dark');
-      try {
-        await appWindow.setTheme('dark');
-      } catch (error) {
-        console.warn('Failed to set window theme:', error);
+      if (theme.value.mode !== 'system') {
+        try {
+          await appWindow.setTheme('dark');
+        } catch (error) {
+          console.warn('Failed to set window theme:', error);
+        }
       }
       return;
     }
 
     document.documentElement.classList.remove('dark');
-    try {
-      await appWindow.setTheme('light');
-    } catch (error) {
-      console.warn('Failed to set window theme:', error);
+    if (theme.value.mode !== 'system') {
+      try {
+        await appWindow.setTheme('light');
+      } catch (error) {
+        console.warn('Failed to set window theme:', error);
+      }
     }
   };
 
@@ -148,6 +163,7 @@ export function useAppThemeSync() {
       () => theme.value.windowMaterial,
       () => theme.value.windowBlurTint,
       () => theme.value.customBackground.foregroundStyle,
+      () => isDarkTheme.value,
     ],
     () => {
       void syncThemeAndMaterial();
@@ -164,6 +180,12 @@ export function useAppThemeSync() {
   );
 
   onMounted(() => {
+    void appWindow.onThemeChanged(({ payload }) => {
+      setResolvedSystemTheme(payload);
+    }).then((unlisten) => {
+      unlistenThemeChanged = unlisten;
+    });
+
     void appWindow.onFocusChanged(({ payload: focused }) => {
       if (focused) {
         scheduleRestoreMaterialSync();
@@ -182,6 +204,11 @@ export function useAppThemeSync() {
     if (unlistenFocusChanged) {
       unlistenFocusChanged();
       unlistenFocusChanged = null;
+    }
+
+    if (unlistenThemeChanged) {
+      unlistenThemeChanged();
+      unlistenThemeChanged = null;
     }
   });
 

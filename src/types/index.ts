@@ -292,7 +292,7 @@ export interface LibraryScanSession {
 }
 
 export interface ThemeSettings {
-  mode: 'light' | 'dark' | 'custom';
+  mode: 'system' | 'light' | 'dark' | 'custom';
   dynamicBgType: 'none' | 'flow' | 'blur';
   windowMaterial: 'none' | 'mica' | 'acrylic' | 'blur';
   retainMaterialOnUnfocus: boolean;

@@ -1,4 +1,4 @@
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { storeToRefs } from 'pinia';
 
 import {
@@ -9,7 +9,15 @@ import {
 import type { ThemeSettings } from '../types';
 import type { WindowMaterialMode } from './windowMaterial';
 
+export type ResolvedSystemTheme = 'light' | 'dark';
+
+const systemTheme = ref<ResolvedSystemTheme>('light');
+
 const resolveThemeDarkMode = (theme: ThemeSettings) => {
+  if (theme.mode === 'system') {
+    return systemTheme.value === 'dark';
+  }
+
   if (theme.mode !== 'custom') {
     return theme.mode === 'dark';
   }
@@ -26,7 +34,12 @@ export function useThemeSettings() {
   const { settings, theme } = storeToRefs(settingsStore);
 
   const isCustomTheme = computed(() => theme.value.mode === 'custom');
+  const resolvedSystemTheme = computed(() => systemTheme.value);
   const isDarkTheme = computed(() => resolveThemeDarkMode(theme.value));
+
+  const setResolvedSystemTheme = (nextTheme: ResolvedSystemTheme | null | undefined) => {
+    systemTheme.value = nextTheme === 'dark' ? 'dark' : 'light';
+  };
 
   const replaceTheme = (nextTheme: ThemeSettings) => {
     settingsStore.replaceTheme(nextTheme);
@@ -72,7 +85,9 @@ export function useThemeSettings() {
     settings,
     theme,
     isCustomTheme,
+    resolvedSystemTheme,
     isDarkTheme,
+    setResolvedSystemTheme,
     replaceTheme,
     patchTheme,
     setThemeMode,

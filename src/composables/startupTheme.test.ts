@@ -18,7 +18,7 @@ const createClassList = () => {
   };
 };
 
-const installDomStubs = () => {
+const installDomStubs = (prefersDark = false) => {
   const store = new Map<string, string>();
   const documentElement = {
     classList: createClassList(),
@@ -50,6 +50,15 @@ const installDomStubs = () => {
       clear: () => store.clear(),
       getItem: (key: string) => store.get(key) ?? null,
       setItem: (key: string, value: string) => store.set(key, value),
+    },
+    configurable: true,
+  });
+
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      matchMedia: (query: string) => ({
+        matches: query === '(prefers-color-scheme: dark)' && prefersDark,
+      }),
     },
     configurable: true,
   });
@@ -89,6 +98,37 @@ describe('startup theme bootstrap', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(false);
     expect(document.documentElement.style.backgroundColor).toBe('#fafafa');
     expect(document.body.style.backgroundColor).toBe('#fafafa');
+  });
+
+  it('uses the system color scheme for a new installation', () => {
+    installDomStubs(true);
+
+    applyPersistedStartupTheme();
+
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(document.documentElement.style.backgroundColor).toBe('#121212');
+  });
+
+  it('uses the system color scheme for a persisted system theme', () => {
+    installDomStubs(true);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      theme: { mode: 'system' },
+    }));
+
+    applyPersistedStartupTheme();
+
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+  });
+
+  it('keeps legacy persisted settings without a theme mode light', () => {
+    installDomStubs(true);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      theme: { windowMaterial: 'none' },
+    }));
+
+    applyPersistedStartupTheme();
+
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
   });
 
   it('does not apply startup paint to transparent auxiliary windows', () => {

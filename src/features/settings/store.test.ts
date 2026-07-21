@@ -12,6 +12,26 @@ describe('settings store', () => {
     setActivePinia(createPinia());
   });
 
+  it('uses the system theme by default while preserving persisted explicit modes', () => {
+    const defaults = createDefaultAppSettings();
+
+    expect(defaults.theme.mode).toBe('system');
+    expect(mergeAppSettings(defaults, { theme: { mode: 'light' } }).theme.mode).toBe('light');
+    expect(mergeAppSettings(defaults, { theme: { mode: 'dark' } }).theme.mode).toBe('dark');
+    expect(mergeAppSettings(defaults, { theme: { mode: 'custom' } }).theme.mode).toBe('custom');
+  });
+
+  it('keeps the current theme mode when a persisted mode is invalid', () => {
+    const defaults = createDefaultAppSettings();
+    defaults.theme.mode = 'dark';
+
+    const merged = mergeAppSettings(defaults, {
+      theme: { mode: 'automatic' as unknown as 'system' },
+    });
+
+    expect(merged.theme.mode).toBe('dark');
+  });
+
   it('patches theme settings without losing nested custom background fields', () => {
     const settingsStore = useSettingsStore();
 

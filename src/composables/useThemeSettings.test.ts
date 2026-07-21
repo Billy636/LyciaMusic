@@ -10,15 +10,36 @@ describe('useThemeSettings', () => {
   });
 
   it('toggles between light and dark theme modes', () => {
-    const { theme, toggleThemeMode } = useThemeSettings();
+    const { theme, setThemeMode, toggleThemeMode } = useThemeSettings();
 
-    expect(theme.value.mode).toBe('light');
+    expect(theme.value.mode).toBe('system');
+
+    setThemeMode('light');
 
     toggleThemeMode();
     expect(theme.value.mode).toBe('dark');
 
     toggleThemeMode();
     expect(theme.value.mode).toBe('light');
+  });
+
+  it('resolves the system theme and leaves follow mode when manually toggled', () => {
+    const {
+      theme,
+      isDarkTheme,
+      setResolvedSystemTheme,
+      toggleThemeMode,
+    } = useThemeSettings();
+
+    setResolvedSystemTheme('dark');
+
+    expect(theme.value.mode).toBe('system');
+    expect(isDarkTheme.value).toBe(true);
+
+    toggleThemeMode();
+
+    expect(theme.value.mode).toBe('light');
+    expect(isDarkTheme.value).toBe(false);
   });
 
   it('toggles custom themes from the current resolved display mode', () => {

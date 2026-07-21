@@ -65,8 +65,17 @@ export const normalizeForegroundStyle = (
   foregroundStyle: string | null | undefined,
 ): ThemeSettings['customBackground']['foregroundStyle'] => (foregroundStyle === 'dark' ? 'dark' : 'light');
 
+export const normalizeThemeMode = (
+  mode: unknown,
+  fallback: ThemeSettings['mode'] = 'system',
+): ThemeSettings['mode'] => (
+  mode === 'system' || mode === 'light' || mode === 'dark' || mode === 'custom'
+    ? mode
+    : fallback
+);
+
 export const defaultThemeSettings: ThemeSettings = {
-  mode: 'light',
+  mode: 'system',
   dynamicBgType: 'none',
   windowMaterial: 'none',
   retainMaterialOnUnfocus: false,
@@ -204,6 +213,7 @@ export const mergeThemeSettings = (
   return {
     ...base,
     ...patch,
+    mode: normalizeThemeMode(patch.mode, base.mode),
     customBackground: {
       ...mergedCustomBackground,
       mediaType,
