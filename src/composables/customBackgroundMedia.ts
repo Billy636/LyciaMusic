@@ -1,6 +1,69 @@
+import { tauriInvoke } from '../services/tauri/invoke';
+import type { PreparedCustomBackgroundImage } from '../services/tauri/contracts';
+
 export type CustomBackgroundMediaType = 'image' | 'video';
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'webm']);
+export const CUSTOM_BACKGROUND_VIDEO_MAX_PIXELS = 3840 * 2160;
+export const CUSTOM_BACKGROUND_VIDEO_MAX_EDGE = 3840;
+
+export interface CustomBackgroundRenderTarget {
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+}
+
+const CUSTOM_BACKGROUND_DOWNSCALE_BLUR_THRESHOLD = 4;
+
+export function optimizeCustomBackgroundRenderTarget(
+  target: CustomBackgroundRenderTarget,
+  blurCssPixels: number,
+): CustomBackgroundRenderTarget {
+  if (blurCssPixels < CUSTOM_BACKGROUND_DOWNSCALE_BLUR_THRESHOLD || target.devicePixelRatio <= 1) {
+    return target;
+  }
+
+  const quantize = (value: number) => Math.max(256, Math.ceil(value / 64) * 64);
+  return {
+    width: quantize(target.width / target.devicePixelRatio),
+    height: quantize(target.height / target.devicePixelRatio),
+    devicePixelRatio: 1,
+  };
+}
+
+export function getCustomBackgroundRenderTarget(): CustomBackgroundRenderTarget {
+  const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
+  const quantize = (value: number) => Math.max(256, Math.ceil(value / 64) * 64);
+  return {
+    width: quantize(window.screen.width * devicePixelRatio),
+    height: quantize(window.screen.height * devicePixelRatio),
+    devicePixelRatio,
+  };
+}
+
+export function prepareCustomBackgroundImage(
+  path: string,
+  options: { target?: CustomBackgroundRenderTarget; blurCssPixels?: number } = {},
+): Promise<PreparedCustomBackgroundImage> {
+  const blurCssPixels = Math.max(0, options.blurCssPixels ?? 0);
+  const target = optimizeCustomBackgroundRenderTarget(
+    options.target ?? getCustomBackgroundRenderTarget(),
+    blurCssPixels,
+  );
+  return tauriInvoke('prepare_custom_background_image', {
+    sourcePath: path,
+    targetWidth: target.width,
+    targetHeight: target.height,
+    blurRadius: blurCssPixels * target.devicePixelRatio,
+  });
+}
+
+export function isCustomBackgroundVideoWithinLimit(width: number, height: number) {
+  return width > 0
+    && height > 0
+    && Math.max(width, height) <= CUSTOM_BACKGROUND_VIDEO_MAX_EDGE
+    && width * height <= CUSTOM_BACKGROUND_VIDEO_MAX_PIXELS;
+}
 
 export function resolveCustomBackgroundMediaType(
   path: string,
@@ -35,21 +98,23 @@ export function loadCustomBackgroundMediaMetadata(
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     const cleanup = () => {
-      video.oncanplay = null;
+      video.onloadedmetadata = null;
       video.onerror = null;
       video.removeAttribute('src');
       video.load();
     };
 
-    video.preload = 'auto';
+    video.preload = 'metadata';
     video.muted = true;
     video.playsInline = true;
-    video.oncanplay = () => {
+    video.onloadedmetadata = () => {
       const width = video.videoWidth;
       const height = video.videoHeight;
       cleanup();
-      if (width > 0 && height > 0) {
+      if (isCustomBackgroundVideoWithinLimit(width, height)) {
         resolve({ width, height });
+      } else if (width > 0 && height > 0) {
+        reject(new Error('视频分辨率超过 4K，请选择不高于 3840×2160 的视频'));
       } else {
         reject(new Error('无法读取视频画面尺寸'));
       }

@@ -99,7 +99,8 @@ fn remove_cache_dir_contents(cache_dir: &Path) -> Result<(), String> {
 #[tauri::command]
 pub fn clear_cover_cache(app: AppHandle) -> Result<(), String> {
     let cache_dir = get_cover_cache_dir(&app);
-    remove_cache_dir_contents(&cache_dir)
+    remove_cache_dir_contents(&cache_dir)?;
+    crate::custom_background::clear_custom_background_cache(&app)
 }
 
 fn generate_source_hash(path: &Path) -> String {

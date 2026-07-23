@@ -11,8 +11,11 @@ import { getPreblurredBackgroundUrl } from '../../composables/preblurredBackgrou
 import { useRenderingPower } from '../../composables/renderingPower';
 import { calculateCoverGeometry } from '../../composables/useThemeBackgroundGeometry';
 import {
+  getCustomBackgroundRenderTarget,
   loadCustomBackgroundMediaMetadata,
+  prepareCustomBackgroundImage,
   resolveCustomBackgroundMediaType,
+  type CustomBackgroundRenderTarget,
   type CustomBackgroundMediaType,
 } from '../../composables/customBackgroundMedia';
 import { useCustomBackgroundPreviewState } from '../../composables/customBackgroundPreviewState';
@@ -53,10 +56,20 @@ let customMediaRequestId = 0;
 
 interface RenderedCustomMedia {
   path: string;
+  displayPath: string;
   mediaType: CustomBackgroundMediaType;
 }
 
 const renderedCustomMedia = ref<RenderedCustomMedia | null>(null);
+const customRenderTarget = computed<CustomBackgroundRenderTarget>(() => {
+  const fallback = getCustomBackgroundRenderTarget();
+  const quantize = (value: number) => Math.max(256, Math.ceil(value / 256) * 256);
+  return {
+    width: quantize(containerWidth.value * fallback.devicePixelRatio),
+    height: quantize(containerHeight.value * fallback.devicePixelRatio),
+    devicePixelRatio: fallback.devicePixelRatio,
+  };
+});
 
 // 媒体加载成功前保留上一份可用背景，避免切换或文件失效时出现黑屏。
 watch(
@@ -64,31 +77,53 @@ watch(
     () => theme.value.mode,
     () => theme.value.customBackground?.imagePath,
     () => theme.value.customBackground?.mediaType,
+    () => theme.value.customBackground?.blur,
+    () => customRenderTarget.value.width,
+    () => customRenderTarget.value.height,
   ],
-  async ([mode, path, configuredMediaType]) => {
+  async ([mode, path, configuredMediaType, blur]) => {
     const requestId = ++customMediaRequestId;
     if (mode !== 'custom' || !path) {
+      renderedCustomMedia.value = null;
+      customMediaReady.value = false;
       return;
     }
 
     const mediaType = resolveCustomBackgroundMediaType(path, configuredMediaType);
     try {
-      const metadata = await loadCustomBackgroundMediaMetadata(convertFileSrc(path), mediaType);
+      const prepared = mediaType === 'image'
+        ? await prepareCustomBackgroundImage(path, {
+            target: customRenderTarget.value,
+            blurCssPixels: Number(blur) || 0,
+          })
+        : await loadCustomBackgroundMediaMetadata(convertFileSrc(path), mediaType);
       if (requestId !== customMediaRequestId) return;
 
-      imageNaturalWidth.value = metadata.width;
-      imageNaturalHeight.value = metadata.height;
+      const sourceWidth = 'sourceWidth' in prepared ? prepared.sourceWidth : prepared.width;
+      const sourceHeight = 'sourceHeight' in prepared ? prepared.sourceHeight : prepared.height;
+      imageNaturalWidth.value = sourceWidth;
+      imageNaturalHeight.value = sourceHeight;
       customMediaReady.value = false;
-      renderedCustomMedia.value = { path, mediaType };
+      renderedCustomMedia.value = {
+        path,
+        displayPath: 'displayPath' in prepared ? prepared.displayPath : path,
+        mediaType,
+      };
 
-      patchTheme({
-        customBackground: {
-          ...theme.value.customBackground,
-          mediaType,
-          imageWidth: metadata.width,
-          imageHeight: metadata.height,
-        }
-      });
+      if (
+        theme.value.customBackground.mediaType !== mediaType
+        || theme.value.customBackground.imageWidth !== sourceWidth
+        || theme.value.customBackground.imageHeight !== sourceHeight
+      ) {
+        patchTheme({
+          customBackground: {
+            ...theme.value.customBackground,
+            mediaType,
+            imageWidth: sourceWidth,
+            imageHeight: sourceHeight,
+          }
+        });
+      }
     } catch (err) {
       if (requestId === customMediaRequestId) {
         console.error('Failed to load custom theme background media', err);
@@ -184,17 +219,29 @@ const bgImageSrc = computed(() => {
 });
 
 const customMediaSrc = computed(() => {
-  const path = renderedCustomMedia.value?.path;
+  const path = renderedCustomMedia.value?.displayPath;
   if (!path) return '';
   return path.startsWith('http') || path.startsWith('data:') ? path : convertFileSrc(path);
 });
+
+const shouldSuspendCustomVideo = computed(() => (
+  isMainWindowLowPower.value || isCustomBackgroundPreviewOpen.value || isMiniMode.value
+));
+const customVideoPlaybackSrc = computed(() => (
+  renderedCustomMedia.value?.mediaType === 'video' && !shouldSuspendCustomVideo.value
+    ? customMediaSrc.value
+    : ''
+));
 
 const syncCustomVideoPlayback = async () => {
   const video = customVideoRef.value;
   if (!video) return;
 
-  if (isMainWindowLowPower.value || isCustomBackgroundPreviewOpen.value || isMiniMode.value) {
+  if (shouldSuspendCustomVideo.value || !customVideoPlaybackSrc.value) {
     video.pause();
+    video.removeAttribute('src');
+    video.load();
+    customMediaReady.value = false;
     return;
   }
 
@@ -206,8 +253,11 @@ const syncCustomVideoPlayback = async () => {
 };
 
 watch(
-  [customVideoRef, isMainWindowLowPower, isCustomBackgroundPreviewOpen, isMiniMode],
-  () => { void syncCustomVideoPlayback(); },
+  [customVideoRef, customVideoPlaybackSrc],
+  async () => {
+    await nextTick();
+    void syncCustomVideoPlayback();
+  },
   { immediate: true },
 );
 
@@ -530,6 +580,12 @@ onBeforeUnmount(() => {
   clearFlowEnterAnimationFrame();
   fullCoverRequestId += 1;
   preblurRequestId += 1;
+  const video = customVideoRef.value;
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
 });
 
 const staticMaskClass = computed(() => {
@@ -710,57 +766,46 @@ const customBgTransform = computed(() => {
           }"
         ></div>
 
-        <!-- 完美的物理双层解耦图片布局 -->
-        <div
-          v-if="customBgGeometry"
-          class="absolute"
+        <video
+          v-if="customBgGeometry && renderedCustomMedia?.mediaType === 'video'"
+          ref="customVideoRef"
+          :src="customVideoPlaybackSrc || undefined"
+          autoplay
+          loop
+          muted
+          playsinline
+          preload="metadata"
+          class="absolute block max-w-none max-h-none select-none pointer-events-none transition-opacity duration-700"
           :style="{
-            position: 'absolute',
             left: '50%',
             top: '50%',
             width: `${customBgGeometry.width}px`,
             height: `${customBgGeometry.height}px`,
-            transform: 'translate(-50%, -50%)',
+            objectFit: 'fill',
+            transform: `translate(calc(-50% + ${customBgTransform.tx}px), calc(-50% + ${customBgTransform.ty}px)) scale(${customBgTransform.scale})`,
+            transformOrigin: 'center center',
+            filter: `blur(${activeBackgroundInfo.blur}px)`,
+            opacity: customMediaReady ? (activeBackgroundInfo.opacity ?? 1.0) : 0,
           }"
-        >
-          <video
-            v-if="renderedCustomMedia?.mediaType === 'video'"
-            ref="customVideoRef"
-            :src="customMediaSrc"
-            autoplay
-            loop
-            muted
-            playsinline
-            preload="auto"
-            class="absolute block max-w-none max-h-none select-none pointer-events-none transition-opacity duration-700"
-            :style="{
-              width: '100%',
-              height: '100%',
-              objectFit: 'fill',
-              transform: `translate3d(${customBgTransform.tx}px, ${customBgTransform.ty}px, 0) scale(${customBgTransform.scale})`,
-              transformOrigin: 'center center',
-              filter: `blur(${activeBackgroundInfo.blur}px)`,
-              opacity: customMediaReady ? (activeBackgroundInfo.opacity ?? 1.0) : 0,
-            }"
-            @canplay="customMediaReady = true; syncCustomVideoPlayback()"
-            @error="customMediaReady = false"
-          />
-          <img
-            v-else
-            :src="customMediaSrc"
-            class="absolute block max-w-none max-h-none select-none pointer-events-none transition-all duration-700"
-            :style="{
-              width: '100%',
-              height: '100%',
-              transform: `translate3d(${customBgTransform.tx}px, ${customBgTransform.ty}px, 0) scale(${customBgTransform.scale})`,
-              transformOrigin: 'center center',
-              filter: `blur(${activeBackgroundInfo.blur}px)`,
-              opacity: customMediaReady ? (activeBackgroundInfo.opacity ?? 1.0) : 0,
-            }"
-            @load="customMediaReady = true"
-            @error="customMediaReady = false"
-          />
-        </div>
+          @canplay="customMediaReady = true; syncCustomVideoPlayback()"
+          @error="customMediaReady = false"
+        />
+        <img
+          v-else-if="customBgGeometry"
+          :src="customMediaSrc"
+          class="absolute block max-w-none max-h-none select-none pointer-events-none transition-opacity duration-700"
+          :style="{
+            left: '50%',
+            top: '50%',
+            width: `${customBgGeometry.width}px`,
+            height: `${customBgGeometry.height}px`,
+            transform: `translate(calc(-50% + ${customBgTransform.tx}px), calc(-50% + ${customBgTransform.ty}px)) scale(${customBgTransform.scale})`,
+            transformOrigin: 'center center',
+            opacity: customMediaReady ? (activeBackgroundInfo.opacity ?? 1.0) : 0,
+          }"
+          @load="customMediaReady = true"
+          @error="customMediaReady = false"
+        />
       </div>
     </transition>
 

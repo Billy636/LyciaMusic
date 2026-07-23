@@ -11,6 +11,7 @@ const TEXT = {
   customTitle: '\u81ea\u5b9a\u4e49\u76ae\u80a4',
   customHint: '\u4f7f\u7528\u56fe\u7247\u3001\u906e\u7f69\u548c\u524d\u666f\u6837\u5f0f',
   customShort: '\u81ea\u5b9a\u4e49',
+  editCustom: '\u4fee\u6539\u81ea\u5b9a\u4e49\u76ae\u80a4',
   dynamicTitle: '\u52a8\u6001\u80cc\u666f',
   dynamicHint: '\u8ddf\u968f\u5c01\u9762\u53d8\u5316',
   dynamicOff: '\u5173\u95ed',
@@ -116,15 +117,39 @@ const {
             <span class="text-sm font-semibold">{{ TEXT.lightScheme }}</span>
           </button>
 
-          <button
-            type="button"
-            class="group flex flex-col items-start gap-2 rounded-xl border px-4 py-3 text-left transition-all"
-            :class="colorScheme === 'custom' ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm text-[#EC4141]' : 'border-white/30 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/5 dark:hover:border-white/10 dark:hover:bg-white/10 text-gray-800 dark:text-gray-200'"
-            @click="setColorScheme('custom'); openCustomModal()"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 opacity-90 transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.38 3.46L16 2a4 4 0 01-8 0L3.62 3.46a2 2 0 00-1.34 2.23l.58 3.47a1 1 0 00.99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 002-2V10h2.15a1 1 0 00.99-.84l.58-3.47a2 2 0 00-1.34-2.23z"></path></svg>
-            <span class="text-sm font-semibold">{{ TEXT.customShort }}</span>
-          </button>
+          <div class="relative">
+            <button
+              type="button"
+              class="group flex w-full flex-col items-start gap-2 rounded-xl border px-4 py-3 pr-12 text-left transition-all"
+              :class="colorScheme === 'custom' ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm text-[#EC4141]' : 'border-white/30 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/5 dark:hover:border-white/10 dark:hover:bg-white/10 text-gray-800 dark:text-gray-200'"
+              @click="setColorScheme('custom')"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 opacity-90 transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.38 3.46L16 2a4 4 0 01-8 0L3.62 3.46a2 2 0 00-1.34 2.23l.58 3.47a1 1 0 00.99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 002-2V10h2.15a1 1 0 00.99-.84l.58-3.47a2 2 0 00-1.34-2.23z"></path></svg>
+              <span class="text-sm font-semibold">{{ TEXT.customShort }}</span>
+            </button>
+
+            <button
+              type="button"
+              class="absolute bottom-3 right-3 rounded-full p-1 text-[#EC4141]/70 opacity-60 transition-all duration-300 hover:bg-[#EC4141]/10 hover:opacity-100 focus-visible:bg-[#EC4141]/10 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EC4141]/40"
+              :title="TEXT.editCustom"
+              :aria-label="TEXT.editCustom"
+              @click.stop="openCustomModal"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </section>

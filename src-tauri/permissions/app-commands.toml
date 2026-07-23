@@ -8,6 +8,7 @@ commands.allow = [
   "get_song_cover_thumbnail",
   "get_song_cover",
   "clear_cover_cache",
+  "prepare_custom_background_image",
   "get_song_lyrics",
   "get_song_lyrics_payload",
   "get_song_lyrics_for_edit",

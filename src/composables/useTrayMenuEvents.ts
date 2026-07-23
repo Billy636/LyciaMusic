@@ -38,8 +38,6 @@ let trayMenuSubmenuPlacement: TrayMenuSubmenuPlacement = 'left';
 let isTrayMenuSizeApplied = false;
 let trayMenuSizePromise: Promise<void> | null = null;
 
-const TRAY_MENU_PREWARM_DELAY_MS = 1_600;
-
 async function getTrayMenuWindow() {
   return WebviewWindow.getByLabel(TRAY_MENU_WINDOW_LABEL);
 }
@@ -215,7 +213,6 @@ export function useTrayMenuEvents(router: Router) {
   let unlistenTrayMenu: UnlistenFn | null = null;
   let unlistenTrayMenuOpen: UnlistenFn | null = null;
   let unlistenTrayMenuReady: UnlistenFn | null = null;
-  let trayMenuPrewarmTimer: ReturnType<typeof window.setTimeout> | null = null;
 
   const createTrayMenuState = (): TrayMenuStatePayload => ({
     currentSong: currentSong.value,
@@ -252,17 +249,6 @@ export function useTrayMenuEvents(router: Router) {
       await waitForRoutePaint();
     } finally {
       skipNextPageTransition.value = false;
-    }
-  };
-
-  const prewarmTrayMenu = async () => {
-    try {
-      const targetWindow = await ensureTrayMenuWindow();
-      await waitForTrayMenuReady();
-      await ensureTrayMenuSize(targetWindow);
-      await targetWindow.setAlwaysOnTop(true);
-    } catch (error) {
-      console.warn('Failed to prewarm tray menu window:', error);
     }
   };
 
@@ -311,18 +297,9 @@ export function useTrayMenuEvents(router: Router) {
       markTrayMenuReady();
     });
 
-    trayMenuPrewarmTimer = window.setTimeout(() => {
-      trayMenuPrewarmTimer = null;
-      void prewarmTrayMenu();
-    }, TRAY_MENU_PREWARM_DELAY_MS);
   });
 
   onUnmounted(() => {
-    if (trayMenuPrewarmTimer !== null) {
-      window.clearTimeout(trayMenuPrewarmTimer);
-      trayMenuPrewarmTimer = null;
-    }
-
     unlistenTrayMenu?.();
     unlistenTrayMenuOpen?.();
     unlistenTrayMenuReady?.();

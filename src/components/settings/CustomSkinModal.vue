@@ -4,7 +4,9 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 
 import { useCustomThemeModal } from '../../composables/useCustomThemeModal';
 import {
+  getCustomBackgroundRenderTarget,
   loadCustomBackgroundMediaMetadata,
+  prepareCustomBackgroundImage,
   resolveCustomBackgroundMediaType,
   type CustomBackgroundMediaType,
 } from '../../composables/customBackgroundMedia';
@@ -22,19 +24,57 @@ const {
 const { setCustomBackgroundPreviewOpen } = useCustomBackgroundPreviewState();
 const { isMainWindowLowPower } = useRenderingPower();
 const mediaError = ref('');
+const isPreparingMedia = ref(false);
+const showPreparingMediaStatus = ref(false);
+const previewDisplayPath = ref('');
 const previewVideoRef = ref<HTMLVideoElement | null>(null);
+let preparingMediaStatusTimer: ReturnType<typeof setTimeout> | null = null;
+
+const clearPreparingMediaStatusTimer = () => {
+  if (preparingMediaStatusTimer === null) return;
+  clearTimeout(preparingMediaStatusTimer);
+  preparingMediaStatusTimer = null;
+};
+
+const beginPreparingMedia = () => {
+  clearPreparingMediaStatusTimer();
+  isPreparingMedia.value = true;
+  showPreparingMediaStatus.value = false;
+  preparingMediaStatusTimer = setTimeout(() => {
+    preparingMediaStatusTimer = null;
+    if (isPreparingMedia.value) {
+      showPreparingMediaStatus.value = true;
+    }
+  }, 300);
+};
+
+const finishPreparingMedia = () => {
+  clearPreparingMediaStatusTimer();
+  isPreparingMedia.value = false;
+  showPreparingMediaStatus.value = false;
+};
+
 const previewMediaType = computed(() => resolveCustomBackgroundMediaType(
   preview.value.imagePath,
   preview.value.mediaType,
 ));
 const isVideoPreview = computed(() => previewMediaType.value === 'video');
+const previewMediaSrc = computed(() => {
+  const path = previewDisplayPath.value || preview.value.imagePath;
+  return path ? convertFileSrc(path) : '';
+});
+const previewVideoPlaybackSrc = computed(() => (
+  isVideoPreview.value && !isMainWindowLowPower.value ? previewMediaSrc.value : ''
+));
 
 const syncPreviewVideoPlayback = async () => {
   const video = previewVideoRef.value;
   if (!video) return;
 
-  if (isMainWindowLowPower.value) {
+  if (isMainWindowLowPower.value || !previewVideoPlaybackSrc.value) {
     video.pause();
+    video.removeAttribute('src');
+    video.load();
     return;
   }
 
@@ -46,7 +86,7 @@ const syncPreviewVideoPlayback = async () => {
 };
 
 watch(
-  [previewVideoRef, isMainWindowLowPower],
+  [previewVideoRef, previewVideoPlaybackSrc],
   () => { void syncPreviewVideoPlayback(); },
   { immediate: true },
 );
@@ -64,6 +104,7 @@ const handleCancel = () => {
 };
 
 const handleSave = () => {
+  if (isPreparingMedia.value || mediaError.value) return;
   applyThemeDraft();
   emit('close');
 };
@@ -287,7 +328,21 @@ watch(
 let resizeObserver: ResizeObserver | null = null;
 
 const applyMediaMetadata = async (path: string, mediaType: CustomBackgroundMediaType) => {
+  if (mediaType === 'image') {
+    const prepared = await prepareCustomBackgroundImage(path, {
+      target: getCustomBackgroundRenderTarget(),
+      blurCssPixels: 0,
+    });
+    previewDisplayPath.value = prepared.displayPath;
+    imageNaturalWidth.value = prepared.sourceWidth;
+    imageNaturalHeight.value = prepared.sourceHeight;
+    preview.value.imageWidth = prepared.sourceWidth;
+    preview.value.imageHeight = prepared.sourceHeight;
+    return;
+  }
+
   const metadata = await loadCustomBackgroundMediaMetadata(convertFileSrc(path), mediaType);
+  previewDisplayPath.value = path;
   imageNaturalWidth.value = metadata.width;
   imageNaturalHeight.value = metadata.height;
   preview.value.imageWidth = metadata.width;
@@ -308,20 +363,30 @@ onMounted(async () => {
 
   // 旧皮肤配置的异步尺寸补齐，以及已保存媒体的可用性检查。
   if (preview.value.imagePath) {
+    beginPreparingMedia();
     try {
       await applyMediaMetadata(preview.value.imagePath, previewMediaType.value);
     } catch (error) {
       mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
+    } finally {
+      finishPreparingMedia();
     }
   }
 });
 
 onUnmounted(() => {
+  clearPreparingMediaStatusTimer();
   setCustomBackgroundPreviewOpen(false);
   window.removeEventListener('resize', updateViewportSize);
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
+  }
+  const video = previewVideoRef.value;
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
   }
 });
 
@@ -330,6 +395,7 @@ const handleSelectNewMedia = async () => {
   if (!selected) return;
 
   mediaError.value = '';
+  beginPreparingMedia();
   try {
     await applyMediaMetadata(selected.path, selected.mediaType);
     preview.value.imagePath = selected.path;
@@ -339,19 +405,22 @@ const handleSelectNewMedia = async () => {
     preview.value.translateY = 0;
   } catch (error) {
     mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
+  } finally {
+    finishPreparingMedia();
   }
 };
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+    <div class="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-[120ms]">
       <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-[500px] flex-col overflow-hidden rounded-2xl border border-white/20 bg-black/40 text-white shadow-2xl backdrop-blur-md">
         <div class="flex items-center justify-between border-b border-white/10 px-6 py-4">
           <div class="flex items-center gap-3">
             <span class="text-base font-bold">自定义皮肤</span>
             <button
               @click="handleSelectNewMedia"
+              :disabled="isPreparingMedia"
               class="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold text-white/90 backdrop-blur-md transition hover:bg-white/10 active:scale-95 shadow-sm cursor-pointer"
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-white/70" viewBox="0 0 20 20" fill="currentColor">
@@ -387,7 +456,7 @@ const handleSelectNewMedia = async () => {
               <!-- 比例自适应的真实裁剪 Viewport -->
               <div
                 id="skin-preview-viewport"
-                class="relative overflow-visible z-10 transition-all duration-300"
+                class="skin-preview-viewport relative z-10 overflow-visible"
                 :style="{
                   width: `${viewportWidth}px`,
                   height: `${viewportHeight}px`
@@ -410,7 +479,7 @@ const handleSelectNewMedia = async () => {
                     <video
                       v-if="isVideoPreview"
                       ref="previewVideoRef"
-                      :src="convertFileSrc(preview.imagePath)"
+                      :src="previewVideoPlaybackSrc || undefined"
                       autoplay
                       loop
                       muted
@@ -429,7 +498,7 @@ const handleSelectNewMedia = async () => {
                     />
                     <img
                       v-else
-                      :src="convertFileSrc(preview.imagePath)"
+                      :src="previewMediaSrc"
                       class="absolute block max-w-none max-h-none select-none pointer-events-none"
                       :style="{
                         width: '100%',
@@ -458,7 +527,7 @@ const handleSelectNewMedia = async () => {
 
                 <!-- 镂空遮罩与 dashed 虚线框层，z-index: 10 -->
                 <div
-                  class="absolute inset-0 z-10 pointer-events-none border border-dashed border-white/50 rounded-[4px] transition-all duration-300"
+                  class="absolute inset-0 z-10 pointer-events-none rounded-[4px] border border-dashed border-white/50"
                   :class="{
                     'shadow-[0_0_0_9999px_rgba(0,0,0,0.65)]': preview.imagePath
                   }"
@@ -506,6 +575,17 @@ const handleSelectNewMedia = async () => {
                       {{ preview.foregroundStyle === 'light' ? '浅色字体' : '深色字体' }}
                     </div>
                   </div>
+                </div>
+              </div>
+
+              <div
+                v-if="showPreparingMediaStatus"
+                class="pointer-events-none absolute inset-0 z-40 flex items-center justify-center"
+                role="status"
+                aria-live="polite"
+              >
+                <div class="rounded-full border border-white/10 bg-black/70 px-4 py-2 text-xs font-medium text-white/85 shadow-lg">
+                  正在准备背景，请稍候…
                 </div>
               </div>
             </div>
@@ -604,7 +684,7 @@ const handleSelectNewMedia = async () => {
           </button>
           <button
             @click="handleSave"
-            :disabled="!preview.imagePath || !!mediaError"
+            :disabled="!preview.imagePath || !!mediaError || isPreparingMedia"
             class="flex-1 rounded-full bg-[#EC4141] py-2.5 text-sm font-bold text-white transition hover:bg-[#d13a3a] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#EC4141]"
           >
             保存并使用
@@ -635,5 +715,25 @@ input[type='range']::-webkit-slider-thumb {
   -webkit-user-drag: none;
   user-select: none;
   pointer-events: none;
+}
+
+.skin-preview-viewport {
+  animation: skin-preview-fade-in 120ms ease-out both;
+}
+
+@keyframes skin-preview-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skin-preview-viewport {
+    animation: none;
+  }
 }
 </style>

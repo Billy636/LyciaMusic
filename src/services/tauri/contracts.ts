@@ -186,6 +186,14 @@ export interface ForegroundFullscreenState {
   isFullscreen: boolean;
 }
 
+export interface PreparedCustomBackgroundImage {
+  displayPath: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  displayWidth: number;
+  displayHeight: number;
+}
+
 export interface ImmersiveFullscreenState {
   isFullscreen: boolean;
   wasMaximizedBeforeFullscreen: boolean;
@@ -289,6 +297,15 @@ export interface TauriCommandMap {
   get_song_cover_thumbnail: { payload: { path: string }; response: string };
   get_song_cover: { payload: { path: string }; response: string };
   clear_cover_cache: { payload: undefined; response: void };
+  prepare_custom_background_image: {
+    payload: {
+      sourcePath: string;
+      targetWidth: number;
+      targetHeight: number;
+      blurRadius: number;
+    };
+    response: PreparedCustomBackgroundImage;
+  };
   get_song_lyrics: { payload: { path: string }; response: string };
   get_song_lyrics_for_edit: { payload: { path: string }; response: SongLyricsForEdit };
   save_song_lyrics: {

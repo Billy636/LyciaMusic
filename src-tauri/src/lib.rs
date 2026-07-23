@@ -1,4 +1,5 @@
 mod app_runtime;
+mod custom_background;
 mod custom_fonts;
 mod database;
 pub mod error;
@@ -18,6 +19,7 @@ mod window_theme;
 mod window_z_order;
 
 use app_runtime::{consume_pending_open_paths, exit_app, handle_single_instance, setup_app};
+use custom_background::prepare_custom_background_image;
 use custom_fonts::{import_lyrics_font, read_lyrics_font_data_url};
 use database::clear_all_app_data;
 use foreground_window::get_foreground_fullscreen_state;
@@ -122,6 +124,7 @@ pub fn run() {
             get_song_cover_thumbnail,
             get_song_cover,
             clear_cover_cache,
+            prepare_custom_background_image,
             get_song_lyrics,
             get_song_lyrics_payload,
             get_song_lyrics_for_edit,
