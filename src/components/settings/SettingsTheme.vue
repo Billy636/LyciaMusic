@@ -26,23 +26,6 @@ const TEXT = {
   windowMaterialWin11Only: '\u4ec5 Windows 11 \u652f\u6301',
 };
 
-const FLOW_TEXT = {
-  panelTitle: '\u6d41\u5149\u5fae\u8c03',
-  colorBoost: '\u8272\u5f69\u5f3a\u5ea6',
-  depth: '\u660e\u6697\u6df1\u5ea6',
-  speed: '\u6d41\u52a8\u901f\u5ea6',
-  texture: '\u7eb9\u7406\u5f3a\u5ea6',
-  subtle: '\u67d4\u548c',
-  vivid: '\u9c9c\u8273',
-  airy: '\u901a\u900f',
-  deep: '\u6df1\u9083',
-  calm: '\u8212\u7f13',
-  brisk: '\u7075\u52a8',
-  clean: '\u5e72\u51c0',
-  textured: '\u7ec6\u817b',
-  toggleLabel: '\u5c55\u5f00\u6216\u6536\u8d77\u6d41\u5149\u5fae\u8c03',
-};
-
 const BLUR_TEXT = {
   panelTitle: '\u906e\u7f69\u6d53\u5ea6',
   tint: '\u906e\u7f69\u6d53\u6de1',
@@ -61,18 +44,12 @@ const {
   getWindowMaterialModeDisabledReason,
   windowMaterialDisabledReason,
   isDynamicBgDisabled,
-  showFlowTuning,
   showBlurTuning,
   setColorScheme,
   setDynamicType,
   toggleWindowMaterial,
   openCustomModal,
-  toggleFlowTuning,
   toggleBlurTuning,
-  setFlowColorBoost,
-  setFlowDepth,
-  setFlowSpeed,
-  setFlowTexture,
   setWindowBlurTint,
   toggleRetainMaterialOnUnfocus,
 } = useSettingsThemeControls();
@@ -186,37 +163,16 @@ const {
               <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicOff }}</div>
             </button>
 
-            <div class="relative">
-              <button
-                type="button"
-                class="w-full rounded-xl border px-4 py-3 pr-12 text-left transition-all"
-                :class="theme.dynamicBgType === 'flow'
-                  ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm'
-                  : 'border-gray-200/70 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/10 dark:hover:bg-white/10'"
-                @click="setDynamicType('flow')"
-              >
-                <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicFlow }}</div>
-              </button>
-
-              <button
-                type="button"
-                class="absolute bottom-3 right-3 rounded-full p-1 text-[#EC4141]/70 opacity-40 transition-all duration-300 hover:bg-[#EC4141]/10 hover:opacity-100"
-                :class="showFlowTuning && theme.dynamicBgType === 'flow' ? 'bg-[#EC4141]/10 opacity-100' : ''"
-                :aria-label="FLOW_TEXT.toggleLabel"
-                @click.stop="toggleFlowTuning"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-4 w-4 transition-transform duration-300"
-                  :class="showFlowTuning && theme.dynamicBgType === 'flow' ? 'rotate-180' : ''"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-            </div>
+            <button
+              type="button"
+              class="rounded-xl border px-4 py-3 text-left transition-all"
+              :class="theme.dynamicBgType === 'flow'
+                ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm'
+                : 'border-gray-200/70 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/10 dark:hover:bg-white/10'"
+              @click="setDynamicType('flow')"
+            >
+              <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicFlow }}</div>
+            </button>
 
             <button
               type="button"
@@ -229,113 +185,6 @@ const {
               <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicBlur }}</div>
             </button>
           </div>
-
-          <transition name="flow-panel">
-            <div
-              v-if="theme.dynamicBgType === 'flow' && showFlowTuning && !isDynamicBgDisabled"
-              class="mt-4 rounded-2xl border border-[#EC4141]/15 bg-white/50 p-4 shadow-sm dark:border-white/8 dark:bg-black/25"
-            >
-              <div class="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <div class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ FLOW_TEXT.panelTitle }}</div>
-                  <div class="text-xs text-gray-600 dark:text-white/60">Lycia Flow</div>
-                </div>
-                <div class="rounded-full bg-[#EC4141]/10 px-2.5 py-1 text-[11px] font-medium text-[#EC4141]">
-                  {{ theme.flowColorBoost }} / {{ theme.flowDepth }} / {{ theme.flowSpeed }} / {{ theme.flowTexture }}
-                </div>
-              </div>
-
-              <div class="space-y-4">
-              <label class="block">
-                <div class="mb-1.5 flex items-center justify-between gap-4">
-                  <div>
-                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ FLOW_TEXT.colorBoost }}</div>
-                  </div>
-                  <div class="text-xs font-medium tabular-nums text-[#EC4141]">{{ theme.flowColorBoost }}</div>
-                </div>
-                <input
-                  :value="theme.flowColorBoost"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  class="flow-slider"
-                  @input="setFlowColorBoost(Number(($event.target as HTMLInputElement).value))"
-                />
-                <div class="mt-1 flex items-center justify-between text-[11px] text-gray-500 dark:text-white/50">
-                  <span>{{ FLOW_TEXT.subtle }}</span>
-                  <span>{{ FLOW_TEXT.vivid }}</span>
-                </div>
-              </label>
-
-              <label class="block">
-                <div class="mb-1.5 flex items-center justify-between gap-4">
-                  <div>
-                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ FLOW_TEXT.depth }}</div>
-                  </div>
-                  <div class="text-xs font-medium tabular-nums text-[#EC4141]">{{ theme.flowDepth }}</div>
-                </div>
-                <input
-                  :value="theme.flowDepth"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  class="flow-slider"
-                  @input="setFlowDepth(Number(($event.target as HTMLInputElement).value))"
-                />
-                <div class="mt-1 flex items-center justify-between text-[11px] text-gray-500 dark:text-white/50">
-                  <span>{{ FLOW_TEXT.airy }}</span>
-                  <span>{{ FLOW_TEXT.deep }}</span>
-                </div>
-              </label>
-
-              <label class="block">
-                <div class="mb-1.5 flex items-center justify-between gap-4">
-                  <div>
-                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ FLOW_TEXT.speed }}</div>
-                  </div>
-                  <div class="text-xs font-medium tabular-nums text-[#EC4141]">{{ theme.flowSpeed }}</div>
-                </div>
-                <input
-                  :value="theme.flowSpeed"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  class="flow-slider"
-                  @input="setFlowSpeed(Number(($event.target as HTMLInputElement).value))"
-                />
-                <div class="mt-1 flex items-center justify-between text-[11px] text-gray-500 dark:text-white/50">
-                  <span>{{ FLOW_TEXT.calm }}</span>
-                  <span>{{ FLOW_TEXT.brisk }}</span>
-                </div>
-              </label>
-
-              <label class="block">
-                <div class="mb-1.5 flex items-center justify-between gap-4">
-                  <div>
-                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ FLOW_TEXT.texture }}</div>
-                  </div>
-                  <div class="text-xs font-medium tabular-nums text-[#EC4141]">{{ theme.flowTexture }}</div>
-                </div>
-                <input
-                  :value="theme.flowTexture"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  class="flow-slider"
-                  @input="setFlowTexture(Number(($event.target as HTMLInputElement).value))"
-                />
-                <div class="mt-1 flex items-center justify-between text-[11px] text-gray-500 dark:text-white/50">
-                  <span>{{ FLOW_TEXT.clean }}</span>
-                  <span>{{ FLOW_TEXT.textured }}</span>
-                </div>
-              </label>
-            </div>
-          </div>
-        </transition>
 
       </div>
       </div>

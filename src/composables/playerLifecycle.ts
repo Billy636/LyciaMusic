@@ -23,6 +23,7 @@ import { usePlaybackStore } from '../features/playback/store';
 import { useSettingsStore } from '../features/settings/store';
 import { defaultDominantColors, useUiStore } from '../shared/stores/ui';
 import { isRemoteSong } from '../utils/remoteSong';
+import { FIXED_FLOW_PRESET } from '../constants/themeBackground';
 
 interface SeekCompletedPayload {
   request_id: number;
@@ -436,8 +437,8 @@ export const createPlayerLifecycle = ({
       const coverUrl = resolveCoverUrl(cover);
       const signature = JSON.stringify({
         coverUrl,
-        colorBoost: settings.value.theme.flowColorBoost,
-        depth: settings.value.theme.flowDepth,
+        colorBoost: FIXED_FLOW_PRESET.colorBoost,
+        depth: FIXED_FLOW_PRESET.depth,
       });
 
       if (signature === dominantColorSignature) {
@@ -446,8 +447,8 @@ export const createPlayerLifecycle = ({
 
       const taskId = ++dominantColorTaskId;
       const colors = await extractDominantColors(coverUrl, 4, {
-        colorBoost: settings.value.theme.flowColorBoost,
-        depth: settings.value.theme.flowDepth,
+        colorBoost: FIXED_FLOW_PRESET.colorBoost,
+        depth: FIXED_FLOW_PRESET.depth,
       });
       if (taskId !== dominantColorTaskId) return;
       dominantColorSignature = signature;
@@ -500,8 +501,6 @@ export const createPlayerLifecycle = ({
       }
     };
 
-    // 流光/桌面歌词封面取色共用主色，参数微调时 debounce 延迟重提取，避免拖动滑块时频繁触发层切换闪烁
-    let flowTweakTimer: ReturnType<typeof setTimeout> | null = null;
     let lastPersistedPlaybackTime = Number.NaN;
     let playbackStateRestored = false;
 
@@ -512,16 +511,6 @@ export const createPlayerLifecycle = ({
       lastPersistedPlaybackTime = nextTime;
       playerStorage.writeNumber(playerStorageKeys.lastTime, nextTime);
     };
-
-    watch([
-      () => settings.value.theme.flowColorBoost,
-      () => settings.value.theme.flowDepth,
-    ], () => {
-      if (flowTweakTimer) clearTimeout(flowTweakTimer);
-      flowTweakTimer = setTimeout(async () => {
-        void updateDominantColors(currentCover.value);
-      }, 500);
-    });
 
     watch(
       () => settings.value.theme.dynamicBgType,
@@ -630,9 +619,6 @@ export const createPlayerLifecycle = ({
     });
 
     onScopeDispose(() => {
-      if (flowTweakTimer) {
-        clearTimeout(flowTweakTimer);
-      }
       if (remoteAutoSyncTimer) {
         clearInterval(remoteAutoSyncTimer);
       }

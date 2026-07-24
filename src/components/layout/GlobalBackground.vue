@@ -19,6 +19,7 @@ import {
   type CustomBackgroundMediaType,
 } from '../../composables/customBackgroundMedia';
 import { useCustomBackgroundPreviewState } from '../../composables/customBackgroundPreviewState';
+import { FIXED_FLOW_PRESET } from '../../constants/themeBackground';
 
 const { currentCover, currentCoverFull, dominantColors, showPlayerDetail, isMiniMode } = usePlayer();
 const { theme, isDarkTheme, patchTheme } = useThemeSettings();
@@ -144,10 +145,13 @@ interface FlowLayerSnapshot {
   signature: string;
   state: 'entering' | 'current' | 'previous';
   shellClass: string;
-  colors: string[];
   baseStyle: {
     opacity: number;
     background: string;
+  };
+  blobStyle: {
+    backgroundImage: string;
+    backgroundSize: string;
   };
   blobOpacity: number;
   noiseOpacity: number;
@@ -155,7 +159,6 @@ interface FlowLayerSnapshot {
   overlayStyle: {
     opacity: number;
   };
-  motionStyle: Record<string, string>;
   reduceDynamicEffects: boolean;
 }
 
@@ -194,7 +197,7 @@ const activeBackgroundInfo = computed(() => {
   if (currentTheme.dynamicBgType === 'blur') {
     return {
       src: currentCoverFull.value || currentCover.value,
-      blur: 32,
+      blur: 24,
       opacity: 0.75,
       scale: 1.25,
       isDynamic: false,
@@ -267,10 +270,9 @@ const dynamicShellClass = computed(() => {
   return 'bg-white dark:bg-[#1a1a1a]';
 });
 
-const flowColorBoostFactor = computed(() => theme.value.flowColorBoost / 100);
-const flowDepthFactor = computed(() => theme.value.flowDepth / 100);
-const flowSpeedFactor = computed(() => theme.value.flowSpeed / 100);
-const flowTextureFactor = computed(() => theme.value.flowTexture / 100);
+const flowColorBoostFactor = FIXED_FLOW_PRESET.colorBoost / 100;
+const flowDepthFactor = FIXED_FLOW_PRESET.depth / 100;
+const flowTextureFactor = FIXED_FLOW_PRESET.texture / 100;
 
 const resolvedFlowColors = computed(() => {
   const colors = dominantColors.value.filter(color => color && color !== 'transparent');
@@ -278,36 +280,23 @@ const resolvedFlowColors = computed(() => {
 });
 
 const dynamicBaseOpacity = computed(() => {
-  const baseOpacity = 0.36 + flowColorBoostFactor.value * 0.15 - flowDepthFactor.value * 0.05;
+  const baseOpacity = 0.36 + flowColorBoostFactor * 0.15 - flowDepthFactor * 0.05;
   return isMicaWindowMaterial.value ? Math.max(0.14, baseOpacity * 0.36) : Math.max(0.34, baseOpacity);
 });
 
 const dynamicBlobOpacity = computed(() => {
-  const blobOpacity = 0.45 + flowColorBoostFactor.value * 0.18;
+  const blobOpacity = 0.45 + flowColorBoostFactor * 0.18;
   return isMicaWindowMaterial.value ? Math.max(0.18, blobOpacity * 0.34) : Math.min(0.86, blobOpacity);
 });
 
 const dynamicNoiseOpacity = computed(() => {
-  const noiseOpacity = 0.004 + flowTextureFactor.value * 0.022;
+  const noiseOpacity = 0.004 + flowTextureFactor * 0.022;
   return isMicaWindowMaterial.value ? noiseOpacity * 0.55 : noiseOpacity;
-});
-
-const flowMotionStyle = computed(() => {
-  const speedFactor = flowSpeedFactor.value;
-  const duration1 = 18 - speedFactor * 8;
-  const duration2 = 22 - speedFactor * 9;
-  const duration3 = 26 - speedFactor * 10;
-
-  return {
-    '--mesh-duration-1': `${duration1.toFixed(2)}s`,
-    '--mesh-duration-2': `${duration2.toFixed(2)}s`,
-    '--mesh-duration-3': `${duration3.toFixed(2)}s`,
-  };
 });
 
 const dynamicBaseStyle = computed(() => {
   const [base, accent, edge, glow] = resolvedFlowColors.value;
-  const depthFactor = flowDepthFactor.value;
+  const depthFactor = flowDepthFactor;
 
   return {
     opacity: dynamicBaseOpacity.value,
@@ -319,6 +308,36 @@ const dynamicBaseStyle = computed(() => {
   };
 });
 
+function createFlowTexture(colors: string[]) {
+  const [base, accent, edge, glow] = colors;
+  const canvas = document.createElement('canvas');
+  canvas.width = 384;
+  canvas.height = 384;
+  const context = canvas.getContext('2d');
+  if (!context) return '';
+
+  const drawGlow = (color: string, x: number, y: number, radius: number) => {
+    const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
+    gradient.addColorStop(0, color);
+    gradient.addColorStop(1, 'transparent');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  };
+
+  drawGlow(accent, 135, 125, 265);
+  drawGlow(edge || base, 265, 270, 275);
+  drawGlow(glow || accent || base, 275, 105, 235);
+  return canvas.toDataURL('image/webp', 0.82);
+}
+
+const dynamicBlobStyle = computed(() => {
+  const textureUrl = createFlowTexture(resolvedFlowColors.value);
+  return {
+    backgroundImage: textureUrl ? `url("${textureUrl}")` : 'none',
+    backgroundSize: '100% 100%',
+  };
+});
+
 const dynamicOverlayClass = computed(() => {
   if (isMicaWindowMaterial.value) return 'bg-white/[0.02] dark:bg-black/[0.08]';
   if (hasWindowMaterial.value) return 'bg-white/[0.02] dark:bg-black/[0.16]';
@@ -326,16 +345,21 @@ const dynamicOverlayClass = computed(() => {
 });
 
 const dynamicOverlayStyle = computed(() => {
-  const overlayOpacity = 0.91 + flowDepthFactor.value * 0.26 - flowColorBoostFactor.value * 0.08;
+  const overlayOpacity = 0.91 + flowDepthFactor * 0.26 - flowColorBoostFactor * 0.08;
   return { opacity: Math.min(1.1, Math.max(0.80, overlayOpacity)) };
 });
 
-// signature 只追踪「需要触发整层切换」的极少数条件
-// 颜色变化通过 CSS transition-colors 在当前层内平滑渐变
+// 固定预设不再逐项 patch 图层；颜色或材质变化时通过整层交叉淡入切换缓存纹理。
 const flowSceneSignature = computed(() => {
   if (activeBackgroundInfo.value?.type !== 'flow') return null;
   return JSON.stringify({
     shellClass: dynamicShellClass.value,
+    baseStyle: dynamicBaseStyle.value,
+    blobStyle: dynamicBlobStyle.value,
+    blobOpacity: dynamicBlobOpacity.value,
+    noiseOpacity: dynamicNoiseOpacity.value,
+    overlayClass: dynamicOverlayClass.value,
+    overlayStyle: dynamicOverlayStyle.value,
     reduceDynamicEffects: reduceDynamicEffects.value,
   });
 });
@@ -345,21 +369,19 @@ const flowScene = computed(() => {
     return null;
   }
 
-  const colors = [...resolvedFlowColors.value];
   const baseStyle = { ...dynamicBaseStyle.value };
+  const blobStyle = { ...dynamicBlobStyle.value };
   const overlayStyle = { ...dynamicOverlayStyle.value };
-  const motionStyle = { ...flowMotionStyle.value };
 
   return {
     signature: flowSceneSignature.value!,
     shellClass: dynamicShellClass.value,
-    colors,
     baseStyle,
+    blobStyle,
     blobOpacity: dynamicBlobOpacity.value,
     noiseOpacity: dynamicNoiseOpacity.value,
     overlayClass: dynamicOverlayClass.value,
     overlayStyle,
-    motionStyle,
     reduceDynamicEffects: reduceDynamicEffects.value,
   };
 });
@@ -394,13 +416,12 @@ function buildFlowLayerSnapshot(scene: NonNullable<typeof flowScene.value>): Flo
     signature: scene.signature,
     state: 'entering',
     shellClass: scene.shellClass,
-    colors: scene.colors,
     baseStyle: scene.baseStyle,
+    blobStyle: scene.blobStyle,
     blobOpacity: scene.blobOpacity,
     noiseOpacity: scene.noiseOpacity,
     overlayClass: scene.overlayClass,
     overlayStyle: scene.overlayStyle,
-    motionStyle: scene.motionStyle,
     reduceDynamicEffects: scene.reduceDynamicEffects,
   };
 }
@@ -457,29 +478,6 @@ watch(flowSceneSignature, (newSig) => {
     flowTransitionTimer = null;
   }, FLOW_SCENE_TRANSITION_MS);
 }, { immediate: true });
-
-// 所有视觉参数变化时直接 patch 当前层（利用模板上已有的 CSS transition 平滑渐变）
-watch(
-  [resolvedFlowColors, dynamicBaseStyle, dynamicBlobOpacity, dynamicNoiseOpacity, dynamicOverlayClass, dynamicOverlayStyle, flowMotionStyle],
-  () => {
-    const nextScene = flowScene.value;
-    if (!nextScene) return;
-    flowLayers.value = flowLayers.value.map(layer =>
-      layer.state === 'current'
-        ? {
-            ...layer,
-            colors: nextScene.colors,
-            baseStyle: nextScene.baseStyle,
-            blobOpacity: nextScene.blobOpacity,
-            noiseOpacity: nextScene.noiseOpacity,
-            overlayClass: nextScene.overlayClass,
-            overlayStyle: nextScene.overlayStyle,
-            motionStyle: nextScene.motionStyle,
-          }
-        : layer,
-    );
-  },
-);
 
 watch(
   [() => activeBackgroundInfo.value?.type, currentSongPath],
@@ -692,7 +690,6 @@ const customBgTransform = computed(() => {
                 ? 'flow-layer-entering'
                 : 'flow-layer-current',
           ]"
-          :style="layer.motionStyle"
         >
           <div
             class="absolute inset-0 transition-colors duration-[1500ms]"
@@ -701,22 +698,9 @@ const customBgTransform = computed(() => {
 
           <div
             v-if="!layer.reduceDynamicEffects"
-            class="absolute inset-0 filter blur-[120px]"
-            :style="{ opacity: layer.blobOpacity }"
-          >
-            <div
-              class="absolute top-[-10%] left-[-10%] h-[60%] w-[60%] rounded-full mix-blend-multiply transition-colors duration-[1500ms] dark:mix-blend-screen animate-mesh-1"
-              :style="{ backgroundColor: layer.colors[1] }"
-            ></div>
-            <div
-              class="absolute bottom-[-10%] right-[-10%] h-[60%] w-[60%] rounded-full mix-blend-multiply transition-colors duration-[1500ms] dark:mix-blend-screen animate-mesh-2"
-              :style="{ backgroundColor: layer.colors[2] || layer.colors[0] }"
-            ></div>
-            <div
-              class="absolute top-[20%] right-[-10%] h-[70%] w-[70%] rounded-full mix-blend-multiply transition-colors duration-[1500ms] dark:mix-blend-screen animate-mesh-3"
-              :style="{ backgroundColor: layer.colors[3] || layer.colors[1] }"
-            ></div>
-          </div>
+            class="flow-accent-texture absolute"
+            :style="{ ...layer.blobStyle, opacity: layer.blobOpacity }"
+          ></div>
 
           <div
             v-if="!layer.reduceDynamicEffects"
@@ -839,62 +823,40 @@ const customBgTransform = computed(() => {
 }
 
 .flow-layer {
-  will-change: opacity, transform, filter;
+  will-change: opacity, transform;
   transition:
     opacity 920ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 920ms cubic-bezier(0.22, 1, 0.36, 1),
-    filter 920ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform 920ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .flow-layer-current {
   opacity: 1;
   transform: scale(1);
-  filter: blur(0);
 }
 
 .flow-layer-entering {
   opacity: 0;
   transform: scale(1.028);
-  filter: blur(10px);
 }
 
 .flow-layer-previous {
   opacity: 0;
   transform: scale(1.048);
-  filter: blur(16px);
+}
+
+.flow-accent-texture {
+  top: 16%;
+  left: 16%;
+  width: 68%;
+  height: 68%;
+  transform-origin: center;
+  transform: scale(1.05);
+  contain: paint;
 }
 
 .bg-noise {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3%3Ffilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/feTurbulence%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
 }
-
-@keyframes mesh-1 {
-  0% { transform: translate(-20%, 15%) scale(1) rotate(0deg); }
-  25% { transform: translate(30%, -10%) scale(1.1) rotate(90deg); }
-  50% { transform: translate(-15%, -25%) scale(0.9) rotate(180deg); }
-  75% { transform: translate(25%, 20%) scale(1.05) rotate(270deg); }
-  100% { transform: translate(-20%, 15%) scale(1) rotate(360deg); }
-}
-
-@keyframes mesh-2 {
-  0% { transform: translate(25%, -20%) scale(1.1) rotate(0deg); }
-  25% { transform: translate(-30%, -15%) scale(0.9) rotate(-90deg); }
-  50% { transform: translate(20%, 25%) scale(1.2) rotate(-180deg); }
-  75% { transform: translate(-25%, 10%) scale(1) rotate(-270deg); }
-  100% { transform: translate(25%, -20%) scale(1.1) rotate(-360deg); }
-}
-
-@keyframes mesh-3 {
-  0% { transform: translate(10%, 30%) scale(0.9) rotate(0deg); }
-  25% { transform: translate(-25%, -20%) scale(1.2) rotate(90deg); }
-  50% { transform: translate(30%, 15%) scale(1) rotate(180deg); }
-  75% { transform: translate(-15%, -30%) scale(1.1) rotate(270deg); }
-  100% { transform: translate(10%, 30%) scale(0.9) rotate(360deg); }
-}
-
-.animate-mesh-1 { animation: mesh-1 var(--mesh-duration-1, 14s) ease-in-out infinite; }
-.animate-mesh-2 { animation: mesh-2 var(--mesh-duration-2, 18s) ease-in-out infinite; }
-.animate-mesh-3 { animation: mesh-3 var(--mesh-duration-3, 22s) ease-in-out infinite; }
 
 .global-background--low-power,
 .global-background--low-power * {
