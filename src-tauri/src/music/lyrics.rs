@@ -3093,27 +3093,6 @@ fn normalize_semantic_line_display_roles(mut line: SemanticLine) -> SemanticLine
     line
 }
 
-fn is_han_only_line(line: &LyricTrackLine) -> bool {
-    line.script_profile.han_count > 0
-        && line.script_profile.latin_count == 0
-        && line.script_profile.kana_count == 0
-        && line.script_profile.hangul_count == 0
-}
-
-fn is_han_latin_mixed_line(line: &LyricTrackLine) -> bool {
-    line.script_profile.han_count > 0
-        && line.script_profile.latin_count > 0
-        && line.script_profile.kana_count == 0
-        && line.script_profile.hangul_count == 0
-}
-
-fn is_latin_only_line(line: &LyricTrackLine) -> bool {
-    line.script_profile.latin_count > 0
-        && line.script_profile.han_count == 0
-        && line.script_profile.kana_count == 0
-        && line.script_profile.hangul_count == 0
-}
-
 fn build_hard_role_semantic_line(
     main_line: &LyricTrackLine,
     translation_line: Option<&LyricTrackLine>,
@@ -3149,26 +3128,11 @@ fn build_hard_role_semantic_line_from_cluster(
 
     match lines.as_slice() {
         [main_line] => Some(build_hard_role_semantic_line(main_line, None, None)),
-        [first_line, second_line] => {
-            let (main_line, translation_line) =
-                if is_han_only_line(first_line) && !is_han_only_line(second_line) {
-                    (*second_line, *first_line)
-                } else if is_han_only_line(second_line) && !is_han_only_line(first_line) {
-                    (*first_line, *second_line)
-                } else if is_han_latin_mixed_line(first_line) && is_latin_only_line(second_line) {
-                    (*second_line, *first_line)
-                } else if is_han_latin_mixed_line(second_line) && is_latin_only_line(first_line) {
-                    (*first_line, *second_line)
-                } else {
-                    (*first_line, *second_line)
-                };
-
-            Some(build_hard_role_semantic_line(
-                main_line,
-                Some(translation_line),
-                None,
-            ))
-        }
+        [first_line, second_line] => Some(build_hard_role_semantic_line(
+            first_line,
+            Some(second_line),
+            None,
+        )),
         [roman_line, main_line, translation_line] => Some(build_hard_role_semantic_line(
             main_line,
             Some(translation_line),
@@ -3782,31 +3746,31 @@ mod tests {
     }
 
     #[test]
-    fn hard_role_rules_treat_han_only_line_as_translation_for_two_lines() {
+    fn hard_role_rules_keep_first_han_line_as_main_for_two_lines() {
         let payload = build_structured_lyrics_payload(
             ["[00:01.000]你知道你爱我", "[00:01.000]You know you love me"].join("\n"),
         );
 
         assert_eq!(payload.display_lines.len(), 1);
-        assert_eq!(payload.display_lines[0].text, "You know you love me");
-        assert_eq!(payload.display_lines[0].translation, "你知道你爱我");
+        assert_eq!(payload.display_lines[0].text, "你知道你爱我");
+        assert_eq!(payload.display_lines[0].translation, "You know you love me");
         assert_eq!(payload.display_lines[0].romaji, "");
     }
 
     #[test]
-    fn hard_role_rules_treat_mixed_han_latin_as_translation_for_two_lines() {
+    fn hard_role_rules_keep_first_mixed_line_as_main_for_two_lines() {
         let payload = build_structured_lyrics_payload(
             ["[00:01.000]你好 darling", "[00:01.000]hello darling"].join("\n"),
         );
 
         assert_eq!(payload.display_lines.len(), 1);
-        assert_eq!(payload.display_lines[0].text, "hello darling");
-        assert_eq!(payload.display_lines[0].translation, "你好 darling");
+        assert_eq!(payload.display_lines[0].text, "你好 darling");
+        assert_eq!(payload.display_lines[0].translation, "hello darling");
         assert_eq!(payload.display_lines[0].romaji, "");
     }
 
     #[test]
-    fn hard_role_rules_fall_back_to_first_main_second_translation_for_two_lines() {
+    fn hard_role_rules_use_first_main_second_translation_for_two_lines() {
         let payload = build_structured_lyrics_payload(
             [
                 "[00:01.000]first latin line",
