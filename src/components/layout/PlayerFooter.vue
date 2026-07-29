@@ -253,14 +253,36 @@ const handleWindowClick = (e: MouseEvent) => {
   }
 };
 
-// --- Idle State for Auto-Hide ---
-const isPinned = ref(localStorage.getItem('footer_pinned') === 'true');
+// --- Idle State for Auto-Hide (Decoupled Main vs Lyric Detail) ---
+const isPinnedMain = ref(
+  localStorage.getItem('footer_pinned_main') !== null
+    ? localStorage.getItem('footer_pinned_main') === 'true'
+    : (localStorage.getItem('footer_pinned') !== null ? localStorage.getItem('footer_pinned') === 'true' : true)
+);
+
+const isPinnedDetail = ref(
+  localStorage.getItem('footer_pinned_detail') !== null
+    ? localStorage.getItem('footer_pinned_detail') === 'true'
+    : false
+);
+
+const isPinned = computed(() => (
+  showPlayerDetail.value ? isPinnedDetail.value : isPinnedMain.value
+));
+
 const isIdle = ref(false);
 let idleTimer: any = null;
 
 const togglePin = () => {
-  isPinned.value = !isPinned.value;
-  localStorage.setItem('footer_pinned', isPinned.value.toString());
+  if (showPlayerDetail.value) {
+    isPinnedDetail.value = !isPinnedDetail.value;
+    localStorage.setItem('footer_pinned_detail', isPinnedDetail.value.toString());
+  } else {
+    isPinnedMain.value = !isPinnedMain.value;
+    localStorage.setItem('footer_pinned_main', isPinnedMain.value.toString());
+    localStorage.setItem('footer_pinned', isPinnedMain.value.toString());
+  }
+
   if (!isPinned.value) {
     startIdleTimer();
   } else {
@@ -268,6 +290,15 @@ const togglePin = () => {
     if (idleTimer) clearTimeout(idleTimer);
   }
 };
+
+watch(showPlayerDetail, () => {
+  if (isPinned.value) {
+    isIdle.value = false;
+    if (idleTimer) clearTimeout(idleTimer);
+  } else {
+    startIdleTimer();
+  }
+});
 
 const startIdleTimer = () => {
   if (idleTimer) clearTimeout(idleTimer);
@@ -611,7 +642,7 @@ onUnmounted(() => {
       <button @click="togglePin"
         class="transition-colors w-8 h-8 flex items-center justify-center rounded-full"
         :class="showPlayerDetail ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'"
-        :title="isPinned ? '取消固定 (当前已常驻)' : '固定状态栏 (当前离开后消失)'"
+        :title="isPinned ? (showPlayerDetail ? '取消固定歌词页底部栏 (当前已常驻)' : '取消固定底部栏 (当前已常驻)') : (showPlayerDetail ? '固定歌词页底部栏 (当前离开后消失)' : '固定底部栏 (当前离开后消失)')"
       >
         <!-- 已固定：完整图钉 -->
         <svg v-if="isPinned" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
