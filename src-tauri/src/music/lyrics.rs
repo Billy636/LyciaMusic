@@ -2920,22 +2920,26 @@ fn build_hard_role_semantic_line_from_cluster(
     match lines.as_slice() {
         [main_line] => Some(build_hard_role_semantic_line(main_line, None, None)),
         [first_line, second_line] => {
-            let (main_line, translation_line) =
-                if is_han_only_line(first_line) && !is_han_only_line(second_line) {
-                    (*second_line, *first_line)
-                } else if is_han_only_line(second_line) && !is_han_only_line(first_line) {
-                    (*first_line, *second_line)
-                } else if is_han_latin_mixed_line(first_line) && is_latin_only_line(second_line) {
-                    (*second_line, *first_line)
-                } else if is_han_latin_mixed_line(second_line) && is_latin_only_line(first_line) {
-                    (*first_line, *second_line)
-                } else {
-                    (*first_line, *second_line)
-                };
+    let first_is_han = is_han_only_line(first_line);
+    let second_is_latin = is_latin_only_line(second_line);
 
-            Some(build_hard_role_semantic_line(
-                main_line,
-                Some(translation_line),
+let (main_line, translation_line) = if first_is_han && second_is_latin {
+if score_romanized_latin_text(&second_line.text) > 0.3 {
+        (first_line, second_line)
+    } else {
+        (first_line, second_line)
+    }
+} else if is_han_latin_mixed_line(first_line) && is_latin_only_line(second_line) {
+    (second_line, first_line)
+} else if is_han_latin_mixed_line(second_line) && is_latin_only_line(first_line) {
+    (first_line, second_line)
+} else {
+    (first_line, second_line)
+};
+
+Some(build_hard_role_semantic_line(
+    main_line,
+    Some(translation_line),
                 None,
             ))
         }
