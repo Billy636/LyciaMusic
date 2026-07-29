@@ -34,4 +34,10 @@ describe('GlobalBackground low power rendering', () => {
     expect(source).not.toContain('will-change: opacity, transform, filter;');
     expect(source).not.toContain('filter: blur(16px);');
   });
+
+  it('only resets customMediaReady when displayPath or mediaType changes', () => {
+    expect(source).toContain('const isPathChanged =');
+    expect(source).toContain('if (isPathChanged) {');
+    expect(source).toContain('customMediaReady.value = false;');
+  });
 });

@@ -102,12 +102,19 @@ watch(
 
       const sourceWidth = 'sourceWidth' in prepared ? prepared.sourceWidth : prepared.width;
       const sourceHeight = 'sourceHeight' in prepared ? prepared.sourceHeight : prepared.height;
+      const displayPath = 'displayPath' in prepared ? prepared.displayPath : path;
+      const isPathChanged =
+        renderedCustomMedia.value?.displayPath !== displayPath ||
+        renderedCustomMedia.value?.mediaType !== mediaType;
+
       imageNaturalWidth.value = sourceWidth;
       imageNaturalHeight.value = sourceHeight;
-      customMediaReady.value = false;
+      if (isPathChanged) {
+        customMediaReady.value = false;
+      }
       renderedCustomMedia.value = {
         path,
-        displayPath: 'displayPath' in prepared ? prepared.displayPath : path,
+        displayPath,
         mediaType,
       };
 
