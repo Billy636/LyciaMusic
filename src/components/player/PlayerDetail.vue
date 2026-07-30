@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useLyrics } from '../../composables/lyrics';
 import { useSongDetailCache } from '../../composables/useSongDetailCache';
@@ -33,25 +33,6 @@ const currentSongDetail = ref<SongDetail | null>(null);
 let detailRequestId = 0;
 
 const appWindow = getCurrentWindow();
-
-const isFullscreen = ref(false);
-const wasMaximizedBeforeFullscreen = ref(false);
-let unlistenResize: (() => void) | null = null;
-
-const toggleFullscreen = async () => {
-  const currentFullscreen = await appWindow.isFullscreen();
-  if (!currentFullscreen) {
-    wasMaximizedBeforeFullscreen.value = await appWindow.isMaximized();
-    await appWindow.setFullscreen(true);
-    isFullscreen.value = true;
-  } else {
-    await appWindow.setFullscreen(false);
-    isFullscreen.value = false;
-    if (wasMaximizedBeforeFullscreen.value) {
-      await appWindow.maximize();
-    }
-  }
-};
 
 const minimize = () => appWindow.minimize();
 const toggleMaximize = async () => {
@@ -94,7 +75,7 @@ const handleTopChromeLeave = () => {
   scheduleTopChromeHide();
 };
 
-watch(showPlayerDetail, async (visible) => {
+watch(showPlayerDetail, (visible) => {
   clearTopChromeHideTimer();
 
   if (visible) {
@@ -106,13 +87,6 @@ watch(showPlayerDetail, async (visible) => {
   isTopChromeVisible.value = false;
   currentSongDetail.value = null;
   clearSongDetailCache();
-
-  // Exit fullscreen if we collapse the player details page
-  const isCurrentFullscreen = await appWindow.isFullscreen();
-  if (isCurrentFullscreen) {
-    await appWindow.setFullscreen(false);
-    isFullscreen.value = false;
-  }
 });
 
 watch([showPlayerDetail, () => currentSong.value?.path ?? ''], async ([visible, path]) => {
@@ -147,21 +121,8 @@ watch([showPlayerDetail, () => currentSong.value?.path ?? ''], async ([visible, 
   }
 }, { immediate: true });
 
-onMounted(async () => {
-  isFullscreen.value = await appWindow.isFullscreen();
-
-  // Listen to window resize to synchronize fullscreen state changes
-  const unlisten = await appWindow.listen('tauri://resize', async () => {
-    isFullscreen.value = await appWindow.isFullscreen();
-  });
-  unlistenResize = unlisten;
-});
-
 onBeforeUnmount(() => {
   clearTopChromeHideTimer();
-  if (unlistenResize) {
-    unlistenResize();
-  }
 });
 
 const formatFileSize = (size: number | undefined) => {
@@ -254,7 +215,6 @@ const metaInfo = computed(() => {
 
           <div class="relative z-10 flex w-1/4 items-center">
             <button
-              v-if="!isFullscreen"
               title="收起详情页"
               class="rounded-lg p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
               @click="handleClose"
@@ -265,31 +225,15 @@ const metaInfo = computed(() => {
             </button>
           </div>
 
-          <div class="pointer-events-none flex-1 truncate px-4 text-center text-sm font-medium text-white/80 drop-shadow-md">
-            {{ currentSong?.title || currentSong?.name }}
-            <span v-if="currentSong?.artist" class="mx-1 opacity-60">-</span>
-            <span class="opacity-60">{{ currentSong?.artist }}</span>
-          </div>
+          <transition name="song-switch-text" mode="out-in">
+            <div :key="currentSong?.path" class="pointer-events-none flex-1 truncate px-4 text-center text-sm font-medium text-white/80 drop-shadow-md">
+              {{ currentSong?.title || currentSong?.name }}
+              <span v-if="currentSong?.artist" class="mx-1 opacity-60">-</span>
+              <span class="opacity-60">{{ currentSong?.artist }}</span>
+            </div>
+          </transition>
 
           <div class="relative z-10 flex w-1/4 items-center justify-end gap-2">
-            <button
-              :title="isFullscreen ? '退出沉浸模式' : '沉浸模式 (全屏)'"
-              class="rounded-lg p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
-              @click="toggleFullscreen"
-            >
-              <svg v-if="isFullscreen" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="4 14 10 14 10 20" />
-                <polyline points="20 10 14 10 14 4" />
-                <line x1="14" y1="10" x2="21" y2="3" />
-                <line x1="10" y1="14" x2="3" y2="21" />
-              </svg>
-              <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="15 3 21 3 21 9" />
-                <polyline points="9 21 3 21 3 15" />
-                <line x1="21" y1="3" x2="14" y2="10" />
-                <line x1="3" y1="21" x2="10" y2="14" />
-              </svg>
-            </button>
             <button class="rounded-lg p-2 text-white/50 transition hover:bg-white/10 hover:text-white" @click="minimize">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M5 12h14" />
@@ -324,22 +268,24 @@ const metaInfo = computed(() => {
               class="h-full rounded-2xl border border-white/5 bg-black/10 p-4 shadow-xl backdrop-blur-sm"
             />
 
-            <LyricsView v-else-if="showPlayerDetail && parsedLyrics.length > 0" class="h-full" />
+            <LyricsView v-else-if="parsedLyrics.length > 0" class="h-full" />
 
-            <div
-              v-else
-              class="flex h-full flex-col items-center justify-center opacity-80"
-              style="text-shadow: 0 2px 10px rgba(0,0,0,0.4);"
-            >
+            <transition v-else name="song-switch-meta" mode="out-in">
               <div
-                v-for="(info, index) in metaInfo"
-                :key="index"
-                class="mb-4 flex items-center text-xl font-medium tracking-wider sm:text-2xl"
+                :key="currentSong?.path"
+                class="flex h-full flex-col items-center justify-center opacity-80"
+                style="text-shadow: 0 2px 10px rgba(0,0,0,0.4);"
               >
-                <span class="mr-4 text-white/40">{{ info.label }}</span>
-                <span class="text-white drop-shadow-md">{{ info.value }}</span>
+                <div
+                  v-for="(info, index) in metaInfo"
+                  :key="index"
+                  class="mb-4 flex items-center text-xl font-medium tracking-wider sm:text-2xl"
+                >
+                  <span class="mr-4 text-white/40">{{ info.label }}</span>
+                  <span class="text-white drop-shadow-md">{{ info.value }}</span>
+                </div>
               </div>
-            </div>
+            </transition>
           </transition>
         </div>
       </div>
@@ -357,6 +303,42 @@ const metaInfo = computed(() => {
 .fade-scale-leave-to {
   opacity: 0;
   transform: scale(0.97) translateY(10px);
+}
+
+/* 切歌时标题/歌手文字过渡 */
+.song-switch-text-enter-active,
+.song-switch-text-leave-active {
+  transition:
+    opacity 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.song-switch-text-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.song-switch-text-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* 切歌时歌曲元信息面板过渡 */
+.song-switch-meta-enter-active,
+.song-switch-meta-leave-active {
+  transition:
+    opacity 360ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 360ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.song-switch-meta-enter-from {
+  opacity: 0;
+  transform: translateY(16px) scale(0.98);
+}
+
+.song-switch-meta-leave-to {
+  opacity: 0;
+  transform: translateY(-12px) scale(0.98);
 }
 
 .text-shadow-sm {
