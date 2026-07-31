@@ -47,8 +47,8 @@ const tabs = [
       </nav>
     </aside>
 
-    <main :class="activeTab === 'about' ? 'relative h-full min-w-0 flex-1 overflow-hidden px-10 py-10 xl:px-16' : 'custom-scrollbar relative h-full min-w-0 flex-1 overflow-y-auto px-10 py-10 xl:px-16'">
-      <div class="w-full pb-16">
+    <main class="custom-scrollbar relative h-full min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-10 sm:py-10 xl:px-16">
+      <div :class="activeTab === 'about' ? 'w-full min-h-full flex flex-col justify-center items-center py-4' : 'w-full pb-16'">
         <SettingsGeneral v-if="activeTab === 'general'" />
         <SettingsTheme v-else-if="activeTab === 'theme'" />
         <SettingsSidebar v-else-if="activeTab === 'sidebar'" />
