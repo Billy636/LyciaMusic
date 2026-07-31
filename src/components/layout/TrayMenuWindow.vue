@@ -261,7 +261,7 @@ onUnmounted(() => {
   --hover-bg: rgba(255, 255, 255, 0.075);
 
   width: 330px;
-  height: 276px;
+  height: 288px;
   padding: 0;
   overflow: hidden;
   background: transparent;
@@ -283,11 +283,13 @@ onUnmounted(() => {
 .tray-menu-panel {
   position: absolute;
   top: 0;
+  display: flex;
+  flex-direction: column;
   width: 190px;
   height: 100%;
   box-sizing: border-box;
   overflow: hidden;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
   border: 0;
   border-radius: 10px;
   background: var(--panel-bg);
