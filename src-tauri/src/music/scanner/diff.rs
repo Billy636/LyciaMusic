@@ -31,6 +31,7 @@ pub(super) struct ScanDiff {
     pub(super) to_add: Vec<Song>,
     pub(super) to_update: Vec<Song>,
     pub(super) to_delete: Vec<String>,
+    #[allow(dead_code)]
     pub(super) has_disk_songs: bool,
 }
 

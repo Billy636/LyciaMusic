@@ -1493,7 +1493,10 @@ pub async fn get_folder_children(
     let result = tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
         let root_path = PathBuf::from(&normalized_folder);
-        let read_dir = std::fs::read_dir(&root_path).map_err(|e| e.to_string())?;
+        let read_dir = match std::fs::read_dir(&root_path) {
+            Ok(dir) => dir,
+            Err(_) => return Ok::<Vec<FolderNode>, String>(Vec::new()),
+        };
         let mut subdirs: Vec<PathBuf> = read_dir
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())

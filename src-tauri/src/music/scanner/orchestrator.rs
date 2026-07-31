@@ -96,12 +96,16 @@ fn scan_single_directory_with_mode(
     let folder_is_accessible =
         Path::new(&normalized_folder).is_dir() && fs::read_dir(&normalized_folder).is_ok();
 
-    if !scan_diff.has_disk_songs && original_db_count > 0 && !folder_is_accessible {
-        let error = "文件夹可能已断开连接或路径错误，未执行删除操作".to_string();
+    if !folder_is_accessible {
+        scan_diff.to_delete.clear();
+        let error = "文件夹可能已断开连接或已被锁定（如 BitLocker），保留已有记录".to_string();
         if let Some(reporter) = reporter.as_ref() {
             reporter.emit_error(error.clone());
         }
-        return Err(error);
+        return Ok(ScanDirectoryOutcome {
+            songs: if return_songs { Some(Vec::new()) } else { None },
+            song_count: original_db_count,
+        });
     }
 
     let covers_dir = app
@@ -343,7 +347,31 @@ pub fn scan_folder_recursive(
         .map(|name| name.to_string_lossy().into_owned())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| normalized_path.clone());
-    let subdirs = read_subdirectories(&folder_path)?;
+    let song_count = count_songs_recursive(&folder_path, conn);
+    let subdirs_opt = read_subdirectories(&folder_path);
+
+    if subdirs_opt.is_none() {
+        if current_depth == 0 {
+            return Some(FolderNode {
+                name: folder_name,
+                path: normalized_path,
+                children: Vec::new(),
+                child_count: 0,
+                children_loaded: true,
+                song_count,
+                cover_song_path: if song_count > 0 {
+                    find_first_song_recursive(&folder_path, conn)
+                } else {
+                    None
+                },
+                is_expanded: false,
+            });
+        } else {
+            return None;
+        }
+    }
+
+    let subdirs = subdirs_opt.unwrap();
     let child_count = subdirs.len();
     let should_preload_children = current_depth < max_depth;
     let children = if should_preload_children {
@@ -356,7 +384,6 @@ pub fn scan_folder_recursive(
     } else {
         Vec::new()
     };
-    let song_count = count_songs_recursive(&folder_path, conn);
 
     Some(FolderNode {
         name: folder_name,

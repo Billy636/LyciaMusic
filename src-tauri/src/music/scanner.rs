@@ -790,4 +790,48 @@ mod tests {
 
         fs::remove_dir_all(temp_dir).expect("remove temp dir");
     }
+
+    #[test]
+    fn scan_inaccessible_directory_retains_db_songs_without_deleting() {
+        let mut conn = setup_test_db();
+        let inaccessible_folder = normalize_path("Z:/LockedBitLockerDrive/Music");
+
+        let mut existing_song = make_song(&normalize_path("Z:/LockedBitLockerDrive/Music/song.flac"));
+        existing_song.id = None;
+        apply_scan_changes(&mut conn, &[existing_song], &[], &[], None).expect("insert existing song");
+
+        let song_count_before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM songs", [], |row| row.get(0))
+            .expect("count songs before scan");
+        assert_eq!(song_count_before, 1);
+
+        let scanned_count = scan_single_directory_summary_internal(
+            inaccessible_folder,
+            Arc::new(Mutex::new(conn)),
+            None,
+            1,
+            1,
+            ScanOptions::default(),
+        )
+        .expect("inaccessible scan should return Ok with retained count");
+
+        assert_eq!(scanned_count, 1);
+    }
+
+    #[test]
+    fn scan_folder_recursive_retains_inaccessible_root_node() {
+        let mut conn = setup_test_db();
+        let inaccessible_path = PathBuf::from(normalize_path("Z:/LockedBitLockerDrive/Music"));
+
+        let mut song = make_song(&normalize_path("Z:/LockedBitLockerDrive/Music/test.flac"));
+        song.id = None;
+        apply_scan_changes(&mut conn, &[song], &[], &[], None).expect("insert song");
+
+        let root_node = super::orchestrator::scan_folder_recursive(inaccessible_path, 0, 1, &conn);
+        assert!(root_node.is_some());
+        let node = root_node.unwrap();
+        assert_eq!(node.song_count, 1);
+        assert_eq!(node.child_count, 0);
+        assert!(node.children.is_empty());
+    }
 }
