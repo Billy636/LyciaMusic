@@ -261,7 +261,7 @@ onUnmounted(() => {
   --hover-bg: rgba(255, 255, 255, 0.075);
 
   width: 330px;
-  height: 288px;
+  height: 276px;
   padding: 0;
   overflow: hidden;
   background: transparent;
@@ -289,7 +289,7 @@ onUnmounted(() => {
   height: 100%;
   box-sizing: border-box;
   overflow: hidden;
-  padding-bottom: 6px;
+  padding-bottom: 8px;
   border: 0;
   border-radius: 10px;
   background: var(--panel-bg);
