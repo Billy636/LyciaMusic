@@ -89,6 +89,7 @@ const {
                       v-if="activeLyricLine"
                       :key="blockTransitionKey"
                       class="desktop-lyric-block"
+                      :class="{ 'desktop-lyric-block--stroked': settings.textStrokeDepth > 0 }"
                       :style="blockStyle"
                     >
                       <div
@@ -161,6 +162,7 @@ const {
                       v-else
                       :key="'empty-' + blockTransitionKey"
                       class="desktop-empty-state flex h-full items-center justify-center text-center"
+                      :class="{ 'desktop-empty-state--stroked': settings.textStrokeDepth > 0 }"
                     >
                       {{ fallbackStateText }}
                     </div>
@@ -307,9 +309,12 @@ const {
   font-family: var(--lyrics-font-family, system-ui, sans-serif);
   transform-origin: var(--lyrics-line-transform-origin, 50%) center;
   opacity: var(--desktop-text-opacity, 1);
+  transition: opacity 220ms ease;
+}
+
+.desktop-lyric-block--stroked {
   -webkit-text-stroke: var(--desktop-text-stroke-width, 0px) var(--desktop-text-stroke-color, #000000);
   paint-order: stroke fill;
-  transition: opacity 220ms ease;
 }
 
 .desktop-lyric-row {
@@ -564,12 +569,15 @@ const {
   font-size: 1.1rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  -webkit-text-stroke: var(--desktop-text-stroke-width, 0px) var(--desktop-text-stroke-color, #000000);
-  paint-order: stroke fill;
   filter:
     drop-shadow(0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.48)))
     drop-shadow(0 0 calc(var(--desktop-first-line-text-shadow-blur, 0px) * 0.82) rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.82)))
     drop-shadow(0 0 16px color-mix(in srgb, var(--desktop-accent-a) 12%, transparent));
+}
+
+.desktop-empty-state--stroked {
+  -webkit-text-stroke: var(--desktop-text-stroke-width, 0px) var(--desktop-text-stroke-color, #000000);
+  paint-order: stroke fill;
 }
 
 .desktop-block-enter-active,

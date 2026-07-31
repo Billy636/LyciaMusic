@@ -1093,7 +1093,10 @@ onUnmounted(() => {
           :style="previewWidgetStyle"
         >
           <div class="desktop-lyrics-preview-body" :style="previewLyricsPlayerStyle" :class="previewLyricsAlignmentClass">
-            <div class="desktop-lyric-block">
+            <div
+              class="desktop-lyric-block"
+              :class="{ 'desktop-lyric-block--stroked': localSettings.textStrokeDepth > 0 }"
+            >
               <!-- 第一行 正在播放 -->
               <div class="desktop-lyric-row desktop-lyric-row--active">
                 <div class="desktop-lyric-main">
@@ -2643,9 +2646,12 @@ onUnmounted(() => {
   text-align: var(--lyrics-text-align, center);
   font-family: var(--lyrics-font-family, system-ui, sans-serif);
   opacity: var(--desktop-text-opacity, 1);
+  transition: opacity 220ms ease;
+}
+
+.desktop-lyric-block--stroked {
   -webkit-text-stroke: var(--desktop-text-stroke-width, 0px) var(--desktop-text-stroke-color, #000000);
   paint-order: stroke fill;
-  transition: opacity 220ms ease;
 }
 
 .desktop-lyric-row {
