@@ -129,6 +129,34 @@ describe('useAppThemeSync', () => {
     expect(document.documentElement.classList.add).toHaveBeenCalledWith('dark');
   });
 
+  it('falls back to matchMedia when appWindow.theme() returns null', async () => {
+    getTheme.mockResolvedValue(null);
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes('dark'),
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => true,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      const { isDarkTheme } = useThemeSettings();
+
+      scope?.run(() => useAppThemeSync());
+      await flushThemeSync();
+
+      expect(setTheme).toHaveBeenCalledWith(null);
+      expect(isDarkTheme.value).toBe(true);
+      expect(document.documentElement.classList.add).toHaveBeenCalledWith('dark');
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
   it('resyncs native window material when custom foreground style changes resolved theme darkness', async () => {
     const settingsStore = useSettingsStore();
     settingsStore.patchTheme({

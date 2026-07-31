@@ -20,6 +20,7 @@ export function useAppThemeSync() {
   let restoreSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let unlistenFocusChanged: UnlistenFn | null = null;
   let unlistenThemeChanged: UnlistenFn | null = null;
+  let mediaQueryList: MediaQueryList | null = null;
   let syncGeneration = 0;
   let skipNextFocusRestore = false;
   let resolveInitialThemeSync: (() => void) | null = null;
@@ -32,13 +33,19 @@ export function useAppThemeSync() {
     resolveInitialThemeSync = null;
   };
 
+  const handleMediaThemeChange = (e: MediaQueryListEvent) => {
+    if (theme.value.mode === 'system') {
+      setResolvedSystemTheme(e.matches ? 'dark' : 'light');
+    }
+  };
+
   const applyTheme = async () => {
     if (theme.value.mode === 'system') {
       try {
         await appWindow.setTheme(null);
         setResolvedSystemTheme(await appWindow.theme());
       } catch (error) {
-        setResolvedSystemTheme('light');
+        setResolvedSystemTheme(null);
         console.warn('Failed to follow system theme:', error);
       }
     }
@@ -180,6 +187,15 @@ export function useAppThemeSync() {
   );
 
   onMounted(() => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      mediaQueryList = window.matchMedia('(prefers-color-scheme: dark)');
+      if (typeof mediaQueryList.addEventListener === 'function') {
+        mediaQueryList.addEventListener('change', handleMediaThemeChange);
+      } else if (typeof (mediaQueryList as unknown as { addListener?: unknown }).addListener === 'function') {
+        (mediaQueryList as unknown as { addListener: (cb: typeof handleMediaThemeChange) => void }).addListener(handleMediaThemeChange);
+      }
+    }
+
     void appWindow.onThemeChanged(({ payload }) => {
       setResolvedSystemTheme(payload);
     }).then((unlisten) => {
@@ -196,6 +212,15 @@ export function useAppThemeSync() {
   });
 
   onBeforeUnmount(() => {
+    if (mediaQueryList) {
+      if (typeof mediaQueryList.removeEventListener === 'function') {
+        mediaQueryList.removeEventListener('change', handleMediaThemeChange);
+      } else if (typeof (mediaQueryList as unknown as { removeListener?: unknown }).removeListener === 'function') {
+        (mediaQueryList as unknown as { removeListener: (cb: typeof handleMediaThemeChange) => void }).removeListener(handleMediaThemeChange);
+      }
+      mediaQueryList = null;
+    }
+
     if (restoreSyncTimer) {
       clearTimeout(restoreSyncTimer);
       restoreSyncTimer = null;

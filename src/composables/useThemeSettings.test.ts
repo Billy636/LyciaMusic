@@ -42,6 +42,28 @@ describe('useThemeSettings', () => {
     expect(isDarkTheme.value).toBe(false);
   });
 
+  it('falls back to matchMedia when setResolvedSystemTheme receives null', () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes('dark'),
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => true,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      const { isDarkTheme, setResolvedSystemTheme } = useThemeSettings();
+      setResolvedSystemTheme(null);
+      expect(isDarkTheme.value).toBe(true);
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
   it('toggles only the foreground style while preserving a custom background', () => {
     const settingsStore = useSettingsStore();
     const { theme, isDarkTheme, toggleThemeMode } = useThemeSettings();

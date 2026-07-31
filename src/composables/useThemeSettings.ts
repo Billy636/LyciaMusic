@@ -11,7 +11,14 @@ import type { WindowMaterialMode } from './windowMaterial';
 
 export type ResolvedSystemTheme = 'light' | 'dark';
 
-const systemTheme = ref<ResolvedSystemTheme>('light');
+const getSystemThemeFallback = (): ResolvedSystemTheme => {
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return 'light';
+};
+
+const systemTheme = ref<ResolvedSystemTheme>(getSystemThemeFallback());
 
 const resolveThemeDarkMode = (theme: ThemeSettings) => {
   if (theme.mode === 'system') {
@@ -38,7 +45,11 @@ export function useThemeSettings() {
   const isDarkTheme = computed(() => resolveThemeDarkMode(theme.value));
 
   const setResolvedSystemTheme = (nextTheme: ResolvedSystemTheme | null | undefined) => {
-    systemTheme.value = nextTheme === 'dark' ? 'dark' : 'light';
+    if (nextTheme === 'dark' || nextTheme === 'light') {
+      systemTheme.value = nextTheme;
+      return;
+    }
+    systemTheme.value = getSystemThemeFallback();
   };
 
   const replaceTheme = (nextTheme: ThemeSettings) => {
