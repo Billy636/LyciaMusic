@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
 import { useSettingsStore } from '../features/settings/store';
@@ -43,24 +43,25 @@ describe('useThemeSettings', () => {
   });
 
   it('falls back to matchMedia when setResolvedSystemTheme receives null', () => {
-    const originalMatchMedia = window.matchMedia;
-    window.matchMedia = ((query: string) => ({
-      matches: query.includes('dark'),
-      media: query,
-      onchange: null,
-      addListener: () => undefined,
-      removeListener: () => undefined,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      dispatchEvent: () => true,
-    })) as unknown as typeof window.matchMedia;
+    vi.stubGlobal('window', {
+      matchMedia: (query: string) => ({
+        matches: query.includes('dark'),
+        media: query,
+        onchange: null,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        dispatchEvent: () => true,
+      }),
+    });
 
     try {
       const { isDarkTheme, setResolvedSystemTheme } = useThemeSettings();
       setResolvedSystemTheme(null);
       expect(isDarkTheme.value).toBe(true);
     } finally {
-      window.matchMedia = originalMatchMedia;
+      vi.unstubAllGlobals();
     }
   });
 
