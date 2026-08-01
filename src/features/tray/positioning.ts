@@ -34,19 +34,26 @@ export async function resolveTrayMenuPosition(payload: TrayMenuOpenPayload): Pro
   }
 
   const scaleFactor = selectedMonitor.scaleFactor || 1;
-  const workAreaPosition = selectedMonitor.workArea.position.toLogical(scaleFactor);
-  const workAreaSize = selectedMonitor.workArea.size.toLogical(scaleFactor);
+  const monitorPosX = selectedMonitor.position.x / scaleFactor;
+  const monitorPosY = selectedMonitor.position.y / scaleFactor;
+  const monitorWidth = selectedMonitor.size.width / scaleFactor;
+  const monitorHeight = selectedMonitor.size.height / scaleFactor;
+
   const clickX = payload.x / scaleFactor;
   const clickY = payload.y / scaleFactor;
 
-  const margin = 8;
-  const maxX = workAreaPosition.x + workAreaSize.width - TRAY_MENU_WINDOW_WIDTH - margin;
-  const minX = workAreaPosition.x + margin;
-  const maxY = workAreaPosition.y + workAreaSize.height - TRAY_MENU_WINDOW_HEIGHT - margin;
-  const minY = workAreaPosition.y + margin;
-  const preferAboveY = clickY - TRAY_MENU_WINDOW_HEIGHT - margin;
-  const fallbackBelowY = clickY + margin;
-  const workAreaRight = workAreaPosition.x + workAreaSize.width - margin;
+  const gap = 6;
+  const minX = monitorPosX + gap;
+  const maxX = monitorPosX + monitorWidth - TRAY_MENU_WINDOW_WIDTH - gap;
+  const minY = monitorPosY + gap;
+  const maxY = monitorPosY + monitorHeight - TRAY_MENU_WINDOW_HEIGHT - gap;
+
+  const preferAboveY = clickY - TRAY_MENU_WINDOW_HEIGHT - gap;
+  const fallbackBelowY = clickY + gap;
+  const targetY = preferAboveY >= minY ? preferAboveY : fallbackBelowY;
+  const clampedY = Math.max(minY, Math.min(maxY, targetY));
+
+  const workAreaRight = monitorPosX + monitorWidth - gap;
   const submenuSpan = TRAY_MENU_SUBMENU_WIDTH + TRAY_MENU_SUBMENU_GAP;
   const mainPanelRightX = clickX + 12;
   const leftSubmenuWindowX = mainPanelRightX - TRAY_MENU_PANEL_WIDTH - submenuSpan;
@@ -59,7 +66,7 @@ export async function resolveTrayMenuPosition(payload: TrayMenuOpenPayload): Pro
   return {
     position: new LogicalPosition(
       Math.round(Math.max(minX, Math.min(maxX, preferredX))),
-      Math.round(Math.max(minY, Math.min(maxY, preferAboveY >= minY ? preferAboveY : fallbackBelowY))),
+      Math.round(clampedY),
     ),
     submenuPlacement,
   };

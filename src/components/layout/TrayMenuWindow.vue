@@ -261,7 +261,7 @@ onUnmounted(() => {
   --hover-bg: rgba(255, 255, 255, 0.075);
 
   width: 330px;
-  height: 276px;
+  height: 273px;
   padding: 0;
   overflow: hidden;
   background: transparent;
@@ -289,7 +289,7 @@ onUnmounted(() => {
   height: 100%;
   box-sizing: border-box;
   overflow: hidden;
-  padding-bottom: 8px;
+  padding: 6px 0;
   border: 0;
   border-radius: 10px;
   background: var(--panel-bg);
@@ -308,9 +308,9 @@ onUnmounted(() => {
 .track-row {
   display: flex;
   align-items: center;
-  height: 32px;
+  height: 30px;
   gap: 9px;
-  padding: 0 13px;
+  padding: 0 12px;
 }
 
 .track-icon {
@@ -331,7 +331,7 @@ onUnmounted(() => {
 
 .menu-divider {
   height: 1px;
-  margin: 3px 13px;
+  margin: 4px 12px;
   background: var(--divider);
 }
 
@@ -339,8 +339,8 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   align-items: center;
-  height: 40px;
-  padding: 0 15px;
+  height: 36px;
+  padding: 0 12px;
 }
 
 .transport-button,
@@ -373,10 +373,10 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   width: calc(100% - 12px);
-  height: 32px;
+  height: 30px;
   margin: 0 6px;
   gap: 9px;
-  border-radius: 7px;
+  border-radius: 6px;
   padding: 0 7px;
   text-align: left;
 }
@@ -420,13 +420,14 @@ onUnmounted(() => {
 
 .play-mode-popover {
   position: absolute;
-  top: 86px;
+  top: 89px;
   z-index: 5;
   width: 132px;
   overflow: hidden;
   border-radius: 8px;
   background: var(--panel-bg);
   box-shadow: inset 0 0 0 1px var(--panel-border);
+  padding: 4px 0;
 }
 
 .tray-menu-shell--submenu-left .play-mode-popover {
@@ -441,11 +442,13 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 18px 1fr 16px;
   align-items: center;
-  width: 100%;
-  height: 30px;
+  width: calc(100% - 8px);
+  height: 28px;
+  margin: 0 4px;
+  border-radius: 5px;
   gap: 7px;
   border: 0;
-  padding: 0 8px;
+  padding: 0 6px;
   background: transparent;
   color: var(--text-muted);
   font-size: 12.5px;
