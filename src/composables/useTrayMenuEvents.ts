@@ -1,8 +1,8 @@
-import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi';
+import { LogicalSize } from '@tauri-apps/api/dpi';
 import { invoke } from '@tauri-apps/api/core';
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { availableMonitors, getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { storeToRefs } from 'pinia';
 import { nextTick, onMounted, onUnmounted } from 'vue';
 import type { Router } from 'vue-router';
@@ -16,11 +16,8 @@ import {
   APP_TRAY_MENU_EVENT,
   APP_TRAY_MENU_OPEN_EVENT,
   handleTrayMenuAction,
-  TRAY_MENU_PANEL_WIDTH,
   TRAY_MENU_READY_EVENT,
   TRAY_MENU_STATE_EVENT,
-  TRAY_MENU_SUBMENU_GAP,
-  TRAY_MENU_SUBMENU_WIDTH,
   TRAY_MENU_WINDOW_HEIGHT,
   TRAY_MENU_WINDOW_LABEL,
   TRAY_MENU_WINDOW_WIDTH,
@@ -29,6 +26,7 @@ import {
   type TrayMenuStatePayload,
   type TrayMenuSubmenuPlacement,
 } from '../features/tray/actions';
+import { resolveTrayMenuPosition } from '../features/tray/positioning';
 
 let trayMenuWindowPromise: Promise<WebviewWindow> | null = null;
 let isTrayMenuReady = false;
@@ -138,9 +136,6 @@ async function ensureTrayMenuSize(targetWindow: WebviewWindow) {
 
   return trayMenuSizePromise;
 }
-
-import { resolveTrayMenuPosition } from '../features/tray/positioning';
-
 const waitForRoutePaint = () => new Promise<void>((resolve) => {
   window.requestAnimationFrame(() => {
     window.requestAnimationFrame(() => resolve());
