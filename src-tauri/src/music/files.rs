@@ -328,15 +328,15 @@ fn sync_moved_song_paths(
 }
 
 fn read_song_lyrics_raw(path: &str) -> String {
-    if let Ok(tagged_file) = read_tagged_file_from_path(Path::new(path)) {
-        if let Some(lyrics) = extract_embedded_lyrics(&tagged_file) {
-            return lyrics;
-        }
-    }
-
     let path_obj = Path::new(path);
     if let Some(content) = read_sidecar_lrc(path_obj) {
         return content;
+    }
+
+    if let Ok(tagged_file) = read_tagged_file_from_path(path_obj) {
+        if let Some(lyrics) = extract_embedded_lyrics(&tagged_file) {
+            return lyrics;
+        }
     }
 
     String::new()
@@ -404,16 +404,6 @@ pub async fn get_song_lyrics_payload(
 
 #[tauri::command]
 pub async fn get_song_lyrics_for_edit(path: String) -> Result<SongLyricsForEdit, String> {
-    if let Ok(tagged_file) = read_tagged_file_from_path(Path::new(&path)) {
-        if let Some(lyrics) = extract_embedded_lyrics(&tagged_file) {
-            return Ok(SongLyricsForEdit {
-                lyrics,
-                source: LyricsStorageSource::Embedded,
-                source_path: None,
-            });
-        }
-    }
-
     let path_obj = Path::new(&path);
     if let Some((content, lrc_path)) = read_sidecar_lrc_with_path(path_obj) {
         return Ok(SongLyricsForEdit {
@@ -421,6 +411,16 @@ pub async fn get_song_lyrics_for_edit(path: String) -> Result<SongLyricsForEdit,
             source: LyricsStorageSource::Sidecar,
             source_path: Some(normalize_path(&lrc_path.to_string_lossy())),
         });
+    }
+
+    if let Ok(tagged_file) = read_tagged_file_from_path(path_obj) {
+        if let Some(lyrics) = extract_embedded_lyrics(&tagged_file) {
+            return Ok(SongLyricsForEdit {
+                lyrics,
+                source: LyricsStorageSource::Embedded,
+                source_path: None,
+            });
+        }
     }
 
     Ok(SongLyricsForEdit {
@@ -810,6 +810,8 @@ pub fn create_folder(parent_path: String, folder_name: String) -> Result<String,
 mod tests {
     use super::*;
     use crate::database::DbState;
+    use id3::frame::Comment;
+    use id3::{TagLike, Version};
     use rusqlite::Connection;
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -843,6 +845,45 @@ mod tests {
         assert!(path
             .file_name()
             .is_some_and(|name| name.eq_ignore_ascii_case(ttml.file_name().unwrap())));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn local_sidecar_lyrics_override_embedded_lyrics() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("lycia_sidecar_override_test_{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("Demo.mp3");
+        let lrc = dir.join("Demo.lrc");
+
+        let mut id3_tag = id3::Tag::new();
+        id3_tag.add_frame(Comment {
+            lang: "eng".to_string(),
+            description: "lyrics".to_string(),
+            text: "[00:01.00]embedded lyric".to_string(),
+        });
+        let mut audio_bytes = Vec::new();
+        id3_tag.write_to(&mut audio_bytes, Version::Id3v24).unwrap();
+        audio_bytes.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x64]);
+        audio_bytes.extend(std::iter::repeat(0).take(413));
+        fs::write(&audio, audio_bytes).unwrap();
+        fs::write(&lrc, "[00:01.00]sidecar lyric").unwrap();
+
+        assert_eq!(
+            read_song_lyrics_raw(audio.to_str().unwrap()),
+            "[00:01.00]sidecar lyric"
+        );
+
+        let editable = get_song_lyrics_for_edit(audio.to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        assert_eq!(editable.lyrics, "[00:01.00]sidecar lyric");
+        assert_eq!(editable.source, LyricsStorageSource::Sidecar);
+        assert_eq!(editable.source_path.as_deref(), lrc.to_str());
+
         let _ = fs::remove_dir_all(dir);
     }
 
