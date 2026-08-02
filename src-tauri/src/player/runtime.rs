@@ -61,6 +61,15 @@ fn should_restore_for_default_device_change(
     selected_device_name.is_none() && next_default_device_name != last_default_device_name
 }
 
+fn should_restore_shared_output(
+    default_device_changed: bool,
+    stream_has_error: bool,
+    output_available: bool,
+    is_playing: bool,
+) -> bool {
+    default_device_changed || stream_has_error || (is_playing && !output_available)
+}
+
 #[cfg(target_os = "windows")]
 fn stop_exclusive_playback(exclusive_playback: &mut Option<WasapiExclusivePlayback>) {
     if let Some(mut playback) = exclusive_playback.take() {
@@ -1164,58 +1173,75 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         );
                     }
 
-                    if selected_device_name.is_none() {
-                        let next_default_name = default_output_device_name(&host);
-                        if should_restore_for_default_device_change(
-                            &selected_device_name,
-                            &last_default_device_name,
-                            &next_default_name,
-                            &active_device_name,
-                        ) {
+                    let next_default_name = if selected_device_name.is_none() {
+                        default_output_device_name(&host)
+                    } else {
+                        last_default_device_name.clone()
+                    };
+                    let default_device_changed = should_restore_for_default_device_change(
+                        &selected_device_name,
+                        &last_default_device_name,
+                        &next_default_name,
+                        &active_device_name,
+                    );
+                    let stream_has_error = should_check_shared
+                        && output
+                            .as_ref()
+                            .is_some_and(SharedOutputBackend::has_stream_error);
+
+                    if should_check_shared
+                        && should_restore_shared_output(
+                            default_device_changed,
+                            stream_has_error,
+                            output.is_some(),
+                            is_playing_flag,
+                        )
+                    {
+                        if selected_device_name.is_none() {
                             last_default_device_name = next_default_name;
-                            if let Some(sink) = &current_sink {
-                                sink.stop();
-                            }
-                            current_sink = None;
-                            #[cfg(target_os = "windows")]
-                            stop_exclusive_playback(&mut exclusive_playback);
-
-                            let cue_start_offset =
-                                Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
-                            let total_duration = current_duration_ms.map(Duration::from_millis);
-
-                            restore_preferred_output(
-                                &selected_device_name,
-                                &mut output,
-                                &host,
-                                &mut current_sink,
-                                #[cfg(target_os = "windows")]
-                                &mut exclusive_playback,
-                                &mut active_device_name,
-                                &mut active_output_mode,
-                                &mut fallback_reason,
-                                requested_output_mode,
-                                &current_path,
-                                current_volume,
-                                is_playing_flag,
-                                &thread_progress,
-                                current_volume_balance_gain,
-                                thread_eq_handle.clone(),
-                                thread_user_volume.clone(),
-                                cue_start_offset,
-                                total_duration,
-                            );
-
-                            emit_output_status(
-                                &thread_app_handle,
-                                &thread_output_status,
-                                None,
-                                active_device_name.clone(),
-                                requested_output_mode,
-                                active_output_mode,
-                                fallback_reason.clone(),
-                            );
                         }
+                        if let Some(sink) = &current_sink {
+                            sink.stop();
+                        }
+                        current_sink = None;
+                        #[cfg(target_os = "windows")]
+                        stop_exclusive_playback(&mut exclusive_playback);
+
+                        let cue_start_offset =
+                            Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
+                        let total_duration = current_duration_ms.map(Duration::from_millis);
+
+                        restore_preferred_output(
+                            &selected_device_name,
+                            &mut output,
+                            &host,
+                            &mut current_sink,
+                            #[cfg(target_os = "windows")]
+                            &mut exclusive_playback,
+                            &mut active_device_name,
+                            &mut active_output_mode,
+                            &mut fallback_reason,
+                            requested_output_mode,
+                            &current_path,
+                            current_volume,
+                            is_playing_flag,
+                            &thread_progress,
+                            current_volume_balance_gain,
+                            thread_eq_handle.clone(),
+                            thread_user_volume.clone(),
+                            cue_start_offset,
+                            total_duration,
+                        );
+
+                        emit_output_status(
+                            &thread_app_handle,
+                            &thread_output_status,
+                            selected_device_name.clone(),
+                            active_device_name.clone(),
+                            requested_output_mode,
+                            active_output_mode,
+                            fallback_reason.clone(),
+                        );
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -1305,5 +1331,16 @@ mod tests {
     fn player_polling_slows_down_only_while_idle() {
         assert_eq!(player_poll_interval(true), Duration::from_millis(150));
         assert_eq!(player_poll_interval(false), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn shared_output_recovers_when_stream_is_invalidated_without_device_rename() {
+        assert!(should_restore_shared_output(false, true, true, true));
+    }
+
+    #[test]
+    fn shared_output_retries_opening_while_playback_is_active() {
+        assert!(should_restore_shared_output(false, false, false, true));
+        assert!(!should_restore_shared_output(false, false, false, false));
     }
 }

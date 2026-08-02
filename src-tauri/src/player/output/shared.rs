@@ -48,6 +48,10 @@ impl SharedOutputBackend {
             active_device_name,
         })
     }
+
+    pub(crate) fn has_stream_error(&self) -> bool {
+        self._stream.has_stream_error()
+    }
 }
 
 impl OutputBackend for SharedOutputBackend {
