@@ -12,13 +12,20 @@ describe('touch click compatibility', () => {
   })
 
   it('does not turn mouse input, dragging, or window drag regions into fallback clicks', () => {
-    expect(touchClickSupport).toContain("event.pointerType === 'mouse'")
-    expect(touchClickSupport).toContain('TOUCH_TAP_MOVE_TOLERANCE')
-    expect(touchClickSupport).toContain("closest('[data-tauri-drag-region]')")
+    expect(touchClickSupport).toContain('event.isPrimary === false || event.button !== 0')
+    expect(touchClickSupport).toContain('TAP_MOVE_TOLERANCE')
+    expect(touchClickSupport).toContain("current.hasAttribute('data-tauri-drag-region')")
   })
 
-  it('waits for and prefers the native click to avoid duplicate actions', () => {
+  it('covers mouse-compatible touch devices and matches native clicks before cancelling the fallback', () => {
     expect(touchClickSupport).toContain('NATIVE_CLICK_GRACE_MS')
+    expect(touchClickSupport).not.toContain("event.pointerType === 'mouse'")
+    expect(touchClickSupport).toContain('targetsMatch(target, pendingClick.target)')
     expect(touchClickSupport).toContain("root.addEventListener('click', handleNativeClick, true)")
+  })
+
+  it('accepts SVG event targets and interactive controls nested inside drag regions', () => {
+    expect(touchClickSupport).toContain('item instanceof Element')
+    expect(touchClickSupport).toContain('current.matches(INTERACTIVE_SELECTOR)')
   })
 })

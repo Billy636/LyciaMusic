@@ -1,39 +1,83 @@
-const TOUCH_TAP_MOVE_TOLERANCE = 12
-const NATIVE_CLICK_GRACE_MS = 40
+const TAP_MOVE_TOLERANCE = 12
+const NATIVE_CLICK_GRACE_MS = 60
 
-type ActiveTouch = {
+const INTERACTIVE_SELECTOR = [
+  'button',
+  'a[href]',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]',
+  '[data-touch-click]',
+].join(',')
+
+type ActivePointer = {
   pointerId: number
-  target: HTMLElement
+  target: Element
   clientX: number
   clientY: number
   moved: boolean
 }
 
+type PendingClick = {
+  target: Element
+  clientX: number
+  clientY: number
+  timer: ReturnType<typeof setTimeout>
+}
+
+const getEventElement = (event: Event): Element | null => {
+  const pathTarget = event.composedPath?.().find((item): item is Element => item instanceof Element)
+  if (pathTarget) return pathTarget
+  return event.target instanceof Element ? event.target : null
+}
+
 /**
- * Some Windows interactive displays expose touch as pointer events but do not
- * reliably synthesize the following click in WebView2. Keep Vue's normal click
- * handlers as the source of truth and provide a click only when the native one
- * did not arrive.
+ * A drag region itself must stay draggable, but real controls nested inside a
+ * drag region (for example title-bar buttons) must remain tappable.
+ */
+const isWindowDragOnlyTarget = (target: Element) => {
+  let current: Element | null = target
+
+  while (current) {
+    if (current.matches(INTERACTIVE_SELECTOR)) return false
+    if (current.hasAttribute('data-tauri-drag-region')) return true
+    current = current.parentElement
+  }
+
+  return false
+}
+
+const targetsMatch = (nativeTarget: Element, pendingTarget: Element) =>
+  nativeTarget === pendingTarget
+  || nativeTarget.contains(pendingTarget)
+  || pendingTarget.contains(nativeTarget)
+
+/**
+ * Windows touch hardware is not consistent: WebView2 may expose a tap as a
+ * touch/pen pointer, or as a compatibility mouse pointer. Track every primary
+ * pointer and synthesize a click only if WebView2 did not emit the matching
+ * native click. This keeps ordinary mouse clicks native while covering both
+ * classes of touch device.
  */
 export const installTouchClickSupport = (root: Document = document) => {
-  let activeTouch: ActiveTouch | null = null
-  let pendingClick: ReturnType<typeof setTimeout> | null = null
+  let activePointer: ActivePointer | null = null
+  let pendingClick: PendingClick | null = null
 
   const clearPendingClick = () => {
-    if (pendingClick !== null) {
-      clearTimeout(pendingClick)
-      pendingClick = null
-    }
+    if (!pendingClick) return
+    clearTimeout(pendingClick.timer)
+    pendingClick = null
   }
 
   const handlePointerDown = (event: PointerEvent) => {
-    if (event.pointerType === 'mouse' || event.isPrimary === false || event.button !== 0) return
+    if (event.isPrimary === false || event.button !== 0) return
 
-    const target = event.target instanceof HTMLElement ? event.target : null
-    if (!target || target.closest('[data-tauri-drag-region]')) return
+    const target = getEventElement(event)
+    if (!target || isWindowDragOnlyTarget(target)) return
 
     clearPendingClick()
-    activeTouch = {
+    activePointer = {
       pointerId: event.pointerId,
       target,
       clientX: event.clientX,
@@ -43,38 +87,51 @@ export const installTouchClickSupport = (root: Document = document) => {
   }
 
   const handlePointerMove = (event: PointerEvent) => {
-    if (!activeTouch || activeTouch.pointerId !== event.pointerId) return
-    if (Math.hypot(event.clientX - activeTouch.clientX, event.clientY - activeTouch.clientY) > TOUCH_TAP_MOVE_TOLERANCE) {
-      activeTouch.moved = true
+    if (!activePointer || activePointer.pointerId !== event.pointerId) return
+    if (Math.hypot(event.clientX - activePointer.clientX, event.clientY - activePointer.clientY) > TAP_MOVE_TOLERANCE) {
+      activePointer.moved = true
     }
   }
 
   const handlePointerUp = (event: PointerEvent) => {
-    if (!activeTouch || activeTouch.pointerId !== event.pointerId) return
+    if (!activePointer || activePointer.pointerId !== event.pointerId) return
 
-    const touch = activeTouch
-    activeTouch = null
-    if (touch.moved || !touch.target.isConnected || touch.target.closest(':disabled')) return
+    const pointer = activePointer
+    activePointer = null
+    if (pointer.moved || !pointer.target.isConnected || pointer.target.closest(':disabled')) return
 
     clearPendingClick()
-    pendingClick = setTimeout(() => {
+    const clientX = event.clientX
+    const clientY = event.clientY
+    const timer = setTimeout(() => {
       pendingClick = null
-      touch.target.dispatchEvent(new MouseEvent('click', {
+      pointer.target.dispatchEvent(new MouseEvent('click', {
         bubbles: true,
         cancelable: true,
         composed: true,
-        clientX: event.clientX,
-        clientY: event.clientY,
+        clientX,
+        clientY,
         detail: 1,
       }))
     }, NATIVE_CLICK_GRACE_MS)
+
+    pendingClick = { target: pointer.target, clientX, clientY, timer }
   }
 
   const handlePointerCancel = (event: PointerEvent) => {
-    if (activeTouch?.pointerId === event.pointerId) activeTouch = null
+    if (activePointer?.pointerId === event.pointerId) activePointer = null
   }
 
-  const handleNativeClick = () => clearPendingClick()
+  const handleNativeClick = (event: MouseEvent) => {
+    if (!pendingClick) return
+
+    const target = getEventElement(event)
+    if (!target || !targetsMatch(target, pendingClick.target)) return
+
+    const closeToTap = event.clientX === 0 && event.clientY === 0
+      || Math.hypot(event.clientX - pendingClick.clientX, event.clientY - pendingClick.clientY) <= TAP_MOVE_TOLERANCE
+    if (closeToTap) clearPendingClick()
+  }
 
   root.addEventListener('pointerdown', handlePointerDown, true)
   root.addEventListener('pointermove', handlePointerMove, true)
@@ -84,7 +141,7 @@ export const installTouchClickSupport = (root: Document = document) => {
 
   return () => {
     clearPendingClick()
-    activeTouch = null
+    activePointer = null
     root.removeEventListener('pointerdown', handlePointerDown, true)
     root.removeEventListener('pointermove', handlePointerMove, true)
     root.removeEventListener('pointerup', handlePointerUp, true)
