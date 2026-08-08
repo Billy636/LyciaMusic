@@ -30,6 +30,7 @@ pub(super) struct ScanDiff {
     pub(super) to_add: Vec<Song>,
     pub(super) to_update: Vec<Song>,
     pub(super) to_delete: Vec<String>,
+    #[allow(dead_code)]
     pub(super) has_disk_songs: bool,
 }
 
@@ -518,7 +519,12 @@ pub(super) fn collect_scan_diff(
     }
 
     let mut songs: Vec<Song> = songs_by_index.into_iter().flatten().collect();
-    to_delete.extend(db_snapshot.keys().cloned());
+
+    // Only mark remaining DB songs for deletion if the folder is accessible.
+    // When folder is inaccessible (e.g. BitLocker locked), preserve songs in DB.
+    if has_disk_songs {
+        to_delete.extend(db_snapshot.keys().cloned());
+    }
 
     enrich_album_groups(&mut songs);
 

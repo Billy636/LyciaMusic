@@ -215,4 +215,5 @@ pub struct FolderNode {
 pub struct LibraryFolder {
     pub path: String,
     pub song_count: usize,
+    pub locked: bool,
 }

@@ -98,6 +98,7 @@ export interface Playlist {
 export interface LibraryFolder {
   path: string;
   song_count: number;
+  locked: boolean;
 }
 
 export type RemoteSourceProvider = 'webdav';

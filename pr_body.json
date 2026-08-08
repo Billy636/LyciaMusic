@@ -1,0 +1,6 @@
+{
+  "title": "fix: 修复 Issue #83, #84, #85 — 封面查找遗漏格式与拼音搜索增强",
+  "body": "## 概述\n- **侧边封面匹配增强**：支持 `歌曲名.mp3.jpg` 这类多一层扩展名的封面文件，不仅限于 `歌曲名.jpg`\n- **拼音搜索全面增强**：支持全拼音、首字母、混输三种搜索方式，输入 `whxhn` 也能搜到\"我很喜欢你\"\n- **搜索架构优化**：后端不再过滤搜索关键词，前端全权处理拼音匹配，消除 SQL 拼音盲区\n\n## 变更类型\n- [x] Bug 修复\n- [x] 功能增强\n\n## 详情\n- `covers.rs` — 侧边封面查找增强：\n  - 保留原有的 `{stem}.{ext}`（如 `song.jpg`）匹配\n  - 新增 `{filename}.{ext}`（如 `song.mp3.jpg`）匹配，解决封面文件名包含原始音频扩展名时无法识别的问题\n  - 缩略图和全尺寸封面两条路径均已同步更新\n- `useLibraryCurrentViewSongs.ts` — 拼音搜索全面重构：\n  - **架构修复**：`loadAllViewSongPaths` 调用时不再传入搜索关键词（`query: \"\"`），后端返回全部路径，前端全权过滤\n  - **新增 `toPinyinInitials`**：提取每个汉字拼音的首字母（\"我很喜欢你\" → `whxhn`），支持纯首字母搜索\n  - **新增 `isSubsequence`**：子序列匹配算法，检查输入是否按顺序出现在全拼中，支持混输（`wohenxhn` 也能匹配 `wohenxihuanni`）\n  - 搜索关键词去空格后同时匹配：原文、全拼、首字母、子序列四种模式\n\n## 测试\n- [x] 前端测试全部通过（73 文件 / 480 tests）\n- [x] Rust 测试全部通过（93 + 24 tests）\n- [x] TypeScript 类型检查通过（`vue-tsc --noEmit`）\n- [x] Tauri 构建通过（`npm run tauri build`）\n\n## 相关 Issue\nCloses #83, Closes #84, Closes #85\n\n## 其他\n感谢大佬的项目！希望能帮到 Lycia 做得更好喵~ (ฅ´ω`ฅ)",
+  "head": "ECM-xiaokong:codex/fix-issues-83-84-85",
+  "base": "main"
+}
