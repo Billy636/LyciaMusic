@@ -645,8 +645,10 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <Transition name="search-refresh">
       <div
         v-if="artistSortMode === 'name'"
+        :key="`artist-grouped-${searchQuery.trim()}`"
         :style="{ paddingTop: groupedArtistVirtualState.paddingTop, paddingBottom: groupedArtistVirtualState.paddingBottom }"
       >
         <template v-for="row in groupedArtistVirtualState.rows" :key="row.key">
@@ -702,6 +704,7 @@ onUnmounted(() => {
 
       <div
         v-else
+        :key="`artist-flat-${searchQuery.trim()}`"
         class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-6 gap-y-4"
         :style="{ paddingTop: flatArtistVirtualState.paddingTop, paddingBottom: flatArtistVirtualState.paddingBottom }"
       >
@@ -737,11 +740,22 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+      </Transition>
     </section>
   </div>
 </template>
 
 <style scoped>
+/* 搜索结果刷新过渡：新列表淡入上移，旧列表立即移除保持实时 */
+.search-refresh-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.search-refresh-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
 .artists-scroll-container {
   overflow-anchor: none;
 }

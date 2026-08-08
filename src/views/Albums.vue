@@ -673,8 +673,10 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <Transition name="search-refresh">
       <div
         v-if="albumSortMode === 'name'"
+        :key="`album-grouped-${searchQuery.trim()}`"
         :style="{ paddingTop: groupedAlbumVirtualState.paddingTop, paddingBottom: groupedAlbumVirtualState.paddingBottom }"
       >
         <template v-for="row in groupedAlbumVirtualState.rows" :key="row.key">
@@ -751,6 +753,7 @@ onUnmounted(() => {
 
       <div
         v-else
+        :key="`album-flat-${searchQuery.trim()}`"
         class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-x-6 gap-y-10"
         :style="{ paddingTop: flatAlbumVirtualState.paddingTop, paddingBottom: flatAlbumVirtualState.paddingBottom }"
       >
@@ -807,11 +810,22 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+      </Transition>
     </section>
   </div>
 </template>
 
 <style scoped>
+/* 搜索结果刷新过渡：新列表淡入上移，旧列表立即移除保持实时 */
+.search-refresh-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.search-refresh-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
 .albums-scroll-container {
   overflow-anchor: none;
 }

@@ -617,7 +617,8 @@ const getRowStyle = (songIndex: number, songPath: string) => {
       :class="{ 'song-list-scrollbar-active': isScrollbarActive }"
       @scroll="onScroll"
     >
-      <div class="w-full relative">
+      <Transition name="search-refresh">
+        <div :key="`song-list-${searchQuery.trim()}`" class="w-full relative">
         <div :style="{ height: virtualPaddingTop }"></div>
 
         <div
@@ -723,6 +724,7 @@ const getRowStyle = (songIndex: number, songPath: string) => {
 
         <div :style="{ height: virtualPaddingBottom }"></div>
       </div>
+      </Transition>
 
       <div v-if="songs.length === 0" class="py-20 flex flex-col justify-center items-center select-none text-gray-500 dark:text-white/60">
         <template v-if="showLibraryOnboarding || showFolderEmpty || hasSearchQuery">
@@ -887,6 +889,16 @@ const getRowStyle = (songIndex: number, songPath: string) => {
 </template>
 
 <style scoped>
+/* 搜索结果刷新过渡：新列表淡入上移，旧列表立即移除保持实时 */
+.search-refresh-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.search-refresh-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
 .song-list-scroll-container {
   overflow-anchor: none;
   scrollbar-color: rgba(0, 0, 0, 0.16) transparent;
