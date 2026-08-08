@@ -9,7 +9,7 @@ import { useSettings } from '../../features/settings/useSettings';
 
 const router = useRouter();
 const route = useRoute();
-const { searchQuery, setSearch, isMiniMode } = usePlayerViewState();
+const { searchQuery, setSearch, isMiniMode, currentViewMode } = usePlayerViewState();
 const appWindow = getCurrentWindow();
 const { settings } = useSettings();
 const { isDarkTheme, toggleThemeMode } = useThemeSettings();
@@ -17,6 +17,17 @@ const rotation = ref(0); // For settings icon animation
 const lastNonSettingsRoute = ref(route.path === '/settings' ? '/' : route.fullPath);
 const isSettingsRoute = computed(() => route.path === '/settings');
 const themeToggleTitle = computed(() => (isDarkTheme.value ? '切换浅色' : '切换深色'));
+
+// 搜索框提示文字随页面切换：歌曲/艺术家/专辑三种搜索模式
+const searchPlaceholder = computed(() => {
+  if (route.path === '/artists') {
+    return '搜索艺术家...';
+  }
+  if (route.path === '/albums') {
+    return '搜索专辑...';
+  }
+  return '搜索歌曲...';
+});
 
 const rotateSettings = () => {
   rotation.value += 180;
@@ -41,6 +52,14 @@ watch(
     }
   },
   { immediate: true },
+);
+
+// 切换页面或首页子视图（本地音乐/文件夹/统计等）时清空搜索词，避免过滤条件残留
+watch(
+  [() => route.path, currentViewMode],
+  () => {
+    setSearch('');
+  },
 );
 
 // 最小化
@@ -93,7 +112,7 @@ const goBack = () => { router.back(); };
         </svg>
         <input 
           type="text" 
-          placeholder="搜索音乐..." 
+          :placeholder="searchPlaceholder" 
           class="bg-transparent outline-none w-full placeholder-gray-700 dark:placeholder-gray-300 text-gray-800 dark:text-gray-100 text-xs font-medium"
           :value="searchQuery"
           @input="handleInput"
