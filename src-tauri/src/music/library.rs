@@ -218,7 +218,29 @@ fn folder_song_matches_query(row: &FolderViewSongRow, query: &str) -> bool {
             .any(|name| name.to_lowercase().contains(&lowered_query))
 }
 
-fn load_cached_songs(conn: &rusqlite::Connection) -> Result<Vec<LibrarySong>, String> {
+
+fn get_locked_folder_paths(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT path FROM library_folders")
+        .map_err(|e| e.to_string())?;
+
+    let paths: Vec<String> = stmt
+        .query_map([], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let locked: Vec<String> = paths
+        .into_iter()
+        .filter(|path| {
+            let p = std::path::Path::new(path);
+            !p.is_dir() || std::fs::read_dir(p).is_err()
+        })
+        .collect();
+
+    Ok(locked)
+}
+fn load_cached_songs(conn: &rusqlite::Connection, exclude_locked: &[String]) -> Result<Vec<LibrarySong>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, path, title, artist, artist_names, effective_artist_names, album, album_artist, album_key, is_various_artists_album, collapse_artist_credits, duration, cover_thumb_path, bitrate, sample_rate, bit_depth, format, container, codec, file_size, track_number, disc_number, added_at, file_modified_at, cue_source_path, cue_start_offset, cue_end_offset, source_type, remote_source_id, comment
@@ -283,6 +305,18 @@ fn load_cached_songs(conn: &rusqlite::Connection) -> Result<Vec<LibrarySong>, St
 
     let mut songs: Vec<LibrarySong> = rows.filter_map(|row| row.ok()).collect();
     songs.sort_by(|a, b| a.name.cmp(&b.name));
+
+    // Filter out songs from locked/inaccessible folders (e.g. BitLocker locked drives)
+    if !exclude_locked.is_empty() {
+        songs.retain(|song| {
+            !exclude_locked.iter().any(|locked_path| {
+                song.path == *locked_path
+                    || song.path.starts_with(&format!("{locked_path}\""))
+                    || song.path.starts_with(&format!("{locked_path}/"))
+            })
+        });
+    }
+
     Ok(songs)
 }
 
@@ -320,9 +354,15 @@ pub async fn get_library_folders(
                 .filter(|song_path| is_descendant_path(song_path, &folder_path))
                 .count();
 
+            // 检测文件夹是否可访问（如 BitLocker 锁定等情况）
+            let folder_path_obj = std::path::Path::new(&folder_path);
+            let is_locked = !folder_path_obj.is_dir()
+                || std::fs::read_dir(folder_path_obj).is_err();
+
             folders.push(LibraryFolder {
                 path: folder_path,
-                song_count: count,
+                song_count: if is_locked { 0 } else { count },
+                locked: is_locked,
             });
         }
         Ok::<Vec<LibraryFolder>, String>(folders)
@@ -387,7 +427,8 @@ pub async fn get_library_songs_cached(
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
-        load_cached_songs(&conn)
+        let locked = get_locked_folder_paths(&conn).unwrap_or_default();
+        load_cached_songs(&conn, &locked)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -883,7 +924,8 @@ pub async fn scan_library(
         }
 
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
-        load_cached_songs(&conn)
+        let locked = get_locked_folder_paths(&conn).unwrap_or_default();
+        load_cached_songs(&conn, &locked)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -913,9 +955,23 @@ pub async fn get_library_hierarchy(
 
         for root in roots {
             let root_path = PathBuf::from(&root);
-            if let Some(root_node) = scan_folder_recursive(root_path.clone(), 0, 1, &conn) {
-                tree.push(root_node);
-            }
+            let root_node = scan_folder_recursive(root_path.clone(), 0, 1, &conn).unwrap_or_else(|| {
+                // Folder is locked or inaccessible - still show it in tree with 0 songs
+                FolderNode {
+                    name: root_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| root.clone()),
+                    path: root.clone(),
+                    children: Vec::new(),
+                    child_count: 0,
+                    children_loaded: true,
+                    song_count: 0,
+                    cover_song_path: None,
+                    is_expanded: false,
+                }
+            });
+            tree.push(root_node);
         }
 
         Ok::<Vec<FolderNode>, String>(tree)
@@ -1088,7 +1144,7 @@ mod tests {
         )
         .expect("insert cached song");
 
-        let songs = load_cached_songs(&conn).expect("load cached songs");
+        let songs = load_cached_songs(&conn, &[]).expect("load cached songs");
 
         assert_eq!(songs.len(), 1);
         assert_eq!(songs[0].comment.as_deref(), Some("Live version"));

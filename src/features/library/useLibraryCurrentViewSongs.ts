@@ -1,4 +1,5 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue';
+import { pinyin } from 'pinyin-pro';
 import { useLibraryStore } from './store';
 
 import {
@@ -135,7 +136,7 @@ export function useLibraryCurrentViewSongs({
       }
 
       const loadCurrentAllViewPaths = () => loadAllViewSongPaths({
-        query,
+        query: "",
         artistFilter: musicTab === 'artist' ? artistFilter : '',
         albumFilter: musicTab === 'album' ? albumFilter : '',
         sortMode,
@@ -482,6 +483,26 @@ export function useLibraryCurrentViewSongs({
     return sortedPaths;
   };
 
+  const toPinyinText = (text: string): string => {
+    return pinyin(text, {
+      toneType: 'none', nonZh: 'consecutive', type: 'string',
+    }).replace(/\s+/g, '').toLowerCase();
+  };
+
+  const toPinyinInitials = (text: string): string => {
+    return pinyin(text, {
+      pattern: 'first', toneType: 'none', nonZh: 'consecutive', type: 'string',
+    }).replace(/\s+/g, '').toLowerCase();
+  };
+
+  const isSubsequence = (query: string, target: string): boolean => {
+    let qi = 0;
+    for (let ti = 0; ti < target.length && qi < query.length; ti++) {
+      if (query[qi] === target[ti]) qi++;
+    }
+    return qi === query.length;
+  };
+
   const sortSongPathsByAlbumDetailMode = (paths: string[], mode: AlbumDetailSortMode) => {
     if (mode !== 'track_number' && mode !== 'track_number_desc') {
       return sortSongPathsByLocalMode(paths, mode as LocalSortMode);
@@ -540,24 +561,51 @@ export function useLibraryCurrentViewSongs({
     if (searchQuery.value.trim()) {
       const query = searchQuery.value.toLowerCase();
 
-      if (currentViewMode.value === 'all' && localSortMode.value !== 'custom') {
-        if (localSortMode.value === 'title') {
-          return sortItemsByAlphabetIndex(
-            allViewSongPaths.value,
-            (path) => getSongTitleLabel(songLookup.value.get(path)!),
-          );
-        }
-        return allViewSongPaths.value;
-      }
-
       const matchesQuery = (path: string) => {
         const song = songLookup.value.get(path);
         if (!song) {
           return false;
         }
-        return song.name.toLowerCase().includes(query)
+        // 基本文本匹配
+        if (song.name.toLowerCase().includes(query)
           || getSongArtistSearchText(song).includes(query)
-          || song.album.toLowerCase().includes(query);
+          || song.album.toLowerCase().includes(query)) {
+          return true;
+        }
+        // Clean query: 去空格用于拼音匹配
+        const cq = query.replace(/\s+/g, '');
+        if (!cq) return false;
+
+        // ===== 拼音增强匹配（全拼 + 首字母 + 子序列） =====
+        // 歌名（name）
+        const pn = toPinyinText(song.name);
+        if (pn.includes(cq) || pn.includes(toPinyinText(cq))
+          || isSubsequence(cq, toPinyinInitials(song.name))
+          || isSubsequence(cq, pn)) {
+          return true;
+        }
+        // 标题（title）
+        if (song.title) {
+          const pt = toPinyinText(song.title);
+          if (pt.includes(cq) || pt.includes(toPinyinText(cq))
+            || isSubsequence(cq, toPinyinInitials(song.title))
+            || isSubsequence(cq, pt)) {
+            return true;
+          }
+        }
+        // 歌手
+        const pa = toPinyinText(song.artist);
+        if (pa.includes(cq) || isSubsequence(cq, toPinyinInitials(song.artist))
+          || isSubsequence(cq, pa)) {
+          return true;
+        }
+        // 专辑
+        const pal = toPinyinText(song.album);
+        if (pal.includes(cq) || isSubsequence(cq, toPinyinInitials(song.album))
+          || isSubsequence(cq, pal)) {
+          return true;
+        }
+        return false;
       };
 
       if (currentViewMode.value === 'favorites') {
@@ -578,7 +626,11 @@ export function useLibraryCurrentViewSongs({
 
       if (currentViewMode.value === 'all') {
         if (localSortMode.value !== 'custom') {
-          return allViewSongPaths.value;
+                      const filteredPaths = allViewSongPaths.value.filter(matchesQuery);
+            if (filteredPaths.length > 0 || allViewSongPaths.value.length > 0) {
+              return filteredPaths;
+            }
+            return canonicalSongPaths.value.filter(matchesQuery);
         }
 
         return sortItemsByAlphabetIndex(

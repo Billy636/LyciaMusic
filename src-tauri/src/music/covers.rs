@@ -329,6 +329,51 @@ pub fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
             }
         }
     }
+
+    // --- Sidecar image lookup: check for external image files with same name ---
+    if let Some(parent) = path.parent() {
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            const SIDECAR_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp"];
+            // Try stem.ext first (e.g. song.jpg)
+            for &ext in SIDECAR_EXTENSIONS {
+                let candidate = parent.join(format!("{}.{}", stem, ext));
+                if candidate.is_file() {
+                    if let Ok(img) = image::open(&candidate) {
+                        let resized = img.resize(
+                            THUMBNAIL_EDGE_PX,
+                            THUMBNAIL_EDGE_PX,
+                            image::imageops::FilterType::Triangle,
+                        );
+                        let cache_path = cache_dir.join(format!("{}.jpg", thumbnail_cache_stem(&source_hash)));
+                        if let Some(persisted) = persist_image_atomically(&resized, ImageFormat::Jpeg, &cache_path) {
+                            let _ = persist_alias_target(&alias_path, &cache_path);
+                            return Some(persisted);
+                        }
+                    }
+                }
+            }
+            // Try filename.ext pattern (e.g. song.mp3.jpg, song.flac.jpg)
+            if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+                for &ext in SIDECAR_EXTENSIONS {
+                    let candidate = parent.join(format!("{}.{}", file_name, ext));
+                    if candidate.is_file() {
+                        if let Ok(img) = image::open(&candidate) {
+                            let resized = img.resize(
+                                THUMBNAIL_EDGE_PX,
+                                THUMBNAIL_EDGE_PX,
+                                image::imageops::FilterType::Triangle,
+                            );
+                            let cache_path = cache_dir.join(format!("{}.jpg", thumbnail_cache_stem(&source_hash)));
+                            if let Some(persisted) = persist_image_atomically(&resized, ImageFormat::Jpeg, &cache_path) {
+                                let _ = persist_alias_target(&alias_path, &cache_path);
+                                return Some(persisted);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     None
 }
 
@@ -392,6 +437,65 @@ pub fn get_or_create_full_cover(path: &Path, app: &AppHandle) -> Option<String> 
                 let persisted = persist_bytes_atomically(pic.data(), &cache_path)?;
                 let _ = persist_alias_target(&alias_path, &cache_path);
                 return Some(persisted);
+            }
+        }
+    }
+
+    // --- Sidecar image lookup: check for external image files with same name ---
+    if let Some(parent) = path.parent() {
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            const SIDECAR_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp"];
+            // Try stem.ext first (e.g. song.jpg)
+            for &ext in SIDECAR_EXTENSIONS {
+                let candidate = parent.join(format!("{}.{}", stem, ext));
+                if candidate.is_file() {
+                    if let Ok(img) = image::open(&candidate) {
+                        let should_resize =
+                            img.width() > FULL_COVER_EDGE_PX || img.height() > FULL_COVER_EDGE_PX;
+                        let display_img = if should_resize {
+                            img.resize(
+                                FULL_COVER_EDGE_PX,
+                                FULL_COVER_EDGE_PX,
+                                image::imageops::FilterType::Lanczos3,
+                            )
+                        } else {
+                            img
+                        };
+                        let cache_stem = full_cover_cache_stem(&source_hash);
+                        let cache_path = cache_dir.join(format!("{cache_stem}.{FULL_COVER_FALLBACK_EXT}"));
+                        if let Some(persisted) = persist_image_atomically(&display_img, ImageFormat::Png, &cache_path) {
+                            let _ = persist_alias_target(&alias_path, &cache_path);
+                            return Some(persisted);
+                        }
+                    }
+                }
+            }
+            // Try filename.ext pattern (e.g. song.mp3.jpg, song.flac.jpg)
+            if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+                for &ext in SIDECAR_EXTENSIONS {
+                    let candidate = parent.join(format!("{}.{}", file_name, ext));
+                    if candidate.is_file() {
+                        if let Ok(img) = image::open(&candidate) {
+                            let should_resize =
+                                img.width() > FULL_COVER_EDGE_PX || img.height() > FULL_COVER_EDGE_PX;
+                            let display_img = if should_resize {
+                                img.resize(
+                                    FULL_COVER_EDGE_PX,
+                                    FULL_COVER_EDGE_PX,
+                                    image::imageops::FilterType::Lanczos3,
+                                )
+                            } else {
+                                img
+                            };
+                            let cache_stem = full_cover_cache_stem(&source_hash);
+                            let cache_path = cache_dir.join(format!("{cache_stem}.{FULL_COVER_FALLBACK_EXT}"));
+                            if let Some(persisted) = persist_image_atomically(&display_img, ImageFormat::Png, &cache_path) {
+                                let _ = persist_alias_target(&alias_path, &cache_path);
+                                return Some(persisted);
+                            }
+                        }
+                    }
+                }
             }
         }
     }

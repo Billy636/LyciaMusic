@@ -35,18 +35,24 @@ pub fn scan_single_directory_internal(
     };
 
     let original_db_count = db_snapshot.len();
-    let mut scan_diff = collect_scan_diff(&normalized_folder, db_snapshot, reporter.as_ref(), options)?;
 
+    // Check if folder is accessible BEFORE scanning (handles BitLocker locked drives, disconnected drives, etc.)
     let folder_is_accessible =
         Path::new(&normalized_folder).is_dir() && fs::read_dir(&normalized_folder).is_ok();
 
-    if !scan_diff.has_disk_songs && original_db_count > 0 && !folder_is_accessible {
-        let error = "文件夹可能已断开连接或路径错误，未执行删除操作".to_string();
+    if !folder_is_accessible && original_db_count > 0 {
+        let error = if Path::new(&normalized_folder).exists() {
+            "文件夹内的音乐已被BitLocker锁定，请解锁后刷新".to_string()
+        } else {
+            "文件夹可能已断开连接或路径错误，未执行删除操作".to_string()
+        };
         if let Some(reporter) = reporter.as_ref() {
             reporter.emit_error(error.clone());
         }
         return Err(error);
     }
+
+    let mut scan_diff = collect_scan_diff(&normalized_folder, db_snapshot, reporter.as_ref(), options)?;
 
     let covers_dir = app.as_ref().map(|a| crate::music::covers::get_cover_cache_dir(a));
 
@@ -273,7 +279,7 @@ pub fn scan_folder_recursive(
         .map(|name| name.to_string_lossy().into_owned())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| normalized_path.clone());
-    let subdirs = read_subdirectories(&folder_path)?;
+    let subdirs = read_subdirectories(&folder_path).unwrap_or_default();
     let child_count = subdirs.len();
     let should_preload_children = current_depth < max_depth;
     let children = if should_preload_children {

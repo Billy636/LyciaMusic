@@ -63,7 +63,7 @@ describe('playerLibraryRuntime.scanLibrary', () => {
     libraryStore.setLibraryFolders([
       {
         path: 'C:\\Music',
-        song_count: 1,
+        song_count: 1, locked: false,
       },
     ]);
 
@@ -197,7 +197,7 @@ describe('playerLibraryRuntime.scanLibrary', () => {
     libraryStore.setLibraryFolders([
       {
         path: 'C:\\Music',
-        song_count: 1,
+        song_count: 1, locked: false,
       },
     ]);
     settingsStore.patchSettings({
