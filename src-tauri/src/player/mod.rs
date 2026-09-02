@@ -1,9 +1,11 @@
 mod commands;
+pub(crate) mod decoder_thread;
 mod device;
 mod downmix;
 pub mod equalizer;
 pub mod loudness;
 mod output;
+pub(crate) mod ring_buffer;
 mod runtime;
 mod spectrum;
 mod types;

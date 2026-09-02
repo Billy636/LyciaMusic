@@ -13,10 +13,10 @@ use crate::player::types::{
 };
 use crate::remote::cache::RemoteStreamSource;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use rodio::{Decoder, Sink, Source};
+use rodio::Sink;
 use souvlaki::{MediaControlEvent, MediaControls, PlatformConfig};
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
@@ -445,25 +445,20 @@ fn append_decoded_source<R>(
     if let Some(output) = output {
         *current_sink = output.create_sink().ok();
 
-        let reader = BufReader::with_capacity(512 * 1024, reader);
-        if let Ok(source) = Decoder::new(reader) {
-            let rate = source.sample_rate();
+        if let Ok(prefetch_source) = crate::player::decoder_thread::create_prefetch_source(
+            reader,
+            start_offset,
+            cue_start_offset,
+            total_duration,
+        ) {
+            let rate = prefetch_source.sample_rate();
+            let playback_channels = prefetch_source.channels();
 
             let offset = start_offset.unwrap_or(Duration::ZERO);
             if start_offset.is_none() {
                 progress.visualizer.reset();
             }
 
-            let skipped_source = source.convert_samples::<f32>().skip_duration(offset);
-            let mut source_chain: Box<dyn Source<Item = f32> + Send> = Box::new(skipped_source);
-            if let Some(tot_dur) = total_duration {
-                let resume_time = offset.saturating_sub(cue_start_offset);
-                let remaining = tot_dur.saturating_sub(resume_time);
-                source_chain = Box::new(source_chain.take_duration(remaining));
-            }
-            source_chain = crate::player::downmix::into_stereo(source_chain);
-
-            let playback_channels = source_chain.channels();
             progress.sample_rate.store(rate, Ordering::Relaxed);
             progress
                 .channels
@@ -476,7 +471,7 @@ fn append_decoded_source<R>(
 
             // 1. VolumeNormalizer 音量平衡节点
             let (normalized_source, handle) = VolumeNormalizer::new(
-                source_chain,
+                prefetch_source,
                 volume_balance_gain,
                 100, // ramp 100ms
             );
@@ -615,74 +610,31 @@ fn handle_seek(
             }
             Err(_) => {
                 if !current_path.is_empty() {
-                    if let Some(output) = output {
+                    if let Some(sink) = current_sink {
                         sink.stop();
-                        *current_sink = output.create_sink().ok();
-
-                        if let Ok(file) = File::open(current_path) {
-                            let reader = BufReader::with_capacity(512 * 1024, file);
-                            if let Ok(source) = Decoder::new(reader) {
-                                let rate = source.sample_rate();
-                                let channels = source.channels();
-                                let samples_to_skip =
-                                    (clamped_time * rate as f64 * channels as f64).round() as u64;
-                                progress
-                                    .samples_played
-                                    .store(samples_to_skip, Ordering::Relaxed);
-
-                                let skipped_source =
-                                    source.convert_samples::<f32>().skip_duration(jump_target);
-                                let mut source_chain: Box<dyn Source<Item = f32> + Send> =
-                                    Box::new(skipped_source);
-                                let cue_start_offset =
-                                    Duration::from_millis(cue_start_offset_ms.unwrap_or(0));
-                                let total_duration = duration_ms.map(Duration::from_millis);
-                                if let Some(tot_dur) = total_duration {
-                                    let resume_time = jump_target.saturating_sub(cue_start_offset);
-                                    let remaining = tot_dur.saturating_sub(resume_time);
-                                    source_chain = Box::new(source_chain.take_duration(remaining));
-                                }
-
-                                // 1. VolumeNormalizer 音量平衡节点
-                                let (normalized_source, handle) = VolumeNormalizer::new(
-                                    source_chain,
-                                    volume_balance_gain,
-                                    100, // ramp 100ms
-                                );
-                                *current_normalizer_handle = Some(handle);
-
-                                // 2. Equalizer 10段级联滤波器组
-                                let eq_source = crate::player::equalizer::Equalizer::new(
-                                    normalized_source,
-                                    equalizer_handle,
-                                );
-
-                                // 3. UserVolumeSource 自定义主音量节点
-                                let vol_source = crate::player::equalizer::UserVolumeSource::new(
-                                    eq_source,
-                                    user_volume,
-                                );
-
-                                // 4. ClipGuardSource 最终安全限幅源
-                                let clip_source =
-                                    crate::player::equalizer::ClipGuardSource::new(vol_source);
-
-                                // 5. TimedSource 可视化进度节点
-                                let timed_source = TimedSource::new(
-                                    clip_source,
-                                    progress.samples_played.clone(),
-                                    progress.visualizer.clone(),
-                                );
-
-                                if let Some(new_sink) = current_sink {
-                                    new_sink.set_volume(1.0); // 必须固定为 1.0
-                                    new_sink.append(timed_source);
-                                    if is_playing {
-                                        new_sink.play();
-                                    } else {
-                                        new_sink.pause();
-                                    }
-                                }
+                    }
+                    if let Ok(file) = File::open(current_path) {
+                        let cue_start_offset =
+                            Duration::from_millis(cue_start_offset_ms.unwrap_or(0));
+                        let total_duration = duration_ms.map(Duration::from_millis);
+                        append_decoded_source(
+                            file,
+                            output,
+                            current_sink,
+                            progress,
+                            Some(jump_target),
+                            volume_balance_gain,
+                            current_normalizer_handle,
+                            equalizer_handle,
+                            user_volume,
+                            cue_start_offset,
+                            total_duration,
+                        );
+                        if let Some(new_sink) = current_sink {
+                            if is_playing {
+                                new_sink.play();
+                            } else {
+                                new_sink.pause();
                             }
                         }
                     }
