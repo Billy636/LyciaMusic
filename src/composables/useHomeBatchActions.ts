@@ -14,6 +14,7 @@ interface ConfirmOptions {
 
 interface UseHomeBatchActionsOptions {
   currentViewMode: Ref<string>;
+  filterCondition?: Ref<string>;
   selectedPaths: Ref<Set<string>>;
   isBatchMode: Ref<boolean>;
   isManagementMode: Ref<boolean>;
@@ -29,6 +30,7 @@ interface UseHomeBatchActionsOptions {
 
 export function useHomeBatchActions({
   currentViewMode,
+  filterCondition,
   selectedPaths,
   isBatchMode,
   isManagementMode,
@@ -71,6 +73,12 @@ export function useHomeBatchActions({
     } else if (getRoutePath() === '/favorites') {
       const selected = new Set(selectedPaths.value);
       favoritePaths.value = favoritePaths.value.filter((path) => !selected.has(path));
+    } else if (currentViewMode.value === 'playlist' && filterCondition?.value) {
+      const selected = new Set(selectedPaths.value);
+      const targetPlaylist = playlists.value.find(p => p.id === filterCondition.value);
+      if (targetPlaylist) {
+        targetPlaylist.songPaths = targetPlaylist.songPaths.filter(path => !selected.has(path));
+      }
     }
 
     resetSelection();

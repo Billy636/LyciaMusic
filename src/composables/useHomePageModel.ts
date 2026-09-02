@@ -165,6 +165,7 @@ export function useHomePageModel() {
     openConfirm,
   } = useHomeBatchActions({
     currentViewMode,
+    filterCondition,
     selectedPaths,
     isBatchMode,
     isManagementMode,
