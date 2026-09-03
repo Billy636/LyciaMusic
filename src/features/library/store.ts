@@ -353,7 +353,19 @@ export const useLibraryStore = defineStore('library', () => {
       return fallback ?? null;
     }
 
-    return songPool.get(path) ?? fallback ?? null;
+    const direct = songPool.get(path);
+    if (direct) {
+      return direct;
+    }
+
+    const normalized = path.replace(/\\/g, '/').toLowerCase();
+    for (const [key, song] of songPool.entries()) {
+      if (key.replace(/\\/g, '/').toLowerCase() === normalized) {
+        return song;
+      }
+    }
+
+    return fallback ?? null;
   };
 
   const resolveSongsByPaths = (paths: string[], fallbackSongs: Song[] = []) => {
@@ -571,6 +583,7 @@ export const useLibraryStore = defineStore('library', () => {
     canonicalSongPaths.value = validPaths;
     songCatalogVersion.value += 1;
     libraryDataVersion.value += 1;
+    pruneSongPool();
 
     if (isProfilingEnabled()) {
       const duration = performance.now() - startTime;
@@ -580,6 +593,7 @@ export const useLibraryStore = defineStore('library', () => {
 
   return {
     libraryDataVersion,
+    pruneSongPool,
     canonicalSongs,
     canonicalSongPaths,
     sourceSongs,

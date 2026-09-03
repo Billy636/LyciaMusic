@@ -198,15 +198,20 @@ const handleRefreshFolder = async () => {
   }
 
   try {
-    const summary = await refreshAllFolders();
-    if (summary && typeof summary === 'object' && 'removedCount' in summary) {
-      const removedCount = Number(summary.removedCount) || 0;
-      toast.showToast(
-        removedCount > 0
-          ? `刷新成功，检测到少了 ${removedCount} 首歌曲`
-          : '刷新成功',
-        'success',
-      );
+    const summary = await refreshFolder(targetFolder.value.path);
+    await fetchFolderTree();
+    if (summary && typeof summary === 'object') {
+      const removedCount = Number((summary as any).removedCount) || 0;
+      const addedCount = Number((summary as any).addedCount) || 0;
+      if (addedCount > 0 && removedCount > 0) {
+        toast.showToast(`刷新成功，新增 ${addedCount} 首，减少 ${removedCount} 首歌曲`, 'success');
+      } else if (addedCount > 0) {
+        toast.showToast(`刷新成功，检测到新增 ${addedCount} 首歌曲`, 'success');
+      } else if (removedCount > 0) {
+        toast.showToast(`刷新成功，检测到少了 ${removedCount} 首歌曲`, 'success');
+      } else {
+        toast.showToast('刷新成功，文件夹歌曲已是最新', 'success');
+      }
     } else {
       toast.showToast('刷新成功', 'success');
     }

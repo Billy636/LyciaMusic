@@ -77,7 +77,7 @@ export function useLibraryCurrentViewSongs({
   const { loadAllViewSongPaths } = useLibraryAllSongPathCache();
   const { loadFavoriteSongPaths, loadRecentSongPaths } = useLibraryCollectionSongPathCache();
   const { loadAlbumSongPaths } = useLibraryDetailSongPathCache();
-  const { loadFolderViewSongPaths } = useLibraryFolderSongPathCache();
+  const { loadFolderViewSongPaths, libraryFolderSongPathCacheVersion } = useLibraryFolderSongPathCache();
   const allViewSongPaths = ref<string[]>([]);
   const allSearchTotal = ref(0);
   const allSearchLoadingMore = ref(false);
@@ -405,6 +405,8 @@ export function useLibraryCurrentViewSongs({
       searchQuery,
       folderSortMode,
       currentFolderSongPaths,
+      canonicalSongPaths,
+      libraryFolderSongPathCacheVersion,
       searchRevision,
     ],
     async ([viewMode, folderFilter, query, sortMode]) => {

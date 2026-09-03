@@ -256,27 +256,40 @@ export const createPlayerFileManager = ({
       folderPath,
       settingsStore.settings.libraryMinDurationSeconds,
     );
-    const removedPaths = canonicalSongPaths.value
-      .filter(path => isSongInFolderScope(folderPath, path))
-      .filter(path => !newSongs.some(song => song.path === path));
+    const previousScopedPaths = canonicalSongPaths.value
+      .filter(path => isSongInFolderScope(folderPath, path));
+    const normalizedNewPaths = new Set(newSongs.map(song => normalizePathForMatch(song.path)));
+    const normalizedOldPaths = new Set(previousScopedPaths.map(path => normalizePathForMatch(path)));
+
+    const removedPaths = previousScopedPaths
+      .filter(path => !normalizedNewPaths.has(normalizePathForMatch(path)));
+    const addedPaths = newSongs
+      .filter(song => !normalizedOldPaths.has(normalizePathForMatch(song.path)))
+      .map(song => song.path);
+
     const keepPath = (path: string) => !isSongInFolderScope(folderPath, path);
     const newPaths = newSongs.map(song => song.path);
 
+    newSongs.forEach(song => {
+      libraryStore.setSongRecord(song);
+    });
+
     libraryStore.setSourceSongOrder([...sourceSongPaths.value.filter(keepPath), ...newPaths]);
     libraryStore.setCanonicalSongOrder([...canonicalSongPaths.value.filter(keepPath), ...newPaths]);
+    libraryStore.pruneSongPool();
     clearLibraryPathCaches();
 
     if (removedPaths.length > 0) {
-      const removedPathSet = new Set(removedPaths);
-      favoritePaths.value = favoritePaths.value.filter(path => !removedPathSet.has(path));
+      const removedPathSet = new Set(removedPaths.map(normalizePathForMatch));
+      favoritePaths.value = favoritePaths.value.filter(path => !removedPathSet.has(normalizePathForMatch(path)));
       playlists.value.forEach((playlist) => {
-        playlist.songPaths = playlist.songPaths.filter(path => !removedPathSet.has(path));
+        playlist.songPaths = playlist.songPaths.filter(path => !removedPathSet.has(normalizePathForMatch(path)));
       });
-      recentSongs.value = recentSongs.value.filter(item => !removedPathSet.has(item.path));
-      playQueuePaths.value = playQueuePaths.value.filter(path => !removedPathSet.has(path));
-      tempQueuePaths.value = tempQueuePaths.value.filter(path => !removedPathSet.has(path));
+      recentSongs.value = recentSongs.value.filter(item => !removedPathSet.has(normalizePathForMatch(item.path)));
+      playQueuePaths.value = playQueuePaths.value.filter(path => !removedPathSet.has(normalizePathForMatch(path)));
+      tempQueuePaths.value = tempQueuePaths.value.filter(path => !removedPathSet.has(normalizePathForMatch(path)));
 
-      if (currentSong.value && removedPathSet.has(currentSong.value.path)) {
+      if (currentSong.value && removedPathSet.has(normalizePathForMatch(currentSong.value.path))) {
         currentSong.value = null;
       }
 
@@ -286,6 +299,8 @@ export const createPlayerFileManager = ({
     return {
       removedCount: removedPaths.length,
       removedPaths,
+      addedCount: addedPaths.length,
+      addedPaths,
     };
   };
 

@@ -113,7 +113,11 @@ describe('playerFileManager.refreshFolder', () => {
     expect(summary).toEqual({
       removedCount: 1,
       removedPaths: [removedSong.path],
+      addedCount: 1,
+      addedPaths: [addedSong.path],
     });
+    expect(libraryStore.getSongByPath(addedSong.path)).toEqual(addedSong);
+    expect(libraryStore.getSongByPath(removedSong.path)).toBeNull();
     expect(libraryStore.canonicalSongPaths).toEqual([
       outsideSong.path,
       keptSong.path,
@@ -149,6 +153,48 @@ describe('playerFileManager.refreshFolder', () => {
     await fileManager.refreshFolder('c:/music/a');
 
     expect(scanMusicFolderMock).toHaveBeenCalledWith('c:/music/a', 60);
+  });
+
+  it('accurately syncs songs when path casing or slashes differ on Windows', async () => {
+    const libraryStore = useLibraryStore();
+    const removedSong = makeSong({
+      path: 'C:\\Music\\Rock\\deleted.mp3',
+      name: 'deleted.mp3',
+      title: 'Deleted',
+    });
+    const keptSong = makeSong({
+      path: 'c:/music/rock/kept.mp3',
+      name: 'kept.mp3',
+      title: 'Kept',
+    });
+
+    libraryStore.librarySongs = [removedSong, keptSong];
+    libraryStore.songList = [removedSong, keptSong];
+
+    // Scanner returns path with Windows backslashes and different casing
+    const scannedKeptSong = makeSong({
+      path: 'C:\\Music\\Rock\\kept.mp3',
+      name: 'kept.mp3',
+      title: 'Kept',
+    });
+    scanMusicFolderMock.mockResolvedValue([scannedKeptSong]);
+
+    const fileManager = createPlayerFileManager({
+      removeLibraryFolderLinked: vi.fn(),
+      removeFromHistory: vi.fn(),
+      showToast: vi.fn(),
+    });
+
+    const summary = await fileManager.refreshFolder('C:/Music/Rock');
+
+    expect(summary).toEqual({
+      removedCount: 1,
+      removedPaths: [removedSong.path],
+      addedCount: 0,
+      addedPaths: [],
+    });
+    expect(libraryStore.canonicalSongPaths).toEqual([scannedKeptSong.path]);
+    expect(libraryStore.getSongByPath(removedSong.path)).toBeNull();
   });
 });
 
