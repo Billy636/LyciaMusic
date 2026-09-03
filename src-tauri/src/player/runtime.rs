@@ -529,7 +529,11 @@ fn handle_play(
 
     let start_offset = start_offset_ms.map(Duration::from_millis);
     let cue_start_offset = Duration::from_millis(cue_start_offset_ms.unwrap_or(0));
-    let total_duration = duration_ms.map(Duration::from_millis);
+    let total_duration = if cue_start_offset_ms.is_some() {
+        duration_ms.map(Duration::from_millis)
+    } else {
+        None
+    };
 
     match source {
         AudioSource::LocalFile(path) => {
@@ -575,7 +579,7 @@ fn handle_seek(
     request_id: u64,
     output: &Option<SharedOutputBackend>,
     current_sink: &mut Option<Sink>,
-    current_path: &str,
+    current_source: &Option<AudioSource>,
     is_playing_flag: &mut bool,
     progress: &Arc<SharedProgress>,
     app: &AppHandle,
@@ -592,53 +596,60 @@ fn handle_seek(
     progress.visualizer.reset();
 
     if let Some(sink) = current_sink {
-        match sink.try_seek(jump_target) {
-            Ok(()) => {
-                let rate = progress.sample_rate.load(Ordering::Relaxed);
-                let channels = progress.channels.load(Ordering::Relaxed);
-                let samples_at_target =
-                    (clamped_time * rate as f64 * channels as f64).round() as u64;
-                progress
-                    .samples_played
-                    .store(samples_at_target, Ordering::Relaxed);
+        sink.stop();
+    }
+    *current_sink = None;
 
-                if is_playing {
-                    sink.play();
-                } else {
-                    sink.pause();
+    if let Some(source) = current_source {
+        let cue_start_offset = Duration::from_millis(cue_start_offset_ms.unwrap_or(0));
+        let total_duration = if cue_start_offset_ms.is_some() {
+            duration_ms.map(Duration::from_millis)
+        } else {
+            None
+        };
+
+        match source {
+            AudioSource::LocalFile(path) => {
+                if let Ok(file) = File::open(path) {
+                    append_decoded_source(
+                        file,
+                        output,
+                        current_sink,
+                        progress,
+                        Some(jump_target),
+                        volume_balance_gain,
+                        current_normalizer_handle,
+                        equalizer_handle,
+                        user_volume,
+                        cue_start_offset,
+                        total_duration,
+                    );
                 }
             }
-            Err(_) => {
-                if !current_path.is_empty() {
-                    if let Some(sink) = current_sink {
-                        sink.stop();
-                    }
-                    if let Ok(file) = File::open(current_path) {
-                        let cue_start_offset =
-                            Duration::from_millis(cue_start_offset_ms.unwrap_or(0));
-                        let total_duration = duration_ms.map(Duration::from_millis);
-                        append_decoded_source(
-                            file,
-                            output,
-                            current_sink,
-                            progress,
-                            Some(jump_target),
-                            volume_balance_gain,
-                            current_normalizer_handle,
-                            equalizer_handle,
-                            user_volume,
-                            cue_start_offset,
-                            total_duration,
-                        );
-                        if let Some(new_sink) = current_sink {
-                            if is_playing {
-                                new_sink.play();
-                            } else {
-                                new_sink.pause();
-                            }
-                        }
-                    }
+            AudioSource::RemoteWebDav(stream) => {
+                if let Ok(reader) = RemoteRangeReader::new(stream.clone()) {
+                    append_decoded_source(
+                        reader,
+                        output,
+                        current_sink,
+                        progress,
+                        Some(jump_target),
+                        volume_balance_gain,
+                        current_normalizer_handle,
+                        equalizer_handle,
+                        user_volume,
+                        cue_start_offset,
+                        total_duration,
+                    );
                 }
+            }
+        }
+
+        if let Some(new_sink) = current_sink {
+            if is_playing {
+                new_sink.play();
+            } else {
+                new_sink.pause();
             }
         }
     }
@@ -681,6 +692,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
         #[cfg(target_os = "windows")]
         let mut exclusive_playback: Option<WasapiExclusivePlayback> = None;
         let mut current_path = String::new();
+        let mut current_source: Option<AudioSource> = None;
         let mut current_volume = 1.0;
         let mut is_playing_flag = false;
         let mut current_duration_ms: Option<u64> = None;
@@ -732,6 +744,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         current_playback_id = playback_id;
                         let source_is_remote = source.is_remote();
                         let display_path = source.display_path();
+                        current_source = Some(source.clone());
 
                         if let Some(sink) = &current_sink {
                             sink.stop();
@@ -746,7 +759,11 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                                 start_offset_ms.map_or(Duration::ZERO, Duration::from_millis);
                             let cue_start_offset =
                                 Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
-                            let total_duration = current_duration_ms.map(Duration::from_millis);
+                            let total_duration = if current_cue_start_offset_ms.is_some() {
+                                current_duration_ms.map(Duration::from_millis)
+                            } else {
+                                None
+                            };
 
                             match start_exclusive_playback(
                                 display_path.clone(),
@@ -862,6 +879,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                     AudioCommand::Stop => {
                         is_playing_flag = false;
                         current_path.clear();
+                        current_source = None;
                         reset_playback_progress(&thread_progress);
                         if let Some(sink) = &current_sink {
                             sink.stop();
@@ -909,7 +927,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             request_id,
                             &output,
                             &mut current_sink,
-                            &current_path,
+                            &current_source,
                             &mut is_playing_flag,
                             &thread_progress,
                             &thread_app_handle,
@@ -937,7 +955,11 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
 
                         let cue_start_offset =
                             Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
-                        let total_duration = current_duration_ms.map(Duration::from_millis);
+                        let total_duration = if current_cue_start_offset_ms.is_some() {
+                            current_duration_ms.map(Duration::from_millis)
+                        } else {
+                            None
+                        };
 
                         restore_preferred_output(
                             &selected_device_name,
@@ -986,7 +1008,11 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
 
                         let cue_start_offset =
                             Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
-                        let total_duration = current_duration_ms.map(Duration::from_millis);
+                        let total_duration = if current_cue_start_offset_ms.is_some() {
+                            current_duration_ms.map(Duration::from_millis)
+                        } else {
+                            None
+                        };
 
                         restore_preferred_output(
                             &selected_device_name,
@@ -1071,7 +1097,11 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                                 fallback_reason = Some(error);
                                 let cue_start_offset =
                                     Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
-                                let total_duration = current_duration_ms.map(Duration::from_millis);
+                                let total_duration = if current_cue_start_offset_ms.is_some() {
+                                    current_duration_ms.map(Duration::from_millis)
+                                } else {
+                                    None
+                                };
 
                                 restore_shared_output(
                                     &selected_device_name,
@@ -1161,7 +1191,11 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
 
                         let cue_start_offset =
                             Duration::from_millis(current_cue_start_offset_ms.unwrap_or(0));
-                        let total_duration = current_duration_ms.map(Duration::from_millis);
+                        let total_duration = if current_cue_start_offset_ms.is_some() {
+                            current_duration_ms.map(Duration::from_millis)
+                        } else {
+                            None
+                        };
 
                         restore_preferred_output(
                             &selected_device_name,
@@ -1283,6 +1317,38 @@ mod tests {
     fn player_polling_slows_down_only_while_idle() {
         assert_eq!(player_poll_interval(true), Duration::from_millis(150));
         assert_eq!(player_poll_interval(false), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_take_duration_seek_recalibrates_remaining() {
+        use rodio::buffer::SamplesBuffer;
+        use rodio::Source;
+
+        // 44.1kHz mono, 10 seconds of audio (441,000 samples)
+        let samples = vec![0.0f32; 441_000];
+        let buffer = SamplesBuffer::new(1, 44100, samples);
+        let mut taken = buffer.take_duration(Duration::from_secs(4));
+
+        // Consume 3 seconds (3 * 44100 = 132300 samples)
+        for _ in 0..132_300 {
+            assert!(taken.next().is_some());
+        }
+
+        // Seek back to 0.0 seconds
+        taken.try_seek(Duration::ZERO).expect("seek to 0 should succeed");
+
+        // After seek: consume another 3 seconds (132300 samples), should still have samples available!
+        let mut count = 0;
+        for _ in 0..132_300 {
+            if taken.next().is_some() {
+                count += 1;
+            }
+        }
+        assert_eq!(
+            count,
+            132_300,
+            "Should be able to play another 3 seconds after seeking back to 0"
+        );
     }
 
     #[test]

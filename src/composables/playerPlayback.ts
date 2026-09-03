@@ -349,6 +349,7 @@ export const createPlayerPlayback = ({
     if (retainedFullCoverPaths.length > 1) {
       preloadFullCovers(retainedFullCoverPaths.filter(path => path !== song.path));
     }
+    const isCueTrack = Boolean(song.cue_source_path);
     const cueStartOffset = song.cue_start_offset || 0;
     const requestedStartTime = Number.isFinite(options.startTime) ? (options.startTime as number) : 0;
     const resumeTime = Math.max(0, Math.min(requestedStartTime, song.duration || requestedStartTime));
@@ -371,10 +372,10 @@ export const createPlayerPlayback = ({
         album: song.album || 'Unknown Album',
         cover: smtcCoverPath,
         duration: Math.floor(song.duration),
-        durationMs: Math.round(song.duration * 1000),
+        durationMs: isCueTrack ? Math.round(song.duration * 1000) : undefined,
         outputMode: settingsStore.settings.audio.outputMode,
         startOffsetMs: startOffsetMs || undefined,
-        cueStartOffsetMs: cueStartOffset || undefined,
+        cueStartOffsetMs: isCueTrack ? cueStartOffset : undefined,
         songId: song.id,
         volumeBalanceEnabled: settingsStore.settings.audio.volumeBalance?.enabled,
         gainOffsetDb: settingsStore.settings.audio.volumeBalance?.gainOffsetDb,

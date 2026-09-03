@@ -330,6 +330,75 @@ describe('player playback domain', () => {
     playerPlayback.dispose();
   });
 
+  it('does not pass durationMs or cueStartOffsetMs for standalone songs to allow natural EOF', async () => {
+    const song = makeSong({ path: '/music/track.mp3', duration: 240 });
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext: vi.fn(),
+    });
+
+    await playerPlayback.playSong(song);
+
+    expect(playbackApi.playAudio).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/music/track.mp3',
+      duration: 240,
+      durationMs: undefined,
+      cueStartOffsetMs: undefined,
+    }));
+    playerPlayback.dispose();
+  });
+
+  it('passes durationMs and cueStartOffsetMs for CUE tracks including track 1 starting at 0ms', async () => {
+    const song = makeSong({
+      path: '/music/album.cue::track01',
+      cue_source_path: '/music/album.flac',
+      cue_start_offset: 0,
+      duration: 240,
+    });
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext: vi.fn(),
+    });
+
+    await playerPlayback.playSong(song);
+
+    expect(playbackApi.playAudio).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/music/album.flac',
+      duration: 240,
+      durationMs: 240_000,
+      cueStartOffsetMs: 0,
+    }));
+    playerPlayback.dispose();
+  });
+
+  it('re-anchors playback clock when seeking to beginning after playing', async () => {
+    const playbackStore = usePlaybackStore();
+    const song = makeSong({ path: '/music/song.mp3', duration: 240 });
+    playbackStore.currentSong = song;
+    playbackStore.currentTime = 180;
+    playbackStore.isPlaying = true;
+
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext: vi.fn(),
+    });
+
+    await playerPlayback.seekTo(0);
+
+    expect(playbackApi.seekAudio).toHaveBeenCalledWith(expect.objectContaining({
+      time: 0,
+      isPlaying: true,
+    }));
+    expect(playbackStore.currentTime).toBe(0);
+    playerPlayback.dispose();
+  });
+
   it('strips the file extension when title metadata is missing', async () => {
     const song = makeSong({ name: 'i-dle - Allergy.flac', title: '   ' });
     const playerPlayback = createPlayerPlayback({
