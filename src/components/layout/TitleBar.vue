@@ -13,6 +13,7 @@ const router = useRouter();
 const route = useRoute();
 const { searchQuery, setSearch, isMiniMode } = usePlayerViewState();
 const appWindow = getCurrentWindow();
+const TITLE_BAR_CONTROL_SELECTOR = 'button, a, input, select, textarea, [role="button"]';
 const { settings } = useSettings();
 const { isDarkTheme, toggleThemeMode } = useThemeSettings();
 const { searchIndexBuilding, searchIndexProgress } = useLibrarySearchIndex();
@@ -71,6 +72,25 @@ const toggleMaximize = async () => {
   }
 };
 
+const isTitleBarControlTarget = (event: Event) => {
+  const target = event.target;
+  return target instanceof Element && target.closest(TITLE_BAR_CONTROL_SELECTOR) !== null;
+};
+
+const handleTitleBarPointerDown = (event: PointerEvent) => {
+  if (event.isPrimary === false || event.button !== 0 || isTitleBarControlTarget(event)) return;
+
+  event.preventDefault();
+  void appWindow.startDragging().catch((error) => {
+    console.error('Failed to start window dragging:', error);
+  });
+};
+
+const handleTitleBarDoubleClick = (event: MouseEvent) => {
+  if (isTitleBarControlTarget(event)) return;
+  void toggleMaximize();
+};
+
 // 关闭
 const closeWindow = async () => { 
   if (settings.value.closeToTray) {
@@ -100,8 +120,10 @@ const goBack = () => { router.back(); };
 
 <template>
   <div 
-    data-tauri-drag-region
+    data-window-drag-handle
     class="h-16 flex items-center justify-between px-6  select-none shrink-0 relative z-[60]"
+    @pointerdown="handleTitleBarPointerDown"
+    @dblclick="handleTitleBarDoubleClick"
   >
     <div class="flex items-center gap-4 relative z-10">
       <button 
@@ -182,7 +204,7 @@ const goBack = () => { router.back(); };
       </button>
       <div class="h-4 w-px bg-gray-400/30 mx-2"></div>
       <div class="flex items-center gap-1">
-        <button @click.stop="isMiniMode = true" class="p-2 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors cursor-pointer" title="Mini 模式">
+        <button type="button" @click.stop="isMiniMode = true" class="p-2 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors cursor-pointer" title="Mini 模式">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <!-- 左上角带缺口的外侧大矩形 -->
             <path d="M13 6H18a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V13" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
@@ -207,9 +229,9 @@ const goBack = () => { router.back(); };
             <rect x="13" y="13" width="7" height="5" rx="1" fill="currentColor" />
           </svg>
         </button>
-        <button @click.stop="minimize" class="p-2 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 12H6" /></svg></button>
-        <button @click.stop="toggleMaximize" class="p-2 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" stroke-width="2" /></svg></button>
-        <button @click.stop="closeWindow" class="p-2 text-gray-900 dark:text-gray-100 hover:text-white hover:bg-[#EC4141] rounded-md transition-colors cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
+        <button type="button" aria-label="最小化" title="最小化" @click.stop="minimize" class="p-2 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 12H6" /></svg></button>
+        <button type="button" aria-label="最大化或还原" title="最大化或还原" @click.stop="toggleMaximize" class="p-2 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" stroke-width="2" /></svg></button>
+        <button type="button" aria-label="关闭" title="关闭" @click.stop="closeWindow" class="p-2 text-gray-900 dark:text-gray-100 hover:text-white hover:bg-[#EC4141] rounded-md transition-colors cursor-pointer"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
       </div>
     </div>
   </div>

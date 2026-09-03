@@ -15,6 +15,7 @@ describe('touch click compatibility', () => {
     expect(touchClickSupport).toContain('event.isPrimary === false || event.button !== 0')
     expect(touchClickSupport).toContain('TAP_MOVE_TOLERANCE')
     expect(touchClickSupport).toContain("current.hasAttribute('data-tauri-drag-region')")
+    expect(touchClickSupport).toContain("current.hasAttribute('data-window-drag-handle')")
   })
 
   it('covers mouse-compatible touch devices and matches native clicks before cancelling the fallback', () => {

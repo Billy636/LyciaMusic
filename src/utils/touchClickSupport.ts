@@ -41,7 +41,10 @@ const isWindowDragOnlyTarget = (target: Element) => {
 
   while (current) {
     if (current.matches(INTERACTIVE_SELECTOR)) return false
-    if (current.hasAttribute('data-tauri-drag-region')) return true
+    if (
+      current.hasAttribute('data-tauri-drag-region')
+      || current.hasAttribute('data-window-drag-handle')
+    ) return true
     current = current.parentElement
   }
 
