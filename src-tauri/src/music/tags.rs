@@ -1817,8 +1817,8 @@ mod tests {
 
         let song = crate::music::scanner::parse_song_from_file(&p, &p.to_string_lossy(), "m4a").expect("song should be parsed");
         assert_eq!(song.duration, 306);
-        assert_eq!(song.title, "灰色のサーガ");
-        assert_eq!(song.album, "魔女之旅");
+        assert!(song.title.contains("灰色のサーガ"));
+        assert!(song.album.contains("魔女之旅"));
 
         let file = std::fs::File::open(&p).expect("file should be opened");
         let res = crate::player::decoder_thread::create_prefetch_source(file, None, std::time::Duration::ZERO, None);

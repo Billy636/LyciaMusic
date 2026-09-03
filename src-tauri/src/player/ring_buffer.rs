@@ -61,6 +61,7 @@ pub fn spsc_ring_buffer<T: Copy + Default + Send + 'static>(
 
 impl<T: Copy + Default + Send + 'static> SpscProducer<T> {
     #[inline]
+    #[allow(dead_code)]
     pub fn capacity(&self) -> usize {
         self.ring.capacity
     }
@@ -73,6 +74,7 @@ impl<T: Copy + Default + Send + 'static> SpscProducer<T> {
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn push(&self, item: T) -> bool {
         let head = self.ring.head.0.load(Ordering::Relaxed);
         let tail = self.ring.tail.0.load(Ordering::Acquire);
@@ -163,6 +165,7 @@ impl<T: Copy + Default + Send + 'static> SpscConsumer<T> {
         Some(item)
     }
 
+    #[allow(dead_code)]
     pub fn pop_slice(&self, slice: &mut [T]) -> usize {
         if slice.is_empty() {
             return 0;
