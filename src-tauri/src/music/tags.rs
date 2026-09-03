@@ -66,6 +66,9 @@ fn read_tagged_file_from_path_with_cover_mode(
         Err(original_err) if is_bad_timestamp_error(&original_err) => {
             read_salvaged_id3_tags(path, read_cover_art).map_err(|_| original_err)
         }
+        Err(original_err) if is_mp4_path(path) => {
+            read_salvaged_mp4_tags(path, read_cover_art).map_err(|_| original_err)
+        }
         Err(original_err) => Err(original_err),
     }
 }
@@ -336,6 +339,433 @@ pub fn contains_lrc_timestamp(text: &str) -> bool {
     }
 
     false
+}
+
+pub fn is_mp4_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "m4a" | "m4b" | "m4p" | "mp4"))
+        .unwrap_or(false)
+}
+
+pub struct OffsetReader<R> {
+    inner: R,
+    offset: u64,
+}
+
+impl<R> OffsetReader<R> {
+    pub fn new(inner: R, offset: u64) -> Self {
+        Self { inner, offset }
+    }
+}
+
+impl<R: Read + Seek> Read for OffsetReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl<R: Read + Seek> Seek for OffsetReader<R> {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        match pos {
+            SeekFrom::Start(p) => {
+                let actual = self.inner.seek(SeekFrom::Start(p.saturating_add(self.offset)))?;
+                Ok(actual.saturating_sub(self.offset))
+            }
+            SeekFrom::Current(p) => {
+                let actual = self.inner.seek(SeekFrom::Current(p))?;
+                Ok(actual.saturating_sub(self.offset))
+            }
+            SeekFrom::End(p) => {
+                let actual = self.inner.seek(SeekFrom::End(p))?;
+                Ok(actual.saturating_sub(self.offset))
+            }
+        }
+    }
+}
+
+pub fn find_ftyp_offset<R: Read + Seek>(reader: &mut R) -> Result<u64, ()> {
+    let mut buffer = [0u8; 64 * 1024];
+    reader.seek(SeekFrom::Start(0)).map_err(|_| ())?;
+    let n = reader.read(&mut buffer).map_err(|_| ())?;
+    if n < 8 {
+        return Err(());
+    }
+    for i in 4..n.saturating_sub(3) {
+        if &buffer[i..i + 4] == b"ftyp" {
+            let box_start = (i - 4) as u64;
+            reader.seek(SeekFrom::Start(box_start)).map_err(|_| ())?;
+            return Ok(box_start);
+        }
+    }
+    Err(())
+}
+
+fn read_salvaged_mp4_tags(path: &Path, read_cover_art: bool) -> Result<TaggedFile, ()> {
+    let file = File::open(path).map_err(|_| ())?;
+    let mut reader = BufReader::new(file);
+    let mut tags = Vec::new();
+
+    let mp4_start = match read_leading_id3_tag(&mut reader, &mut tags, read_cover_art)? {
+        Some(id3_size) => id3_size,
+        None => find_ftyp_offset(&mut reader).unwrap_or(0),
+    };
+
+    let offset_file = File::open(path).map_err(|_| ())?;
+    let offset_reader = OffsetReader::new(offset_file, mp4_start);
+    let options = ParseOptions::new()
+        .read_cover_art(read_cover_art)
+        .parsing_mode(lofty::config::ParsingMode::Relaxed);
+
+    if let Ok(mut tf) = Probe::new(BufReader::new(offset_reader))
+        .set_file_type(FileType::Mp4)
+        .options(options)
+        .read()
+    {
+        for tag in tags {
+            tf.insert_tag(tag);
+        }
+        return Ok(tf);
+    }
+
+    if !tags.is_empty() {
+        return Ok(TaggedFile::new(
+            FileType::Mp4,
+            FileProperties::default(),
+            tags,
+        ));
+    }
+
+    Err(())
+}
+
+pub fn probe_mp4_duration(path: &Path) -> Option<u32> {
+    let mut file = File::open(path).ok()?;
+    let file_len = file.metadata().ok()?.len();
+
+    let start_offset = find_ftyp_offset(&mut file).unwrap_or(0);
+    file.seek(SeekFrom::Start(start_offset)).ok()?;
+
+    let mut mvhd_timescale = None;
+    let mut mvhd_duration = None;
+    let mut mehd_duration = None;
+    let mut sidx_duration = None;
+    let mut mdhd_duration = None;
+
+    let mut buf = [0u8; 8];
+    while let Ok(_) = file.read_exact(&mut buf) {
+        let size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as u64;
+        let fourcc = match std::str::from_utf8(&buf[4..8]) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        let cur = match file.stream_position() {
+            Ok(pos) => pos,
+            Err(_) => break,
+        };
+        let (_box_data_start, box_data_end) = if size == 1 {
+            let mut large = [0u8; 8];
+            if file.read_exact(&mut large).is_err() {
+                break;
+            }
+            let lsize = u64::from_be_bytes(large);
+            (cur + 8, cur - 8 + lsize)
+        } else if size == 0 {
+            (cur, file_len)
+        } else if size >= 8 {
+            (cur, cur - 8 + size)
+        } else {
+            break;
+        };
+
+        if fourcc == "sidx" && sidx_duration.is_none() {
+            let mut sidx_header = [0u8; 12];
+            if file.read_exact(&mut sidx_header).is_ok() {
+                let version = sidx_header[0];
+                let timescale = u32::from_be_bytes([
+                    sidx_header[4],
+                    sidx_header[5],
+                    sidx_header[6],
+                    sidx_header[7],
+                ]);
+                let skip = if version == 0 { 8 } else { 16 };
+                let _ = file.seek(SeekFrom::Current(skip));
+                let mut count_buf = [0u8; 4];
+                if file.read_exact(&mut count_buf).is_ok() {
+                    let ref_count = u16::from_be_bytes([count_buf[2], count_buf[3]]) as usize;
+                    let mut total_dur: u64 = 0;
+                    for _ in 0..ref_count {
+                        let mut ref_buf = [0u8; 12];
+                        if file.read_exact(&mut ref_buf).is_err() {
+                            break;
+                        }
+                        let sub_dur = u32::from_be_bytes([
+                            ref_buf[4], ref_buf[5], ref_buf[6], ref_buf[7],
+                        ]) as u64;
+                        total_dur = total_dur.saturating_add(sub_dur);
+                    }
+                    if timescale > 0 && total_dur > 0 {
+                        sidx_duration = Some((total_dur / timescale as u64) as u32);
+                    }
+                }
+            }
+        } else if fourcc == "moov" {
+            let moov_end = box_data_end;
+            while let Ok(cur_pos) = file.stream_position() {
+                if cur_pos >= moov_end {
+                    break;
+                }
+                let mut c_buf = [0u8; 8];
+                if file.read_exact(&mut c_buf).is_err() {
+                    break;
+                }
+                let c_size = u32::from_be_bytes([c_buf[0], c_buf[1], c_buf[2], c_buf[3]]) as u64;
+                let c_fourcc = match std::str::from_utf8(&c_buf[4..8]) {
+                    Ok(s) => s,
+                    Err(_) => break,
+                };
+                let c_data_start = match file.stream_position() {
+                    Ok(pos) => pos,
+                    Err(_) => break,
+                };
+                let (_c_box_start, c_box_end) = if c_size == 1 {
+                    let mut large = [0u8; 8];
+                    if file.read_exact(&mut large).is_err() {
+                        break;
+                    }
+                    let lsize = u64::from_be_bytes(large);
+                    (c_data_start + 8, c_data_start - 8 + lsize)
+                } else if c_size >= 8 {
+                    (c_data_start, c_data_start - 8 + c_size)
+                } else {
+                    break;
+                };
+
+                if c_fourcc == "mvhd" {
+                    let mut mvhd_data = [0u8; 32];
+                    if file.read_exact(&mut mvhd_data).is_ok() {
+                        let version = mvhd_data[0];
+                        if version == 0 {
+                            let ts = u32::from_be_bytes([
+                                mvhd_data[12],
+                                mvhd_data[13],
+                                mvhd_data[14],
+                                mvhd_data[15],
+                            ]);
+                            let dur = u32::from_be_bytes([
+                                mvhd_data[16],
+                                mvhd_data[17],
+                                mvhd_data[18],
+                                mvhd_data[19],
+                            ]) as u64;
+                            if ts > 0 {
+                                mvhd_timescale = Some(ts);
+                                if dur > 0 {
+                                    mvhd_duration = Some((dur / ts as u64) as u32);
+                                }
+                            }
+                        } else if version == 1 {
+                            let ts = u32::from_be_bytes([
+                                mvhd_data[20],
+                                mvhd_data[21],
+                                mvhd_data[22],
+                                mvhd_data[23],
+                            ]);
+                            let dur = u64::from_be_bytes([
+                                mvhd_data[24],
+                                mvhd_data[25],
+                                mvhd_data[26],
+                                mvhd_data[27],
+                                mvhd_data[28],
+                                mvhd_data[29],
+                                mvhd_data[30],
+                                mvhd_data[31],
+                            ]);
+                            if ts > 0 {
+                                mvhd_timescale = Some(ts);
+                                if dur > 0 {
+                                    mvhd_duration = Some((dur / ts as u64) as u32);
+                                }
+                            }
+                        }
+                    }
+                } else if c_fourcc == "mvex" {
+                    let mvex_end = c_box_end;
+                    while let Ok(m_cur) = file.stream_position() {
+                        if m_cur >= mvex_end {
+                            break;
+                        }
+                        let mut m_buf = [0u8; 8];
+                        if file.read_exact(&mut m_buf).is_err() {
+                            break;
+                        }
+                        let m_size =
+                            u32::from_be_bytes([m_buf[0], m_buf[1], m_buf[2], m_buf[3]]) as u64;
+                        let m_fourcc = match std::str::from_utf8(&m_buf[4..8]) {
+                            Ok(s) => s,
+                            Err(_) => break,
+                        };
+                        let m_data_start = match file.stream_position() {
+                            Ok(pos) => pos,
+                            Err(_) => break,
+                        };
+                        let m_box_end = if m_size == 1 {
+                            let mut large = [0u8; 8];
+                            if file.read_exact(&mut large).is_err() {
+                                break;
+                            }
+                            m_data_start - 8 + u64::from_be_bytes(large)
+                        } else if m_size >= 8 {
+                            m_data_start - 8 + m_size
+                        } else {
+                            break;
+                        };
+
+                        if m_fourcc == "mehd" {
+                            let mut mehd_header = [0u8; 8];
+                            if file.read_exact(&mut mehd_header).is_ok() {
+                                let version = mehd_header[0];
+                                if version == 0 {
+                                    let frag_dur = u32::from_be_bytes([
+                                        mehd_header[4],
+                                        mehd_header[5],
+                                        mehd_header[6],
+                                        mehd_header[7],
+                                    ]) as u64;
+                                    mehd_duration = Some(frag_dur);
+                                } else {
+                                    let mut mehd_rest = [0u8; 4];
+                                    if file.read_exact(&mut mehd_rest).is_ok() {
+                                        let frag_dur = u64::from_be_bytes([
+                                            mehd_header[4],
+                                            mehd_header[5],
+                                            mehd_header[6],
+                                            mehd_header[7],
+                                            mehd_rest[0],
+                                            mehd_rest[1],
+                                            mehd_rest[2],
+                                            mehd_rest[3],
+                                        ]);
+                                        mehd_duration = Some(frag_dur);
+                                    }
+                                }
+                            }
+                        }
+                        let _ = file.seek(SeekFrom::Start(m_box_end));
+                    }
+                } else if c_fourcc == "trak" && mdhd_duration.is_none() {
+                    if let Some((ts, dur)) = probe_trak_mdhd(&mut file, c_box_end) {
+                        if ts > 0 && dur > 0 {
+                            mdhd_duration = Some((dur / ts as u64) as u32);
+                        }
+                    }
+                }
+                let _ = file.seek(SeekFrom::Start(c_box_end));
+            }
+        }
+
+        if let Err(_) = file.seek(SeekFrom::Start(box_data_end)) {
+            break;
+        }
+        if box_data_end >= file_len {
+            break;
+        }
+    }
+
+    if let (Some(frag_dur), Some(ts)) = (mehd_duration, mvhd_timescale) {
+        if ts > 0 && frag_dur > 0 {
+            return Some((frag_dur / ts as u64) as u32);
+        }
+    }
+    if let Some(sidx_dur) = sidx_duration {
+        if sidx_dur > 0 {
+            return Some(sidx_dur);
+        }
+    }
+    if let Some(mvhd_dur) = mvhd_duration {
+        if mvhd_dur > 0 {
+            return Some(mvhd_dur);
+        }
+    }
+    if let Some(mdhd_dur) = mdhd_duration {
+        if mdhd_dur > 0 {
+            return Some(mdhd_dur);
+        }
+    }
+
+    None
+}
+
+fn probe_trak_mdhd<R: Read + Seek>(file: &mut R, trak_end: u64) -> Option<(u32, u64)> {
+    while let Ok(cur_pos) = file.stream_position() {
+        if cur_pos >= trak_end {
+            break;
+        }
+        let mut buf = [0u8; 8];
+        if file.read_exact(&mut buf).is_err() {
+            break;
+        }
+        let size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as u64;
+        let fourcc = std::str::from_utf8(&buf[4..8]).ok()?;
+        let box_end = cur_pos.saturating_add(size);
+        if fourcc == "mdia" {
+            let mdia_end = box_end;
+            while let Ok(m_pos) = file.stream_position() {
+                if m_pos >= mdia_end {
+                    break;
+                }
+                let mut m_buf = [0u8; 8];
+                if file.read_exact(&mut m_buf).is_err() {
+                    break;
+                }
+                let m_size = u32::from_be_bytes([m_buf[0], m_buf[1], m_buf[2], m_buf[3]]) as u64;
+                let m_fourcc = std::str::from_utf8(&m_buf[4..8]).ok()?;
+                let m_box_end = m_pos.saturating_add(m_size);
+                if m_fourcc == "mdhd" {
+                    let mut mdhd_data = [0u8; 32];
+                    if file.read_exact(&mut mdhd_data).is_ok() {
+                        let version = mdhd_data[0];
+                        if version == 0 {
+                            let ts = u32::from_be_bytes([
+                                mdhd_data[12],
+                                mdhd_data[13],
+                                mdhd_data[14],
+                                mdhd_data[15],
+                            ]);
+                            let dur = u32::from_be_bytes([
+                                mdhd_data[16],
+                                mdhd_data[17],
+                                mdhd_data[18],
+                                mdhd_data[19],
+                            ]) as u64;
+                            return Some((ts, dur));
+                        } else if version == 1 {
+                            let ts = u32::from_be_bytes([
+                                mdhd_data[20],
+                                mdhd_data[21],
+                                mdhd_data[22],
+                                mdhd_data[23],
+                            ]);
+                            let dur = u64::from_be_bytes([
+                                mdhd_data[24],
+                                mdhd_data[25],
+                                mdhd_data[26],
+                                mdhd_data[27],
+                                mdhd_data[28],
+                                mdhd_data[29],
+                                mdhd_data[30],
+                                mdhd_data[31],
+                            ]);
+                            return Some((ts, dur));
+                        }
+                    }
+                }
+                let _ = file.seek(SeekFrom::Start(m_box_end));
+            }
+        }
+        let _ = file.seek(SeekFrom::Start(box_end));
+    }
+    None
 }
 
 fn is_wav_path(path: &Path) -> bool {
@@ -1261,5 +1691,137 @@ mod tests {
         assert!(find_embedded_picture(&scan_tagged_file).is_none());
 
         let _ = fs::remove_file(temp_path);
+    }
+
+    fn make_mp4_box(fourcc: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let size = (8 + payload.len()) as u32;
+        let mut b = size.to_be_bytes().to_vec();
+        b.extend_from_slice(fourcc);
+        b.extend_from_slice(payload);
+        b
+    }
+
+    #[test]
+    fn test_probe_mp4_duration_mehd() {
+        let ftyp = make_mp4_box(b"ftyp", b"M4A \0\0\0\0M4A mp42isom");
+
+        // mvhd with timescale 1000, duration 0
+        let mut mvhd_payload = vec![0u8; 100];
+        mvhd_payload[12..16].copy_from_slice(&1000u32.to_be_bytes()); // timescale 1000
+        mvhd_payload[16..20].copy_from_slice(&0u32.to_be_bytes()); // duration 0
+        let mvhd = make_mp4_box(b"mvhd", &mvhd_payload);
+
+        // mehd with fragment_duration 306000
+        let mut mehd_payload = vec![0u8; 8];
+        mehd_payload[4..8].copy_from_slice(&306_000u32.to_be_bytes());
+        let mehd = make_mp4_box(b"mehd", &mehd_payload);
+        let mvex = make_mp4_box(b"mvex", &mehd);
+
+        let moov_payload = [&mvhd[..], &mvex[..]].concat();
+        let moov = make_mp4_box(b"moov", &moov_payload);
+
+        let file_bytes = [&ftyp[..], &moov[..]].concat();
+        let temp_path = std::env::temp_dir().join(format!("test_mp4_mehd_{}.m4a", std::process::id()));
+        fs::write(&temp_path, file_bytes).unwrap();
+
+        let dur = super::probe_mp4_duration(&temp_path);
+        assert_eq!(dur, Some(306));
+
+        let _ = fs::remove_file(temp_path);
+    }
+
+    #[test]
+    fn test_probe_mp4_duration_mvhd() {
+        let ftyp = make_mp4_box(b"ftyp", b"M4A \0\0\0\0M4A mp42isom");
+
+        // mvhd with timescale 1000, duration 229000 -> 229s
+        let mut mvhd_payload = vec![0u8; 100];
+        mvhd_payload[12..16].copy_from_slice(&1000u32.to_be_bytes());
+        mvhd_payload[16..20].copy_from_slice(&229_000u32.to_be_bytes());
+        let mvhd = make_mp4_box(b"mvhd", &mvhd_payload);
+        let moov = make_mp4_box(b"moov", &mvhd);
+
+        let file_bytes = [&ftyp[..], &moov[..]].concat();
+        let temp_path = std::env::temp_dir().join(format!("test_mp4_mvhd_{}.m4a", std::process::id()));
+        fs::write(&temp_path, file_bytes).unwrap();
+
+        let dur = super::probe_mp4_duration(&temp_path);
+        assert_eq!(dur, Some(229));
+
+        let _ = fs::remove_file(temp_path);
+    }
+
+    #[test]
+    fn test_probe_mp4_duration_sidx() {
+        let ftyp = make_mp4_box(b"ftyp", b"M4A \0\0\0\0M4A mp42isom");
+
+        // sidx with timescale 1000, 2 subsegments of duration 50000 each = 100000 / 1000 = 100s
+        let mut sidx_payload = vec![0u8; 24 + 24];
+        sidx_payload[4..8].copy_from_slice(&1000u32.to_be_bytes()); // timescale
+        sidx_payload[22..24].copy_from_slice(&2u16.to_be_bytes()); // ref_count = 2
+        // ref 1 duration at offset 24 + 4 = 28
+        sidx_payload[28..32].copy_from_slice(&50_000u32.to_be_bytes());
+        // ref 2 duration at offset 24 + 12 + 4 = 40
+        sidx_payload[40..44].copy_from_slice(&50_000u32.to_be_bytes());
+        let sidx = make_mp4_box(b"sidx", &sidx_payload);
+
+        let file_bytes = [&ftyp[..], &sidx[..]].concat();
+        let temp_path = std::env::temp_dir().join(format!("test_mp4_sidx_{}.m4a", std::process::id()));
+        fs::write(&temp_path, file_bytes).unwrap();
+
+        let dur = super::probe_mp4_duration(&temp_path);
+        assert_eq!(dur, Some(100));
+
+        let _ = fs::remove_file(temp_path);
+    }
+
+    #[test]
+    fn test_find_ftyp_offset_with_prepended_id3() {
+        let mut id3_data = vec![
+            b'I', b'D', b'3', 3, 0, 0,
+            0, 0, 0, 10,
+        ];
+        id3_data.extend_from_slice(&[0u8; 10]); // total 20 bytes ID3
+        let ftyp = make_mp4_box(b"ftyp", b"M4A \0\0\0\0M4A mp42isom");
+        id3_data.extend_from_slice(&ftyp);
+
+        let mut cursor = std::io::Cursor::new(id3_data);
+        let offset = super::find_ftyp_offset(&mut cursor);
+        assert_eq!(offset, Ok(20));
+    }
+
+    #[test]
+    fn test_user_reported_m4a_file_if_present() {
+        let dir = std::path::Path::new(r"C:\Users\lover\Desktop\test");
+        if !dir.exists() {
+            return;
+        }
+        let mut target_file = None;
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.contains("ChouCho") && name.ends_with(".m4a") {
+                    target_file = Some(entry.path());
+                    break;
+                }
+            }
+        }
+
+        let p = match target_file {
+            Some(p) => p,
+            None => return,
+        };
+
+        let dur = super::probe_mp4_duration(&p);
+        assert_eq!(dur, Some(306));
+
+        let song = crate::music::scanner::parse_song_from_file(&p, &p.to_string_lossy(), "m4a").expect("song should be parsed");
+        assert_eq!(song.duration, 306);
+        assert_eq!(song.title, "灰色のサーガ");
+        assert_eq!(song.album, "魔女之旅");
+
+        let file = std::fs::File::open(&p).expect("file should be opened");
+        let res = crate::player::decoder_thread::create_prefetch_source(file, None, std::time::Duration::ZERO, None);
+        assert!(res.is_ok(), "decoder should be created successfully");
     }
 }

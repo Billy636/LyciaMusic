@@ -1,6 +1,6 @@
 use crate::player::ring_buffer::{spsc_ring_buffer, SpscConsumer, SpscProducer};
 use rodio::{Decoder, Source};
-use std::io::{BufReader, Read, Seek};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle, Thread};
@@ -126,13 +126,43 @@ pub fn create_prefetch_source<R>(
 where
     R: Read + Seek + Send + Sync + 'static,
 {
-    let buf_reader = BufReader::with_capacity(512 * 1024, reader);
-    let decoder = Decoder::new(buf_reader).map_err(|e| format!("Failed to create decoder: {e}"))?;
-    let sample_rate = decoder.sample_rate();
-
     let offset = start_offset.unwrap_or(Duration::ZERO);
-    let skipped = decoder.convert_samples::<f32>().skip_duration(offset);
-    let mut source_chain: Box<dyn Source<Item = f32> + Send> = Box::new(skipped);
+
+    let (mut source_chain, sample_rate): (Box<dyn Source<Item = f32> + Send>, u32) = {
+        let mut reader = reader;
+        let mut is_id3_prefixed_m4a = false;
+        let mut m4a_offset = 0;
+
+        let mut head = [0u8; 16];
+        if reader.seek(SeekFrom::Start(0)).is_ok() && reader.read_exact(&mut head).is_ok() {
+            if &head[..3] == b"ID3" {
+                if let Ok(offset) = crate::music::tags::find_ftyp_offset(&mut reader) {
+                    if offset > 0 {
+                        is_id3_prefixed_m4a = true;
+                        m4a_offset = offset;
+                    }
+                }
+            }
+        }
+        let _ = reader.seek(SeekFrom::Start(0));
+
+        if is_id3_prefixed_m4a {
+            let offset_reader = crate::music::tags::OffsetReader::new(reader, m4a_offset);
+            let buf_reader = BufReader::with_capacity(512 * 1024, offset_reader);
+            let decoder = Decoder::new(buf_reader)
+                .map_err(|e| format!("Failed to create decoder: {e}"))?;
+            let rate = decoder.sample_rate();
+            let skipped = decoder.convert_samples::<f32>().skip_duration(offset);
+            (Box::new(skipped), rate)
+        } else {
+            let buf_reader = BufReader::with_capacity(512 * 1024, reader);
+            let decoder = Decoder::new(buf_reader)
+                .map_err(|e| format!("Failed to create decoder: {e}"))?;
+            let rate = decoder.sample_rate();
+            let skipped = decoder.convert_samples::<f32>().skip_duration(offset);
+            (Box::new(skipped), rate)
+        }
+    };
 
     if let Some(tot_dur) = total_duration {
         let resume_time = offset.saturating_sub(cue_start_offset);

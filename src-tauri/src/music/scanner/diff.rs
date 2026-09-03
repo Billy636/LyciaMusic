@@ -380,11 +380,32 @@ fn probe_audio_duration_ms(path: &Path) -> Option<u32> {
         .tracks()
         .iter()
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)?;
-    let time_base = track.codec_params.time_base?;
-    let frames = track.codec_params.n_frames?;
-    let time = time_base.calc_time(frames);
-    let seconds = time.seconds.saturating_add(u64::from(time.frac > 0.0));
-    Some((seconds.min(u32::MAX as u64) * 1000) as u32)
+    let seconds = if let (Some(time_base), Some(frames)) = (track.codec_params.time_base, track.codec_params.n_frames) {
+        if frames > 0 {
+            let time = time_base.calc_time(frames);
+            time.seconds.saturating_add(u64::from(time.frac > 0.0))
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
+    let seconds = if seconds == 0 {
+        if crate::music::tags::is_mp4_path(path) {
+            crate::music::tags::probe_mp4_duration(path).unwrap_or(0) as u64
+        } else {
+            0
+        }
+    } else {
+        seconds
+    };
+
+    if seconds > 0 {
+        Some((seconds.min(u32::MAX as u64) * 1000) as u32)
+    } else {
+        None
+    }
 }
 
 fn process_cue_parse_tasks(tasks: &[ParseTask], options: ScanOptions) -> Vec<ParsedTaskResult> {
