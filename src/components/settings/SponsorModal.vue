@@ -73,6 +73,11 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown));
 
         <!-- Scrollable Content Area -->
         <div class="flex-1 overflow-y-auto pr-1.5 -mr-1.5 custom-scrollbar pb-2 text-center">
+          <!-- Heartwarming conclusion -->
+          <p class="mb-5 px-2 text-xs sm:text-sm font-bold text-[#EC4141] dark:text-[#f85c5c] animate-pulse leading-normal">
+            不论您是否赞助，不论您赞助金额多少，非常感谢您对本项目的支持！
+          </p>
+
           <!-- Description Paragraph -->
           <p class="mb-5 px-1 text-xs sm:text-sm leading-relaxed text-gray-600 dark:text-gray-300">
             本项目完全由个人作者开发，投入了很多时间精力。您的支持将会对本项目的长期更新做出杰出贡献！赞助者的反馈将优先采用。
@@ -105,43 +110,11 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown));
             </div>
           </div>
 
-          <!-- Tiers Description List -->
-          <div class="mb-5 space-y-3 rounded-2xl bg-gray-50/40 p-4 text-left dark:bg-white/5 border border-gray-100/50 dark:border-white/5">
-            <!-- Tier 1 -->
-            <div class="flex items-center gap-3">
-              <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-lg dark:bg-amber-950/20">
-                🍳
-              </div>
-              <p class="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300">
-                一元在作者早餐里加个鸡蛋。
-              </p>
-            </div>
-
-            <!-- Tier 5 -->
-            <div class="flex items-center gap-3">
-              <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-pink-500/10 text-lg dark:bg-pink-950/20">
-                🥤
-              </div>
-              <p class="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300">
-                五元请作者喝一杯棒打鲜橙。
-              </p>
-            </div>
-
-            <!-- Tier 15 -->
-            <div class="flex items-center gap-3">
-              <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-rose-500/10 text-lg dark:bg-rose-950/20">
-                🥤
-              </div>
-              <p class="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300">
-                十元请作者喝一杯杨枝甘露。
-              </p>
-            </div>
+          <!-- Sponsor List -->
+          <div class="mb-5 space-y-2 rounded-2xl bg-gray-50/40 p-4 text-left dark:bg-white/5 border border-gray-100/50 dark:border-white/5">
+            <p class="text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-200">赞助名单</p>
+            <p class="text-xs sm:text-sm text-gray-500 dark:text-gray-400">名单整理中，敬请期待……</p>
           </div>
-
-          <!-- Heartwarming conclusion -->
-          <p class="mb-2 px-2 text-xs sm:text-sm font-bold text-[#EC4141] dark:text-[#f85c5c] animate-pulse leading-normal">
-            不论您是否赞助，不论您赞助金额多少，非常感谢您对本项目的支持！
-          </p>
         </div>
 
         <!-- Close button at the bottom (Fixed) -->
