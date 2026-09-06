@@ -180,16 +180,13 @@ graph TD
 
 ---
 
-## 👥 贡献排行与 Commit 统计
+## 👥 贡献者名单 (Contributors)
 
-感谢所有通过 Commit 提交、Issue 反馈为 Lycia Player 做出贡献的人！
+感谢所有通过 Commit 提交、Issue 反馈为 Lycia Player 做出贡献的小伙伴！
 
-| 贡献者 | 头像 | 提交数 (Commits) |
-| :--- | :---: | :---: |
-| **[Billy636](https://github.com/Billy636)** | <img src="https://github.com/Billy636.png" width="36" height="36" style="border-radius: 50%;" /> | **586** |
-| **[Xiyue Cheng](https://github.com/silver-wolf-little-wife)** | <img src="https://github.com/silver-wolf-little-wife.png" width="36" height="36" style="border-radius: 50%;" /> | **7** |
-
-*如果您提交了 Pull Request 并被合并，您的头像和 Commit 数量统计将会在下一次文档更新中在此体现。*
+<a href="https://github.com/Billy636/LyciaMusic/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Billy636/LyciaMusic" alt="Contributors" />
+</a>
 
 ---
 
