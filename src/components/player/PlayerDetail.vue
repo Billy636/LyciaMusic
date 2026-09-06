@@ -442,11 +442,13 @@ const metaInfo = computed(() => {
             </button>
           </div>
 
-          <div class="pointer-events-none flex-1 truncate px-4 text-center text-sm font-medium text-white/80 drop-shadow-md">
-            {{ currentSong?.title || currentSong?.name }}
-            <span v-if="currentSong?.artist" class="mx-1 opacity-60">-</span>
-            <span class="opacity-60">{{ currentSong?.artist }}</span>
-          </div>
+          <transition name="song-switch-text" mode="out-in">
+            <div :key="currentSong?.path" class="pointer-events-none flex-1 truncate px-4 text-center text-sm font-medium text-white/80 drop-shadow-md">
+              {{ currentSong?.title || currentSong?.name }}
+              <span v-if="currentSong?.artist" class="mx-1 opacity-60">-</span>
+              <span class="opacity-60">{{ currentSong?.artist }}</span>
+            </div>
+          </transition>
 
           <div class="relative z-10 flex w-1/4 items-center justify-end gap-2">
             <button
@@ -506,20 +508,22 @@ const metaInfo = computed(() => {
 
             <LyricsView v-else-if="showPlayerDetail && parsedLyrics.length > 0" class="h-full" />
 
-            <div
-              v-else
-              class="flex h-full flex-col items-center justify-center opacity-80"
-              style="text-shadow: 0 2px 10px rgba(0,0,0,0.4);"
-            >
+            <transition v-else name="song-switch-meta" mode="out-in">
               <div
-                v-for="(info, index) in metaInfo"
-                :key="index"
-                class="mb-4 flex items-center text-xl font-medium tracking-wider sm:text-2xl"
+                :key="currentSong?.path"
+                class="flex h-full flex-col items-center justify-center opacity-80"
+                style="text-shadow: 0 2px 10px rgba(0,0,0,0.4);"
               >
-                <span class="mr-4 text-white/40">{{ info.label }}</span>
-                <span class="text-white drop-shadow-md">{{ info.value }}</span>
+                <div
+                  v-for="(info, index) in metaInfo"
+                  :key="index"
+                  class="mb-4 flex items-center text-xl font-medium tracking-wider sm:text-2xl"
+                >
+                  <span class="mr-4 text-white/40">{{ info.label }}</span>
+                  <span class="text-white drop-shadow-md">{{ info.value }}</span>
+                </div>
               </div>
-            </div>
+            </transition>
           </transition>
         </div>
       </div>
@@ -537,6 +541,42 @@ const metaInfo = computed(() => {
 .fade-scale-leave-to {
   opacity: 0;
   transform: scale(0.97) translateY(10px);
+}
+
+/* 切歌时标题/歌手文字过渡 */
+.song-switch-text-enter-active,
+.song-switch-text-leave-active {
+  transition:
+    opacity 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.song-switch-text-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.song-switch-text-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* 切歌时歌曲元信息面板过渡 */
+.song-switch-meta-enter-active,
+.song-switch-meta-leave-active {
+  transition:
+    opacity 360ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 360ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.song-switch-meta-enter-from {
+  opacity: 0;
+  transform: translateY(16px) scale(0.98);
+}
+
+.song-switch-meta-leave-to {
+  opacity: 0;
+  transform: translateY(-12px) scale(0.98);
 }
 
 .text-shadow-sm {
