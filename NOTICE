@@ -18,10 +18,13 @@ Additional attribution:
   original work.
 - Lycia Player-specific modifications remain identified in this
   repository and should keep existing attribution and license notices.
+- Song switching transition animation in player details (PR #80)
+  contributed by sherkent (VeilCode).
 
 中文说明：
 Lycia Player 的歌词相关实现使用并改编了 AMLL（Apple Music-like Lyrics）
 项目的部分代码与设计思路。
+播放详情页切歌平滑过渡动效（PR #80）由 sherkent (VeilCode) 贡献。
 
 上游项目地址：
 https://github.com/amll-dev/applemusic-like-lyrics

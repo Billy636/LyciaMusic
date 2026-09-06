@@ -543,7 +543,7 @@ const metaInfo = computed(() => {
   transform: scale(0.97) translateY(10px);
 }
 
-/* 切歌时标题/歌手文字过渡 */
+/* 切歌时标题/歌手文字过渡 (PR #80 by @sherkent) */
 .song-switch-text-enter-active,
 .song-switch-text-leave-active {
   transition:
