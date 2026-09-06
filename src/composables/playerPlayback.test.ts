@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 const loadCoverMock = vi.fn().mockResolvedValue('');
 const loadCoverPathMock = vi.fn().mockResolvedValue('');
 const loadFullCoverMock = vi.fn().mockResolvedValue('');
+const loadFullCoverPathMock = vi.fn().mockResolvedValue('');
 const peekCoverUrlMock = vi.fn().mockReturnValue('');
 const peekCoverPathMock = vi.fn().mockReturnValue('');
 const getFullCoverUrlMock = vi.fn().mockReturnValue('');
@@ -28,6 +29,7 @@ vi.mock('./useCoverCache', () => ({
   useCoverCache: () => ({
     loadCover: loadCoverMock,
     loadCoverPath: loadCoverPathMock,
+    loadFullCoverPath: loadFullCoverPathMock,
     loadFullCover: loadFullCoverMock,
     peekCoverUrl: peekCoverUrlMock,
     peekCoverPath: peekCoverPathMock,
@@ -68,6 +70,7 @@ describe('player playback domain', () => {
     vi.clearAllMocks();
     loadCoverMock.mockResolvedValue('');
     loadCoverPathMock.mockResolvedValue('');
+    loadFullCoverPathMock.mockResolvedValue('');
     loadFullCoverMock.mockResolvedValue('');
     peekCoverUrlMock.mockReturnValue('');
     peekCoverPathMock.mockReturnValue('');
@@ -99,7 +102,35 @@ describe('player playback domain', () => {
 
     await playerPlayback.playSong(firstSong);
 
-    expect(playbackStore.playQueue.map(song => song.path)).toEqual(displaySongList.map(song => song.path));
+    expect(playbackStore.playQueuePaths).toEqual(displaySongList.map(song => song.path));
+    playerPlayback.dispose();
+  });
+
+  it('preserves the restored queue when playback resumes before audio is loaded', async () => {
+    const playbackStore = usePlaybackStore();
+    const restoredSong = makeSong({ path: '/music/folder-a/restored.flac', title: 'Restored' });
+    const queuedSong = makeSong({ path: '/music/folder-a/queued.flac', title: 'Queued' });
+    const otherFolderSong = makeSong({ path: '/music/folder-b/other.flac', title: 'Other' });
+    const restoredQueuePaths = [restoredSong.path, queuedSong.path];
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [restoredSong, queuedSong, otherFolderSong],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext: vi.fn(),
+    });
+
+    playbackStore.currentSong = restoredSong;
+    playbackStore.currentTime = 42;
+    playbackStore.isSongLoaded = false;
+    playbackStore.playQueuePaths = restoredQueuePaths;
+
+    await playerPlayback.togglePlay();
+
+    expect(playbackStore.playQueuePaths).toEqual(restoredQueuePaths);
+    expect(playbackApi.playAudio).toHaveBeenCalledWith(expect.objectContaining({
+      path: restoredSong.path,
+      startOffsetMs: 42_000,
+    }));
     playerPlayback.dispose();
   });
 
@@ -123,7 +154,7 @@ describe('player playback domain', () => {
     await playerPlayback.playSong(searchedSong, { insertAfterCurrent: true });
 
     expect(playbackStore.currentSong?.path).toBe(searchedSong.path);
-    expect(playbackStore.playQueue.map(song => song.path)).toEqual([
+    expect(playbackStore.playQueuePaths).toEqual([
       songA.path,
       searchedSong.path,
       songB.path,
@@ -153,13 +184,13 @@ describe('player playback domain', () => {
   it('does not auto-advance songs with unknown duration', async () => {
     const song = makeSong({ path: 'remote://source/demo.flac', duration: 0 });
     const handleAutoNext = vi.fn();
-    let frameCallback: FrameRequestCallback | undefined;
+    let progressCallback: (() => void) | undefined;
     vi
-      .stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-        frameCallback = callback;
+      .stubGlobal('setTimeout', (callback: () => void) => {
+        progressCallback = callback;
         return 1;
       });
-    vi.stubGlobal('cancelAnimationFrame', () => {});
+    vi.stubGlobal('clearTimeout', () => {});
     const playerPlayback = createPlayerPlayback({
       getDisplaySongList: () => [song],
       addToHistory: vi.fn(),
@@ -168,8 +199,8 @@ describe('player playback domain', () => {
     });
 
     await playerPlayback.playSong(song);
-    expect(frameCallback).toBeDefined();
-    (frameCallback as FrameRequestCallback)(performance.now() + 16);
+    expect(progressCallback).toBeDefined();
+    (progressCallback as () => void)();
 
     expect(handleAutoNext).not.toHaveBeenCalled();
 
@@ -199,6 +230,32 @@ describe('player playback domain', () => {
 
     expect(requestAnimationFrameMock).not.toHaveBeenCalled();
     expect(setTimeoutMock).toHaveBeenCalledWith(expect.any(Function), 1000);
+
+    playerPlayback.dispose();
+    vi.unstubAllGlobals();
+  });
+
+  it('updates global playback progress with a low-frequency timer during normal rendering', async () => {
+    const song = makeSong({ duration: 180 });
+    const handleAutoNext = vi.fn();
+    const requestAnimationFrameMock = vi.fn();
+    const setTimeoutMock = vi.fn().mockReturnValue(7);
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock);
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('setTimeout', setTimeoutMock);
+    vi.stubGlobal('clearTimeout', vi.fn());
+
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext,
+    });
+
+    await playerPlayback.playSong(song);
+
+    expect(requestAnimationFrameMock).not.toHaveBeenCalled();
+    expect(setTimeoutMock).toHaveBeenCalledWith(expect.any(Function), 100);
 
     playerPlayback.dispose();
     vi.unstubAllGlobals();
@@ -235,6 +292,110 @@ describe('player playback domain', () => {
     });
 
     expect(playbackStore.currentTime).toBe(10);
+    playerPlayback.dispose();
+  });
+
+  it('hydrates runtime metadata before starting playback', async () => {
+    const playbackStore = usePlaybackStore();
+    const song = makeSong({ path: '/music/album.cue::track02', duration: 120 });
+    const resolveSongForPlayback = vi.fn(async (value: Song) => Object.assign(value, {
+      id: 42,
+      cue_source_path: '/music/album.flac',
+      cue_start_offset: 180_000,
+      cue_end_offset: 300_000,
+    }));
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext: vi.fn(),
+      resolveSongForPlayback,
+    });
+
+    await playerPlayback.playSong(song);
+
+    expect(resolveSongForPlayback).toHaveBeenCalledWith(song);
+    expect(playbackStore.currentSong).toMatchObject({
+      path: song.path,
+      id: 42,
+      cue_source_path: '/music/album.flac',
+      cue_start_offset: 180_000,
+    });
+    expect(playbackApi.playAudio).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/music/album.flac',
+      songId: 42,
+      cueStartOffsetMs: 180_000,
+      startOffsetMs: 180_000,
+    }));
+    playerPlayback.dispose();
+  });
+
+  it('does not pass durationMs or cueStartOffsetMs for standalone songs to allow natural EOF', async () => {
+    const song = makeSong({ path: '/music/track.mp3', duration: 240 });
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext: vi.fn(),
+    });
+
+    await playerPlayback.playSong(song);
+
+    expect(playbackApi.playAudio).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/music/track.mp3',
+      duration: 240,
+      durationMs: undefined,
+      cueStartOffsetMs: undefined,
+    }));
+    playerPlayback.dispose();
+  });
+
+  it('passes durationMs and cueStartOffsetMs for CUE tracks including track 1 starting at 0ms', async () => {
+    const song = makeSong({
+      path: '/music/album.cue::track01',
+      cue_source_path: '/music/album.flac',
+      cue_start_offset: 0,
+      duration: 240,
+    });
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext: vi.fn(),
+    });
+
+    await playerPlayback.playSong(song);
+
+    expect(playbackApi.playAudio).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/music/album.flac',
+      duration: 240,
+      durationMs: 240_000,
+      cueStartOffsetMs: 0,
+    }));
+    playerPlayback.dispose();
+  });
+
+  it('re-anchors playback clock when seeking to beginning after playing', async () => {
+    const playbackStore = usePlaybackStore();
+    const song = makeSong({ path: '/music/song.mp3', duration: 240 });
+    playbackStore.currentSong = song;
+    playbackStore.currentTime = 180;
+    playbackStore.isPlaying = true;
+
+    const playerPlayback = createPlayerPlayback({
+      getDisplaySongList: () => [song],
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext: vi.fn(),
+    });
+
+    await playerPlayback.seekTo(0);
+
+    expect(playbackApi.seekAudio).toHaveBeenCalledWith(expect.objectContaining({
+      time: 0,
+      isPlaying: true,
+    }));
+    expect(playbackStore.currentTime).toBe(0);
     playerPlayback.dispose();
   });
 
@@ -281,8 +442,8 @@ describe('player playback domain', () => {
 
   it('starts loading the current thumbnail before the audio backend finishes switching songs', async () => {
     const song = makeSong({ path: '/music/current-thumbnail.flac', title: 'Current Thumbnail' });
-    let resolvePlayAudio!: () => void;
-    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<void>((resolve) => {
+    let resolvePlayAudio!: (val?: any) => void;
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<any>((resolve) => {
       resolvePlayAudio = resolve;
     }));
 
@@ -309,6 +470,10 @@ describe('player playback domain', () => {
       title: 'Persisted Thumb',
       cover_thumb_path: 'C:\\covers\\persisted-thumb.jpg',
     });
+    let resolvePlayAudio!: (val?: any) => void;
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<any>((resolve) => {
+      resolvePlayAudio = resolve;
+    }));
     primeCoverPathMock.mockReturnValue('asset://C:\\covers\\persisted-thumb.jpg');
 
     const playerPlayback = createPlayerPlayback({
@@ -318,11 +483,14 @@ describe('player playback domain', () => {
       handleAutoNext: vi.fn(),
     });
 
-    await playerPlayback.playSong(song);
+    const playPromise = playerPlayback.playSong(song);
 
     expect(primeCoverPathMock).toHaveBeenCalledWith(song.path, song.cover_thumb_path);
     expect(playbackStore.currentCover).toBe('asset://C:\\covers\\persisted-thumb.jpg');
     expect(loadCoverMock).toHaveBeenCalledWith(song.path);
+
+    resolvePlayAudio();
+    await playPromise;
     playerPlayback.dispose();
   });
 
@@ -330,9 +498,9 @@ describe('player playback domain', () => {
     const playbackStore = usePlaybackStore();
     const oldCover = 'asset://C:\\covers\\old-thumb.jpg';
     const song = makeSong({ path: '/music/cold-hdd.flac', title: 'Cold HDD' });
-    let resolvePlayAudio!: () => void;
+    let resolvePlayAudio!: (val?: any) => void;
     playbackStore.currentCover = oldCover;
-    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<void>((resolve) => {
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<any>((resolve) => {
       resolvePlayAudio = resolve;
     }));
 
@@ -358,12 +526,12 @@ describe('player playback domain', () => {
     const oldCover = 'asset://C:\\covers\\old-thumb.jpg';
     const oldFullCover = 'asset://C:\\covers\\old-full.png';
     const song = makeSong({ path: '/music/new-song.flac', title: 'New Song' });
-    let resolvePlayAudio!: () => void;
+    let resolvePlayAudio!: (val?: any) => void;
     uiStore.showPlayerDetail = true;
     playbackStore.currentCover = oldCover;
     playbackStore.currentCoverPath = '/music/old-song.flac';
     playbackStore.currentCoverFull = oldFullCover;
-    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<void>((resolve) => {
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise<any>((resolve) => {
       resolvePlayAudio = resolve;
     }));
 

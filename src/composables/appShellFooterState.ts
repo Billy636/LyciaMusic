@@ -1,4 +1,4 @@
 import type { Song } from '../types';
 
-export const shouldShowPlayerFooter = (playQueue: Song[], currentSong: Song | null) =>
-  playQueue.length > 0 || currentSong !== null;
+export const shouldShowPlayerFooter = (queue: unknown[] | number, currentSong: Song | null) =>
+  (typeof queue === 'number' ? queue : queue.length) > 0 || currentSong !== null;

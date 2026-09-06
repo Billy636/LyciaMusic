@@ -25,47 +25,53 @@ pub fn start_topmost_guard(window: tauri::Window) {
 }
 
 #[tauri::command]
-pub fn stop_topmost_guard() {
+pub fn stop_topmost_guard(window: tauri::Window) {
     #[cfg(target_os = "windows")]
     {
-        stop_window_topmost_guard();
+        stop_window_topmost_guard(&window);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
     }
 }
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use std::sync::{
-        atomic::{AtomicIsize, Ordering},
-        mpsc, OnceLock,
+    use std::{
+        cell::RefCell,
+        sync::atomic::{AtomicIsize, Ordering},
     };
 
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use tauri::Window;
     use windows_sys::Win32::{
-        Foundation::{HWND, LPARAM, WPARAM},
-        System::Threading::GetCurrentThreadId,
+        Foundation::HWND,
         UI::{
             Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK},
             WindowsAndMessaging::{
-                DispatchMessageW, GetAncestor, GetClassNameW, GetMessageW, IsWindow, PeekMessageW,
-                PostThreadMessageW, SetWindowPos, TranslateMessage, EVENT_OBJECT_FOCUS,
+                GetAncestor, GetClassNameW, IsWindow, SetWindowPos, EVENT_OBJECT_FOCUS,
                 EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MENUSTART, GA_ROOT, HWND_NOTOPMOST,
-                HWND_TOPMOST, MSG, PM_NOREMOVE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER,
-                SWP_NOSENDCHANGING, SWP_NOSIZE, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
-                WM_APP,
+                HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSENDCHANGING,
+                SWP_NOSIZE, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
             },
         },
     };
 
     static TARGET_HWND: AtomicIsize = AtomicIsize::new(0);
-    static HOOK_THREAD: OnceLock<HookThreadHandle> = OnceLock::new();
 
-    const WM_TOPMOST_GUARD_START: u32 = WM_APP + 0x120;
-    const WM_TOPMOST_GUARD_STOP: u32 = WM_APP + 0x121;
+    thread_local! {
+        static ACTIVE_GUARD: RefCell<Option<TopMostGuard>> = RefCell::new(None);
+    }
 
     pub(super) fn refresh_window_topmost(window: &Window, enabled: bool) {
         if let Some(hwnd) = window_hwnd(window) {
-            set_topmost_state(hwnd, enabled);
+            let hwnd_value = hwnd as isize;
+            let _ = window.run_on_main_thread(move || {
+                let hwnd = hwnd_value as HWND;
+                set_topmost_state(hwnd, enabled);
+            });
         }
     }
 
@@ -74,14 +80,47 @@ mod platform {
             return;
         };
 
-        TARGET_HWND.store(hwnd as isize, Ordering::SeqCst);
-        set_topmost_state(hwnd, true);
-        post_guard_thread_message(WM_TOPMOST_GUARD_START);
+        let hwnd_value = hwnd as isize;
+        TARGET_HWND.store(hwnd_value, Ordering::SeqCst);
+
+        let _ = window.run_on_main_thread(move || {
+            // 时序检查：如果在排队期间 TARGET_HWND 已经被 stop 改变，则忽略本次操作
+            if TARGET_HWND.load(Ordering::SeqCst) != hwnd_value {
+                return;
+            }
+
+            let hwnd = hwnd_value as HWND;
+            set_topmost_state(hwnd, true);
+
+            ACTIVE_GUARD.with(|guard| {
+                let mut guard_lock = guard.borrow_mut();
+                if let Some(existing_guard) = guard_lock.take() {
+                    existing_guard.stop();
+                }
+
+                if let Some(new_guard) = TopMostGuard::start(hwnd) {
+                    *guard_lock = Some(new_guard);
+                }
+            });
+        });
     }
 
-    pub(super) fn stop_window_topmost_guard() {
+    pub(super) fn stop_window_topmost_guard(window: &Window) {
         TARGET_HWND.store(0, Ordering::SeqCst);
-        post_guard_thread_message(WM_TOPMOST_GUARD_STOP);
+
+        let _ = window.run_on_main_thread(move || {
+            // 时序检查：如果在排队期间 TARGET_HWND 已经被新的 start 改变，则忽略卸载
+            if TARGET_HWND.load(Ordering::SeqCst) != 0 {
+                return;
+            }
+
+            ACTIVE_GUARD.with(|guard| {
+                let mut guard_lock = guard.borrow_mut();
+                if let Some(existing_guard) = guard_lock.take() {
+                    existing_guard.stop();
+                }
+            });
+        });
     }
 
     fn window_hwnd(window: &Window) -> Option<HWND> {
@@ -102,83 +141,11 @@ mod platform {
 
         unsafe {
             if enabled {
-                SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+                let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
             } else {
-                SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+                let _ = SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
             }
         }
-    }
-
-    fn post_guard_thread_message(message: u32) {
-        let hook_thread = guard_thread();
-
-        unsafe {
-            let _ = PostThreadMessageW(hook_thread.thread_id, message, 0 as WPARAM, 0 as LPARAM);
-        }
-    }
-
-    fn guard_thread() -> &'static HookThreadHandle {
-        HOOK_THREAD.get_or_init(|| {
-            let (ready_tx, ready_rx) = mpsc::channel();
-
-            std::thread::spawn(move || unsafe {
-                run_guard_thread(ready_tx);
-            });
-
-            let thread_id = ready_rx
-                .recv()
-                .expect("topmost guard thread failed to initialize");
-
-            HookThreadHandle { thread_id }
-        })
-    }
-
-    unsafe fn run_guard_thread(ready_tx: mpsc::Sender<u32>) {
-        let thread_id = GetCurrentThreadId();
-        let mut msg: MSG = std::mem::zeroed();
-
-        // Force creation of the message queue before other threads start posting messages.
-        PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE);
-        let _ = ready_tx.send(thread_id);
-
-        let mut guard: Option<TopMostGuard> = None;
-
-        loop {
-            let status = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);
-            if status <= 0 {
-                break;
-            }
-
-            match msg.message {
-                WM_TOPMOST_GUARD_START => {
-                    if let Some(existing_guard) = guard.take() {
-                        existing_guard.stop();
-                    }
-
-                    let hwnd = TARGET_HWND.load(Ordering::SeqCst) as HWND;
-                    if !hwnd.is_null() {
-                        guard = TopMostGuard::start(hwnd);
-                    }
-                }
-                WM_TOPMOST_GUARD_STOP => {
-                    if let Some(existing_guard) = guard.take() {
-                        existing_guard.stop();
-                    }
-                }
-                _ => {
-                    TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
-                }
-            }
-        }
-
-        if let Some(existing_guard) = guard.take() {
-            existing_guard.stop();
-        }
-    }
-
-    struct HookThreadHandle {
-        thread_id: u32,
     }
 
     struct TopMostGuard {
@@ -217,12 +184,12 @@ mod platform {
 
         fn stop(self) {
             unsafe {
-                UnhookWinEvent(self.foreground_hook);
+                let _ = UnhookWinEvent(self.foreground_hook);
                 if let Some(hook) = self.focus_hook {
-                    UnhookWinEvent(hook);
+                    let _ = UnhookWinEvent(hook);
                 }
                 if let Some(hook) = self.menu_hook {
-                    UnhookWinEvent(hook);
+                    let _ = UnhookWinEvent(hook);
                 }
             }
         }

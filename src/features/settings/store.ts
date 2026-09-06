@@ -65,10 +65,20 @@ export const normalizeForegroundStyle = (
   foregroundStyle: string | null | undefined,
 ): ThemeSettings['customBackground']['foregroundStyle'] => (foregroundStyle === 'dark' ? 'dark' : 'light');
 
+export const normalizeThemeMode = (
+  mode: unknown,
+  fallback: ThemeSettings['mode'] = 'system',
+): ThemeSettings['mode'] => (
+  mode === 'system' || mode === 'light' || mode === 'dark' || mode === 'custom'
+    ? mode
+    : fallback
+);
+
 export const defaultThemeSettings: ThemeSettings = {
-  mode: 'light',
+  mode: 'system',
   dynamicBgType: 'none',
   windowMaterial: 'none',
+  retainMaterialOnUnfocus: false,
   flowColorBoost: 25,
   flowDepth: 30,
   flowSpeed: 52,
@@ -79,6 +89,7 @@ export const defaultThemeSettings: ThemeSettings = {
   blur: 20,
   customBackground: {
     imagePath: '',
+    mediaType: 'image',
     blur: 20,
     opacity: 1,
     maskColor: '#000000',
@@ -98,6 +109,7 @@ export const defaultSidebarSettings: SidebarSettings = {
   showRecent: true,
   showFolders: true,
   showStatistics: true,
+  showPlaylists: false,
 };
 
 export const defaultAudioSettings: AudioSettings = {
@@ -136,9 +148,11 @@ export const defaultAppSettings: AppSettings = {
   sidebar: defaultSidebarSettings,
   shortcuts: createDefaultShortcutSettings(),
   showTaskbarPlayer: false,
+  showTaskbarPlayerIcon: true,
   taskbarPlayerCanDrag: false,
   gpuAcceleration: true,
   writeArtistAvatarToTags: false,
+  autoScanLibraryOnStartup: false,
 };
 
 export const createDefaultThemeSettings = (): ThemeSettings => ({
@@ -194,11 +208,15 @@ export const mergeThemeSettings = (
     ...(patch.customBackground ?? {}),
   };
 
+  const mediaType = mergedCustomBackground.mediaType === 'video' ? 'video' : 'image';
+
   return {
     ...base,
     ...patch,
+    mode: normalizeThemeMode(patch.mode, base.mode),
     customBackground: {
       ...mergedCustomBackground,
+      mediaType,
       foregroundStyle: normalizeForegroundStyle(mergedCustomBackground.foregroundStyle),
     },
   };

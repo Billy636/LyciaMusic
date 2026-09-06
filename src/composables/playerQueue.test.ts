@@ -36,12 +36,10 @@ describe('player queue domain', () => {
   });
 
   it('plays queued temp songs before the main queue', () => {
-    const played: string[] = [];
+    const playSong = vi.fn();
     const playbackStore = usePlaybackStore();
     const playerQueue = createPlayerQueue({
-      playSong: (song) => {
-        played.push(song.path);
-      },
+      playSong,
       stopPlaybackRuntime: vi.fn(),
       showToast: vi.fn(),
     });
@@ -56,8 +54,32 @@ describe('player queue domain', () => {
 
     playerQueue.nextSong();
 
-    expect(played).toEqual(['/music/next.flac']);
+    expect(playSong).toHaveBeenCalledWith(
+      tempSong,
+      expect.objectContaining({ preserveQueue: true }),
+    );
     expect(playbackStore.tempQueue).toEqual([]);
+  });
+
+  it('preserves the main queue during normal next-song navigation', () => {
+    const playSong = vi.fn();
+    const playbackStore = usePlaybackStore();
+    const playerQueue = createPlayerQueue({
+      playSong,
+      stopPlaybackRuntime: vi.fn(),
+      showToast: vi.fn(),
+    });
+    const currentSong = makeSong({ path: '/music/current.flac', title: 'Current' });
+    const nextSong = makeSong({ path: '/music/next.flac', title: 'Next' });
+    playbackStore.currentSong = currentSong;
+    playbackStore.playQueue = [currentSong, nextSong];
+
+    playerQueue.nextSong();
+
+    expect(playSong).toHaveBeenCalledWith(
+      nextSong,
+      expect.objectContaining({ preserveQueue: true }),
+    );
   });
 
   it('clears queue state and pauses runtime when queue is reset during playback', async () => {

@@ -7,6 +7,7 @@ import {
   createDesktopLyricsWindowOptions,
   useDesktopLyricsWindowBridge,
 } from './useDesktopLyricsWindowBridge';
+import source from './useDesktopLyricsWindowBridge.ts?raw';
 
 declare const require: <T = unknown>(id: string) => T;
 
@@ -44,6 +45,8 @@ const mocks = vi.hoisted(() => {
       textShadowColor: '#000000',
       firstLineTextShadowStrength: 0,
       secondLineTextShadowStrength: 0,
+      textStrokeColor: '#000000',
+      textStrokeDepth: 0,
       playerFontScale: 1,
       playerLineGap: 1,
       playerOffsetX: 0,
@@ -233,5 +236,9 @@ describe('desktop lyrics window bridge', () => {
     expect(mocks.patchSettings).toHaveBeenCalledWith({ showDesktopLyrics: false });
 
     scope.stop();
+  });
+
+  it('stops desktop lyrics IPC sync and destroys the window when hidden', () => {
+    expect(source).toContain('stopSyncLoop();\n    await destroyDesktopLyricsWindow();');
   });
 });

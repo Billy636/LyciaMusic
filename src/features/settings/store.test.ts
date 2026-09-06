@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
-import { mergeAppSettings, useSettingsStore } from './store';
+import { createDefaultAppSettings, mergeAppSettings, useSettingsStore } from './store';
 import type { EqualizerSettings } from '../../types';
 
 // Helper: allows partial EqualizerSettings patches in tests
@@ -10,6 +10,26 @@ const partialEq = (patch: Partial<EqualizerSettings>) => patch as EqualizerSetti
 describe('settings store', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+  });
+
+  it('uses the system theme by default while preserving persisted explicit modes', () => {
+    const defaults = createDefaultAppSettings();
+
+    expect(defaults.theme.mode).toBe('system');
+    expect(mergeAppSettings(defaults, { theme: { mode: 'light' } }).theme.mode).toBe('light');
+    expect(mergeAppSettings(defaults, { theme: { mode: 'dark' } }).theme.mode).toBe('dark');
+    expect(mergeAppSettings(defaults, { theme: { mode: 'custom' } }).theme.mode).toBe('custom');
+  });
+
+  it('keeps the current theme mode when a persisted mode is invalid', () => {
+    const defaults = createDefaultAppSettings();
+    defaults.theme.mode = 'dark';
+
+    const merged = mergeAppSettings(defaults, {
+      theme: { mode: 'automatic' as unknown as 'system' },
+    });
+
+    expect(merged.theme.mode).toBe('dark');
   });
 
   it('patches theme settings without losing nested custom background fields', () => {
@@ -29,6 +49,30 @@ describe('settings store', () => {
     expect(settingsStore.theme.customBackground.maskColor).toBe('#000000');
   });
 
+  it('preserves video custom background settings while defaulting legacy entries to images', () => {
+    const settingsStore = useSettingsStore();
+
+    settingsStore.patchTheme({
+      customBackground: {
+        imagePath: 'C:\\wallpapers\\loop.mp4',
+        mediaType: 'video',
+      },
+    });
+
+    expect(settingsStore.theme.customBackground.mediaType).toBe('video');
+
+    settingsStore.replaceTheme({
+      ...settingsStore.theme,
+      customBackground: {
+        ...settingsStore.theme.customBackground,
+        imagePath: 'C:\\wallpapers\\legacy.jpg',
+        mediaType: undefined,
+      },
+    });
+
+    expect(settingsStore.theme.customBackground.mediaType).toBe('image');
+  });
+
   it('replaces theme through the settings domain instead of mutating ui state', () => {
     const settingsStore = useSettingsStore();
 
@@ -36,6 +80,7 @@ describe('settings store', () => {
       mode: 'dark',
       dynamicBgType: 'blur',
       windowMaterial: 'mica',
+      retainMaterialOnUnfocus: false,
       flowColorBoost: 62,
       flowDepth: 54,
       flowSpeed: 48,
@@ -66,6 +111,7 @@ describe('settings store', () => {
       mode: 'custom',
       dynamicBgType: 'none',
       windowMaterial: 'none',
+      retainMaterialOnUnfocus: false,
       flowColorBoost: 25,
       flowDepth: 30,
       flowSpeed: 52,
@@ -128,6 +174,28 @@ describe('settings store', () => {
     const settingsStore = useSettingsStore();
 
     expect(settingsStore.settings.enableScrollToTopButton).toBe(true);
+  });
+
+  it('hides sidebar playlists by default and preserves the visibility setting', () => {
+    const settingsStore = useSettingsStore();
+
+    expect(settingsStore.settings.sidebar.showPlaylists).toBe(false);
+
+    const mergedLegacySettings = mergeAppSettings(createDefaultAppSettings(), {
+      sidebar: {
+        showArtists: false,
+      },
+    });
+
+    expect(mergedLegacySettings.sidebar.showPlaylists).toBe(false);
+
+    const merged = mergeAppSettings(settingsStore.settings, {
+      sidebar: {
+        showPlaylists: true,
+      },
+    });
+
+    expect(merged.sidebar.showPlaylists).toBe(true);
   });
 
   it('shows song comments by default', () => {
@@ -632,5 +700,24 @@ describe('settings store', () => {
     expect(store.settings.audio.equalizer.gains).toEqual(Array(10).fill(0));
     // 注意：equalizerPresets 是独立的ref，resetSettings不会清除它
     // 这是设计决定，因为预设存储在localStorage中
+  });
+
+  it('default settings have autoScanLibraryOnStartup set to false', () => {
+    const store = useSettingsStore();
+    expect(store.settings.autoScanLibraryOnStartup).toBe(false);
+  });
+
+  it('mergeAppSettings handles missing autoScanLibraryOnStartup by falling back to default false', () => {
+    const merged = mergeAppSettings(createDefaultAppSettings(), {
+      closeToTray: true,
+    });
+    expect(merged.autoScanLibraryOnStartup).toBe(false);
+  });
+
+  it('mergeAppSettings keeps autoScanLibraryOnStartup value when explicitly true', () => {
+    const merged = mergeAppSettings(createDefaultAppSettings(), {
+      autoScanLibraryOnStartup: true,
+    });
+    expect(merged.autoScanLibraryOnStartup).toBe(true);
   });
 });

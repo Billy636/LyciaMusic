@@ -19,8 +19,8 @@ interface CreatePlayerFolderImportDeps {
 const isDirectParent = (parentPath: string, childPath: string) => {
   if (!parentPath || !childPath) return false;
 
-  const normalizedParent = parentPath.replace(/\\/g, '/').replace(/\/$/, '');
-  const normalizedChild = childPath.replace(/\\/g, '/');
+  const normalizedParent = parentPath.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const normalizedChild = childPath.replace(/\\/g, '/').toLowerCase();
   const lastSlash = normalizedChild.lastIndexOf('/');
 
   return lastSlash !== -1 && normalizedChild.substring(0, lastSlash) === normalizedParent;

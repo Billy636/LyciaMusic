@@ -48,6 +48,7 @@ export function usePlaybackController() {
     clearQueue: playbackDomain.clearQueue,
     addSongToQueue: playbackDomain.addSongToQueue,
     addSongsToQueue: playbackDomain.addSongsToQueue,
+    addSongPathsToQueue: playbackDomain.addSongPathsToQueue,
     removeSongFromQueue: playbackDomain.removeSongFromQueue,
     playNext: playbackDomain.playNext,
     formatDuration: playbackDomain.formatDuration,

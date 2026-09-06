@@ -46,6 +46,17 @@ fn derive_bitrate_kbps(file_size: u64, duration: u32) -> u32 {
     kbps.min(u32::MAX as u128) as u32
 }
 
+fn derive_duration_seconds(file_size: u64, bitrate_kbps: u32) -> u32 {
+    if file_size == 0 || bitrate_kbps == 0 {
+        return 0;
+    }
+
+    let bits = (file_size as u128).saturating_mul(8);
+    let bps = (bitrate_kbps as u128).saturating_mul(1000);
+    let seconds = bits / bps;
+    seconds.min(u32::MAX as u128) as u32
+}
+
 fn system_time_to_unix_seconds(time: std::time::SystemTime) -> Option<u64> {
     time.duration_since(UNIX_EPOCH)
         .ok()
@@ -69,10 +80,14 @@ pub(super) fn preferred_parse_workers_for_available(task_count: usize, available
         return 1;
     }
 
-    let reserved = if available <= 8 { 1 } else { 2 };
-    let usable = available.saturating_sub(reserved).max(1);
+    let available = available.max(1);
+    let responsive_budget = if available <= 2 {
+        1
+    } else {
+        (available / 2).max(2).min(8)
+    };
 
-    task_count.min(usable).max(1)
+    task_count.min(responsive_budget).min(available).max(1)
 }
 
 pub(super) fn song_metadata_incomplete(song: &Song) -> bool {
@@ -170,6 +185,18 @@ pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) ->
             container = identity.container;
         }
         codec = identity.codec;
+    }
+
+    if duration == 0 {
+        if crate::music::tags::is_mp4_path(path) {
+            if let Some(mp4_dur) = crate::music::tags::probe_mp4_duration(path) {
+                duration = mp4_dur;
+            }
+        }
+    }
+
+    if duration == 0 && bitrate > 0 && file_size > 0 {
+        duration = derive_duration_seconds(file_size, bitrate);
     }
 
     if bitrate == 0 {
@@ -351,12 +378,16 @@ fn detect_audio_identity(path: &Path, ext: &str) -> AudioIdentity {
         }
     };
 
-    let duration_seconds = match (track.codec_params.time_base, track.codec_params.n_frames) {
+    let mut duration_seconds = match (track.codec_params.time_base, track.codec_params.n_frames) {
         (Some(time_base), Some(frames)) if frames > 0 => {
             Some(duration_seconds_from_timebase(time_base, frames))
         }
         _ => None,
     };
+
+    if duration_seconds.is_none() && crate::music::tags::is_mp4_path(path) {
+        duration_seconds = crate::music::tags::probe_mp4_duration(path);
+    }
     let sample_rate = track.codec_params.sample_rate;
     let bit_depth = track
         .codec_params

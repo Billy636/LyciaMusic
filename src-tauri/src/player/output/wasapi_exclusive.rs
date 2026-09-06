@@ -1,9 +1,8 @@
 use crate::player::equalizer::{EqualizerHandle, EqualizerSettings};
 use crate::player::output::OutputError;
 use crate::player::types::{SharedProgress, SharedVisualizer};
-use rodio::{Decoder, Source};
+use rodio::Source;
 use std::fs::File;
-use std::io::BufReader;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::Arc;
@@ -34,6 +33,8 @@ pub(crate) struct ExclusivePlayRequest {
     pub volume_balance_gain: f32,
     pub equalizer_handle: Arc<EqualizerHandle>,
     pub user_volume: Arc<AtomicU32>,
+    pub cue_start_offset: Duration,
+    pub total_duration: Option<Duration>,
 }
 
 enum ExclusiveCommand {
@@ -147,6 +148,7 @@ struct ExclusiveSource {
     channels: u16,
     channel_sum: f32,
     channel_samples: u16,
+    visualizer_enabled_for_frame: bool,
     normalizer_handle: crate::player::loudness::VolumeNormalizerHandle,
 }
 
@@ -173,15 +175,21 @@ impl ExclusiveSource {
         volume_balance_gain: f32,
         equalizer_handle: Arc<EqualizerHandle>,
         user_volume: Arc<AtomicU32>,
+        cue_start_offset: Duration,
+        total_duration: Option<Duration>,
     ) -> Result<(Self, u32, u16), String> {
         let file = File::open(path).map_err(|error| error.to_string())?;
-        let reader = BufReader::with_capacity(512 * 1024, file);
-        let decoder = Decoder::new(reader).map_err(|error| error.to_string())?;
-        let sample_rate = decoder.sample_rate();
-        let channels = decoder.channels();
+        let prefetch_source = crate::player::decoder_thread::create_prefetch_source(
+            file,
+            Some(start_time),
+            cue_start_offset,
+            total_duration,
+        )?;
+        let sample_rate = prefetch_source.sample_rate();
+        let channels = prefetch_source.channels();
+
         let samples_at_target =
             (start_time.as_secs_f64() * sample_rate as f64 * channels as f64).round() as u64;
-
         progress.sample_rate.store(sample_rate, Ordering::Relaxed);
         progress.channels.store(channels as u32, Ordering::Relaxed);
         progress
@@ -189,10 +197,8 @@ impl ExclusiveSource {
             .store(samples_at_target, Ordering::Relaxed);
         progress.visualizer.reset();
 
-        // 按照管线顺序装配: Decoder -> VolumeNormalizer -> Equalizer -> UserVolumeSource -> ClipGuardSource
-        let decoded = decoder.convert_samples::<f32>().skip_duration(start_time);
         let (normalized, normalizer_handle) = crate::player::loudness::VolumeNormalizer::new(
-            decoded,
+            prefetch_source,
             volume_balance_gain,
             100, // ramp 100ms
         );
@@ -208,6 +214,7 @@ impl ExclusiveSource {
                 channels,
                 channel_sum: 0.0,
                 channel_samples: 0,
+                visualizer_enabled_for_frame: false,
                 normalizer_handle,
             },
             sample_rate,
@@ -229,12 +236,19 @@ impl ExclusiveSource {
                 let sample = match self.source.next() {
                     Some(sample) => {
                         self.progress.samples_played.fetch_add(1, Ordering::Relaxed);
-                        self.channel_sum += sample;
+                        if self.channel_samples == 0 {
+                            self.visualizer_enabled_for_frame = self.visualizer.is_enabled();
+                        }
+                        if self.visualizer_enabled_for_frame {
+                            self.channel_sum += sample;
+                        }
                         self.channel_samples += 1;
 
                         if self.channel_samples >= self.channels {
-                            self.visualizer
-                                .push_sample(self.channel_sum / self.channel_samples as f32);
+                            if self.visualizer_enabled_for_frame {
+                                self.visualizer
+                                    .push_sample(self.channel_sum / self.channel_samples as f32);
+                            }
                             self.channel_sum = 0.0;
                             self.channel_samples = 0;
                         }
@@ -343,6 +357,8 @@ fn run_exclusive_playback(
         current_volume_balance_gain,
         request.equalizer_handle.clone(),
         request.user_volume.clone(),
+        request.cue_start_offset,
+        request.total_duration,
     )?;
 
     let enumerator = DeviceEnumerator::new().map_err(|error| error.to_string())?;
@@ -442,6 +458,8 @@ fn run_exclusive_playback(
                         current_volume_balance_gain,
                         request.equalizer_handle.clone(),
                         request.user_volume.clone(),
+                        request.cue_start_offset,
+                        request.total_duration,
                     )?
                     .0;
                     let _ = source.read_frames_into(

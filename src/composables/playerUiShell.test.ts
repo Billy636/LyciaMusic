@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getNextWheelVolume } from './playerUiShell';
+import { getNextWheelVolume } from '../utils/volume';
 
 describe('player UI volume wheel handling', () => {
   it('adjusts volume by one percent per wheel step', () => {

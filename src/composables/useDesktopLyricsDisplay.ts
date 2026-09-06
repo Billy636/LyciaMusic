@@ -12,6 +12,8 @@ import {
   DEFAULT_DESKTOP_TEXT_OPACITY,
   DEFAULT_DESKTOP_TEXT_SHADOW_COLOR,
   DEFAULT_DESKTOP_TEXT_SHADOW_STRENGTH,
+  DEFAULT_DESKTOP_TEXT_STROKE_COLOR,
+  DEFAULT_DESKTOP_TEXT_STROKE_DEPTH,
   DEFAULT_PLAYER_FONT_PRESET,
   DEFAULT_PLAYER_FONT_SCALE,
   DEFAULT_PLAYER_LINE_GAP,
@@ -19,6 +21,7 @@ import {
   DEFAULT_PLAYER_OFFSET_Y,
   MAX_DESKTOP_TEXT_OPACITY,
   MAX_DESKTOP_TEXT_SHADOW_STRENGTH,
+  MAX_DESKTOP_TEXT_STROKE_DEPTH,
   LYRICS_FONT_OPTIONS,
   MAX_PLAYER_FONT_SCALE,
   MAX_PLAYER_LINE_GAP,
@@ -30,17 +33,22 @@ import {
   MIN_PLAYER_OFFSET_Y,
   MIN_DESKTOP_TEXT_OPACITY,
   MIN_DESKTOP_TEXT_SHADOW_STRENGTH,
-  buildImportedLyricsFontOptions,
-  getLyricsFontFamily,
+  MIN_DESKTOP_TEXT_STROKE_DEPTH,
   normalizeHexColor,
   normalizeDesktopPlayerAlignment,
   normalizeLyricsFontPreset,
+} from './lyrics/constants';
+import {
+  buildImportedLyricsFontOptions,
+  getLyricsFontFamily,
   registerImportedLyricsFonts,
   systemLyricsFontOptions,
-  type LyricsStatus,
-  type LyricLine,
-  type LyricWord,
-} from './lyrics';
+} from './lyrics/fontUtils';
+import type {
+  LyricsStatus,
+  LyricLine,
+  LyricWord,
+} from './lyrics/types';
 import type { ImportedLyricsFont } from '../types';
 import {
   DESKTOP_LYRICS_ACTION_EVENT,
@@ -121,6 +129,8 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     textShadowColor: DEFAULT_DESKTOP_TEXT_SHADOW_COLOR,
     firstLineTextShadowStrength: DEFAULT_DESKTOP_TEXT_SHADOW_STRENGTH,
     secondLineTextShadowStrength: DEFAULT_DESKTOP_TEXT_SHADOW_STRENGTH,
+    textStrokeColor: DEFAULT_DESKTOP_TEXT_STROKE_COLOR,
+    textStrokeDepth: DEFAULT_DESKTOP_TEXT_STROKE_DEPTH,
     playerFontScale: DEFAULT_PLAYER_FONT_SCALE,
     playerLineGap: DEFAULT_PLAYER_LINE_GAP,
     playerOffsetX: DEFAULT_PLAYER_OFFSET_X,
@@ -233,6 +243,22 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
       normalizedPatch.textShadowColor = normalizeHexColor(
         normalizedPatch.textShadowColor,
         DEFAULT_DESKTOP_TEXT_SHADOW_COLOR,
+      );
+    }
+
+    if (typeof normalizedPatch.textStrokeDepth === 'number') {
+      normalizedPatch.textStrokeDepth = Math.round(
+        Math.min(
+          MAX_DESKTOP_TEXT_STROKE_DEPTH,
+          Math.max(MIN_DESKTOP_TEXT_STROKE_DEPTH, normalizedPatch.textStrokeDepth),
+        ),
+      );
+    }
+
+    if (typeof normalizedPatch.textStrokeColor === 'string') {
+      normalizedPatch.textStrokeColor = normalizeHexColor(
+        normalizedPatch.textStrokeColor,
+        DEFAULT_DESKTOP_TEXT_STROKE_COLOR,
       );
     }
 
@@ -521,6 +547,8 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
       '--desktop-first-line-text-shadow-blur': `${Math.round(settings.value.firstLineTextShadowStrength * 0.24)}px`,
       '--desktop-second-line-text-shadow-alpha': formatCssNumber(settings.value.secondLineTextShadowStrength / 100),
       '--desktop-second-line-text-shadow-blur': `${Math.round(settings.value.secondLineTextShadowStrength * 0.24)}px`,
+      '--desktop-text-stroke-color': settings.value.textStrokeColor,
+      '--desktop-text-stroke-width': `${(settings.value.textStrokeDepth * 0.03).toFixed(2)}px`,
       outline: shouldShowSurface ? '1px solid rgba(255, 255, 255, 0.16)' : 'none',
     } as Record<string, string>;
   });
@@ -614,75 +642,29 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     '--desktop-line-gap': settings.value.playerLineGap.toString(),
   }));
 
-  function getWordStyle(start: number, end: number): CSSProperties {
+  function getKaraokeProgressStyle(start: number, end: number): CSSProperties {
     const duration = Math.max(0.001, end - start);
     const progress = Math.max(0, Math.min(1, (syncedCurrentTime.value - start) / duration));
-
-    if (progress <= 0) {
-      return {
-        color: 'var(--desktop-text-primary)',
-        textShadow: 'none',
-      };
-    }
-
-    const highlightStop = `${Math.round(progress * 100)}%`;
+    const progressPercent = Math.round(progress * 10000) / 100;
 
     return {
-      backgroundImage: `linear-gradient(90deg, var(--desktop-accent-a) 0%, var(--desktop-accent-b) ${highlightStop}, var(--desktop-text-primary) ${highlightStop}, var(--desktop-text-primary) 100%)`,
-      WebkitBackgroundClip: 'text',
-      backgroundClip: 'text',
-      color: 'transparent',
-      WebkitTextFillColor: 'transparent',
+      '--desktop-karaoke-progress': `${progressPercent}%`,
       textShadow: 'none',
-    };
+    } as CSSProperties;
+  }
+
+  function getWordStyle(start: number, end: number): CSSProperties {
+    return getKaraokeProgressStyle(start, end);
   }
 
   function getRomajiWordStyle(start: number, end: number): CSSProperties {
-    const duration = Math.max(0.001, end - start);
-    const progress = Math.max(0, Math.min(1, (syncedCurrentTime.value - start) / duration));
-
-    if (progress <= 0) {
-      return {
-        color: 'var(--desktop-romaji-unplayed-color)',
-        textShadow: 'none',
-      };
-    }
-
-    const highlightStop = `${Math.round(progress * 100)}%`;
-
-    return {
-      backgroundImage: `linear-gradient(90deg, var(--desktop-romaji-played-color) 0%, var(--desktop-romaji-played-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) 100%)`,
-      WebkitBackgroundClip: 'text',
-      backgroundClip: 'text',
-      color: 'transparent',
-      WebkitTextFillColor: 'transparent',
-      textShadow: 'none',
-    };
+    return getKaraokeProgressStyle(start, end);
   }
 
   function getRomajiLineStyle(line: LyricLine, lineIndex: number): CSSProperties {
     const start = Number.isFinite(line.time) ? line.time : 0;
     const end = Math.max(start + 0.001, getPseudoWordEnd(line, lineIndex, start));
-    const duration = Math.max(0.001, end - start);
-    const progress = Math.max(0, Math.min(1, (syncedCurrentTime.value - start) / duration));
-
-    if (progress <= 0) {
-      return {
-        color: 'var(--desktop-romaji-unplayed-color)',
-        textShadow: 'none',
-      };
-    }
-
-    const highlightStop = `${Math.round(progress * 100)}%`;
-
-    return {
-      backgroundImage: `linear-gradient(90deg, var(--desktop-romaji-played-color) 0%, var(--desktop-romaji-played-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) ${highlightStop}, var(--desktop-romaji-unplayed-color) 100%)`,
-      WebkitBackgroundClip: 'text',
-      backgroundClip: 'text',
-      color: 'transparent',
-      WebkitTextFillColor: 'transparent',
-      textShadow: 'none',
-    };
+    return getKaraokeProgressStyle(start, end);
   }
 
   return {

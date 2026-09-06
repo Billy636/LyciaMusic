@@ -139,26 +139,12 @@ export const createPlayerFileManager = ({
   const { clearLibraryCollectionSongPathCache } = useLibraryCollectionSongPathCache();
   const { clearLibraryDetailSongPathCache } = useLibraryDetailSongPathCache();
   const { clearLibraryFolderSongPathCache } = useLibraryFolderSongPathCache();
-  const { canonicalSongs, libraryHierarchy, sourceSongs, watchedFolders } = storeToRefs(libraryStore);
+  const { canonicalSongPaths, libraryHierarchy, sourceSongPaths, watchedFolders } = storeToRefs(libraryStore);
   const { favoritePaths, playlists, recentSongs } = storeToRefs(collectionsStore);
-  const { currentSong, playQueue, tempQueue } = storeToRefs(playbackStore);
+  const { currentSong, playQueuePaths, tempQueuePaths } = storeToRefs(playbackStore);
 
-  const removeSongPathFromList = (songs: Song[], path: string) =>
-    songs.filter(song => song.path !== path);
-
-  const replaceSongPathInList = (songs: Song[], oldPath: string, newPath: string) => {
-    let changed = false;
-    const nextSongs = songs.map(song => {
-      if (song.path !== oldPath) {
-        return song;
-      }
-
-      changed = true;
-      return { ...song, path: newPath };
-    });
-
-    return changed ? nextSongs : songs;
-  };
+  const replacePathInList = (paths: string[], oldPath: string, newPath: string) =>
+    paths.map(path => path === oldPath ? newPath : path);
 
   const clearLibraryPathCaches = () => {
     clearLibraryAllSongPathCache();
@@ -186,7 +172,7 @@ export const createPlayerFileManager = ({
 
     await fileApi.moveFileToFolder(sourcePath, targetFolderPath);
 
-    sourceSongs.value = removeSongPathFromList(sourceSongs.value, sourcePath);
+    sourceSongPaths.value = sourceSongPaths.value.filter(path => path !== sourcePath);
 
     decrementNodeCount(libraryHierarchy.value, sourceFolderPath);
 
@@ -234,7 +220,7 @@ export const createPlayerFileManager = ({
     });
 
     const movedCount = moveResult.moved_paths.length;
-    sourceSongs.value = sourceSongs.value.filter(song => !movedOldPaths.has(song.path));
+    sourceSongPaths.value = sourceSongPaths.value.filter(path => !movedOldPaths.has(path));
 
     for (const [sourceFolder, entry] of sourceFolderMap) {
       for (let index = 0; index < entry.count; index += 1) {
@@ -270,27 +256,40 @@ export const createPlayerFileManager = ({
       folderPath,
       settingsStore.settings.libraryMinDurationSeconds,
     );
-    const removedPaths = canonicalSongs.value
-      .filter(song => isSongInFolderScope(folderPath, song.path))
-      .map(song => song.path)
-      .filter(path => !newSongs.some(song => song.path === path));
-    const keepSong = (song: Song) => !isSongInFolderScope(folderPath, song.path);
+    const previousScopedPaths = canonicalSongPaths.value
+      .filter(path => isSongInFolderScope(folderPath, path));
+    const normalizedNewPaths = new Set(newSongs.map(song => normalizePathForMatch(song.path)));
+    const normalizedOldPaths = new Set(previousScopedPaths.map(path => normalizePathForMatch(path)));
 
-    sourceSongs.value = [...sourceSongs.value.filter(keepSong), ...newSongs];
-    canonicalSongs.value = [...canonicalSongs.value.filter(keepSong), ...newSongs];
+    const removedPaths = previousScopedPaths
+      .filter(path => !normalizedNewPaths.has(normalizePathForMatch(path)));
+    const addedPaths = newSongs
+      .filter(song => !normalizedOldPaths.has(normalizePathForMatch(song.path)))
+      .map(song => song.path);
+
+    const keepPath = (path: string) => !isSongInFolderScope(folderPath, path);
+    const newPaths = newSongs.map(song => song.path);
+
+    newSongs.forEach(song => {
+      libraryStore.setSongRecord(song);
+    });
+
+    libraryStore.setSourceSongOrder([...sourceSongPaths.value.filter(keepPath), ...newPaths]);
+    libraryStore.setCanonicalSongOrder([...canonicalSongPaths.value.filter(keepPath), ...newPaths]);
+    libraryStore.pruneSongPool();
     clearLibraryPathCaches();
 
     if (removedPaths.length > 0) {
-      const removedPathSet = new Set(removedPaths);
-      favoritePaths.value = favoritePaths.value.filter(path => !removedPathSet.has(path));
+      const removedPathSet = new Set(removedPaths.map(normalizePathForMatch));
+      favoritePaths.value = favoritePaths.value.filter(path => !removedPathSet.has(normalizePathForMatch(path)));
       playlists.value.forEach((playlist) => {
-        playlist.songPaths = playlist.songPaths.filter(path => !removedPathSet.has(path));
+        playlist.songPaths = playlist.songPaths.filter(path => !removedPathSet.has(normalizePathForMatch(path)));
       });
-      recentSongs.value = recentSongs.value.filter(item => !removedPathSet.has(item.path));
-      playQueue.value = playQueue.value.filter(song => !removedPathSet.has(song.path));
-      tempQueue.value = tempQueue.value.filter(song => !removedPathSet.has(song.path));
+      recentSongs.value = recentSongs.value.filter(item => !removedPathSet.has(normalizePathForMatch(item.path)));
+      playQueuePaths.value = playQueuePaths.value.filter(path => !removedPathSet.has(normalizePathForMatch(path)));
+      tempQueuePaths.value = tempQueuePaths.value.filter(path => !removedPathSet.has(normalizePathForMatch(path)));
 
-      if (currentSong.value && removedPathSet.has(currentSong.value.path)) {
+      if (currentSong.value && removedPathSet.has(normalizePathForMatch(currentSong.value.path))) {
         currentSong.value = null;
       }
 
@@ -300,6 +299,8 @@ export const createPlayerFileManager = ({
     return {
       removedCount: removedPaths.length,
       removedPaths,
+      addedCount: addedPaths.length,
+      addedPaths,
     };
   };
 
@@ -341,10 +342,11 @@ export const createPlayerFileManager = ({
       await fileApi.moveMusicFile(song.path, newPath);
 
       const oldPath = song.path;
-      sourceSongs.value = replaceSongPathInList(sourceSongs.value, oldPath, newPath);
-      canonicalSongs.value = replaceSongPathInList(canonicalSongs.value, oldPath, newPath);
-      playQueue.value = replaceSongPathInList(playQueue.value, oldPath, newPath);
-      tempQueue.value = replaceSongPathInList(tempQueue.value, oldPath, newPath);
+      libraryStore.setSourceSongOrder(replacePathInList(sourceSongPaths.value, oldPath, newPath));
+      libraryStore.setCanonicalSongOrder(replacePathInList(canonicalSongPaths.value, oldPath, newPath));
+      libraryStore.setSongRecord({ ...song, path: newPath });
+      playQueuePaths.value = playQueuePaths.value.map(path => path === oldPath ? newPath : path);
+      tempQueuePaths.value = tempQueuePaths.value.map(path => path === oldPath ? newPath : path);
       recentSongs.value = recentSongs.value.map(item =>
         item.path === oldPath
           ? { ...item, path: newPath }
@@ -384,10 +386,9 @@ export const createPlayerFileManager = ({
   const deleteFromDisk = async (song: Song) => {
     try {
       await fileApi.deleteMusicFile(song.path);
-      canonicalSongs.value = canonicalSongs.value.filter(item => item.path !== song.path);
-      sourceSongs.value = sourceSongs.value.filter(item => item.path !== song.path);
+      libraryStore.patchLibrarySongPaths({ added_paths: [], deleted_paths: [song.path] });
       favoritePaths.value = favoritePaths.value.filter(path => path !== song.path);
-      removeSongPathsFromPlaybackState({ playQueue, tempQueue, currentSong }, [song.path]);
+      removeSongPathsFromPlaybackState({ playQueuePaths, tempQueuePaths, currentSong }, [song.path]);
       await removeFromHistory([song.path]);
       playlists.value.forEach(playlist => {
         playlist.songPaths = playlist.songPaths.filter(path => path !== song.path);
@@ -399,10 +400,10 @@ export const createPlayerFileManager = ({
 
   const refreshAllFolders = async () => {
     try {
-      if (watchedFolders.value.length === 0 && sourceSongs.value.length > 0) {
+      if (watchedFolders.value.length === 0 && sourceSongPaths.value.length > 0) {
         const potentialFolders = new Set<string>();
-        sourceSongs.value.forEach(song => {
-          const parent = song.path.replace(/[/\\][^/\\]+$/, '');
+        sourceSongPaths.value.forEach(path => {
+          const parent = path.replace(/[/\\][^/\\]+$/, '');
           if (parent) {
             potentialFolders.add(parent);
           }
@@ -419,17 +420,61 @@ export const createPlayerFileManager = ({
         return;
       }
 
+      const previousPaths = [...sourceSongPaths.value];
+      const previousPathSet = new Set(previousPaths);
+
       let allNewSongs: Song[] = [];
       for (const folder of watchedFolders.value) {
         const songs = await fileApi.scanMusicFolder(folder);
         allNewSongs = allNewSongs.concat(songs);
       }
 
-      const keptSongs = sourceSongs.value.filter(song => {
-        return !watchedFolders.value.some(folder => song.path.startsWith(folder));
+      const keptSourcePaths = sourceSongPaths.value.filter(path => {
+        return !watchedFolders.value.some(folder => isSongInFolderScope(folder, path));
       });
+      libraryStore.setSourceSongOrder([...keptSourcePaths, ...allNewSongs.map(song => song.path)]);
 
-      sourceSongs.value = [...keptSongs, ...allNewSongs];
+      const keptCanonicalPaths = canonicalSongPaths.value.filter(path => {
+        return !watchedFolders.value.some(folder => isSongInFolderScope(folder, path));
+      });
+      libraryStore.setCanonicalSongOrder([...keptCanonicalPaths, ...allNewSongs.map(song => song.path)]);
+
+      const currentPathSet = new Set(sourceSongPaths.value);
+      const removedPaths = previousPaths.filter(path => !currentPathSet.has(path));
+
+      const queuePathsToCheck = [
+        ...playQueuePaths.value,
+        ...tempQueuePaths.value,
+        ...(currentSong.value ? [currentSong.value.path] : []),
+      ];
+      const uniqueQueuePaths = Array.from(new Set(queuePathsToCheck));
+
+      const allRemovedPaths = [...removedPaths];
+      for (const path of uniqueQueuePaths) {
+        if (!previousPathSet.has(path)) {
+          try {
+            const exists = await fileApi.fileExists(path);
+            if (!exists) {
+              allRemovedPaths.push(path);
+            }
+          } catch (error) {
+            console.error(`Failed to verify file existence for external path: ${path}`, error);
+          }
+        }
+      }
+
+      if (allRemovedPaths.length > 0) {
+        removeSongPathsFromPlaybackState({ playQueuePaths, tempQueuePaths, currentSong }, allRemovedPaths);
+        await removeFromHistory(allRemovedPaths);
+        playlists.value.forEach((playlist) => {
+          const removedSet = new Set(allRemovedPaths);
+          playlist.songPaths = playlist.songPaths.filter(path => !removedSet.has(path));
+        });
+        const removedSet = new Set(allRemovedPaths);
+        recentSongs.value = recentSongs.value.filter(item => !removedSet.has(item.path));
+        favoritePaths.value = favoritePaths.value.filter(path => !removedSet.has(path));
+      }
+
       showToast('已刷新所有文件夹', 'success');
     } catch (error) {
       console.error('刷新文件夹失败:', error);

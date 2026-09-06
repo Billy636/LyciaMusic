@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useLyrics } from '../../composables/lyrics';
 import { useSongDetailCache } from '../../composables/useSongDetailCache';
 import { usePlaybackController } from '../../features/playback/usePlaybackController';
 import { useSettings } from '../../features/settings/useSettings';
 import { useSharedTransition } from '../../composables/useSharedTransition';
+import { useToast } from '../../composables/toast';
+import { windowApi } from '../../services/tauri/windowApi';
 import type { SongDetail } from '../../types';
 import LyricsView from './LyricsView.vue';
 import PlayerDetailBackground from './PlayerDetailBackground.vue';
 import PlayerDetailLeft from './PlayerDetailLeft.vue';
 import QueueList from './QueueList.vue';
+import { resolvePlayerDetailEscapeAction } from './playerDetailKeyboard';
+import { hideMainWindowToTray } from '../../composables/renderingPower';
 
 const {
   showPlayerDetail,
@@ -24,15 +28,83 @@ const { settings } = useSettings();
 const { parsedLyrics } = useLyrics();
 const { staggerPhase } = useSharedTransition();
 const { loadSongDetail, clearSongDetailCache } = useSongDetailCache();
+const { showToast } = useToast();
 
 const TOP_CHROME_HIDE_DELAY = 2500;
+const IMMERSIVE_CURSOR_HIDE_DELAY = 2500;
 
 const isTopChromeVisible = ref(false);
 let topChromeHideTimer: ReturnType<typeof setTimeout> | null = null;
+const isImmersiveCursorHidden = ref(false);
+let immersiveCursorHideTimer: ReturnType<typeof setTimeout> | null = null;
 const currentSongDetail = ref<SongDetail | null>(null);
 let detailRequestId = 0;
 
 const appWindow = getCurrentWindow();
+
+const isFullscreen = ref(false);
+const wasMaximizedBeforeFullscreen = ref(false);
+const isFullscreenTransitioning = ref(false);
+let unlistenResize: (() => void) | null = null;
+let pendingFullscreenTransitions = 0;
+let fullscreenTransitionQueue = Promise.resolve();
+
+const enqueueFullscreenTransition = (operation: () => Promise<void>) => {
+  pendingFullscreenTransitions += 1;
+  isFullscreenTransitioning.value = true;
+
+  const result = fullscreenTransitionQueue.then(operation);
+  fullscreenTransitionQueue = result.catch(() => undefined);
+
+  return result.finally(() => {
+    pendingFullscreenTransitions -= 1;
+    isFullscreenTransitioning.value = pendingFullscreenTransitions > 0;
+  });
+};
+
+const toggleFullscreen = async () => {
+  try {
+    await enqueueFullscreenTransition(async () => {
+      const currentFullscreen = await appWindow.isFullscreen();
+      const state = await windowApi.setImmersiveFullscreen(
+        !currentFullscreen,
+        currentFullscreen && wasMaximizedBeforeFullscreen.value,
+      );
+
+      isFullscreen.value = state.isFullscreen;
+      wasMaximizedBeforeFullscreen.value = state.wasMaximizedBeforeFullscreen;
+      showTopChrome();
+      scheduleTopChromeHide();
+    });
+  } catch (error) {
+    console.error('Failed to toggle fullscreen:', error);
+    isFullscreen.value = await appWindow.isFullscreen().catch(() => false);
+    showToast('沉浸模式切换失败，请重试', 'error');
+  }
+};
+
+const exitImmersiveFullscreen = async () => {
+  try {
+    await enqueueFullscreenTransition(async () => {
+      const currentFullscreen = await appWindow.isFullscreen();
+      if (!currentFullscreen && !wasMaximizedBeforeFullscreen.value) {
+        isFullscreen.value = false;
+        return;
+      }
+
+      const state = await windowApi.setImmersiveFullscreen(
+        false,
+        wasMaximizedBeforeFullscreen.value,
+      );
+      isFullscreen.value = state.isFullscreen;
+      wasMaximizedBeforeFullscreen.value = false;
+    });
+  } catch (error) {
+    console.error('Failed to exit fullscreen:', error);
+    isFullscreen.value = await appWindow.isFullscreen().catch(() => false);
+    showToast('退出沉浸模式失败，请重试', 'error');
+  }
+};
 
 const minimize = () => appWindow.minimize();
 const toggleMaximize = async () => {
@@ -45,7 +117,7 @@ const toggleMaximize = async () => {
 };
 const closeApp = async () => {
   if (settings.value.closeToTray) {
-    await appWindow.hide();
+    await hideMainWindowToTray(appWindow);
   } else {
     await appWindow.close();
   }
@@ -75,7 +147,43 @@ const handleTopChromeLeave = () => {
   scheduleTopChromeHide();
 };
 
-watch(showPlayerDetail, (visible) => {
+const clearImmersiveCursorHideTimer = () => {
+  if (immersiveCursorHideTimer) {
+    clearTimeout(immersiveCursorHideTimer);
+    immersiveCursorHideTimer = null;
+  }
+};
+
+const scheduleImmersiveCursorHide = () => {
+  clearImmersiveCursorHideTimer();
+  if (!showPlayerDetail.value || !isFullscreen.value) {
+    isImmersiveCursorHidden.value = false;
+    return;
+  }
+
+  immersiveCursorHideTimer = setTimeout(() => {
+    isImmersiveCursorHidden.value = true;
+    immersiveCursorHideTimer = null;
+  }, IMMERSIVE_CURSOR_HIDE_DELAY);
+};
+
+const handleGlobalMousemove = () => {
+  if (!showPlayerDetail.value || !isFullscreen.value) return;
+
+  isImmersiveCursorHidden.value = false;
+  scheduleImmersiveCursorHide();
+};
+
+watch([showPlayerDetail, isFullscreen], ([visible, fullscreen]) => {
+  clearImmersiveCursorHideTimer();
+  isImmersiveCursorHidden.value = false;
+
+  if (visible && fullscreen) {
+    scheduleImmersiveCursorHide();
+  }
+});
+
+watch(showPlayerDetail, async (visible) => {
   clearTopChromeHideTimer();
 
   if (visible) {
@@ -87,6 +195,9 @@ watch(showPlayerDetail, (visible) => {
   isTopChromeVisible.value = false;
   currentSongDetail.value = null;
   clearSongDetailCache();
+
+  // Exit fullscreen if we collapse the player details page
+  await exitImmersiveFullscreen();
 });
 
 watch([showPlayerDetail, () => currentSong.value?.path ?? ''], async ([visible, path]) => {
@@ -121,9 +232,106 @@ watch([showPlayerDetail, () => currentSong.value?.path ?? ''], async ([visible, 
   }
 }, { immediate: true });
 
+const isTypingTarget = (target: EventTarget | null) => {
+  const INTERACTIVE_SELECTOR = [
+    'input',
+    'textarea',
+    'select',
+    '[contenteditable="true"]',
+    '[contenteditable=""]',
+    '[role="textbox"]',
+    '[data-shortcut-capture="true"]',
+  ].join(', ');
+  return target instanceof HTMLElement && !!target.closest(INTERACTIVE_SELECTOR);
+};
+
+const isModalOrMenuOpen = () => {
+  const elements = document.querySelectorAll('[class*="z-["]');
+  for (const el of elements) {
+    const style = window.getComputedStyle(el);
+    if (style.pointerEvents === 'none' || style.display === 'none' || style.visibility === 'hidden') {
+      continue;
+    }
+    const zIndex = parseInt(style.zIndex, 10);
+    if (!isNaN(zIndex) && zIndex >= 9000) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const handleGlobalKeydown = (event: KeyboardEvent) => {
+  if (!showPlayerDetail.value) return;
+
+  if (event.key === 'Escape') {
+    if (isTypingTarget(event.target)) return;
+    if (isModalOrMenuOpen()) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const action = resolvePlayerDetailEscapeAction(
+      isFullscreen.value,
+      isFullscreenTransitioning.value,
+    );
+    if (action === 'exit-immersive') {
+      void exitImmersiveFullscreen();
+      return;
+    }
+
+    closePlayerDetail();
+  }
+};
+
+const handleGlobalMouseup = (event: MouseEvent) => {
+  if (!showPlayerDetail.value) return;
+
+  if (event.button === 3) {
+    if (isModalOrMenuOpen()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closePlayerDetail();
+  }
+};
+
+const handleGlobalMousedown = (event: MouseEvent) => {
+  if (!showPlayerDetail.value) return;
+
+  if (event.button === 3) {
+    if (isModalOrMenuOpen()) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+};
+
+onMounted(async () => {
+  isFullscreen.value = await appWindow.isFullscreen();
+
+  // Listen to window resize to synchronize fullscreen state changes
+  const unlisten = await appWindow.listen('tauri://resize', async () => {
+    isFullscreen.value = await appWindow.isFullscreen();
+  });
+  unlistenResize = unlisten;
+
+  window.addEventListener('keydown', handleGlobalKeydown, true);
+  window.addEventListener('mousemove', handleGlobalMousemove, true);
+  window.addEventListener('mouseup', handleGlobalMouseup, true);
+  window.addEventListener('mousedown', handleGlobalMousedown, true);
+});
+
 onBeforeUnmount(() => {
   clearTopChromeHideTimer();
+  clearImmersiveCursorHideTimer();
+  isImmersiveCursorHidden.value = false;
+  if (unlistenResize) {
+    unlistenResize();
+  }
+  window.removeEventListener('keydown', handleGlobalKeydown, true);
+  window.removeEventListener('mousemove', handleGlobalMousemove, true);
+  window.removeEventListener('mouseup', handleGlobalMouseup, true);
+  window.removeEventListener('mousedown', handleGlobalMousedown, true);
 });
+
 
 const formatFileSize = (size: number | undefined) => {
   if (!size || size <= 0) {
@@ -167,7 +375,12 @@ const metaInfo = computed(() => {
   return [
     { label: '歌手', value: song.artist },
     { label: '专辑', value: song.album },
-    { label: '音质', value: song.bitrate ? `${song.sample_rate}Hz / ${song.bitrate}kbps` : 'Standard' },
+    {
+      label: '音质',
+      value: (detail?.bitrate || song.bitrate)
+        ? `${detail?.sample_rate || song.sample_rate}Hz / ${detail?.bitrate || song.bitrate}kbps`
+        : 'Standard',
+    },
     (detail?.genre || song.genre) ? { label: '风格', value: detail?.genre || song.genre || '' } : null,
     (detail?.year || song.year) ? { label: '年份', value: detail?.year || song.year || '' } : null,
     detail?.file_size ? { label: '大小', value: formatFileSize(detail.file_size) } : null,
@@ -178,7 +391,10 @@ const metaInfo = computed(() => {
 <template>
   <div
     class="fixed inset-x-0 bottom-0 z-[50] flex h-[100vh] flex-col overflow-visible font-sans select-none text-white"
-    :class="showPlayerDetail ? 'pointer-events-auto' : 'pointer-events-none'"
+    :class="[
+      showPlayerDetail ? 'pointer-events-auto' : 'pointer-events-none',
+      isImmersiveCursorHidden ? 'immersive-cursor-hidden' : '',
+    ]"
   >
     <div class="relative flex h-[100vh] w-full flex-col pt-[calc(100vh-100%)]">
       <div
@@ -215,6 +431,7 @@ const metaInfo = computed(() => {
 
           <div class="relative z-10 flex w-1/4 items-center">
             <button
+              v-if="!isFullscreen"
               title="收起详情页"
               class="rounded-lg p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
               @click="handleClose"
@@ -225,19 +442,42 @@ const metaInfo = computed(() => {
             </button>
           </div>
 
-          <div class="pointer-events-none flex-1 truncate px-4 text-center text-sm font-medium text-white/80 drop-shadow-md">
-            {{ currentSong?.title || currentSong?.name }}
-            <span v-if="currentSong?.artist" class="mx-1 opacity-60">-</span>
-            <span class="opacity-60">{{ currentSong?.artist }}</span>
-          </div>
+          <transition name="song-switch-text" mode="out-in">
+            <div :key="currentSong?.path" class="pointer-events-none flex-1 truncate px-4 text-center text-sm font-medium text-white/80 drop-shadow-md">
+              {{ currentSong?.title || currentSong?.name }}
+              <span v-if="currentSong?.artist" class="mx-1 opacity-60">-</span>
+              <span class="opacity-60">{{ currentSong?.artist }}</span>
+            </div>
+          </transition>
 
           <div class="relative z-10 flex w-1/4 items-center justify-end gap-2">
+            <button
+              :title="isFullscreenTransitioning ? '正在切换沉浸模式' : isFullscreen ? '退出沉浸模式' : '沉浸模式 (全屏)'"
+              :aria-label="isFullscreen ? '退出沉浸模式' : '进入沉浸模式'"
+              :disabled="isFullscreenTransitioning"
+              class="rounded-lg p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
+              :class="isFullscreenTransitioning ? 'cursor-wait opacity-50' : ''"
+              @click="toggleFullscreen"
+            >
+              <svg v-if="isFullscreen" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 14 10 14 10 20" />
+                <polyline points="20 10 14 10 14 4" />
+                <line x1="14" y1="10" x2="21" y2="3" />
+                <line x1="10" y1="14" x2="3" y2="21" />
+              </svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 3 21 3 21 9" />
+                <polyline points="9 21 3 21 3 15" />
+                <line x1="21" y1="3" x2="14" y2="10" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            </button>
             <button class="rounded-lg p-2 text-white/50 transition hover:bg-white/10 hover:text-white" @click="minimize">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M5 12h14" />
               </svg>
             </button>
-            <button class="rounded-lg p-2 text-white/50 transition hover:bg-white/10 hover:text-white" @click="toggleMaximize">
+            <button v-if="!isFullscreen" class="rounded-lg p-2 text-white/50 transition hover:bg-white/10 hover:text-white" @click="toggleMaximize">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
               </svg>
@@ -266,22 +506,24 @@ const metaInfo = computed(() => {
               class="h-full rounded-2xl border border-white/5 bg-black/10 p-4 shadow-xl backdrop-blur-sm"
             />
 
-            <LyricsView v-else-if="parsedLyrics.length > 0" class="h-full" />
+            <LyricsView v-else-if="showPlayerDetail && parsedLyrics.length > 0" class="h-full" />
 
-            <div
-              v-else
-              class="flex h-full flex-col items-center justify-center opacity-80"
-              style="text-shadow: 0 2px 10px rgba(0,0,0,0.4);"
-            >
+            <transition v-else name="song-switch-meta" mode="out-in">
               <div
-                v-for="(info, index) in metaInfo"
-                :key="index"
-                class="mb-4 flex items-center text-xl font-medium tracking-wider sm:text-2xl"
+                :key="currentSong?.path"
+                class="flex h-full flex-col items-center justify-center opacity-80"
+                style="text-shadow: 0 2px 10px rgba(0,0,0,0.4);"
               >
-                <span class="mr-4 text-white/40">{{ info.label }}</span>
-                <span class="text-white drop-shadow-md">{{ info.value }}</span>
+                <div
+                  v-for="(info, index) in metaInfo"
+                  :key="index"
+                  class="mb-4 flex items-center text-xl font-medium tracking-wider sm:text-2xl"
+                >
+                  <span class="mr-4 text-white/40">{{ info.label }}</span>
+                  <span class="text-white drop-shadow-md">{{ info.value }}</span>
+                </div>
               </div>
-            </div>
+            </transition>
           </transition>
         </div>
       </div>
@@ -301,7 +543,48 @@ const metaInfo = computed(() => {
   transform: scale(0.97) translateY(10px);
 }
 
+/* 切歌时标题/歌手文字过渡 */
+.song-switch-text-enter-active,
+.song-switch-text-leave-active {
+  transition:
+    opacity 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.song-switch-text-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.song-switch-text-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* 切歌时歌曲元信息面板过渡 */
+.song-switch-meta-enter-active,
+.song-switch-meta-leave-active {
+  transition:
+    opacity 360ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 360ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.song-switch-meta-enter-from {
+  opacity: 0;
+  transform: translateY(16px) scale(0.98);
+}
+
+.song-switch-meta-leave-to {
+  opacity: 0;
+  transform: translateY(-12px) scale(0.98);
+}
+
 .text-shadow-sm {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.immersive-cursor-hidden,
+.immersive-cursor-hidden :deep(*) {
+  cursor: none !important;
 }
 </style>

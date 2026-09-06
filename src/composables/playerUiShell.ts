@@ -8,6 +8,7 @@ import { useLibraryStore } from '../features/library/store';
 import { useNavigationStore } from '../shared/stores/navigation';
 import { usePlaybackStore } from '../features/playback/store';
 import { useUiStore } from '../shared/stores/ui';
+import { getNextWheelVolume } from '../utils/volume';
 
 interface CreatePlayerUiShellDeps {
   addFolder: () => void | Promise<void>;
@@ -15,14 +16,6 @@ interface CreatePlayerUiShellDeps {
 }
 
 const clampVolumePercent = (volume: number) => Math.max(0, Math.min(100, Math.round(volume)));
-
-export const getNextWheelVolume = (currentVolume: number, deltaY: number) => {
-  if (deltaY === 0) {
-    return clampVolumePercent(currentVolume);
-  }
-
-  return clampVolumePercent(currentVolume + (deltaY < 0 ? 1 : -1));
-};
 
 export const createPlayerUiShell = ({
   addFolder,
@@ -34,7 +27,6 @@ export const createPlayerUiShell = ({
   const playbackStore = usePlaybackStore();
   const uiStore = useUiStore();
   const { currentViewMode } = storeToRefs(navigationStore);
-  const { canonicalSongs, sourceSongs } = storeToRefs(libraryStore);
   const { favoritePaths } = storeToRefs(collectionsStore);
 
   const handleVolume = async (event: Event) => {
@@ -82,8 +74,7 @@ export const createPlayerUiShell = ({
 
   const removeSongFromList = async (song: Song) => {
     if (currentViewMode.value === 'all') {
-      canonicalSongs.value = canonicalSongs.value.filter(item => item.path !== song.path);
-      sourceSongs.value = sourceSongs.value.filter(item => item.path !== song.path);
+      libraryStore.patchLibrarySongPaths({ added_paths: [], deleted_paths: [song.path] });
       return;
     }
 

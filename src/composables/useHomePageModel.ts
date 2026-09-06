@@ -22,6 +22,7 @@ import { useLibraryRuntimeActions } from '../features/library/useLibraryRuntimeA
 import { usePlayerLibraryView } from '../features/library/usePlayerLibraryView';
 import { usePlaybackController } from '../features/playback/usePlaybackController';
 import { useLibraryStore } from '../features/library/store';
+import { useLibrarySongResolver } from './useLibrarySongResolver';
 
 export function useHomePageModel() {
   const route = useRoute();
@@ -32,8 +33,9 @@ export function useHomePageModel() {
 
   const libraryStore = useLibraryStore();
   const {
-    canonicalSongs,
-    sourceSongs,
+    canonicalSongPaths,
+    sourceSongPaths,
+    albumCatalog,
     albumSortMode,
     albumCustomOrder,
   } = storeToRefs(libraryStore);
@@ -46,11 +48,13 @@ export function useHomePageModel() {
   } = usePlayerViewState();
   const {
     displaySongList,
+    currentViewSongPaths,
     librarySongs,
     folderTree,
     searchQuery,
   } = usePlayerLibraryView();
   const { playSong } = usePlaybackController();
+  const { loadSong } = useLibrarySongResolver();
   const {
     moveFilesToFolder,
     refreshAllFolders,
@@ -90,7 +94,27 @@ export function useHomePageModel() {
   });
 
   const localSongList = computed(() => displaySongList.value);
-  const selectedAlbumSong = computed(() => localSongList.value[0] || null);
+  const localSongPaths = computed(() => currentViewSongPaths.value);
+  const selectedAlbumSong = computed<Song | null>(() => {
+    const loadedSong = localSongList.value[0];
+    if (loadedSong) return loadedSong;
+    const album = albumCatalog.value.find(item => item.key === filterCondition.value);
+    if (!album) return null;
+    return {
+      path: album.firstSongPath,
+      name: album.name,
+      title: album.name,
+      artist: album.artist,
+      artist_names: album.artist ? [album.artist] : [],
+      effective_artist_names: album.artist ? [album.artist] : [],
+      album: album.name,
+      album_artist: album.artist,
+      album_key: album.key,
+      is_various_artists_album: false,
+      collapse_artist_credits: false,
+      duration: 0,
+    };
+  });
   const batchSelectionScopeKey = computed(() =>
     [
       route.path,
@@ -109,6 +133,7 @@ export function useHomePageModel() {
     isBatchMode,
     selectedPaths,
     songTableRef,
+    localSongPaths,
   );
 
   const {
@@ -140,11 +165,12 @@ export function useHomePageModel() {
     openConfirm,
   } = useHomeBatchActions({
     currentViewMode,
+    filterCondition,
     selectedPaths,
     isBatchMode,
     isManagementMode,
-    canonicalSongs,
-    sourceSongs,
+    canonicalSongPaths,
+    sourceSongPaths,
     favoritePaths,
     playlists,
     moveFilesToFolder,
@@ -170,7 +196,7 @@ export function useHomePageModel() {
     activeRootPath,
     currentFolderFilter,
     libraryHierarchy: folderTree,
-    sourceSongs,
+    sourceSongPaths,
     refreshFolder,
     fetchFolderTree,
     createFolder,
@@ -220,9 +246,10 @@ export function useHomePageModel() {
     preloadCovers,
   });
 
-  const handlePlayAll = () => {
-    if (localSongList.value.length > 0) {
-      void playSong(localSongList.value[0]);
+  const handlePlayAll = async () => {
+    const song = await loadSong(localSongPaths.value[0] ?? '');
+    if (song) {
+      await playSong(song);
     }
   };
 
@@ -234,10 +261,11 @@ export function useHomePageModel() {
     void playSong(song, shouldInsertAfterCurrent ? { insertAfterCurrent: true } : undefined);
   };
 
-  const handleBatchPlay = () => {
-    const selectedSongs = localSongList.value.filter(song => selectedPaths.value.has(song.path));
-    if (selectedSongs.length > 0) {
-      void playSong(selectedSongs[0]);
+  const handleBatchPlay = async () => {
+    const firstSelectedPath = localSongPaths.value.find(path => selectedPaths.value.has(path));
+    const song = await loadSong(firstSelectedPath ?? '');
+    if (song) {
+      await playSong(song);
     }
   };
 
@@ -301,6 +329,7 @@ export function useHomePageModel() {
     currentFolderFilter,
     playlistDetail,
     localSongList,
+    localSongPaths,
     artistActiveTab,
     localFilterCondition,
     selectedAlbumSong,

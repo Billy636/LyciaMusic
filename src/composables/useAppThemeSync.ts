@@ -3,6 +3,7 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 import { computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue';
 import { useWindowMaterial } from './windowMaterial';
 import { useThemeSettings } from './useThemeSettings';
+import { windowApi } from '../services/tauri/windowApi';
 
 export function useAppThemeSync() {
   const {
@@ -11,13 +12,15 @@ export function useAppThemeSync() {
     rebuildWindowMaterialForCompositor,
     loadWindowMaterialCapabilities,
   } = useWindowMaterial();
-  const { theme, isDarkTheme } = useThemeSettings();
+  const { theme, isDarkTheme, setResolvedSystemTheme } = useThemeSettings();
   const appWindow = getCurrentWindow();
 
   const hasWindowMaterial = computed(() => activeWindowMaterial.value !== 'none');
   const isMicaWindowMaterial = computed(() => activeWindowMaterial.value === 'mica');
   let restoreSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let unlistenFocusChanged: UnlistenFn | null = null;
+  let unlistenThemeChanged: UnlistenFn | null = null;
+  let mediaQueryList: MediaQueryList | null = null;
   let syncGeneration = 0;
   let skipNextFocusRestore = false;
   let resolveInitialThemeSync: (() => void) | null = null;
@@ -30,22 +33,42 @@ export function useAppThemeSync() {
     resolveInitialThemeSync = null;
   };
 
+  const handleMediaThemeChange = (e: MediaQueryListEvent) => {
+    if (theme.value.mode === 'system') {
+      setResolvedSystemTheme(e.matches ? 'dark' : 'light');
+    }
+  };
+
   const applyTheme = async () => {
+    if (theme.value.mode === 'system') {
+      try {
+        await appWindow.setTheme(null);
+        setResolvedSystemTheme(await appWindow.theme());
+      } catch (error) {
+        setResolvedSystemTheme(null);
+        console.warn('Failed to follow system theme:', error);
+      }
+    }
+
     if (isDarkTheme.value) {
       document.documentElement.classList.add('dark');
-      try {
-        await appWindow.setTheme('dark');
-      } catch (error) {
-        console.warn('Failed to set window theme:', error);
+      if (theme.value.mode !== 'system') {
+        try {
+          await appWindow.setTheme('dark');
+        } catch (error) {
+          console.warn('Failed to set window theme:', error);
+        }
       }
       return;
     }
 
     document.documentElement.classList.remove('dark');
-    try {
-      await appWindow.setTheme('light');
-    } catch (error) {
-      console.warn('Failed to set window theme:', error);
+    if (theme.value.mode !== 'system') {
+      try {
+        await appWindow.setTheme('light');
+      } catch (error) {
+        console.warn('Failed to set window theme:', error);
+      }
     }
   };
 
@@ -147,6 +170,7 @@ export function useAppThemeSync() {
       () => theme.value.windowMaterial,
       () => theme.value.windowBlurTint,
       () => theme.value.customBackground.foregroundStyle,
+      () => isDarkTheme.value,
     ],
     () => {
       void syncThemeAndMaterial();
@@ -154,7 +178,30 @@ export function useAppThemeSync() {
     { immediate: true },
   );
 
+  watch(
+    () => theme.value.retainMaterialOnUnfocus,
+    (enabled) => {
+      void windowApi.setRetainMaterialOnUnfocus(enabled);
+    },
+    { immediate: true },
+  );
+
   onMounted(() => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      mediaQueryList = window.matchMedia('(prefers-color-scheme: dark)');
+      if (typeof mediaQueryList.addEventListener === 'function') {
+        mediaQueryList.addEventListener('change', handleMediaThemeChange);
+      } else if (typeof (mediaQueryList as unknown as { addListener?: unknown }).addListener === 'function') {
+        (mediaQueryList as unknown as { addListener: (cb: typeof handleMediaThemeChange) => void }).addListener(handleMediaThemeChange);
+      }
+    }
+
+    void appWindow.onThemeChanged(({ payload }) => {
+      setResolvedSystemTheme(payload);
+    }).then((unlisten) => {
+      unlistenThemeChanged = unlisten;
+    });
+
     void appWindow.onFocusChanged(({ payload: focused }) => {
       if (focused) {
         scheduleRestoreMaterialSync();
@@ -165,6 +212,15 @@ export function useAppThemeSync() {
   });
 
   onBeforeUnmount(() => {
+    if (mediaQueryList) {
+      if (typeof mediaQueryList.removeEventListener === 'function') {
+        mediaQueryList.removeEventListener('change', handleMediaThemeChange);
+      } else if (typeof (mediaQueryList as unknown as { removeListener?: unknown }).removeListener === 'function') {
+        (mediaQueryList as unknown as { removeListener: (cb: typeof handleMediaThemeChange) => void }).removeListener(handleMediaThemeChange);
+      }
+      mediaQueryList = null;
+    }
+
     if (restoreSyncTimer) {
       clearTimeout(restoreSyncTimer);
       restoreSyncTimer = null;
@@ -173,6 +229,11 @@ export function useAppThemeSync() {
     if (unlistenFocusChanged) {
       unlistenFocusChanged();
       unlistenFocusChanged = null;
+    }
+
+    if (unlistenThemeChanged) {
+      unlistenThemeChanged();
+      unlistenThemeChanged = null;
     }
   });
 

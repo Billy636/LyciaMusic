@@ -3,14 +3,14 @@ import type { Song } from '../../types';
 
 export const APP_TRAY_MENU_EVENT = 'app:tray-menu';
 export const APP_TRAY_MENU_OPEN_EVENT = 'app:tray-menu-open';
-export const TRAY_MENU_WINDOW_LABEL = 'tray-menu';
+export { TRAY_MENU_WINDOW_LABEL } from '../../windowLabels';
 export const TRAY_MENU_STATE_EVENT = 'tray-menu:state';
 export const TRAY_MENU_READY_EVENT = 'tray-menu:ready';
 export const TRAY_MENU_PANEL_WIDTH = 190;
 export const TRAY_MENU_SUBMENU_WIDTH = 132;
 export const TRAY_MENU_SUBMENU_GAP = 8;
 export const TRAY_MENU_WINDOW_WIDTH = TRAY_MENU_PANEL_WIDTH + TRAY_MENU_SUBMENU_WIDTH + TRAY_MENU_SUBMENU_GAP;
-export const TRAY_MENU_WINDOW_HEIGHT = 276;
+export const TRAY_MENU_WINDOW_HEIGHT = 273;
 
 export type TrayMenuSubmenuPlacement = 'left' | 'right';
 

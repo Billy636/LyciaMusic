@@ -6,6 +6,7 @@ use regex::Regex;
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 const MAX_GROUP_TOLERANCE_MS: u32 = 50;
 const MAX_GROUP_SIZE: usize = 3;
@@ -13,6 +14,9 @@ const ALIGNMENT_HIGH_WINDOW_MS: u32 = 300;
 const ALIGNMENT_MEDIUM_WINDOW_MS: u32 = 800;
 const ALIGNMENT_LOW_WINDOW_MS: u32 = 1500;
 const MIN_TRACK_MATCH_SCORE: f64 = 2.6;
+const ENHANCED_INFERRED_WORD_DEFAULT_DURATION_MS: u32 = 300;
+const ENHANCED_INFERRED_WORD_MIN_DURATION_MS: u32 = 150;
+const ENHANCED_INFERRED_WORD_MAX_DURATION_MS: u32 = 1000;
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -115,6 +119,11 @@ pub struct ParsedLine {
     pub source_index: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explicit_role: Option<ExplicitLineRole>,
+}
+
+struct EnhancedLrcParseResult {
+    line: ParsedLine,
+    inferred_word_index: Option<usize>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -329,6 +338,36 @@ fn sanitize_word_text(text: &str) -> String {
     text.replace(['\u{200b}', '\u{2063}'], "")
 }
 
+fn strip_enhanced_lrc_voice_prefix(body: &str) -> String {
+    let leading_whitespace_len = body.len() - body.trim_start().len();
+    let trimmed = &body[leading_whitespace_len..];
+    let Some(rest) = trimmed.strip_prefix(['v', 'V']) else {
+        return body.to_string();
+    };
+
+    let digit_len = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .map(char::len_utf8)
+        .sum::<usize>();
+    if digit_len == 0 {
+        return body.to_string();
+    }
+
+    let after_digits = &rest[digit_len..];
+    let after_digits = after_digits.trim_start();
+    let Some(after_colon) = after_digits.strip_prefix(':') else {
+        return body.to_string();
+    };
+
+    let after_prefix = after_colon.trim_start();
+    if after_prefix.starts_with('<') && collect_markers(after_prefix, '<', '>').first().is_some() {
+        return after_prefix.to_string();
+    }
+
+    body.to_string()
+}
+
 fn consume_square_timestamp_block(source: &str) -> Option<(usize, String)> {
     if !source.starts_with('[') {
         return None;
@@ -392,39 +431,64 @@ fn normalize_eslrc_source(source: &str) -> String {
         .join("\n")
 }
 
+fn parse_milliseconds_fraction(fraction_opt: Option<&str>) -> u32 {
+    let Some(fraction) = fraction_opt else {
+        return 0;
+    };
+    let mut padded = fraction.to_string();
+    while padded.len() < 3 {
+        padded.push('0');
+    }
+    padded
+        .chars()
+        .take(3)
+        .collect::<String>()
+        .parse::<u32>()
+        .unwrap_or(0)
+}
+
 fn parse_timestamp_to_ms(raw: &str) -> Option<u32> {
     let trimmed = raw.trim();
-    let mut parts = trimmed.split(':');
-    let minutes = parts.next()?.parse::<u32>().ok()?;
-    let seconds_part = parts.next()?;
-    if parts.next().is_some() {
-        return None;
-    }
+    let parts: Vec<&str> = trimmed.split(':').collect();
 
-    let mut second_parts = seconds_part.split('.');
-    let seconds = second_parts.next()?.parse::<u32>().ok()?;
-    if seconds >= 60 {
-        return None;
-    }
-
-    let milliseconds = second_parts
-        .next()
-        .map(|fraction| {
-            let mut padded = fraction.to_string();
-            while padded.len() < 3 {
-                padded.push('0');
+    if parts.len() == 2 {
+        let minutes = parts[0].parse::<u32>().ok()?;
+        let mut second_parts = parts[1].split('.');
+        let seconds = second_parts.next()?.parse::<u32>().ok()?;
+        if seconds >= 60 {
+            return None;
+        }
+        let fraction = second_parts.next();
+        let milliseconds = parse_milliseconds_fraction(fraction);
+        Some(minutes * 60_000 + seconds * 1_000 + milliseconds)
+    } else if parts.len() == 3 {
+        if parts[2].contains('.') {
+            let hours = parts[0].parse::<u32>().ok()?;
+            let minutes = parts[1].parse::<u32>().ok()?;
+            if minutes >= 60 {
+                return None;
             }
-            padded
-                .chars()
-                .take(3)
-                .collect::<String>()
-                .parse::<u32>()
-                .ok()
-        })
-        .flatten()
-        .unwrap_or(0);
-
-    Some(minutes * 60_000 + seconds * 1_000 + milliseconds)
+            let mut second_parts = parts[2].split('.');
+            let seconds = second_parts.next()?.parse::<u32>().ok()?;
+            if seconds >= 60 {
+                return None;
+            }
+            let fraction = second_parts.next();
+            let milliseconds = parse_milliseconds_fraction(fraction);
+            Some(hours * 3_600_000 + minutes * 60_000 + seconds * 1_000 + milliseconds)
+        } else {
+            let minutes = parts[0].parse::<u32>().ok()?;
+            let seconds = parts[1].parse::<u32>().ok()?;
+            if seconds >= 60 {
+                return None;
+            }
+            let fraction = Some(parts[2]);
+            let milliseconds = parse_milliseconds_fraction(fraction);
+            Some(minutes * 60_000 + seconds * 1_000 + milliseconds)
+        }
+    } else {
+        None
+    }
 }
 
 fn parse_ttml_clock_to_ms(raw: &str) -> Option<u32> {
@@ -873,12 +937,16 @@ fn parse_inline_square_timed_line(line: &str, source_index: usize) -> Option<Par
     })
 }
 
-fn parse_enhanced_lrc_line(line: &str, source_index: usize) -> Option<ParsedLine> {
+fn parse_enhanced_lrc_line_internal(
+    line: &str,
+    source_index: usize,
+) -> Option<EnhancedLrcParseResult> {
     let leading = collect_markers(line, '[', ']');
     let (_, body_start, line_start_ms) = *leading.first()?;
-    let body = &line[body_start..];
+    let body = strip_enhanced_lrc_voice_prefix(&line[body_start..]);
+    let body = body.as_str();
     let markers = collect_markers(body, '<', '>');
-    if markers.len() < 2 {
+    if markers.is_empty() {
         return None;
     }
 
@@ -887,6 +955,9 @@ fn parse_enhanced_lrc_line(line: &str, source_index: usize) -> Option<ParsedLine
     }
 
     let mut words = Vec::new();
+    let mut explicit_end_time = None;
+    let mut inferred_word_index = None;
+
     for window in markers.windows(2) {
         let (_, current_end, current_start_ms) = window[0];
         let (next_start, _, next_start_ms) = window[1];
@@ -908,9 +979,34 @@ fn parse_enhanced_lrc_line(line: &str, source_index: usize) -> Option<ParsedLine
         });
     }
 
+    if let Some(&last_marker) = markers.last() {
+        let (_, current_end, current_start_ms) = last_marker;
+        let segment = &body[current_end..];
+        let text = sanitize_word_text(segment);
+
+        if text.trim().is_empty() {
+            explicit_end_time = Some(current_start_ms);
+        } else {
+            inferred_word_index = Some(words.len());
+            words.push(ParsedWord {
+                text,
+                start_ms: current_start_ms,
+                end_ms: current_start_ms, // temporary
+                roman_text: None,
+            });
+        }
+    }
+
     if words.is_empty() {
         return None;
     }
+
+    let end_ms = explicit_end_time.unwrap_or_else(|| {
+        words
+            .last()
+            .map(|word| word.end_ms)
+            .unwrap_or(line_start_ms)
+    });
 
     let text = sanitize_line_text(
         &words
@@ -919,22 +1015,84 @@ fn parse_enhanced_lrc_line(line: &str, source_index: usize) -> Option<ParsedLine
             .collect::<String>(),
     );
     let (explicit_role, normalized_text) = detect_explicit_role(&text);
-    let end_ms = markers
-        .last()
-        .map(|marker| marker.2)
-        .unwrap_or(line_start_ms);
 
-    Some(ParsedLine {
-        start_ms: line_start_ms,
-        end_ms: end_ms.max(line_start_ms),
-        text: normalized_text,
-        words: Some(words),
-        translated_text: None,
-        roman_text: None,
-        source_format: ParsedLineSourceFormat::EnhancedLrc,
-        source_index: source_index as f64,
-        explicit_role,
+    Some(EnhancedLrcParseResult {
+        line: ParsedLine {
+            start_ms: line_start_ms,
+            end_ms: end_ms.max(line_start_ms),
+            text: normalized_text,
+            words: Some(words),
+            translated_text: None,
+            roman_text: None,
+            source_format: ParsedLineSourceFormat::EnhancedLrc,
+            source_index: source_index as f64,
+            explicit_role,
+        },
+        inferred_word_index,
     })
+}
+
+fn median_u32(values: &[u32]) -> Option<u32> {
+    if values.is_empty() {
+        return None;
+    }
+
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    let middle = sorted.len() / 2;
+    if sorted.len() % 2 == 1 {
+        Some(sorted[middle])
+    } else {
+        Some(((sorted[middle - 1] as u64 + sorted[middle] as u64) / 2) as u32)
+    }
+}
+
+fn collect_explicit_word_durations(result: &EnhancedLrcParseResult) -> Vec<u32> {
+    result
+        .line
+        .words
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| Some(*index) != result.inferred_word_index)
+        .filter_map(|(_, word)| {
+            let duration = word.end_ms.saturating_sub(word.start_ms);
+            (duration > 0).then_some(duration)
+        })
+        .collect()
+}
+
+fn finalize_enhanced_lrc_line(
+    mut result: EnhancedLrcParseResult,
+    contextual_durations: &[u32],
+    next_line_start_ms: Option<u32>,
+) -> ParsedLine {
+    let Some(inferred_word_index) = result.inferred_word_index else {
+        return result.line;
+    };
+
+    let local_durations = collect_explicit_word_durations(&result);
+    let estimated_duration = median_u32(&local_durations)
+        .or_else(|| median_u32(contextual_durations))
+        .unwrap_or(ENHANCED_INFERRED_WORD_DEFAULT_DURATION_MS)
+        .clamp(
+            ENHANCED_INFERRED_WORD_MIN_DURATION_MS,
+            ENHANCED_INFERRED_WORD_MAX_DURATION_MS,
+        );
+    let words = result.line.words.as_mut().expect("enhanced line has words");
+    let inferred_word = &mut words[inferred_word_index];
+    let estimated_end_ms = inferred_word.start_ms.saturating_add(estimated_duration);
+    inferred_word.end_ms = next_line_start_ms
+        .map(|next_start| estimated_end_ms.min(next_start).max(inferred_word.start_ms))
+        .unwrap_or(estimated_end_ms);
+    result.line.end_ms = inferred_word.end_ms;
+    result.line
+}
+
+fn parse_enhanced_lrc_line(line: &str, source_index: usize) -> Option<ParsedLine> {
+    parse_enhanced_lrc_line_internal(line, source_index)
+        .map(|result| finalize_enhanced_lrc_line(result, &[], None))
 }
 
 fn parse_plain_lrc_line(line: &str, source_index: usize) -> Vec<ParsedLine> {
@@ -997,6 +1155,8 @@ fn strip_xml_tags(raw: &str) -> String {
     sanitize_line_text(&re.replace_all(raw, "").to_string())
 }
 
+// 仅供非 AMLL 的结构化/轻量歌词路径降级使用。
+// 完整 TTML 语义由前端官方 parseTTML 解析器负责，勿在此扩展正则解析能力。
 fn parse_ttml(raw: &str) -> Vec<ParsedLine> {
     let paragraph_re = Regex::new(r#"(?s)<p\b([^>]*)>(.*?)</p>"#).expect("valid paragraph regex");
     let begin_re = Regex::new(r#"(?i)\bbegin="([^"]+)""#).expect("valid begin regex");
@@ -1101,19 +1261,38 @@ fn parse_ttml(raw: &str) -> Vec<ParsedLine> {
 
 fn parse_manual_lrc_like(raw: &str) -> Vec<ParsedLine> {
     let mut lines = Vec::new();
+    let mut enhanced_results = Vec::new();
     for (index, line) in raw.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
 
-        if let Some(parsed) = parse_enhanced_lrc_line(trimmed, index) {
-            lines.push(parsed);
+        if let Some(parsed) = parse_enhanced_lrc_line_internal(trimmed, index) {
+            enhanced_results.push(parsed);
             continue;
         }
 
         lines.extend(parse_plain_lrc_line(trimmed, index));
     }
+
+    let contextual_durations = enhanced_results
+        .iter()
+        .flat_map(collect_explicit_word_durations)
+        .collect::<Vec<_>>();
+    let start_times = enhanced_results
+        .iter()
+        .map(|result| result.line.start_ms)
+        .collect::<Vec<_>>();
+
+    lines.extend(enhanced_results.into_iter().map(|result| {
+        let next_line_start_ms = start_times
+            .iter()
+            .copied()
+            .filter(|start_ms| *start_ms > result.line.start_ms)
+            .min();
+        finalize_enhanced_lrc_line(result, &contextual_durations, next_line_start_ms)
+    }));
 
     lines
 }
@@ -1131,8 +1310,57 @@ fn collect_candidate(
     candidates.push(ParserCandidate { source, lines });
 }
 
+fn normalize_lyric_timestamps(source: &str) -> String {
+    let re_square = Regex::new(r"\[(\d+):(\d{2}):(\d{1,3})\]").expect("valid square regex");
+    let re_angle = Regex::new(r"<(\d+):(\d{2}):(\d{1,3})>").expect("valid angle regex");
+
+    let step1 = re_square.replace_all(source, "[$1:$2.$3]");
+    re_angle.replace_all(&step1, "<$1:$2.$3>").to_string()
+}
+
+fn lrc_offset_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    PATTERN.get_or_init(|| {
+        Regex::new(r"(?im)^[\t ]*\[offset[\t ]*:[\t ]*([+-]?\d+)[\t ]*(?:ms)?[\t ]*\][\t ]*$")
+            .expect("valid LRC offset regex")
+    })
+}
+
+fn parse_lrc_offset_ms(source: &str) -> i64 {
+    lrc_offset_pattern()
+        .captures_iter(source)
+        .filter_map(|captures| captures.get(1)?.as_str().parse::<i64>().ok())
+        .last()
+        .unwrap_or(0)
+}
+
+fn shift_lyric_timestamp(timestamp_ms: u32, offset_ms: i64) -> u32 {
+    (timestamp_ms as i64)
+        .saturating_add(offset_ms)
+        .clamp(0, u32::MAX as i64) as u32
+}
+
+fn apply_lrc_offset(lines: &mut [ParsedLine], offset_ms: i64) {
+    if offset_ms == 0 {
+        return;
+    }
+
+    for line in lines {
+        line.start_ms = shift_lyric_timestamp(line.start_ms, offset_ms);
+        line.end_ms = shift_lyric_timestamp(line.end_ms, offset_ms);
+
+        if let Some(words) = line.words.as_mut() {
+            for word in words {
+                word.start_ms = shift_lyric_timestamp(word.start_ms, offset_ms);
+                word.end_ms = shift_lyric_timestamp(word.end_ms, offset_ms);
+            }
+        }
+    }
+}
+
 fn parse_raw_lyrics(raw: &str) -> Vec<ParsedLine> {
-    let normalized = raw
+    let raw_normalized = normalize_lyric_timestamps(raw);
+    let normalized = raw_normalized
         .replace('\u{FEFF}', "")
         .replace("\r\n", "\n")
         .replace('\r', "\n");
@@ -1214,11 +1442,13 @@ fn parse_raw_lyrics(raw: &str) -> Vec<ParsedLine> {
     );
 
     candidates.sort_by(compare_parser_candidates);
-    candidates
+    let mut lines = candidates
         .into_iter()
         .next()
         .map(|candidate| candidate.lines)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    apply_lrc_offset(&mut lines, parse_lrc_offset_ms(&normalized));
+    lines
 }
 
 fn track_source_format(lines: &[LyricTrackLine]) -> LyricTrackSourceFormat {
@@ -2863,27 +3093,6 @@ fn normalize_semantic_line_display_roles(mut line: SemanticLine) -> SemanticLine
     line
 }
 
-fn is_han_only_line(line: &LyricTrackLine) -> bool {
-    line.script_profile.han_count > 0
-        && line.script_profile.latin_count == 0
-        && line.script_profile.kana_count == 0
-        && line.script_profile.hangul_count == 0
-}
-
-fn is_han_latin_mixed_line(line: &LyricTrackLine) -> bool {
-    line.script_profile.han_count > 0
-        && line.script_profile.latin_count > 0
-        && line.script_profile.kana_count == 0
-        && line.script_profile.hangul_count == 0
-}
-
-fn is_latin_only_line(line: &LyricTrackLine) -> bool {
-    line.script_profile.latin_count > 0
-        && line.script_profile.han_count == 0
-        && line.script_profile.kana_count == 0
-        && line.script_profile.hangul_count == 0
-}
-
 fn build_hard_role_semantic_line(
     main_line: &LyricTrackLine,
     translation_line: Option<&LyricTrackLine>,
@@ -2919,26 +3128,11 @@ fn build_hard_role_semantic_line_from_cluster(
 
     match lines.as_slice() {
         [main_line] => Some(build_hard_role_semantic_line(main_line, None, None)),
-        [first_line, second_line] => {
-            let (main_line, translation_line) =
-                if is_han_only_line(first_line) && !is_han_only_line(second_line) {
-                    (*second_line, *first_line)
-                } else if is_han_only_line(second_line) && !is_han_only_line(first_line) {
-                    (*first_line, *second_line)
-                } else if is_han_latin_mixed_line(first_line) && is_latin_only_line(second_line) {
-                    (*second_line, *first_line)
-                } else if is_han_latin_mixed_line(second_line) && is_latin_only_line(first_line) {
-                    (*first_line, *second_line)
-                } else {
-                    (*first_line, *second_line)
-                };
-
-            Some(build_hard_role_semantic_line(
-                main_line,
-                Some(translation_line),
-                None,
-            ))
-        }
+        [first_line, second_line] => Some(build_hard_role_semantic_line(
+            first_line,
+            Some(second_line),
+            None,
+        )),
         [roman_line, main_line, translation_line] => Some(build_hard_role_semantic_line(
             main_line,
             Some(translation_line),
@@ -3491,6 +3685,57 @@ mod tests {
     }
 
     #[test]
+    fn parses_colons_timestamp_lrc() {
+        let parsed = parse_raw_lyrics("[00:22:05]上天啊\n[00:25:20]难道你看不出我很爱她");
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].start_ms, 22050);
+        assert_eq!(parsed[0].text, "上天啊");
+        assert_eq!(parsed[1].start_ms, 25200);
+        assert_eq!(parsed[1].text, "难道你看不出我很爱她");
+    }
+
+    #[test]
+    fn applies_positive_lrc_offset_to_line_timing() {
+        let parsed = parse_raw_lyrics("[offset:+200]\n[00:01.000]Hello");
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].start_ms, 1200);
+        assert_eq!(parsed[0].end_ms, 6200);
+    }
+
+    #[test]
+    fn supports_case_insensitive_lrc_offset_with_ms_suffix() {
+        let parsed = parse_raw_lyrics("[OFFSET : -200ms]\n[00:01.000]Hello");
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].start_ms, 800);
+        assert_eq!(parsed[0].end_ms, 5800);
+    }
+
+    #[test]
+    fn applies_lrc_offset_to_enhanced_word_timing_and_clamps_at_zero() {
+        let parsed =
+            parse_raw_lyrics("[offset:-500]\n[00:00.250]<00:00.250>A<00:00.750>B<00:01.250>");
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].start_ms, 0);
+        let words = parsed[0].words.as_ref().expect("enhanced words");
+        assert_eq!(words[0].start_ms, 0);
+        assert_eq!(words[0].end_ms, 250);
+        assert_eq!(words[1].start_ms, 250);
+        assert_eq!(words[1].end_ms, 750);
+    }
+
+    #[test]
+    fn uses_the_last_valid_lrc_offset_tag() {
+        let parsed =
+            parse_raw_lyrics("[offset:+100]\n[offset:invalid]\n[offset:+300ms]\n[00:01.000]Hello");
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].start_ms, 1300);
+    }
+
+    #[test]
     fn hard_role_rules_keep_single_line_as_main() {
         let payload = build_structured_lyrics_payload("[00:01.000]Hello darling".to_string());
 
@@ -3501,31 +3746,31 @@ mod tests {
     }
 
     #[test]
-    fn hard_role_rules_treat_han_only_line_as_translation_for_two_lines() {
+    fn hard_role_rules_keep_first_han_line_as_main_for_two_lines() {
         let payload = build_structured_lyrics_payload(
             ["[00:01.000]你知道你爱我", "[00:01.000]You know you love me"].join("\n"),
         );
 
         assert_eq!(payload.display_lines.len(), 1);
-        assert_eq!(payload.display_lines[0].text, "You know you love me");
-        assert_eq!(payload.display_lines[0].translation, "你知道你爱我");
+        assert_eq!(payload.display_lines[0].text, "你知道你爱我");
+        assert_eq!(payload.display_lines[0].translation, "You know you love me");
         assert_eq!(payload.display_lines[0].romaji, "");
     }
 
     #[test]
-    fn hard_role_rules_treat_mixed_han_latin_as_translation_for_two_lines() {
+    fn hard_role_rules_keep_first_mixed_line_as_main_for_two_lines() {
         let payload = build_structured_lyrics_payload(
             ["[00:01.000]你好 darling", "[00:01.000]hello darling"].join("\n"),
         );
 
         assert_eq!(payload.display_lines.len(), 1);
-        assert_eq!(payload.display_lines[0].text, "hello darling");
-        assert_eq!(payload.display_lines[0].translation, "你好 darling");
+        assert_eq!(payload.display_lines[0].text, "你好 darling");
+        assert_eq!(payload.display_lines[0].translation, "hello darling");
         assert_eq!(payload.display_lines[0].romaji, "");
     }
 
     #[test]
-    fn hard_role_rules_fall_back_to_first_main_second_translation_for_two_lines() {
+    fn hard_role_rules_use_first_main_second_translation_for_two_lines() {
         let payload = build_structured_lyrics_payload(
             [
                 "[00:01.000]first latin line",

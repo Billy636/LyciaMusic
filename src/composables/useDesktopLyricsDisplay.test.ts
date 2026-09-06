@@ -53,6 +53,8 @@ function createPayload(enableWordEffect: boolean): DesktopLyricsStatePayload {
       textShadowColor: '#000000',
       firstLineTextShadowStrength: 0,
       secondLineTextShadowStrength: 0,
+      textStrokeColor: '#000000',
+      textStrokeDepth: 0,
       playerFontScale: 1,
       playerLineGap: 1,
       playerOffsetX: 0,
@@ -146,6 +148,8 @@ describe('useDesktopLyricsDisplay', () => {
         textShadowColor: '#112233',
         firstLineTextShadowStrength: 25,
         secondLineTextShadowStrength: 75,
+        textStrokeColor: '#445566',
+        textStrokeDepth: 50,
       } as any,
     });
 
@@ -156,6 +160,8 @@ describe('useDesktopLyricsDisplay', () => {
       '--desktop-first-line-text-shadow-blur': '6px',
       '--desktop-second-line-text-shadow-alpha': '0.75',
       '--desktop-second-line-text-shadow-blur': '18px',
+      '--desktop-text-stroke-color': '#445566',
+      '--desktop-text-stroke-width': '1.50px',
     });
   });
 
@@ -206,8 +212,27 @@ describe('useDesktopLyricsDisplay', () => {
       '--desktop-romaji-played-color': '#123456',
       '--desktop-romaji-unplayed-color': '#ABCDEF',
     });
-    expect(display.getRomajiWordStyle(1, 3).backgroundImage).toContain('var(--desktop-romaji-played-color) 0%');
-    expect(display.getRomajiWordStyle(1, 3).backgroundImage).toContain('var(--desktop-romaji-unplayed-color) 50%');
+    expect(display.getRomajiWordStyle(1, 3)).toMatchObject({
+      '--desktop-karaoke-progress': '50%',
+      textShadow: 'none',
+    });
+  });
+
+  it('keeps karaoke word painting stable and only updates the clipped progress', () => {
+    const display = useDesktopLyricsDisplay(ref(false));
+    const payload = createPayload(true);
+
+    display.handlePayload({ ...payload, playbackTime: 1 });
+    expect(display.getWordStyle(1, 3)).toEqual({
+      '--desktop-karaoke-progress': '0%',
+      textShadow: 'none',
+    });
+
+    display.playbackTime.value = 1.6789;
+    expect(display.getWordStyle(1, 3)).toEqual({
+      '--desktop-karaoke-progress': '33.95%',
+      textShadow: 'none',
+    });
   });
 
   it('uses word-level romaji on desktop only when every displayed word has romaji', () => {

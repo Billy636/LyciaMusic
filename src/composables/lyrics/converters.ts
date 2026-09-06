@@ -1,4 +1,7 @@
-import type { LyricLine as CoreAmlLyricLine } from '@applemusic-like-lyrics/core';
+import type {
+  LyricLine as CoreAmlLyricLine,
+  LyricWord as CoreAmlLyricWord,
+} from '@applemusic-like-lyrics/core';
 
 import type {
   CurrentLyricDisplayLine,
@@ -18,7 +21,15 @@ const AML_LINE_LEAD_IN_RATIO = 0.25;
 const MIN_AML_LINE_DURATION_MS = 40;
 const AML_ROMAJI_FRAGMENT_SEPARATOR = '\u00a0';
 
-type AmlLineWithTimedRomaji = CoreAmlLyricLine & {
+type AmlLineWithTimedRomaji = Omit<CoreAmlLyricLine, 'words'> & {
+  words: Array<CoreAmlLyricWord & {
+    ruby?: Array<{
+      word: string;
+      startTime: number;
+      endTime: number;
+    }>;
+    emptyBeat?: number;
+  }>;
   romajiWords?: Array<{
     text: string;
     startTime: number;
@@ -236,7 +247,11 @@ export function convertLyricsToAmlLines(
     } satisfies RenderLine;
 
     const startTime = renderLine.startMs;
-    const parsedEndTime = renderLine.endMs;
+    const latestWordEndTime = line.words?.reduce(
+      (latestEndTime, word) => Math.max(latestEndTime, toMs(word.end)),
+      startTime,
+    ) ?? startTime;
+    const parsedEndTime = Math.max(renderLine.endMs, latestWordEndTime);
     const nextLine = lines[lineIndex + 1];
     const nextStartTime = toMs(nextLine?.time ?? line.time + 3);
     const adaptiveLeadIn = nextLine
@@ -245,7 +260,14 @@ export function convertLyricsToAmlLines(
     const lineBoundaryEndTime = nextLine
       ? nextStartTime - adaptiveLeadIn
       : Math.max(parsedEndTime, nextStartTime);
-    const endTime = Math.max(startTime + MIN_AML_LINE_DURATION_MS, lineBoundaryEndTime);
+    // Overlapping vocal parts can start before the current singer has finished.
+    // Keep every timed word inside its AMLL line instead of truncating the line
+    // at the next vocal part and producing an invalid word timeline.
+    const endTime = Math.max(
+      startTime + MIN_AML_LINE_DURATION_MS,
+      lineBoundaryEndTime,
+      latestWordEndTime,
+    );
 
     const sourceWords = line.words ?? [];
     const convertedWords = sourceWords.map((word, wordIndex) => {
@@ -261,7 +283,13 @@ export function convertLyricsToAmlLines(
         startTime: wordStart,
         endTime: wordEnd,
         romanWord: canRenderAlignedRomaji ? getAmlRomanWord(sourceWords, wordIndex) : '',
-        obscene: false,
+        ruby: word.ruby?.map((ruby) => ({
+          word: ruby.text,
+          startTime: toMs(ruby.start),
+          endTime: toMs(ruby.end),
+        })),
+        obscene: word.obscene ?? false,
+        emptyBeat: word.emptyBeat,
       };
     }).filter((word) => word.word.length > 0);
 
@@ -281,8 +309,8 @@ export function convertLyricsToAmlLines(
       romanLyric: showRomaji && !canRenderAlignedRomaji ? (line.romaji || '') : '',
       startTime,
       endTime,
-      isBG: false,
-      isDuet: false,
+      isBG: line.isBG ?? false,
+      isDuet: line.isDuet ?? false,
     };
 
     if (showRomaji && !canRenderAlignedRomaji && line.romajiWords && line.romajiWords.length > 0) {

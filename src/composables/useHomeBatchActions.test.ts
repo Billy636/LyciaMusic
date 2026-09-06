@@ -45,8 +45,8 @@ describe('useHomeBatchActions physical delete', () => {
     deleteMusicFileMock.mockResolvedValue(undefined);
 
     const selectedPaths = ref(new Set([deletedSong.path]));
-    const canonicalSongs = ref<Song[]>([deletedSong, keptSong]);
-    const sourceSongs = ref<Song[]>([deletedSong, keptSong]);
+    const canonicalSongPaths = ref([deletedSong.path, keptSong.path]);
+    const sourceSongPaths = ref([deletedSong.path, keptSong.path]);
     const favoritePaths = ref([deletedSong.path, keptSong.path]);
     const playlists = ref<Playlist[]>([
       { id: 'playlist-1', name: 'Playlist', songPaths: [deletedSong.path, keptSong.path] },
@@ -58,8 +58,8 @@ describe('useHomeBatchActions physical delete', () => {
       selectedPaths,
       isBatchMode: ref(true),
       isManagementMode: ref(true),
-      canonicalSongs,
-      sourceSongs,
+      canonicalSongPaths,
+      sourceSongPaths,
       favoritePaths,
       playlists,
       moveFilesToFolder: vi.fn(),
@@ -77,5 +77,46 @@ describe('useHomeBatchActions physical delete', () => {
     expect(favoritePaths.value).toEqual([keptSong.path]);
     expect(playlists.value[0]?.songPaths).toEqual([keptSong.path]);
     expect(removeFromHistory).toHaveBeenCalledWith([deletedSong.path]);
+  });
+
+  it('removes selected songs from playlist when in playlist view', async () => {
+    const song1 = 'C:\\Music\\song1.flac';
+    const song2 = 'C:\\Music\\song2.flac';
+    const song3 = 'C:\\Music\\song3.flac';
+
+    const selectedPaths = ref(new Set([song1, song2]));
+    const isBatchMode = ref(true);
+    const filterCondition = ref('target-playlist');
+    const playlists = ref<Playlist[]>([
+      { id: 'target-playlist', name: 'Target Playlist', songPaths: [song1, song2, song3] },
+      { id: 'other-playlist', name: 'Other Playlist', songPaths: [song1, song3] },
+    ]);
+
+    const actions = useHomeBatchActions({
+      currentViewMode: ref('playlist'),
+      filterCondition,
+      selectedPaths,
+      isBatchMode,
+      isManagementMode: ref(false),
+      canonicalSongPaths: ref([song1, song2, song3]),
+      sourceSongPaths: ref([song1, song2, song3]),
+      favoritePaths: ref([]),
+      playlists,
+      moveFilesToFolder: vi.fn(),
+      removeFromHistory: vi.fn(),
+      showToast: vi.fn(),
+      getRoutePath: () => '/',
+    });
+
+    actions.requestBatchDelete();
+    expect(actions.showConfirm.value).toBe(true);
+
+    await actions.executeConfirmAction();
+
+    expect(playlists.value.find(p => p.id === 'target-playlist')?.songPaths).toEqual([song3]);
+    expect(playlists.value.find(p => p.id === 'other-playlist')?.songPaths).toEqual([song1, song3]);
+    expect(selectedPaths.value.size).toBe(0);
+    expect(isBatchMode.value).toBe(false);
+    expect(actions.showConfirm.value).toBe(false);
   });
 });

@@ -99,7 +99,8 @@ fn remove_cache_dir_contents(cache_dir: &Path) -> Result<(), String> {
 #[tauri::command]
 pub fn clear_cover_cache(app: AppHandle) -> Result<(), String> {
     let cache_dir = get_cover_cache_dir(&app);
-    remove_cache_dir_contents(&cache_dir)
+    remove_cache_dir_contents(&cache_dir)?;
+    crate::custom_background::clear_custom_background_cache(&app)
 }
 
 fn generate_source_hash(path: &Path) -> String {
@@ -486,7 +487,10 @@ pub fn save_artist_avatar_auto(bytes: &[u8], covers_dir: &std::path::Path) -> Op
 
     if !covers_dir.exists() {
         if let Err(e) = std::fs::create_dir_all(covers_dir) {
-            eprintln!("[头像缓存] 警告：创建缓存目录失败: {}, 路径: {:?}", e, covers_dir);
+            eprintln!(
+                "[头像缓存] 警告：创建缓存目录失败: {}, 路径: {:?}",
+                e, covers_dir
+            );
             return None;
         }
     }
@@ -497,4 +501,3 @@ pub fn save_artist_avatar_auto(bytes: &[u8], covers_dir: &std::path::Path) -> Op
         None
     }
 }
-

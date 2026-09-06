@@ -11,8 +11,10 @@ export function useSongDrag(
     displaySongList: Ref<Song[]>,
     isBatchMode: Ref<boolean>,
     selectedPaths: Ref<Set<string>>,
-    songTableRef: Ref<{ containerRef: HTMLElement | null } | null>
+    songTableRef: Ref<{ containerRef: HTMLElement | null } | null>,
+    displaySongPaths?: Ref<string[]>,
 ) {
+    const getVisualPaths = () => displaySongPaths?.value ?? displaySongList.value.map(song => song.path);
     const {
         songList, currentViewMode, addSongsToPlaylist,
         currentFolderFilter, updateFolderOrder // 🟢 导入文件夹排序函数
@@ -130,7 +132,8 @@ export function useSongDrag(
                     const start = Math.min(lastSelectedIndex.value, index);
                     const end = Math.max(lastSelectedIndex.value, index);
                     for (let i = start; i <= end; i++) {
-                        if (displaySongList.value[i]) selectedPaths.value.add(displaySongList.value[i].path);
+                        const path = getVisualPaths()[i];
+                        if (path) selectedPaths.value.add(path);
                     }
                 } else {
                     // 普通点击：单选/反选
@@ -147,7 +150,8 @@ export function useSongDrag(
                 // 点击右侧区域，视为“拖拽已选歌曲”
                 isSelectionDragging.value = false;
                 if (!selectedPaths.value.has(song.path)) selectedPaths.value.add(song.path);
-                dragSession.songs = displaySongList.value.filter(s => selectedPaths.value.has(s.path));
+                const loadedSelectedSongs = displaySongList.value.filter(s => selectedPaths.value.has(s.path));
+                dragSession.songs = loadedSelectedSongs.length > 0 ? loadedSelectedSongs : [song];
                 dragSession.insertIndex = index;
             }
         }
@@ -198,19 +202,20 @@ export function useSongDrag(
                 }
 
                 if (currentIndex === -1) return;
-                currentIndex = Math.max(0, Math.min(displaySongList.value.length - 1, currentIndex));
+                const visualPaths = getVisualPaths();
+                currentIndex = Math.max(0, Math.min(visualPaths.length - 1, currentIndex));
 
                 if (currentIndex !== lastSelectedIndex.value) {
                     const start = Math.min(lastSelectedIndex.value, currentIndex);
                     const end = Math.max(lastSelectedIndex.value, currentIndex);
 
                     for (let i = start; i <= end; i++) {
-                        const s = displaySongList.value[i];
-                        if (s) {
+                        const path = visualPaths[i];
+                        if (path) {
                             if (dragSelectAction.value === 'select') {
-                                selectedPaths.value.add(s.path);
+                                selectedPaths.value.add(path);
                             } else if (dragSelectAction.value === 'deselect') {
-                                selectedPaths.value.delete(s.path);
+                                selectedPaths.value.delete(path);
                             }
                         }
                     }
@@ -286,7 +291,7 @@ export function useSongDrag(
 
                     const upTriggerLimit = (currentGapIndex - 0.5) * ROW_HEIGHT;
                     const downTriggerLimit = (currentGapIndex + 1.5) * ROW_HEIGHT;
-                    const maxIndex = displaySongList.value.length - 1;
+                    const maxIndex = getVisualPaths().length - 1;
 
                     if (offsetY < upTriggerLimit) {
                         const newIndex = Math.floor(offsetY / ROW_HEIGHT);
@@ -339,8 +344,8 @@ export function useSongDrag(
                 const movingSongs = dragSession.songs;
                 if (movingSongs.length > 0) {
                     const movingPaths = movingSongs.map(s => s.path);
-                    const targetVisualSong = displaySongList.value[dragSession.insertIndex];
-                    const targetPath = targetVisualSong?.path;
+                    const visualPaths = getVisualPaths();
+                    const targetPath = visualPaths[dragSession.insertIndex];
 
                     // 处理歌单内排序
                     if (currentViewMode.value === 'playlist') {
@@ -349,7 +354,6 @@ export function useSongDrag(
 
                         if (pl) {
                             // Keep drag behavior consistent with current visual order.
-                            const visualPaths = displaySongList.value.map(s => s.path);
                             const { reordered, changed } = reorderPathOrder(visualPaths, movingPaths, targetPath);
                             if (changed) {
                                 pl.songPaths = reordered;
@@ -367,7 +371,6 @@ export function useSongDrag(
 
                         // 🟢 文件夹视图:保存自定义排序顺序
                         if (currentViewMode.value === 'folder' && currentFolderFilter.value) {
-                            const visualPaths = displaySongList.value.map(s => s.path);
                             const { reordered: newOrder, changed: folderOrderChanged } = reorderPathOrder(
                                 visualPaths,
                                 movingPaths,
@@ -380,7 +383,6 @@ export function useSongDrag(
 
                         // 本地音乐视图: 保存自定义排序并自动切换到 custom 模式
                         if (currentViewMode.value === 'all') {
-                            const visualPaths = displaySongList.value.map(s => s.path);
                             const { reordered: newOrder, changed: localOrderChanged } = reorderPathOrder(
                                 visualPaths,
                                 movingPaths,

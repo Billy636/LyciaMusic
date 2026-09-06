@@ -3,6 +3,7 @@ import { computed, type Ref } from 'vue';
 import type { AlbumCatalogItem, ArtistCatalogItem } from '../../types';
 import { compareByAlphabetIndex } from '../../utils/alphabetIndex';
 import type { AlbumSortMode, ArtistSortMode } from '../../services/storage/playerStorage';
+import { matchesPinyinSearch } from '../../utils/pinyinSearch';
 import {
   type AlbumListItem,
   type ArtistListItem,
@@ -76,7 +77,7 @@ export function useLibraryCatalogSelectors({
       return artistList.value;
     }
 
-    return artistList.value.filter(artist => (artist.name || '').toLowerCase().includes(query));
+    return artistList.value.filter(artist => matchesPinyinSearch([artist.name || ''], query));
   });
 
   const filteredAlbumList = computed(() => {
@@ -85,10 +86,10 @@ export function useLibraryCatalogSelectors({
       return albumList.value;
     }
 
-    return albumList.value.filter(album =>
-      (album.name || '').toLowerCase().includes(query) ||
-      (album.artist || '').toLowerCase().includes(query),
-    );
+    return albumList.value.filter(album => matchesPinyinSearch([
+      album.name || '',
+      album.artist || '',
+    ], query));
   });
 
   return {

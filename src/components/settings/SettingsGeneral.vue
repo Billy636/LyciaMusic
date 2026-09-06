@@ -56,6 +56,7 @@ const outputDeviceSelectRef = ref<HTMLElement | null>(null);
 const isOutputDeviceMenuOpen = ref(false);
 const isChangingOutputDevice = ref(false);
 const wasapiExclusiveSideEffectTip = '开启后会独占播放设备：其他软件可能无声；设备断开或被占用时会自动回退默认播放。';
+const autoScanLibraryOnStartupTip = '每次启动时会自动扫描音乐库变化，会增加启动短时内的CPU占用，若启动卡顿建议关闭，若经常歌曲变动且cpu较好则可开启。';
 let unlistenAudioOutput: UnlistenFn | null = null;
 const { clearCoverCaches } = useCoverCache();
 
@@ -283,6 +284,32 @@ onScopeDispose(() => {
 
         <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">启动时自动扫描音乐库</div>
+          </div>
+          <div class="flex items-center gap-3">
+            <span
+              class="settings-side-effect-tip"
+              :aria-label="autoScanLibraryOnStartupTip"
+              tabindex="0"
+            >
+              <CircleAlert class="h-4 w-4" aria-hidden="true" />
+              <span class="settings-side-effect-tip-popover" role="tooltip">{{ autoScanLibraryOnStartupTip }}</span>
+            </span>
+            <button
+              @click="settings.autoScanLibraryOnStartup = !settings.autoScanLibraryOnStartup"
+              class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none shrink-0"
+              :class="settings.autoScanLibraryOnStartup ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'"
+            >
+              <span
+                class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm"
+                :class="settings.autoScanLibraryOnStartup ? 'translate-x-6' : 'translate-x-1'"
+              />
+            </button>
+          </div>
+        </div>
+
+        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+          <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">关闭时最小化至托盘</div>
           </div>
           <button @click="settings.closeToTray = !settings.closeToTray" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.closeToTray ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
@@ -319,10 +346,10 @@ onScopeDispose(() => {
 
         <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">启用任务栏快捷播控</div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">显示任务栏播控图标</div>
           </div>
-          <button @click="settings.showTaskbarPlayer = !settings.showTaskbarPlayer" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.showTaskbarPlayer ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.showTaskbarPlayer ? 'translate-x-6' : 'translate-x-1'" />
+          <button @click="settings.showTaskbarPlayerIcon = !settings.showTaskbarPlayerIcon" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.showTaskbarPlayerIcon ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.showTaskbarPlayerIcon ? 'translate-x-6' : 'translate-x-1'" />
           </button>
         </div>
 
@@ -416,12 +443,12 @@ onScopeDispose(() => {
           </div>
           <div class="flex items-center gap-3">
             <span
-              class="wasapi-tip"
+              class="settings-side-effect-tip"
               :aria-label="wasapiExclusiveSideEffectTip"
               tabindex="0"
             >
               <CircleAlert class="h-4 w-4" aria-hidden="true" />
-              <span class="wasapi-tip-popover" role="tooltip">{{ wasapiExclusiveSideEffectTip }}</span>
+              <span class="settings-side-effect-tip-popover" role="tooltip">{{ wasapiExclusiveSideEffectTip }}</span>
             </span>
             <button @click="toggleWasapiExclusive" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="isWasapiExclusiveEnabled ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
               <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="isWasapiExclusiveEnabled ? 'translate-x-6' : 'translate-x-1'" />
@@ -558,7 +585,7 @@ onScopeDispose(() => {
   overflow: visible;
 }
 
-.wasapi-tip {
+.settings-side-effect-tip {
   position: relative;
   display: inline-flex;
   height: 20px;
@@ -570,7 +597,7 @@ onScopeDispose(() => {
   outline: none;
 }
 
-.wasapi-tip-popover {
+.settings-side-effect-tip-popover {
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
@@ -593,8 +620,8 @@ onScopeDispose(() => {
   white-space: normal;
 }
 
-.wasapi-tip:hover .wasapi-tip-popover,
-.wasapi-tip:focus-visible .wasapi-tip-popover {
+.settings-side-effect-tip:hover .settings-side-effect-tip-popover,
+.settings-side-effect-tip:focus-visible .settings-side-effect-tip-popover {
   opacity: 1;
   transform: translateY(0);
 }
@@ -832,11 +859,11 @@ onScopeDispose(() => {
   border-top-color: rgba(255, 255, 255, 0.08);
 }
 
-:global(.dark) .wasapi-tip {
+:global(.dark) .settings-side-effect-tip {
   color: #fcd34d;
 }
 
-:global(.dark) .wasapi-tip-popover {
+:global(.dark) .settings-side-effect-tip-popover {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(31, 31, 31, 0.96);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);

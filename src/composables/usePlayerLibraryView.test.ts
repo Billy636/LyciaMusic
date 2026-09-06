@@ -7,6 +7,7 @@ import { useLibraryStore } from '../features/library/store';
 import { useNavigationStore } from '../shared/stores/navigation';
 import { usePlayerLibraryView } from '../features/library/usePlayerLibraryView';
 import { compareSongPathsByTrackNumber } from '../features/library/playerLibraryViewShared';
+import { useLibraryFolderSongPathCache } from './useLibraryFolderSongPathCache';
 
 const tauriInvokeMock = vi.fn();
 
@@ -615,5 +616,31 @@ describe('player library view', () => {
     collectionsStore.playlistSortMode = 'custom';
     await flushPromises();
     expect(displaySongList.value.map(song => song.title)).toEqual(['Alpha']);
+  });
+
+  it('refreshes folder view song paths when folder cache is cleared or canonical order changes', async () => {
+    const libraryStore = useLibraryStore();
+    const navigationStore = useNavigationStore();
+    const { clearLibraryFolderSongPathCache } = useLibraryFolderSongPathCache();
+
+    const song1 = makeSong({ path: '/music/rock/song1.flac', title: 'Song 1' });
+    const song2 = makeSong({ path: '/music/rock/song2.flac', title: 'Song 2' });
+
+    libraryStore.librarySongs = [song1, song2];
+    navigationStore.currentViewMode = 'folder';
+    navigationStore.currentFolderFilter = '/music/rock';
+    libraryStore.folderSortMode = 'title';
+
+    const { currentViewSongPaths } = usePlayerLibraryView();
+    await flushPromises();
+
+    expect(currentViewSongPaths.value).toEqual([song1.path, song2.path]);
+
+    // Simulate removing song2: update library songs and clear folder path cache
+    libraryStore.librarySongs = [song1];
+    clearLibraryFolderSongPathCache();
+    await flushPromises();
+
+    expect(currentViewSongPaths.value).toEqual([song1.path]);
   });
 });

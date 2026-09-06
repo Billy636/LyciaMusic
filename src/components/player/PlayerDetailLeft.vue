@@ -15,7 +15,7 @@ const {
 } = usePlaybackController();
 const { getFullCoverUrl, loadFullCover, preloadFullCovers, retainFullCoverPaths } = useCoverCache();
 const playbackStore = usePlaybackStore();
-const { playQueue, tempQueue } = storeToRefs(playbackStore);
+const { playQueuePaths, tempQueuePaths } = storeToRefs(playbackStore);
 
 const showContextMenu = ref(false);
 const contextMenuX = ref(0);
@@ -63,13 +63,13 @@ const getRetainedFullCoverPaths = (path: string) => {
   };
 
   // Temp queue items will be played before the regular queue.
-  pushUniquePath(tempQueue.value[0]?.path);
+  pushUniquePath(tempQueuePaths.value[0]);
 
-  const queue = playQueue.value;
-  const currentIndex = queue.findIndex(song => song.path === path);
+  const queue = playQueuePaths.value;
+  const currentIndex = queue.indexOf(path);
   if (currentIndex >= 0 && queue.length > 1) {
-    pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]?.path);
-    pushUniquePath(queue[(currentIndex + 1) % queue.length]?.path);
+    pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]);
+    pushUniquePath(queue[(currentIndex + 1) % queue.length]);
   }
 
   return retainedPaths.slice(0, 4);
@@ -175,13 +175,15 @@ defineExpose({ detailCoverRef });
       }"
     >
       <!-- Main Cover Container -->
-      <div class="w-full h-full rounded-[inherit] overflow-hidden relative isolate z-20">
-        <img v-if="currentLocalCoverUrl" :key="`thumb:${currentSongPath}:${currentLocalCoverUrl}`" :src="currentLocalCoverUrl" class="absolute inset-0 w-full h-full object-cover select-none transition-[transform,filter,opacity] duration-[240ms] ease-out z-10" :class="props.isExpanded ? (fullCoverLoading ? 'scale-[1.03] blur-[10px] brightness-90' : 'scale-100 blur-0 brightness-100') : 'scale-125 blur-0 brightness-100'" draggable="false" decoding="async" />
-        <img v-if="currentBigCoverUrl" :key="`big:${currentSongPath}:${currentBigCoverUrl}`" :src="currentBigCoverUrl" @load="onBigCoverLoad" @error="onBigCoverError" class="absolute inset-0 w-full h-full object-cover select-none transition-opacity duration-[240ms] ease-out z-20" :class="[props.isExpanded ? 'scale-100' : 'scale-125', bigCoverLoaded ? 'opacity-100' : 'opacity-0']" draggable="false" decoding="async" />
-        <div v-if="!currentLocalCoverUrl && !currentBigCoverUrl" class="absolute inset-0 w-full h-full bg-white/5 flex items-center justify-center text-white/10 z-0">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-32 w-32" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+      <transition name="song-switch-cover" mode="out-in">
+        <div :key="currentSongPath" class="w-full h-full rounded-[inherit] overflow-hidden relative isolate z-20">
+          <img v-if="currentLocalCoverUrl" :key="`thumb:${currentSongPath}:${currentLocalCoverUrl}`" :src="currentLocalCoverUrl" class="absolute inset-0 w-full h-full object-cover select-none transition-[transform,filter,opacity] duration-[240ms] ease-out z-10" :class="props.isExpanded ? (fullCoverLoading ? 'scale-[1.03] blur-[10px] brightness-90' : 'scale-100 blur-0 brightness-100') : 'scale-125 blur-0 brightness-100'" draggable="false" decoding="async" />
+          <img v-if="currentBigCoverUrl" :key="`big:${currentSongPath}:${currentBigCoverUrl}`" :src="currentBigCoverUrl" @load="onBigCoverLoad" @error="onBigCoverError" class="absolute inset-0 w-full h-full object-cover select-none transition-opacity duration-[240ms] ease-out z-20" :class="[props.isExpanded ? 'scale-100' : 'scale-125', bigCoverLoaded ? 'opacity-100' : 'opacity-0']" draggable="false" decoding="async" />
+          <div v-if="!currentLocalCoverUrl && !currentBigCoverUrl" class="absolute inset-0 w-full h-full bg-white/5 flex items-center justify-center text-white/10 z-0">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-32 w-32" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+          </div>
         </div>
-      </div>
+      </transition>
 
       <!-- Glass Table Reflection Layer -->
       <transition name="reflection-reveal" appear>
@@ -259,5 +261,23 @@ defineExpose({ detailCoverRef });
 
 .reflection-reveal-leave-to {
   transform: translateY(-10px) rotateX(48deg) skewX(-20deg) scale(0.985);
+}
+
+/* 切歌时封面交叉淡入淡出 */
+.song-switch-cover-enter-active,
+.song-switch-cover-leave-active {
+  transition:
+    opacity 360ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 360ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.song-switch-cover-enter-from {
+  opacity: 0;
+  transform: scale(1.05);
+}
+
+.song-switch-cover-leave-to {
+  opacity: 0;
+  transform: scale(0.98);
 }
 </style>

@@ -1,11 +1,18 @@
-import { computed, ref } from 'vue';
+import { computed, ref, shallowRef } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 import { usePlaybackStore } from '../../features/playback/store';
 import { useSettingsStore } from '../../features/settings/store';
 import { useLyricsSettingsStore } from '../../features/lyricsSettings/store';
 import { getCurrentLyricDisplayLines, semanticLineToLyricLine } from './converters';
+import {
+  amlLineToLegacyLyricLine,
+  isTtmlLyrics,
+  parseNativeTtml,
+  type NativeAmlLyricLine,
+} from './ttml';
 import type {
+  ActiveLyricsFormat,
   CurrentLyricDisplayState,
   DesktopLyricsSettings,
   LyricLine,
@@ -21,6 +28,8 @@ export const showLyricsPlayerSettingsPanel = ref(false);
 export const lyricsStatus = ref<LyricsStatus>('idle');
 export const parsedLyrics = ref<LyricLine[]>([]);
 export const lyricDocument = ref<LyricDocument | null>(null);
+export const activeLyricsFormat = ref<ActiveLyricsFormat>('unknown');
+export const nativeAmlLyrics = shallowRef<NativeAmlLyricLine[]>([]);
 
 const rawLyrics = ref('');
 const semanticLyrics = ref<SemanticLine[]>([]);
@@ -74,6 +83,8 @@ export async function loadLyrics() {
     lyricDocument.value = null;
     semanticLyrics.value = [];
     parsedLyrics.value = [];
+    activeLyricsFormat.value = 'unknown';
+    nativeAmlLyrics.value = [];
     lyricsStatus.value = 'idle';
     return;
   }
@@ -83,6 +94,8 @@ export async function loadLyrics() {
   lyricDocument.value = null;
   semanticLyrics.value = [];
   parsedLyrics.value = [];
+  activeLyricsFormat.value = 'unknown';
+  nativeAmlLyrics.value = [];
 
   try {
     const lyricsPath = song.cue_source_path || song.path;
@@ -94,57 +107,28 @@ export async function loadLyrics() {
     lyricDocument.value = payload?.document ?? null;
     semanticLyrics.value = payload?.semanticLines ?? [];
 
-    let sourceLines: LyricLine[] = [];
-
-    // 如果是 ttml 格式，直接走前端原生 AMLL 识别路径，绕过不稳定的启发式分类逻辑
-    if (rawLyrics.value.includes('<tt')) {
+    if (isTtmlLyrics(rawLyrics.value)) {
+      activeLyricsFormat.value = 'ttml';
       try {
-        const { parseTTML } = await import('@applemusic-like-lyrics/lyric/pkg/amll_lyric.js');
-        const ttmlDoc = parseTTML(rawLyrics.value);
-        if (ttmlDoc && Array.isArray(ttmlDoc.lines) && ttmlDoc.lines.length > 0) {
-          sourceLines = ttmlDoc.lines.map((line: any) => {
-            const words = Array.isArray(line.words) && line.words.length > 0
-              ? line.words.map((w: any) => ({
-                  text: w.word || '',
-                  start: (w.startTime || 0) / 1000,
-                  end: (w.endTime || 0) / 1000,
-                  romaji: w.romanWord || '',
-                }))
-              : undefined;
+        const nativeLines = await parseNativeTtml(rawLyrics.value);
+        if (requestId !== loadRequestId || playbackStore.currentSong?.path !== song.path) return;
 
-            const text = words
-              ? words.map((w: any) => w.text).join('')
-              : '';
-
-            const romajiWords = words && words.some((w: any) => w.romaji)
-              ? words.map((w: any) => ({
-                  text: w.romaji,
-                  start: w.start,
-                  end: w.end,
-                }))
-              : undefined;
-
-            return {
-              time: (line.startTime || 0) / 1000,
-              endTime: (line.endTime || 0) / 1000,
-              text: text || line.text || '',
-              translation: line.translatedLyric || '',
-              romaji: line.romanLyric || '',
-              words,
-              romajiWords,
-            } as LyricLine;
-          });
+        if (nativeLines.length > 0) {
+          nativeAmlLyrics.value = nativeLines;
+          parsedLyrics.value = nativeLines.map(amlLineToLegacyLyricLine);
+          lyricsStatus.value = 'ready';
+          return;
         }
-      } catch (e) {
-        console.error('Failed to parse ttml natively in frontend:', e);
+      } catch (error) {
+        console.error('Failed to parse TTML with the official AMLL parser:', error);
       }
+    } else {
+      activeLyricsFormat.value = lyricDocument.value?.metadata.sourceFormats[0] ?? 'unknown';
     }
 
-    if (sourceLines.length === 0) {
-      sourceLines = semanticLyrics.value.length > 0
-        ? semanticLyrics.value.map((line) => semanticLineToLyricLine(line))
-        : (payload?.displayLines ?? []);
-    }
+    const sourceLines = semanticLyrics.value.length > 0
+      ? semanticLyrics.value.map((line) => semanticLineToLyricLine(line))
+      : (payload?.displayLines ?? []);
 
     parsedLyrics.value = sourceLines.map((line) => ({
       ...line,
@@ -168,6 +152,8 @@ export async function loadLyrics() {
     lyricDocument.value = null;
     semanticLyrics.value = [];
     parsedLyrics.value = [];
+    activeLyricsFormat.value = 'unknown';
+    nativeAmlLyrics.value = [];
     lyricsStatus.value = 'error';
     console.error('Failed to load lyrics:', error);
   }
@@ -259,6 +245,8 @@ export function useLyrics() {
     currentLyricLine,
     currentLyricIndex,
     parsedLyrics,
+    activeLyricsFormat,
+    nativeAmlLyrics,
     lyricDocument,
     loadLyrics,
     semanticLyrics,

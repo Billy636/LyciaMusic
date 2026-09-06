@@ -3,6 +3,9 @@ import type { Song } from '../types';
 
 import { useLibraryStore } from '../features/library/store';
 import { usePlaybackStore } from '../features/playback/store';
+import { useCollectionsStore } from '../features/collections/store';
+import { removeSongPathsFromPlaybackState } from './playbackCleanup';
+import { isProfilingEnabled } from '../utils/profiling';
 
 const LIBRARY_SCAN_BATCH_FLUSH_MS = 120;
 
@@ -15,28 +18,18 @@ export const createPlayerLibraryBatch = ({
 }: CreatePlayerLibraryBatchDeps) => {
   const libraryStore = useLibraryStore();
   const playbackStore = usePlaybackStore();
-  const { sourceSongs, canonicalSongs } = storeToRefs(libraryStore);
-  const { playQueue, tempQueue, currentSong } = storeToRefs(playbackStore);
+  const collectionsStore = useCollectionsStore();
+  const { canonicalSongPaths } = storeToRefs(libraryStore);
+  const { currentSong, playQueuePaths, tempQueuePaths } = storeToRefs(playbackStore);
   let libraryScanBatchFlushTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingLibraryScanSongs = new Map<string, Song>();
   const pendingLibraryScanDeletedPaths = new Set<string>();
-  const pendingLibraryScanFallbackSongs = new Map<string, Song>();
 
   const refreshStateSongReferences = (fallbackSongs: Song[] = []) => {
     const lookup = createSongLookup(fallbackSongs);
 
-    sourceSongs.value = sourceSongs.value
-      .map(song => lookup.get(song.path))
-      .filter((song): song is Song => !!song);
-    playQueue.value = playQueue.value
-      .map(song => lookup.get(song.path))
-      .filter((song): song is Song => !!song);
-    tempQueue.value = tempQueue.value
-      .map(song => lookup.get(song.path))
-      .filter((song): song is Song => !!song);
-
     if (currentSong.value?.path) {
-      currentSong.value = lookup.get(currentSong.value.path) ?? null;
+      currentSong.value = lookup.get(currentSong.value.path) ?? currentSong.value;
     }
   };
 
@@ -47,29 +40,30 @@ export const createPlayerLibraryBatch = ({
     }
 
     if (pendingLibraryScanSongs.size === 0 && pendingLibraryScanDeletedPaths.size === 0) {
-      pendingLibraryScanFallbackSongs.clear();
       return;
     }
 
-    const startTime = import.meta.env.DEV ? performance.now() : 0;
+    const startTime = isProfilingEnabled() ? performance.now() : 0;
     const pendingSongsCount = pendingLibraryScanSongs.size;
     const pendingDeletedCount = pendingLibraryScanDeletedPaths.size;
 
-    // 局部增量 Patch 写入，避免 O(N^2) 的全量重建
-    libraryStore.patchLibrarySongs({
-      songs: Array.from(pendingLibraryScanSongs.values()),
+    libraryStore.patchLibrarySongPaths({
+      added_paths: Array.from(pendingLibraryScanSongs.keys()),
       deleted_paths: Array.from(pendingLibraryScanDeletedPaths.values()),
     });
-
-    refreshStateSongReferences(Array.from(pendingLibraryScanFallbackSongs.values()));
+    const activeSongUpdate = currentSong.value?.path
+      ? pendingLibraryScanSongs.get(currentSong.value.path)
+      : null;
+    if (activeSongUpdate) {
+      currentSong.value = activeSongUpdate;
+    }
 
     pendingLibraryScanSongs.clear();
     pendingLibraryScanDeletedPaths.clear();
-    pendingLibraryScanFallbackSongs.clear();
 
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       const duration = performance.now() - startTime;
-      console.log(`[Profiling] flushBufferedLibraryScanBatch took ${duration.toFixed(2)}ms (added/updated batch: ${pendingSongsCount}, deleted: ${pendingDeletedCount}, total canonical: ${canonicalSongs.value.length})`);
+      console.log(`[Profiling] flushBufferedLibraryScanBatch took ${duration.toFixed(2)}ms (added/updated batch: ${pendingSongsCount}, deleted: ${pendingDeletedCount}, total canonical: ${canonicalSongPaths.value.length})`);
     }
   };
 
@@ -89,14 +83,27 @@ export const createPlayerLibraryBatch = ({
     for (const deletedPath of payload.deleted_paths ?? []) {
       pendingLibraryScanDeletedPaths.add(deletedPath);
       pendingLibraryScanSongs.delete(deletedPath);
-      pendingLibraryScanFallbackSongs.delete(deletedPath);
+    }
+
+    const deletedPaths = Array.from(pendingLibraryScanDeletedPaths);
+    if (deletedPaths.length > 0) {
+      const deletedSet = new Set(deletedPaths);
+      removeSongPathsFromPlaybackState({
+        playQueuePaths,
+        tempQueuePaths,
+        currentSong,
+      }, deletedPaths);
+      collectionsStore.favoritePaths = collectionsStore.favoritePaths.filter(path => !deletedSet.has(path));
+      collectionsStore.playlists.forEach((playlist) => {
+        playlist.songPaths = playlist.songPaths.filter(path => !deletedSet.has(path));
+      });
+      collectionsStore.recentSongs = collectionsStore.recentSongs.filter(item => !deletedSet.has(item.path));
     }
 
     for (const song of incomingSongs) {
       if (!song?.path) continue;
       pendingLibraryScanDeletedPaths.delete(song.path);
       pendingLibraryScanSongs.set(song.path, song);
-      pendingLibraryScanFallbackSongs.set(song.path, song);
     }
 
     scheduleLibraryScanBatchFlush();
@@ -109,7 +116,6 @@ export const createPlayerLibraryBatch = ({
     }
     pendingLibraryScanSongs.clear();
     pendingLibraryScanDeletedPaths.clear();
-    pendingLibraryScanFallbackSongs.clear();
   };
 
   return {

@@ -1,8 +1,9 @@
 import type { Ref } from 'vue';
 
 import type { Song } from '../../types';
-import { useLibraryStore } from '../library/store';
 import { useToast } from '../../composables/toast';
+import { tauriInvoke } from '../../services/tauri/invoke';
+import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver';
 
 interface PlayerPlaybackApi {
   playSong: (song: Song, options?: {
@@ -28,6 +29,7 @@ interface PlayerQueueApi {
   removeSongFromQueue: (song: Song) => void;
   addSongToQueue: (song: Song) => void;
   addSongsToQueue: (songs: Song[]) => void;
+  addSongPathsToQueue: (paths: string[]) => void;
 }
 
 interface PlayerUiShellApi {
@@ -58,7 +60,7 @@ export function usePlaybackActions({
 }: UsePlaybackActionsOptions) {
   const handleAutoNext = () => {
     if (playMode.value === 1 && currentSong.value) {
-      void getPlayerPlayback().playSong(currentSong.value);
+      void getPlayerPlayback().playSong(currentSong.value, { preserveQueue: true });
       return;
     }
 
@@ -90,20 +92,19 @@ export function usePlaybackActions({
   const removeSongFromQueue = (song: Song) => getPlayerQueue().removeSongFromQueue(song);
   const addSongToQueue = (song: Song) => getPlayerQueue().addSongToQueue(song);
   const addSongsToQueue = (songs: Song[]) => getPlayerQueue().addSongsToQueue(songs);
+  const addSongPathsToQueue = (paths: string[]) => getPlayerQueue().addSongPathsToQueue(paths);
 
-  const addAlbumToQueueTail = (song: Song) => {
-    const libraryStore = useLibraryStore();
+  const addAlbumToQueueTail = async (song: Song) => {
     const { showToast } = useToast();
+    const { loadSongs } = useLibrarySongResolver();
 
     if (!song) return;
 
     const albumKey = song.album_key || `${song.album || 'Unknown'}::${song.album_artist || song.artist || 'Unknown'}`;
     if (!albumKey) return;
 
-    const albumSongs = libraryStore.canonicalSongs.filter((s) => {
-      const sAlbumKey = s.album_key || `${s.album || 'Unknown'}::${s.album_artist || s.artist || 'Unknown'}`;
-      return sAlbumKey === albumKey;
-    });
+    const albumPaths = await tauriInvoke('get_library_song_paths_by_album', { albumKey });
+    const albumSongs = await loadSongs(albumPaths);
 
     if (albumSongs.length === 0) {
       showToast('未找到该专辑的歌曲', 'info');
@@ -167,6 +168,7 @@ export function usePlaybackActions({
     removeSongFromQueue,
     addSongToQueue,
     addSongsToQueue,
+    addSongPathsToQueue,
     addAlbumToQueueTail,
     seekTo,
     playAt,

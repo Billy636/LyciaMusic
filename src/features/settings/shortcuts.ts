@@ -6,6 +6,7 @@ import type {
 } from '../../types';
 
 export const shortcutActionOrder: ShortcutActionId[] = [
+  'toggleMainWindow',
   'togglePlay',
   'prevSong',
   'nextSong',
@@ -13,11 +14,14 @@ export const shortcutActionOrder: ShortcutActionId[] = [
   'volumeDown',
   'toggleMiniMode',
   'toggleFavorite',
+  'addSongHighlight',
+  'playSongHighlight',
   'toggleDesktopLyrics',
   'toggleDesktopLyricsLock',
 ];
 
 export const shortcutActionLabels: Record<ShortcutActionId, string> = {
+  toggleMainWindow: '显示/收起主窗口',
   togglePlay: '播放/暂停',
   prevSong: '上一首',
   nextSong: '下一首',
@@ -25,6 +29,8 @@ export const shortcutActionLabels: Record<ShortcutActionId, string> = {
   volumeDown: '音量减',
   toggleMiniMode: 'mini/完整模式',
   toggleFavorite: '喜欢歌曲',
+  addSongHighlight: '添加/更新高潮点',
+  playSongHighlight: '跳到主高潮并播放',
   toggleDesktopLyrics: '打开/关闭歌词',
   toggleDesktopLyricsLock: '锁定/解锁桌面歌词',
 };
@@ -45,6 +51,7 @@ const cloneShortcutBinding = (binding: ShortcutBinding | null): ShortcutBinding 
 );
 
 const createShortcutBindingMap = (bindings: ShortcutBindingMap): ShortcutBindingMap => ({
+  toggleMainWindow: cloneShortcutBinding(bindings.toggleMainWindow),
   togglePlay: cloneShortcutBinding(bindings.togglePlay),
   prevSong: cloneShortcutBinding(bindings.prevSong),
   nextSong: cloneShortcutBinding(bindings.nextSong),
@@ -52,11 +59,14 @@ const createShortcutBindingMap = (bindings: ShortcutBindingMap): ShortcutBinding
   volumeDown: cloneShortcutBinding(bindings.volumeDown),
   toggleMiniMode: cloneShortcutBinding(bindings.toggleMiniMode),
   toggleFavorite: cloneShortcutBinding(bindings.toggleFavorite),
+  addSongHighlight: cloneShortcutBinding(bindings.addSongHighlight),
+  playSongHighlight: cloneShortcutBinding(bindings.playSongHighlight),
   toggleDesktopLyrics: cloneShortcutBinding(bindings.toggleDesktopLyrics),
   toggleDesktopLyricsLock: cloneShortcutBinding(bindings.toggleDesktopLyricsLock),
 });
 
 export const defaultLocalShortcutBindings: ShortcutBindingMap = {
+  toggleMainWindow: createShortcutBinding('KeyW', { ctrl: true }),
   togglePlay: createShortcutBinding('Space'),
   prevSong: createShortcutBinding('ArrowLeft', { ctrl: true }),
   nextSong: createShortcutBinding('ArrowRight', { ctrl: true }),
@@ -64,11 +74,14 @@ export const defaultLocalShortcutBindings: ShortcutBindingMap = {
   volumeDown: createShortcutBinding('ArrowDown', { ctrl: true }),
   toggleMiniMode: createShortcutBinding('KeyM', { ctrl: true }),
   toggleFavorite: createShortcutBinding('KeyL', { ctrl: true }),
+  addSongHighlight: createShortcutBinding('KeyM'),
+  playSongHighlight: createShortcutBinding('KeyM', { shift: true }),
   toggleDesktopLyrics: createShortcutBinding('KeyD', { ctrl: true }),
   toggleDesktopLyricsLock: createShortcutBinding('KeyD', { ctrl: true, shift: true }),
 };
 
 export const defaultGlobalShortcutBindings: ShortcutBindingMap = {
+  toggleMainWindow: null,
   togglePlay: createShortcutBinding('KeyP', { ctrl: true, alt: true }),
   prevSong: createShortcutBinding('ArrowLeft', { ctrl: true, alt: true }),
   nextSong: createShortcutBinding('ArrowRight', { ctrl: true, alt: true }),
@@ -76,6 +89,8 @@ export const defaultGlobalShortcutBindings: ShortcutBindingMap = {
   volumeDown: createShortcutBinding('ArrowDown', { ctrl: true, alt: true }),
   toggleMiniMode: createShortcutBinding('KeyM', { ctrl: true, alt: true }),
   toggleFavorite: createShortcutBinding('KeyL', { ctrl: true, alt: true }),
+  addSongHighlight: null,
+  playSongHighlight: null,
   toggleDesktopLyrics: createShortcutBinding('KeyD', { ctrl: true, alt: true }),
   toggleDesktopLyricsLock: null,
 };

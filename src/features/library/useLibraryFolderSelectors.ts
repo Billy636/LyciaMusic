@@ -34,9 +34,21 @@ export function useLibraryFolderSelectors({
   folderSortMode,
   folderCustomOrder,
 }: UseLibraryFolderSelectorsOptions) {
+  const lookupSong = (path: string): Song | null => {
+    const direct = songLookup.value.get(path);
+    if (direct) return direct;
+    const normalized = path.replace(/\\/g, '/').toLowerCase();
+    for (const [key, song] of songLookup.value.entries()) {
+      if (key.replace(/\\/g, '/').toLowerCase() === normalized) {
+        return song;
+      }
+    }
+    return null;
+  };
+
   const sourceSongs = computed(() =>
     sourceSongPaths.value
-      .map(path => songLookup.value.get(path))
+      .map(path => lookupSong(path))
       .filter((song): song is Song => !!song),
   );
 
@@ -46,24 +58,27 @@ export function useLibraryFolderSelectors({
     }
 
     const paths = sourceSongPaths.value.filter(path => isDirectParent(currentFolderFilter.value, path));
+    if (folderSortMode.value !== 'custom' && songLookup.value.size === 0) {
+      return paths;
+    }
 
     if (folderSortMode.value === 'title') {
-      return sortItemsByAlphabetIndex(paths, (path) => getSongTitleLabel(songLookup.value.get(path)!));
+      return sortItemsByAlphabetIndex(paths, (path) => getSongTitleLabel(lookupSong(path), path));
     }
 
     if (folderSortMode.value === 'name') {
-      return sortItemsByAlphabetIndex(paths, (path) => getSongFileNameLabel(songLookup.value.get(path)!));
+      return sortItemsByAlphabetIndex(paths, (path) => getSongFileNameLabel(lookupSong(path), path));
     }
 
     if (folderSortMode.value === 'artist') {
       return [...paths].sort((left, right) =>
-        (songLookup.value.get(left)?.artist || '').localeCompare(songLookup.value.get(right)?.artist || '', 'zh-CN'),
+        (lookupSong(left)?.artist || '').localeCompare(lookupSong(right)?.artist || '', 'zh-CN'),
       );
     }
 
     if (folderSortMode.value === 'added_at') {
       return [...paths].sort((left, right) =>
-        (songLookup.value.get(right)?.added_at || 0) - (songLookup.value.get(left)?.added_at || 0),
+        (lookupSong(right)?.added_at || 0) - (lookupSong(left)?.added_at || 0),
       );
     }
 
@@ -105,7 +120,7 @@ export function useLibraryFolderSelectors({
 
   const currentFolderSongs = computed(() =>
     currentFolderSongPaths.value
-      .map(path => songLookup.value.get(path))
+      .map(path => lookupSong(path))
       .filter((song): song is Song => !!song),
   );
 

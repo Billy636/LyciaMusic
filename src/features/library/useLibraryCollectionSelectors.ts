@@ -39,7 +39,7 @@ export function useLibraryCollectionSelectors({
 
   const favoriteSongPaths = computed(() => {
     const favoritePathSet = new Set(favoritePaths.value);
-    return canonicalSongPaths.value.filter(path => favoritePathSet.has(path) && songLookup.value.has(path));
+    return canonicalSongPaths.value.filter(path => favoritePathSet.has(path));
   });
 
   const favoriteSongList = computed(() =>

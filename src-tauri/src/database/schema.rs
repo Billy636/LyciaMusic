@@ -101,6 +101,18 @@ pub(crate) fn ensure_base_schema(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
 
+    // Matches the default all-songs ORDER BY exactly, avoiding a temporary sort B-tree
+    // for the most common first-page query without changing title ordering semantics.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_songs_all_view_title
+         ON songs (
+           COALESCE(NULLIF(TRIM(title), ''), path) COLLATE NOCASE,
+           path COLLATE NOCASE
+         )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS song_artists (
             song_id INTEGER NOT NULL,
@@ -113,6 +125,104 @@ pub(crate) fn ensure_base_schema(conn: &Connection) -> Result<(), String> {
         [],
     )
     .map_err(|e| e.to_string())?;
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS song_search_index (
+            song_id INTEGER PRIMARY KEY,
+            title_full TEXT NOT NULL DEFAULT '',
+            title_initials TEXT NOT NULL DEFAULT '',
+            artist_full TEXT NOT NULL DEFAULT '',
+            artist_initials TEXT NOT NULL DEFAULT '',
+            album_full TEXT NOT NULL DEFAULT '',
+            album_initials TEXT NOT NULL DEFAULT '',
+            album_artist_full TEXT NOT NULL DEFAULT '',
+            album_artist_initials TEXT NOT NULL DEFAULT '',
+            literal_text TEXT NOT NULL DEFAULT '',
+            title_sort_key TEXT NOT NULL DEFAULT '',
+            index_version INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS song_search_fts USING fts5(
+            title_full,
+            title_initials,
+            artist_full,
+            artist_initials,
+            album_full,
+            album_initials,
+            album_artist_full,
+            album_artist_initials,
+            content='song_search_index',
+            content_rowid='song_id',
+            tokenize='unicode61 remove_diacritics 2'
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS song_search_literal_fts USING fts5(
+            literal_text,
+            content='song_search_index',
+            content_rowid='song_id',
+            tokenize='trigram'
+        );
+        CREATE TABLE IF NOT EXISTS song_search_meta (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            index_version INTEGER NOT NULL DEFAULT 1,
+            complete INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT OR IGNORE INTO song_search_meta(id, index_version, complete) VALUES (1, 1, 0);
+        CREATE TRIGGER IF NOT EXISTS song_search_index_ai AFTER INSERT ON song_search_index BEGIN
+            INSERT INTO song_search_fts(
+                rowid, title_full, title_initials, artist_full, artist_initials,
+                album_full, album_initials, album_artist_full, album_artist_initials
+            ) VALUES (
+                new.song_id, new.title_full, new.title_initials, new.artist_full, new.artist_initials,
+                new.album_full, new.album_initials, new.album_artist_full, new.album_artist_initials
+            );
+            INSERT INTO song_search_literal_fts(rowid, literal_text)
+            VALUES (new.song_id, new.literal_text);
+        END;
+        CREATE TRIGGER IF NOT EXISTS song_search_index_ad AFTER DELETE ON song_search_index BEGIN
+            INSERT INTO song_search_fts(
+                song_search_fts, rowid, title_full, title_initials, artist_full, artist_initials,
+                album_full, album_initials, album_artist_full, album_artist_initials
+            ) VALUES (
+                'delete', old.song_id, old.title_full, old.title_initials, old.artist_full,
+                old.artist_initials, old.album_full, old.album_initials,
+                old.album_artist_full, old.album_artist_initials
+            );
+            INSERT INTO song_search_literal_fts(song_search_literal_fts, rowid, literal_text)
+            VALUES ('delete', old.song_id, old.literal_text);
+        END;
+        CREATE TRIGGER IF NOT EXISTS song_search_index_au AFTER UPDATE ON song_search_index BEGIN
+            INSERT INTO song_search_fts(
+                song_search_fts, rowid, title_full, title_initials, artist_full, artist_initials,
+                album_full, album_initials, album_artist_full, album_artist_initials
+            ) VALUES (
+                'delete', old.song_id, old.title_full, old.title_initials, old.artist_full,
+                old.artist_initials, old.album_full, old.album_initials,
+                old.album_artist_full, old.album_artist_initials
+            );
+            INSERT INTO song_search_literal_fts(song_search_literal_fts, rowid, literal_text)
+            VALUES ('delete', old.song_id, old.literal_text);
+            INSERT INTO song_search_fts(
+                rowid, title_full, title_initials, artist_full, artist_initials,
+                album_full, album_initials, album_artist_full, album_artist_initials
+            ) VALUES (
+                new.song_id, new.title_full, new.title_initials, new.artist_full, new.artist_initials,
+                new.album_full, new.album_initials, new.album_artist_full, new.album_artist_initials
+            );
+            INSERT INTO song_search_literal_fts(rowid, literal_text)
+            VALUES (new.song_id, new.literal_text);
+        END;
+        CREATE TRIGGER IF NOT EXISTS songs_search_fields_au
+        AFTER UPDATE OF path, title, artist, artist_names, effective_artist_names, album, album_artist ON songs
+        BEGIN
+            DELETE FROM song_search_index WHERE song_id = new.id;
+            UPDATE song_search_meta SET complete = 0 WHERE id = 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS songs_search_ai AFTER INSERT ON songs
+        BEGIN
+            UPDATE song_search_meta SET complete = 0 WHERE id = 1;
+        END;",
+    )
+    .map_err(|error| error.to_string())?;
 
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_song_artists_artist_id ON song_artists(artist_id)",
@@ -346,5 +456,75 @@ pub(crate) fn ensure_base_schema(conn: &Connection) -> Result<(), String> {
     )
     .ok();
 
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS song_highlight_identities (
+            content_hash TEXT PRIMARY KEY,
+            file_size INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS song_highlight_paths (
+            path TEXT PRIMARY KEY,
+            content_hash TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            file_modified_at INTEGER NOT NULL,
+            FOREIGN KEY(content_hash) REFERENCES song_highlight_identities(content_hash) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_song_highlight_paths_hash
+            ON song_highlight_paths(content_hash);
+        CREATE TABLE IF NOT EXISTS song_highlight_markers (
+            id TEXT PRIMARY KEY,
+            content_hash TEXT NOT NULL,
+            position_ms INTEGER NOT NULL,
+            is_primary INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(content_hash) REFERENCES song_highlight_identities(content_hash) ON DELETE CASCADE,
+            CONSTRAINT check_song_highlight_position CHECK (position_ms >= 0),
+            CONSTRAINT check_song_highlight_primary CHECK (is_primary IN (0, 1))
+        );
+        CREATE INDEX IF NOT EXISTS idx_song_highlight_markers_hash_position
+            ON song_highlight_markers(content_hash, position_ms);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_song_highlight_one_primary
+            ON song_highlight_markers(content_hash) WHERE is_primary = 1;",
+    )
+    .map_err(|error| error.to_string())?;
+
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_all_view_order_uses_covering_expression_index() {
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+        ensure_base_schema(&conn).expect("create schema");
+        let mut statement = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT path FROM songs
+                 ORDER BY COALESCE(NULLIF(TRIM(title), ''), path) COLLATE NOCASE ASC,
+                          path COLLATE NOCASE ASC
+                 LIMIT 128",
+            )
+            .expect("prepare query plan");
+        let plan = statement
+            .query_map([], |row| row.get::<_, String>(3))
+            .expect("load query plan")
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+
+        assert!(
+            plan.iter()
+                .any(|detail| detail.contains("idx_songs_all_view_title")),
+            "title index missing from query plan: {plan:?}"
+        );
+        assert!(
+            plan.iter()
+                .all(|detail| !detail.contains("USE TEMP B-TREE")),
+            "default title order still allocates a temp sort: {plan:?}"
+        );
+    }
 }

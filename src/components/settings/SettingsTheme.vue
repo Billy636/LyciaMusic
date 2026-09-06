@@ -6,10 +6,12 @@ const TEXT = {
   paletteTitle: '\u914d\u8272\u65b9\u6848',
   darkScheme: '\u6df1\u8272',
   lightScheme: '\u6d45\u8272',
+  systemScheme: '\u8ddf\u968f\u7cfb\u7edf',
   customEmoji: '\u{1F3A8}',
   customTitle: '\u81ea\u5b9a\u4e49\u76ae\u80a4',
   customHint: '\u4f7f\u7528\u56fe\u7247\u3001\u906e\u7f69\u548c\u524d\u666f\u6837\u5f0f',
   customShort: '\u81ea\u5b9a\u4e49',
+  editCustom: '\u4fee\u6539\u81ea\u5b9a\u4e49\u76ae\u80a4',
   dynamicTitle: '\u52a8\u6001\u80cc\u666f',
   dynamicHint: '\u8ddf\u968f\u5c01\u9762\u53d8\u5316',
   dynamicOff: '\u5173\u95ed',
@@ -22,23 +24,6 @@ const TEXT = {
   windowMaterialTransparencyHint: '\u9700\u5728\u7cfb\u7edf\u8bbe\u7f6e\u4e2d\u5f00\u542f\u900f\u660e\u6548\u679c\u540e\u624d\u53ef\u7528\u3002',
   windowMaterialConflictHint: '\u5173\u95ed\u52a8\u6001\u80cc\u666f\u6216\u81ea\u5b9a\u4e49\u76ae\u80a4\u540e\u53ef\u7528\u3002',
   windowMaterialWin11Only: '\u4ec5 Windows 11 \u652f\u6301',
-};
-
-const FLOW_TEXT = {
-  panelTitle: '\u6d41\u5149\u5fae\u8c03',
-  colorBoost: '\u8272\u5f69\u5f3a\u5ea6',
-  depth: '\u660e\u6697\u6df1\u5ea6',
-  speed: '\u6d41\u52a8\u901f\u5ea6',
-  texture: '\u7eb9\u7406\u5f3a\u5ea6',
-  subtle: '\u67d4\u548c',
-  vivid: '\u9c9c\u8273',
-  airy: '\u901a\u900f',
-  deep: '\u6df1\u9083',
-  calm: '\u8212\u7f13',
-  brisk: '\u7075\u52a8',
-  clean: '\u5e72\u51c0',
-  textured: '\u7ec6\u817b',
-  toggleLabel: '\u5c55\u5f00\u6216\u6536\u8d77\u6d41\u5149\u5fae\u8c03',
 };
 
 const BLUR_TEXT = {
@@ -59,19 +44,14 @@ const {
   getWindowMaterialModeDisabledReason,
   windowMaterialDisabledReason,
   isDynamicBgDisabled,
-  showFlowTuning,
   showBlurTuning,
   setColorScheme,
   setDynamicType,
   toggleWindowMaterial,
   openCustomModal,
-  toggleFlowTuning,
   toggleBlurTuning,
-  setFlowColorBoost,
-  setFlowDepth,
-  setFlowSpeed,
-  setFlowTexture,
   setWindowBlurTint,
+  toggleRetainMaterialOnUnfocus,
 } = useSettingsThemeControls();
 </script>
 
@@ -83,7 +63,17 @@ const {
         {{ TEXT.paletteTitle }}
       </h2>
       <div class="">
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <button
+            type="button"
+            class="group flex flex-col items-start gap-2 rounded-xl border px-4 py-3 text-left transition-all"
+            :class="colorScheme === 'system' ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm text-[#EC4141]' : 'border-white/30 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/5 dark:hover:border-white/10 dark:hover:bg-white/10 text-gray-800 dark:text-gray-200'"
+            @click="setColorScheme('system')"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 opacity-90 transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8"></path><path d="M12 16v4"></path></svg>
+            <span class="text-sm font-semibold">{{ TEXT.systemScheme }}</span>
+          </button>
+
           <button
             type="button"
             class="group flex flex-col items-start gap-2 rounded-xl border px-4 py-3 text-left transition-all"
@@ -104,15 +94,39 @@ const {
             <span class="text-sm font-semibold">{{ TEXT.lightScheme }}</span>
           </button>
 
-          <button
-            type="button"
-            class="group flex flex-col items-start gap-2 rounded-xl border px-4 py-3 text-left transition-all"
-            :class="colorScheme === 'custom' ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm text-[#EC4141]' : 'border-white/30 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/5 dark:hover:border-white/10 dark:hover:bg-white/10 text-gray-800 dark:text-gray-200'"
-            @click="setColorScheme('custom'); openCustomModal()"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 opacity-90 transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.38 3.46L16 2a4 4 0 01-8 0L3.62 3.46a2 2 0 00-1.34 2.23l.58 3.47a1 1 0 00.99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 002-2V10h2.15a1 1 0 00.99-.84l.58-3.47a2 2 0 00-1.34-2.23z"></path></svg>
-            <span class="text-sm font-semibold">{{ TEXT.customShort }}</span>
-          </button>
+          <div class="relative">
+            <button
+              type="button"
+              class="group flex w-full flex-col items-start gap-2 rounded-xl border px-4 py-3 pr-12 text-left transition-all"
+              :class="colorScheme === 'custom' ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm text-[#EC4141]' : 'border-white/30 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/5 dark:hover:border-white/10 dark:hover:bg-white/10 text-gray-800 dark:text-gray-200'"
+              @click="setColorScheme('custom')"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 opacity-90 transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.38 3.46L16 2a4 4 0 01-8 0L3.62 3.46a2 2 0 00-1.34 2.23l.58 3.47a1 1 0 00.99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 002-2V10h2.15a1 1 0 00.99-.84l.58-3.47a2 2 0 00-1.34-2.23z"></path></svg>
+              <span class="text-sm font-semibold">{{ TEXT.customShort }}</span>
+            </button>
+
+            <button
+              type="button"
+              class="absolute bottom-3 right-3 rounded-full p-1 text-[#EC4141]/70 opacity-60 transition-all duration-300 hover:bg-[#EC4141]/10 hover:opacity-100 focus-visible:bg-[#EC4141]/10 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EC4141]/40"
+              :title="TEXT.editCustom"
+              :aria-label="TEXT.editCustom"
+              @click.stop="openCustomModal"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -149,37 +163,16 @@ const {
               <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicOff }}</div>
             </button>
 
-            <div class="relative">
-              <button
-                type="button"
-                class="w-full rounded-xl border px-4 py-3 pr-12 text-left transition-all"
-                :class="theme.dynamicBgType === 'flow'
-                  ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm'
-                  : 'border-gray-200/70 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/10 dark:hover:bg-white/10'"
-                @click="setDynamicType('flow')"
-              >
-                <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicFlow }}</div>
-              </button>
-
-              <button
-                type="button"
-                class="absolute bottom-3 right-3 rounded-full p-1 text-[#EC4141]/70 opacity-40 transition-all duration-300 hover:bg-[#EC4141]/10 hover:opacity-100"
-                :class="showFlowTuning && theme.dynamicBgType === 'flow' ? 'bg-[#EC4141]/10 opacity-100' : ''"
-                :aria-label="FLOW_TEXT.toggleLabel"
-                @click.stop="toggleFlowTuning"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-4 w-4 transition-transform duration-300"
-                  :class="showFlowTuning && theme.dynamicBgType === 'flow' ? 'rotate-180' : ''"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-            </div>
+            <button
+              type="button"
+              class="rounded-xl border px-4 py-3 text-left transition-all"
+              :class="theme.dynamicBgType === 'flow'
+                ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm'
+                : 'border-gray-200/70 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/10 dark:hover:bg-white/10'"
+              @click="setDynamicType('flow')"
+            >
+              <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicFlow }}</div>
+            </button>
 
             <button
               type="button"
@@ -192,113 +185,6 @@ const {
               <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicBlur }}</div>
             </button>
           </div>
-
-          <transition name="flow-panel">
-            <div
-              v-if="theme.dynamicBgType === 'flow' && showFlowTuning && !isDynamicBgDisabled"
-              class="mt-4 rounded-2xl border border-[#EC4141]/15 bg-white/50 p-4 shadow-sm dark:border-white/8 dark:bg-black/25"
-            >
-              <div class="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <div class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ FLOW_TEXT.panelTitle }}</div>
-                  <div class="text-xs text-gray-600 dark:text-white/60">Lycia Flow</div>
-                </div>
-                <div class="rounded-full bg-[#EC4141]/10 px-2.5 py-1 text-[11px] font-medium text-[#EC4141]">
-                  {{ theme.flowColorBoost }} / {{ theme.flowDepth }} / {{ theme.flowSpeed }} / {{ theme.flowTexture }}
-                </div>
-              </div>
-
-              <div class="space-y-4">
-              <label class="block">
-                <div class="mb-1.5 flex items-center justify-between gap-4">
-                  <div>
-                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ FLOW_TEXT.colorBoost }}</div>
-                  </div>
-                  <div class="text-xs font-medium tabular-nums text-[#EC4141]">{{ theme.flowColorBoost }}</div>
-                </div>
-                <input
-                  :value="theme.flowColorBoost"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  class="flow-slider"
-                  @input="setFlowColorBoost(Number(($event.target as HTMLInputElement).value))"
-                />
-                <div class="mt-1 flex items-center justify-between text-[11px] text-gray-500 dark:text-white/50">
-                  <span>{{ FLOW_TEXT.subtle }}</span>
-                  <span>{{ FLOW_TEXT.vivid }}</span>
-                </div>
-              </label>
-
-              <label class="block">
-                <div class="mb-1.5 flex items-center justify-between gap-4">
-                  <div>
-                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ FLOW_TEXT.depth }}</div>
-                  </div>
-                  <div class="text-xs font-medium tabular-nums text-[#EC4141]">{{ theme.flowDepth }}</div>
-                </div>
-                <input
-                  :value="theme.flowDepth"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  class="flow-slider"
-                  @input="setFlowDepth(Number(($event.target as HTMLInputElement).value))"
-                />
-                <div class="mt-1 flex items-center justify-between text-[11px] text-gray-500 dark:text-white/50">
-                  <span>{{ FLOW_TEXT.airy }}</span>
-                  <span>{{ FLOW_TEXT.deep }}</span>
-                </div>
-              </label>
-
-              <label class="block">
-                <div class="mb-1.5 flex items-center justify-between gap-4">
-                  <div>
-                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ FLOW_TEXT.speed }}</div>
-                  </div>
-                  <div class="text-xs font-medium tabular-nums text-[#EC4141]">{{ theme.flowSpeed }}</div>
-                </div>
-                <input
-                  :value="theme.flowSpeed"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  class="flow-slider"
-                  @input="setFlowSpeed(Number(($event.target as HTMLInputElement).value))"
-                />
-                <div class="mt-1 flex items-center justify-between text-[11px] text-gray-500 dark:text-white/50">
-                  <span>{{ FLOW_TEXT.calm }}</span>
-                  <span>{{ FLOW_TEXT.brisk }}</span>
-                </div>
-              </label>
-
-              <label class="block">
-                <div class="mb-1.5 flex items-center justify-between gap-4">
-                  <div>
-                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ FLOW_TEXT.texture }}</div>
-                  </div>
-                  <div class="text-xs font-medium tabular-nums text-[#EC4141]">{{ theme.flowTexture }}</div>
-                </div>
-                <input
-                  :value="theme.flowTexture"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  class="flow-slider"
-                  @input="setFlowTexture(Number(($event.target as HTMLInputElement).value))"
-                />
-                <div class="mt-1 flex items-center justify-between text-[11px] text-gray-500 dark:text-white/50">
-                  <span>{{ FLOW_TEXT.clean }}</span>
-                  <span>{{ FLOW_TEXT.textured }}</span>
-                </div>
-              </label>
-            </div>
-          </div>
-        </transition>
 
       </div>
       </div>
@@ -419,6 +305,33 @@ const {
                 <span>{{ BLUR_TEXT.solid }}</span>
               </div>
             </label>
+          </div>
+        </transition>
+
+        <transition name="flow-panel">
+          <div
+            v-if="materialMode !== 'none'"
+            class="mt-4 flex items-center justify-between rounded-xl border border-gray-200/50 bg-white/20 px-4 py-3 shadow-xs dark:border-white/5 dark:bg-white/5"
+          >
+            <div class="space-y-0.5">
+              <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                失去焦点时保持材质效果
+              </div>
+              <div class="text-xs text-gray-500 dark:text-white/45">
+                关闭后，点击桌面等失焦情况下将变回系统默认的暗淡纯色背景
+              </div>
+            </div>
+            <button
+              type="button"
+              class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none shrink-0"
+              :class="theme.retainMaterialOnUnfocus ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'"
+              @click="toggleRetainMaterialOnUnfocus"
+            >
+              <span
+                class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm"
+                :class="theme.retainMaterialOnUnfocus ? 'translate-x-6' : 'translate-x-1'"
+              />
+            </button>
           </div>
         </transition>
       </div>

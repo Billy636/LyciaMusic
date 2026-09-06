@@ -37,7 +37,82 @@ export interface SongCore {
 
 export interface Song extends SongCore {}
 
-export type LibrarySong = Omit<Song, 'container' | 'codec' | 'file_size' | 'genre' | 'year'>;
+export type LibrarySong = Omit<
+  Song,
+  | 'id'
+  | 'container'
+  | 'codec'
+  | 'file_size'
+  | 'genre'
+  | 'year'
+  | 'remote_source_id'
+  | 'cue_source_path'
+  | 'cue_start_offset'
+  | 'cue_end_offset'
+  | 'comment'
+>;
+
+export interface LibrarySongPage {
+  total: number;
+  offset: number;
+  rows: LibrarySong[];
+}
+
+export interface LibrarySongPathPage {
+  total: number;
+  offset: number;
+  paths: string[];
+}
+
+export interface LibrarySongLabel {
+  path: string;
+  label: string;
+}
+
+export interface SearchIndexStatus {
+  total: number;
+  indexed: number;
+  version: number;
+}
+
+export interface SearchIndexSource {
+  songId: number;
+  path: string;
+  title: string;
+  artistNames: string[];
+  album: string;
+  albumArtist: string;
+  sourceSignature: string;
+}
+
+export interface SearchIndexEntry {
+  songId: number;
+  titleFull: string;
+  titleInitials: string;
+  artistFull: string;
+  artistInitials: string;
+  albumFull: string;
+  albumInitials: string;
+  albumArtistFull: string;
+  albumArtistInitials: string;
+  literalText: string;
+  titleSortKey: string;
+  sourceSignature: string;
+}
+
+export interface SongRuntimeMetadata {
+  id?: number;
+  remote_source_id?: string;
+  cue_source_path?: string;
+  cue_start_offset?: number;
+  cue_end_offset?: number;
+}
+
+export interface SongHighlightMarker {
+  id: string;
+  positionMs: number;
+  isPrimary: boolean;
+}
 
 export interface SongDetail {
   path: string;
@@ -49,6 +124,10 @@ export interface SongDetail {
   container?: string;
   codec?: string;
   file_size?: number;
+  bitrate?: number;
+  sample_rate?: number;
+  bit_depth?: number;
+  format?: string;
 }
 
 export interface ArtistCatalogItem {
@@ -213,9 +292,10 @@ export interface LibraryScanSession {
 }
 
 export interface ThemeSettings {
-  mode: 'light' | 'dark' | 'custom';
+  mode: 'system' | 'light' | 'dark' | 'custom';
   dynamicBgType: 'none' | 'flow' | 'blur';
   windowMaterial: 'none' | 'mica' | 'acrylic' | 'blur';
+  retainMaterialOnUnfocus: boolean;
   flowColorBoost: number;
   flowDepth: number;
   flowSpeed: number;
@@ -226,6 +306,7 @@ export interface ThemeSettings {
   blur: number;         // Legacy field
   customBackground: {
     imagePath: string;
+    mediaType?: 'image' | 'video';
     blur: number;
     opacity: number;
     maskColor: string;
@@ -247,6 +328,7 @@ export interface SidebarSettings {
   showRecent: boolean;
   showFolders: boolean;
   showStatistics: boolean;
+  showPlaylists: boolean;
 }
 
 export type LyricsPlayerAlignment = 'left' | 'center' | 'right';
@@ -297,6 +379,8 @@ export interface DesktopLyricsSettings {
   textShadowColor: string;
   firstLineTextShadowStrength: number;
   secondLineTextShadowStrength: number;
+  textStrokeColor: string;
+  textStrokeDepth: number;
   playerFontScale: number;
   playerLineGap: number;
   playerOffsetX: number;
@@ -336,6 +420,7 @@ export interface AudioSettings {
 }
 
 export type ShortcutActionId =
+  | 'toggleMainWindow'
   | 'togglePlay'
   | 'prevSong'
   | 'nextSong'
@@ -343,6 +428,8 @@ export type ShortcutActionId =
   | 'volumeDown'
   | 'toggleMiniMode'
   | 'toggleFavorite'
+  | 'addSongHighlight'
+  | 'playSongHighlight'
   | 'toggleDesktopLyrics'
   | 'toggleDesktopLyricsLock';
 
@@ -385,9 +472,11 @@ export interface AppSettings {
   sidebar: SidebarSettings;
   shortcuts: ShortcutSettings;
   showTaskbarPlayer: boolean;
+  showTaskbarPlayerIcon: boolean;
   taskbarPlayerCanDrag: boolean;
   gpuAcceleration: boolean;
   writeArtistAvatarToTags: boolean;
+  autoScanLibraryOnStartup: boolean;
 }
 
 export interface SaveArtistAvatarResponse {
@@ -395,4 +484,3 @@ export interface SaveArtistAvatarResponse {
   avatarPath: string;
   taskId?: string;
 }
-

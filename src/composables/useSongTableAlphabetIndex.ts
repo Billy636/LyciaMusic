@@ -15,6 +15,8 @@ import {
   getAlphabetIndexKey,
   type AlphabetIndexKey,
 } from '../utils/alphabetIndex';
+import { isProfilingEnabled } from '../utils/profiling';
+import { getCachedLibrarySongTitleLabel } from './useLibraryAllSongPathCache';
 
 const ROW_HEIGHT = 72;
 const INDEX_PROXIMITY_PX = 72;
@@ -25,6 +27,7 @@ type StringRef = Ref<string> | ComputedRef<string>;
 
 interface UseSongTableAlphabetIndexOptions {
   songs: Ref<Song[]>;
+  songPaths?: Ref<string[]>;
   scrollTop: Ref<number>;
   containerHeight: Ref<number>;
   containerRef: Ref<HTMLElement | null>;
@@ -42,6 +45,7 @@ interface UseSongTableAlphabetIndexOptions {
 
 export function useSongTableAlphabetIndex({
   songs,
+  songPaths,
   scrollTop,
   containerHeight,
   containerRef,
@@ -63,6 +67,10 @@ export function useSongTableAlphabetIndex({
   const hoverIndexKey = ref<AlphabetIndexKey | null>(null);
   const isIndexBarVisible = ref(false);
   let hideIndexBarTimer: ReturnType<typeof setTimeout> | null = null;
+  let firstSongIndexProfileCount = 0;
+  const effectivePaths = computed(() => songPaths?.value?.length
+    ? songPaths.value
+    : songs.value.map(song => song.path));
 
   const indexLabelGetter = computed<((song: Song) => string) | null>(() => {
     if (currentViewMode.value === 'all' && localSortMode.value === 'title') {
@@ -79,37 +87,67 @@ export function useSongTableAlphabetIndex({
   });
 
   const showAlphabetIndex = computed(() =>
-    routePath.value === '/' && !!indexLabelGetter.value && songs.value.length > 0,
+    routePath.value === '/' && !!indexLabelGetter.value && effectivePaths.value.length > 0,
   );
 
+  const getPathIndexLabel = (path: string, index: number) => {
+    const song = songs.value[index];
+    if (song?.path === path && indexLabelGetter.value) {
+      return indexLabelGetter.value(song);
+    }
+    if (currentViewMode.value === 'all' && localSortMode.value === 'title') {
+      return getCachedLibrarySongTitleLabel(path) || path.split(/[/\\]/).pop() || path;
+    }
+    return path.split(/[/\\]/).pop() || path;
+  };
+
   const firstSongIndexByKey = computed(() => {
+    const profileStart = isProfilingEnabled() ? performance.now() : 0;
     const keyMap = new Map<AlphabetIndexKey, number>();
 
     if (!indexLabelGetter.value) {
+      if (isProfilingEnabled()) {
+        firstSongIndexProfileCount += 1;
+        if (firstSongIndexProfileCount <= 3) {
+          console.log(
+            `[Profiling] SongTable firstSongIndexByKey#${firstSongIndexProfileCount} skipped in ${(performance.now() - profileStart).toFixed(2)}ms (songs: ${songs.value.length})`,
+          );
+        }
+      }
       return keyMap;
     }
 
-    songs.value.forEach((song, index) => {
-      const key = getAlphabetIndexKey(indexLabelGetter.value!(song));
+    effectivePaths.value.forEach((path, index) => {
+      const key = getAlphabetIndexKey(getPathIndexLabel(path, index));
       if (!keyMap.has(key)) {
         keyMap.set(key, index);
       }
     });
 
+    if (isProfilingEnabled()) {
+      const duration = performance.now() - profileStart;
+      firstSongIndexProfileCount += 1;
+      if (firstSongIndexProfileCount <= 3 || duration > 8) {
+        console.log(
+          `[Profiling] SongTable firstSongIndexByKey#${firstSongIndexProfileCount} computed in ${duration.toFixed(2)}ms (songs: ${songs.value.length}, keys: ${keyMap.size}, view: ${currentViewMode.value}, sort: ${localSortMode.value}/${folderSortMode.value})`,
+        );
+      }
+    }
+
     return keyMap;
   });
 
   const activeIndexKey = computed<AlphabetIndexKey | null>(() => {
-    if (!indexLabelGetter.value || songs.value.length === 0) {
+    if (!indexLabelGetter.value || effectivePaths.value.length === 0) {
       return null;
     }
 
     const visibleIndex = Math.min(
-      songs.value.length - 1,
+      effectivePaths.value.length - 1,
       Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT)),
     );
 
-    return getAlphabetIndexKey(indexLabelGetter.value(songs.value[visibleIndex]));
+    return getAlphabetIndexKey(getPathIndexLabel(effectivePaths.value[visibleIndex], visibleIndex));
   });
 
   const currentSongIndex = computed(() => {
@@ -117,7 +155,7 @@ export function useSongTableAlphabetIndex({
       return -1;
     }
 
-    return songs.value.findIndex((song) => song.path === currentSong.value?.path);
+    return effectivePaths.value.indexOf(currentSong.value.path);
   });
 
   const normalizePath = (path: string | null | undefined) =>
@@ -185,7 +223,7 @@ export function useSongTableAlphabetIndex({
   const showScrollToTopButton = computed(() =>
     routePath.value === '/' &&
     SCROLL_TO_TOP_VIEW_MODES.has(currentViewMode.value) &&
-    songs.value.length > 0 &&
+    effectivePaths.value.length > 0 &&
     scrollTop.value > ROW_HEIGHT,
   );
 
@@ -292,7 +330,9 @@ export function useSongTableAlphabetIndex({
       scrollFolderTargetsIntoView(targetFolderPath, targetRootPath);
     });
 
-    const refreshedSongIndex = songs.value.findIndex((song) => song.path === currentSong.value?.path);
+    const refreshedSongIndex = currentSong.value?.path
+      ? effectivePaths.value.indexOf(currentSong.value.path)
+      : -1;
     if (refreshedSongIndex >= 0) {
       jumpToSongIndex(refreshedSongIndex);
     }
@@ -355,7 +395,7 @@ export function useSongTableAlphabetIndex({
     }
 
     const songIndex = firstSongIndexByKey.value.get(resolvedKey);
-    if (songIndex !== undefined && songIndex >= 0 && songIndex < songs.value.length) {
+    if (songIndex !== undefined && songIndex >= 0 && songIndex < effectivePaths.value.length) {
       jumpToSongIndex(songIndex);
     }
   };

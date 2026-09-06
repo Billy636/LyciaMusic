@@ -15,6 +15,7 @@ export const useNavigationStore = defineStore('navigation', () => {
   const currentViewMode = ref<NavigationViewMode>('all');
   const filterCondition = ref('');
   const searchQuery = ref('');
+  const searchRevision = ref(0);
   const localMusicTab = ref<'default' | 'artist' | 'album'>('default');
   const currentArtistFilter = ref('');
   const currentAlbumFilter = ref('');
@@ -28,10 +29,15 @@ export const useNavigationStore = defineStore('navigation', () => {
     searchQuery.value = query;
   };
 
+  const refreshSearch = () => {
+    searchRevision.value += 1;
+  };
+
   return {
     currentViewMode,
     filterCondition,
     searchQuery,
+    searchRevision,
     localMusicTab,
     currentArtistFilter,
     currentAlbumFilter,
@@ -41,5 +47,6 @@ export const useNavigationStore = defineStore('navigation', () => {
     recentTab,
     activeRootPath,
     setSearch,
+    refreshSearch,
   };
 });

@@ -2,9 +2,8 @@ use crate::player::equalizer::EqualizerHandle;
 use crate::player::output::{OutputBackend, OutputError};
 use crate::player::types::{SharedProgress, TimedSource};
 use cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use rodio::{OutputStream, OutputStreamHandle, Sink};
 use std::fs::File;
-use std::io::BufReader;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,6 +47,10 @@ impl SharedOutputBackend {
             active_device_name,
         })
     }
+
+    pub(crate) fn has_stream_error(&self) -> bool {
+        self._stream.has_stream_error()
+    }
 }
 
 impl OutputBackend for SharedOutputBackend {
@@ -76,6 +79,8 @@ pub(crate) fn restore_current_playback(
     progress: &Arc<SharedProgress>,
     equalizer_handle: Arc<EqualizerHandle>,
     user_volume: Arc<AtomicU32>,
+    cue_start_offset: Duration,
+    total_duration: Option<Duration>,
 ) {
     if current_path.is_empty() {
         return;
@@ -91,12 +96,15 @@ pub(crate) fn restore_current_playback(
         let jump_target = Duration::from_secs_f64(time_played);
 
         if let Ok(file) = File::open(current_path) {
-            let reader = BufReader::with_capacity(512 * 1024, file);
-            if let Ok(source) = Decoder::new(reader) {
-                let skipped = source.convert_samples::<f32>().skip_duration(jump_target);
-
+            if let Ok(prefetch_source) = crate::player::decoder_thread::create_prefetch_source(
+                file,
+                Some(jump_target),
+                cue_start_offset,
+                total_duration,
+            ) {
                 // 1. Equalizer
-                let eq_source = crate::player::equalizer::Equalizer::new(skipped, equalizer_handle);
+                let eq_source =
+                    crate::player::equalizer::Equalizer::new(prefetch_source, equalizer_handle);
 
                 // 2. UserVolumeSource
                 let vol_source =

@@ -8,6 +8,7 @@ import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useCoverCache } from './useCoverCache';
 import { usePlayer } from './player';
 import { useThemeSettings } from './useThemeSettings';
+import { toggleMainWindowVisibility } from './mainWindowVisibility';
 import { useSettings } from '../features/settings/useSettings';
 import {
   TASKBAR_PLAYER_WINDOW_LABEL,
@@ -18,31 +19,13 @@ import {
   TASKBAR_PLAYER_READY_EVENT,
   TASKBAR_PLAYER_VISIBILITY_EVENT,
   TASKBAR_PLAYER_DRAG_EVENT,
-  TASKBAR_PLAYER_POSITION_X_KEY,
   TASKBAR_PLAYER_WINDOW_WIDTH,
   TASKBAR_PLAYER_WINDOW_HEIGHT,
+  readSavedTaskbarPositionX,
+  type TaskbarTrayGeometry,
   type TaskbarPlayerStatePayload,
   type TaskbarPlayerAction,
 } from '../features/taskbarPlayer/shared';
-
-export type OwnerBindingState = 'bound' | 'failed' | 'unsupported' | 'already_bound';
-export type GeometrySource = 'tray' | 'taskbar_fallback';
-
-export interface RectPhysical {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
-export interface TaskbarTrayGeometry {
-  taskbar_rect_physical: RectPhysical;
-  tray_rect_physical: RectPhysical | null;
-  taskbar_hwnd_changed: boolean;
-  owner_binding: OwnerBindingState;
-  source: GeometrySource;
-  scale_factor: number;
-}
 
 let taskbarPlayerWindowPromise: Promise<WebviewWindow> | null = null;
 let isTaskbarPlayerReady = false;
@@ -50,6 +33,9 @@ let taskbarPlayerReadyPromise: Promise<void> | null = null;
 let resolveTaskbarPlayerReady: (() => void) | null = null;
 let resolveTaskbarPlayerStateApplied: (() => void) | null = null;
 let unlistenScaleChange: (() => void) | null = null;
+
+const TASKBAR_FULLSCREEN_CHECK_INTERVAL_MS = 1_000;
+const TASKBAR_GEOMETRY_FALLBACK_INTERVAL_MS = 10_000;
 
 // 高可用定位并发控制锁
 let isPositioning = false;
@@ -86,21 +72,6 @@ function scheduleTaskbarWindowGeometryStabilization(targetWindow: WebviewWindow)
       void stabilizeTaskbarWindowGeometry(targetWindow);
     }, delay);
   }
-}
-
-// 读取保存的 x 坐标
-function readSavedPositionX(): number | null {
-  if (typeof localStorage === 'undefined') return null;
-  const stored = localStorage.getItem(TASKBAR_PLAYER_POSITION_X_KEY);
-  if (!stored) return null;
-  const parsed = parseInt(stored, 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-// 写入保存的 x 坐标
-export function writeSavedPositionX(x: number) {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(TASKBAR_PLAYER_POSITION_X_KEY, String(Math.round(x)));
 }
 
 // 核心自愈与几何定位控制器（带 pending 控制的并发锁机制）
@@ -180,7 +151,7 @@ async function updatePosition() {
       let x = 0;
       let y = 0;
 
-      const savedX = readSavedPositionX();
+      const savedX = readSavedTaskbarPositionX();
 
       // 多边定位公式单独定义与精细避让
       if (isBottom) {
@@ -348,7 +319,9 @@ export function useTaskbarPlayerBridge() {
   const isTaskbarPlayerVisible = ref(false);
   const unlisteners: Array<() => void> = [];
   let checkTimer: number | null = null;
+  let lastGeometryFallbackAt = 0;
   let isMainWindowClosing = false;
+  let updateSequence = 0;
 
   const createStatePayload = async (): Promise<TaskbarPlayerStatePayload> => {
     const song = currentSong.value;
@@ -366,11 +339,19 @@ export function useTaskbarPlayerBridge() {
     const targetWindow = await getTaskbarPlayerWindow();
     if (!targetWindow) return;
 
+    updateSequence++;
+    const currentSeq = updateSequence;
+
+    const payload = await createStatePayload();
+    if (currentSeq !== updateSequence) {
+      return;
+    }
+
     const appliedPromise = waitForTaskbarPlayerStateApplied();
     await emitTo<TaskbarPlayerStatePayload>(
       TASKBAR_PLAYER_WINDOW_LABEL,
       TASKBAR_PLAYER_STATE_EVENT,
-      await createStatePayload(),
+      payload,
     );
     await appliedPromise;
   };
@@ -386,6 +367,7 @@ export function useTaskbarPlayerBridge() {
     await emitTo(TASKBAR_PLAYER_WINDOW_LABEL, TASKBAR_PLAYER_VISIBILITY_EVENT, { visible: true });
     await targetWindow.show();
     await stabilizeTaskbarWindowGeometry(targetWindow);
+    lastGeometryFallbackAt = Date.now();
     isTaskbarPlayerVisible.value = true;
 
     // 安装 Z-order 守护，防止点击任务栏时播控窗口被遮盖
@@ -408,28 +390,12 @@ export function useTaskbarPlayerBridge() {
     startCheckLoop();
   };
 
-  const hideTaskbarPlayerWindow = async () => {
-    const targetWindow = await getTaskbarPlayerWindow();
-    if (!targetWindow) {
-      isTaskbarPlayerVisible.value = false;
-      return;
-    }
-
-    stopCheckLoop();
-    if (unlistenScaleChange) {
-      unlistenScaleChange();
-      unlistenScaleChange = null;
-    }
-    // 卸载 Z-order 守护
-    void invoke('uninstall_taskbar_zorder_guard').catch(() => {});
-    await emitTo(TASKBAR_PLAYER_WINDOW_LABEL, TASKBAR_PLAYER_VISIBILITY_EVENT, { visible: false });
-    await targetWindow.hide();
-    isTaskbarPlayerVisible.value = false;
-  };
-
   const destroyTaskbarPlayerWindow = async () => {
     const targetWindow = await getTaskbarPlayerWindow();
     if (!targetWindow) {
+      isTaskbarPlayerReady = false;
+      taskbarPlayerReadyPromise = null;
+      resolveTaskbarPlayerReady = null;
       isTaskbarPlayerVisible.value = false;
       return;
     }
@@ -447,11 +413,14 @@ export function useTaskbarPlayerBridge() {
       console.warn('Failed to destroy taskbar player window:', error);
     } finally {
       taskbarPlayerWindowPromise = null;
+      isTaskbarPlayerReady = false;
+      taskbarPlayerReadyPromise = null;
+      resolveTaskbarPlayerReady = null;
       isTaskbarPlayerVisible.value = false;
     }
   };
 
-  // 全屏屏蔽防盖以及秒级自愈对齐复合轮询机制
+  // 全屏切换保持秒级响应；较重的托盘几何查询只做低频兜底，DPI 变化仍由事件立即处理。
   const startCheckLoop = () => {
     if (checkTimer) return;
 
@@ -470,18 +439,23 @@ export function useTaskbarPlayerBridge() {
           if (!isTaskbarPlayerVisible.value) {
             // 对齐一次坐标并显示
             await stabilizeTaskbarWindowGeometry(targetWindow);
+            await emitStateToTaskbarPlayer();
             await targetWindow.show();
             await stabilizeTaskbarWindowGeometry(targetWindow);
             isTaskbarPlayerVisible.value = true;
-          } else if (!isTaskbarPlayerDragging) {
-            // 正常显示状态下，每 1 秒进行位置的静默校验和动态纠偏（应对托盘变化或 Explorer 重建）
+          } else if (
+            !isTaskbarPlayerDragging
+            && Date.now() - lastGeometryFallbackAt >= TASKBAR_GEOMETRY_FALLBACK_INTERVAL_MS
+          ) {
+            // 低频兜底应对托盘变化或 Explorer 重建，避免每秒重复 Win32 几何查询。
+            lastGeometryFallbackAt = Date.now();
             void stabilizeTaskbarWindowGeometry(targetWindow);
           }
         }
       } catch (error) {
         console.warn('Failed in check loop:', error);
       }
-    }, 1000);
+    }, TASKBAR_FULLSCREEN_CHECK_INTERVAL_MS);
   };
 
   const stopCheckLoop = () => {
@@ -493,6 +467,9 @@ export function useTaskbarPlayerBridge() {
 
   const handleAction = async (action: TaskbarPlayerAction) => {
     switch (action.type) {
+      case 'toggle-main-window':
+        await toggleMainWindowVisibility(mainWindow);
+        break;
       case 'toggle-play':
         await togglePlay();
         break;
@@ -560,7 +537,7 @@ export function useTaskbarPlayerBridge() {
         if (enabled) {
           await openTaskbarPlayerWindow();
         } else {
-          await hideTaskbarPlayerWindow();
+          await destroyTaskbarPlayerWindow();
         }
       },
       { immediate: true }

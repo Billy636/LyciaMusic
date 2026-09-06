@@ -30,6 +30,8 @@ export const playbackApi = {
   getPlaybackProgress: (): Promise<number> => tauriInvoke('get_playback_progress'),
   getAudioVisualizerSamples: (): Promise<number[]> =>
     tauriInvoke('get_audio_visualizer_samples'),
+  setAudioVisualizerEnabled: (enabled: boolean): Promise<void> =>
+    tauriInvoke('set_audio_visualizer_enabled', { enabled }),
   recordPlay: (payload: {
     songPath: string;
     listenedMs: number;
@@ -40,7 +42,7 @@ export const playbackApi = {
     trackNumber?: string;
   }) =>
     tauriInvoke('record_play', { payload }),
-  playAudio: (options: PlayAudioOptions): Promise<void> => tauriInvoke('play_audio', options),
+  playAudio: (options: PlayAudioOptions): Promise<number> => tauriInvoke('play_audio', options),
   updatePlaybackMetadata: (options: UpdatePlaybackMetadataOptions): Promise<void> =>
     tauriInvoke('update_playback_metadata', options),
   pauseAudio: (): Promise<void> => tauriInvoke('pause_audio'),

@@ -1,5 +1,5 @@
 use super::super::types::{FolderNode, GeneratedFolder, Song};
-use super::super::utils::{descendant_like_patterns, normalize_path};
+use super::super::utils::{descendant_like_patterns, is_dot_prefixed_path, normalize_path};
 use super::diff::{collect_scan_diff, load_db_snapshot_for_folder};
 use super::parser::parse_audio_files_internal;
 use super::progress::ScanProgressReporter;
@@ -13,6 +13,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
 
+struct ScanDirectoryOutcome {
+    songs: Option<Vec<Song>>,
+    song_count: usize,
+}
+
 pub fn scan_single_directory_internal(
     folder_path: String,
     db_conn: Arc<Mutex<rusqlite::Connection>>,
@@ -21,12 +26,58 @@ pub fn scan_single_directory_internal(
     folder_total: usize,
     options: ScanOptions,
 ) -> Result<Vec<Song>, String> {
+    scan_single_directory_with_mode(
+        folder_path,
+        db_conn,
+        app,
+        folder_index,
+        folder_total,
+        options,
+        true,
+    )
+    .map(|outcome| outcome.songs.unwrap_or_default())
+}
+
+pub(crate) fn scan_single_directory_summary_internal(
+    folder_path: String,
+    db_conn: Arc<Mutex<rusqlite::Connection>>,
+    app: Option<AppHandle>,
+    folder_index: usize,
+    folder_total: usize,
+    options: ScanOptions,
+) -> Result<usize, String> {
+    scan_single_directory_with_mode(
+        folder_path,
+        db_conn,
+        app,
+        folder_index,
+        folder_total,
+        options,
+        false,
+    )
+    .map(|outcome| outcome.song_count)
+}
+
+fn scan_single_directory_with_mode(
+    folder_path: String,
+    db_conn: Arc<Mutex<rusqlite::Connection>>,
+    app: Option<AppHandle>,
+    folder_index: usize,
+    folder_total: usize,
+    options: ScanOptions,
+    return_songs: bool,
+) -> Result<ScanDirectoryOutcome, String> {
     #[cfg(debug_assertions)]
     let start_time = std::time::Instant::now();
 
     let normalized_folder = normalize_path(&folder_path);
     let reporter = app.as_ref().map(|app| {
-        ScanProgressReporter::new(app.clone(), normalized_folder.clone(), folder_index, folder_total)
+        ScanProgressReporter::new(
+            app.clone(),
+            normalized_folder.clone(),
+            folder_index,
+            folder_total,
+        )
     });
 
     let db_snapshot = {
@@ -35,31 +86,47 @@ pub fn scan_single_directory_internal(
     };
 
     let original_db_count = db_snapshot.len();
-    let mut scan_diff = collect_scan_diff(&normalized_folder, db_snapshot, reporter.as_ref(), options)?;
+    let mut scan_diff =
+        collect_scan_diff(&normalized_folder, db_snapshot, reporter.as_ref(), options)?;
+    let song_count = scan_diff.songs.len();
+    if !return_songs {
+        scan_diff.songs = Vec::new();
+    }
 
     let folder_is_accessible =
         Path::new(&normalized_folder).is_dir() && fs::read_dir(&normalized_folder).is_ok();
 
-    if !scan_diff.has_disk_songs && original_db_count > 0 && !folder_is_accessible {
-        let error = "文件夹可能已断开连接或路径错误，未执行删除操作".to_string();
+    if !folder_is_accessible {
+        scan_diff.to_delete.clear();
+        let error = "文件夹可能已断开连接或已被锁定（如 BitLocker），保留已有记录".to_string();
         if let Some(reporter) = reporter.as_ref() {
             reporter.emit_error(error.clone());
         }
-        return Err(error);
+        return Ok(ScanDirectoryOutcome {
+            songs: if return_songs { Some(Vec::new()) } else { None },
+            song_count: original_db_count,
+        });
     }
 
-    let covers_dir = app.as_ref().map(|a| crate::music::covers::get_cover_cache_dir(a));
+    let covers_dir = app
+        .as_ref()
+        .map(|a| crate::music::covers::get_cover_cache_dir(a));
 
     // 按歌曲规范化路径进行稳定排序，保证入库及头像更新时序的唯一性
     scan_diff.to_add.sort_by(|a, b| a.path.cmp(&b.path));
     scan_diff.to_update.sort_by(|a, b| a.path.cmp(&b.path));
 
     // 缓存写盘并在结束后无条件释放字节内存
-    for song in scan_diff.to_add.iter_mut().chain(scan_diff.to_update.iter_mut()) {
+    for song in scan_diff
+        .to_add
+        .iter_mut()
+        .chain(scan_diff.to_update.iter_mut())
+    {
         if let Some(ref bytes) = song.artist_avatar_bytes {
             if let Some(ref dir) = covers_dir {
                 if super::get_song_single_valid_artist(song).is_some() {
-                    song.artist_avatar_path = crate::music::covers::save_artist_avatar_auto(bytes, dir);
+                    song.artist_avatar_path =
+                        crate::music::covers::save_artist_avatar_auto(bytes, dir);
                 }
             }
         }
@@ -90,7 +157,7 @@ pub fn scan_single_directory_internal(
     }
 
     if let Some(reporter) = reporter.as_ref() {
-        reporter.emit_complete(scan_diff.songs.len());
+        reporter.emit_complete(song_count);
     }
 
     #[cfg(debug_assertions)]
@@ -105,7 +172,14 @@ pub fn scan_single_directory_internal(
         );
     }
 
-    Ok(scan_diff.songs)
+    Ok(ScanDirectoryOutcome {
+        songs: if return_songs {
+            Some(scan_diff.songs)
+        } else {
+            None
+        },
+        song_count,
+    })
 }
 
 #[tauri::command]
@@ -223,7 +297,7 @@ fn read_subdirectories(folder_path: &Path) -> Option<Vec<PathBuf>> {
     let mut subdirs: Vec<PathBuf> = read_dir
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
+        .filter(|path| path.is_dir() && !is_dot_prefixed_path(path))
         .collect();
 
     subdirs.sort_by(|left, right| {
@@ -273,7 +347,31 @@ pub fn scan_folder_recursive(
         .map(|name| name.to_string_lossy().into_owned())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| normalized_path.clone());
-    let subdirs = read_subdirectories(&folder_path)?;
+    let song_count = count_songs_recursive(&folder_path, conn);
+    let subdirs_opt = read_subdirectories(&folder_path);
+
+    if subdirs_opt.is_none() {
+        if current_depth == 0 {
+            return Some(FolderNode {
+                name: folder_name,
+                path: normalized_path,
+                children: Vec::new(),
+                child_count: 0,
+                children_loaded: true,
+                song_count,
+                cover_song_path: if song_count > 0 {
+                    find_first_song_recursive(&folder_path, conn)
+                } else {
+                    None
+                },
+                is_expanded: false,
+            });
+        } else {
+            return None;
+        }
+    }
+
+    let subdirs = subdirs_opt.unwrap();
     let child_count = subdirs.len();
     let should_preload_children = current_depth < max_depth;
     let children = if should_preload_children {
@@ -286,7 +384,6 @@ pub fn scan_folder_recursive(
     } else {
         Vec::new()
     };
-    let song_count = count_songs_recursive(&folder_path, conn);
 
     Some(FolderNode {
         name: folder_name,

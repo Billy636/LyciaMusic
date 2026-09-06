@@ -4,7 +4,7 @@ import { emitTo, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 
-import { getNextWheelVolume } from '../../composables/playerUiShell';
+import { getNextWheelVolume } from '../../utils/volume';
 import {
   MINI_PLAYER_ACTION_EVENT,
   MINI_PLAYER_BOUNDS_EVENT,
@@ -21,13 +21,14 @@ import {
   type MiniPlayerStatePayload,
 } from '../../features/miniPlayer/shared';
 import type { Song } from '../../types';
+import { useLibrarySongWindowCache } from '../../composables/useLibrarySongWindowCache';
 
 const appWindow = getCurrentWindow();
 const currentSong = ref<Song | null>(null);
 const isPlaying = ref(false);
 const isDarkTheme = ref(false);
 const volume = ref(100);
-const queue = ref<Song[]>([]);
+const queuePaths = ref<string[]>([]);
 const lyricText = ref('');
 const localCoverUrl = ref('');
 const isWindowVisible = ref(false);
@@ -54,7 +55,51 @@ const VOLUME_POPOVER_WIDTH = 160;
 const VOLUME_POPOVER_GAP = 8;
 const VOLUME_POPOVER_MARGIN = 8;
 
-const displayQueue = computed(() => queue.value);
+const queueContainerRef = ref<HTMLElement | null>(null);
+const queueScrollTop = ref(0);
+const QUEUE_ROW_HEIGHT = 44;
+const QUEUE_OVERSCAN = 8;
+const { ensureWindow, getSongAt } = useLibrarySongWindowCache();
+const displayQueue = computed(() => {
+  const viewportHeight = queueContainerRef.value?.clientHeight || 360;
+  const start = Math.floor(queueScrollTop.value / QUEUE_ROW_HEIGHT);
+  const visibleCount = Math.ceil(viewportHeight / QUEUE_ROW_HEIGHT);
+  const renderStart = Math.max(0, start - QUEUE_OVERSCAN);
+  const renderEnd = Math.min(queuePaths.value.length, start + visibleCount + QUEUE_OVERSCAN);
+  return {
+    paddingTop: renderStart * QUEUE_ROW_HEIGHT,
+    paddingBottom: (queuePaths.value.length - renderEnd) * QUEUE_ROW_HEIGHT,
+    items: queuePaths.value.slice(renderStart, renderEnd).map((path, relativeIndex) => {
+      const song = getSongAt(renderStart + relativeIndex);
+      return {
+        path,
+        name: song?.name ?? path.split(/[\\/]/).pop() ?? path,
+        title: song?.title ?? '',
+        artist: song?.artist ?? '',
+        duration: song?.duration ?? 0,
+        virtualIndex: renderStart + relativeIndex,
+      };
+    }),
+  };
+});
+
+const ensureVisibleQueue = () => {
+  const viewportHeight = queueContainerRef.value?.clientHeight || 360;
+  const start = Math.floor(queueScrollTop.value / QUEUE_ROW_HEIGHT);
+  const visibleCount = Math.ceil(viewportHeight / QUEUE_ROW_HEIGHT);
+  void ensureWindow({
+    paths: queuePaths.value,
+    start: Math.max(0, start - QUEUE_OVERSCAN),
+    end: Math.min(queuePaths.value.length, start + visibleCount + QUEUE_OVERSCAN),
+    viewportHeight,
+    rowHeight: QUEUE_ROW_HEIGHT,
+  });
+};
+
+const handleQueueScroll = (event: Event) => {
+  queueScrollTop.value = (event.target as HTMLElement).scrollTop;
+  ensureVisibleQueue();
+};
 
 const formatDuration = (seconds: number) => {
   if (!seconds) return '00:00';
@@ -237,7 +282,8 @@ onMounted(async () => {
     isPlaying.value = event.payload.isPlaying;
     isDarkTheme.value = event.payload.isDarkTheme;
     volume.value = event.payload.volume;
-    queue.value = event.payload.queue;
+    queuePaths.value = event.payload.queuePaths;
+    ensureVisibleQueue();
     lyricText.value = event.payload.lyricText;
     void nextTick(() => emitTo('main', MINI_PLAYER_STATE_APPLIED_EVENT));
   });
@@ -424,21 +470,23 @@ onUnmounted(() => {
         class="absolute left-0 right-0 top-[45px] bottom-0 z-30 bg-white/95 dark:bg-gray-900/95"
         :class="[isDarkTheme ? 'dark !bg-gray-900/95' : '!bg-white/95']"
       >
-        <div class="h-full overflow-y-auto custom-scrollbar px-1.5 pt-0 pb-1.5">
-          <div v-if="displayQueue.length === 0" class="h-full flex items-center justify-center text-xs text-gray-400 dark:text-white/30">
+        <div ref="queueContainerRef" class="h-full overflow-y-auto custom-scrollbar px-1.5 pt-0 pb-1.5" @scroll="handleQueueScroll">
+          <div v-if="queuePaths.length === 0" class="h-full flex items-center justify-center text-xs text-gray-400 dark:text-white/30">
             暂无歌曲
           </div>
 
+          <div :style="{ height: `${displayQueue.paddingTop}px` }"></div>
           <button
-            v-for="(song, index) in displayQueue"
-            :key="song.path + index"
-            @click="sendAction({ type: 'play-song', song })"
+            v-for="song in displayQueue.items"
+            :key="song.path + song.virtualIndex"
+            @click="sendAction({ type: 'play-song', path: song.path })"
             class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors"
+            :style="{ height: `${QUEUE_ROW_HEIGHT}px` }"
             :class="currentSong?.path === song.path ? 'bg-[#EC4141]/10 text-[#EC4141]' : 'text-gray-700 dark:text-white/80 hover:bg-black/5 dark:hover:bg-white/5'"
           >
             <div class="w-5 shrink-0 text-[10px] text-center" :class="currentSong?.path === song.path ? 'text-[#EC4141]' : 'text-gray-400 dark:text-white/30'">
               <svg v-if="currentSong?.path === song.path" xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mx-auto" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-              <span v-else>{{ index + 1 }}</span>
+              <span v-else>{{ song.virtualIndex + 1 }}</span>
             </div>
 
             <div class="min-w-0 flex-1">
@@ -450,6 +498,7 @@ onUnmounted(() => {
               {{ formatDuration(song.duration) }}
             </div>
           </button>
+          <div :style="{ height: `${displayQueue.paddingBottom}px` }"></div>
         </div>
       </div>
     </transition>

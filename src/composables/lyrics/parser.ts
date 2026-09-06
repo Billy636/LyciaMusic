@@ -10,19 +10,28 @@ import type {
   ParsedWord,
 } from './types';
 
-const TIMESTAMP_BLOCK_PATTERN = /\[(\d{1,}:\d{2}(?:\.\d+)?)\]/g;
-const ADJACENT_TIMESTAMPS_BEFORE_TEXT_PATTERN = /(?:\[(?:\d{1,}:\d{2}(?:\.\d+)?)\])+(?=[^[\]\r\n])/g;
+const TIMESTAMP_BLOCK_PATTERN = /\[(\d{1,}:\d{2}(?:[.:]\d+)?)\]/g;
+const ADJACENT_TIMESTAMPS_BEFORE_TEXT_PATTERN = /(?:\[(?:\d{1,}:\d{2}(?:[.:]\d+)?)\])+(?=[^[\]\r\n])/g;
 const ESLRC_GAP_PLACEHOLDER = '\u2063';
-const ENHANCED_TIMESTAMP_PATTERN = /<(\d{1,}:\d{2}(?:\.\d+)?)>/g;
-const ENHANCED_TIMESTAMP_TEXT_PATTERN = /<\d{1,}:\d{2}(?:\.\d+)?>/;
-const LRC_LINE_TIMESTAMP_PATTERN = /^\[(\d{1,}:\d{2}(?:\.\d+)?)\](.*)$/;
+const ENHANCED_TIMESTAMP_PATTERN = /<(\d{1,}:\d{2}(?:[.:]\d+)?)>/g;
+const ENHANCED_TIMESTAMP_TEXT_PATTERN = /<\d{1,}:\d{2}(?:[.:]\d+)?>/;
+const LRC_LINE_TIMESTAMP_PATTERN = /^\[(\d{1,}:\d{2}(?:[.:]\d+)?)\](.*)$/;
+const ENHANCED_LRC_VOICE_PREFIX_PATTERN = /^\s*v\d+\s*:\s*(?=<\d{1,}:\d{2}(?:[.:]\d+)?>)/i;
 const ENHANCED_EMPTY_BACKWARD_TOLERANCE_MS = 5;
+const ENHANCED_INFERRED_WORD_DEFAULT_DURATION_MS = 300;
+const ENHANCED_INFERRED_WORD_MIN_DURATION_MS = 150;
+const ENHANCED_INFERRED_WORD_MAX_DURATION_MS = 1000;
 
 type ParserSource = ParsedLineSourceFormat;
 
 interface ParserCandidate {
   source: ParserSource;
   lines: AmlLyricLine[];
+}
+
+interface EnhancedLrcParseResult {
+  line: AmlLyricLine;
+  inferredWordIndex: number | null;
 }
 
 const PARSER_PRIORITIES: Record<ParserSource, number> = {
@@ -79,8 +88,14 @@ export function normalizeEslrcSource(source: string): string {
   });
 }
 
+export function normalizeLyricTimestamps(source: string): string {
+  return source
+    .replace(/\[(\d+):(\d{2}):(\d{1,3})\]/g, '[$1:$2.$3]')
+    .replace(/<(\d+):(\d{2}):(\d{1,3})>/g, '<$1:$2.$3>');
+}
+
 export function parseTimestampToMs(raw: string): number | null {
-  const match = /^(\d+):(\d{2})(?:\.(\d{1,3}))?$/.exec(raw.trim());
+  const match = /^(\d+):(\d{2})(?:[.:](\d{1,3}))?$/.exec(raw.trim());
   if (!match) return null;
 
   const minutes = Number(match[1]);
@@ -99,25 +114,30 @@ export function isEnhancedLrcLine(line: string): boolean {
   const match = LRC_LINE_TIMESTAMP_PATTERN.exec(line);
   if (!match) return false;
 
-  return ENHANCED_TIMESTAMP_TEXT_PATTERN.test(match[2]);
+  return ENHANCED_TIMESTAMP_TEXT_PATTERN.test(stripEnhancedLrcVoicePrefix(match[2]));
 }
 
-export function parseEnhancedLrcLine(line: string): AmlLyricLine | null {
+function stripEnhancedLrcVoicePrefix(body: string): string {
+  return body.replace(ENHANCED_LRC_VOICE_PREFIX_PATTERN, '');
+}
+
+function parseEnhancedLrcLineInternal(line: string): EnhancedLrcParseResult | null {
   const lineMatch = LRC_LINE_TIMESTAMP_PATTERN.exec(line);
   if (!lineMatch) return null;
 
   const lineStartTime = parseTimestampToMs(lineMatch[1]);
   if (lineStartTime === null) return null;
 
-  const body = lineMatch[2];
+  const body = stripEnhancedLrcVoicePrefix(lineMatch[2]);
   const markers = [...body.matchAll(ENHANCED_TIMESTAMP_PATTERN)];
-  if (markers.length < 2) return null;
+  if (markers.length < 1) return null;
 
   const leadingText = body.slice(0, markers[0].index ?? 0);
   if (leadingText.trim().length > 0) return null;
 
   const words: AmlLyricWord[] = [];
   let explicitEndTime: number | null = null;
+  let inferredWordIndex: number | null = null;
 
   for (let index = 0; index < markers.length; index += 1) {
     const currentMarker = markers[index];
@@ -130,8 +150,18 @@ export function parseEnhancedLrcLine(line: string): AmlLyricLine | null {
     const text = body.slice(currentMarkerEnd, nextMarkerIndex);
 
     if (!nextMarker) {
-      if (text.length > 0) return null;
-      explicitEndTime = currentStart;
+      if (text.trim().length === 0) {
+        explicitEndTime = currentStart;
+        continue;
+      }
+
+      inferredWordIndex = words.length;
+      words.push({
+        startTime: currentStart,
+        endTime: currentStart,
+        word: text,
+        romanWord: '',
+      });
       continue;
     }
 
@@ -159,27 +189,89 @@ export function parseEnhancedLrcLine(line: string): AmlLyricLine | null {
   if (endTime < lineStartTime) return null;
 
   return {
-    words,
-    translatedLyric: '',
-    romanLyric: '',
-    isBG: false,
-    isDuet: false,
-    startTime: lineStartTime,
-    endTime,
+    line: {
+      words,
+      translatedLyric: '',
+      romanLyric: '',
+      isBG: false,
+      isDuet: false,
+      startTime: lineStartTime,
+      endTime,
+    },
+    inferredWordIndex,
   };
 }
 
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[middle];
+  return Math.floor((sorted[middle - 1] + sorted[middle]) / 2);
+}
+
+function collectExplicitWordDurations(result: EnhancedLrcParseResult): number[] {
+  return result.line.words.flatMap((word, index) => {
+    if (index === result.inferredWordIndex) return [];
+
+    const duration = word.endTime - word.startTime;
+    return Number.isFinite(duration) && duration > 0 ? [duration] : [];
+  });
+}
+
+function finalizeEnhancedLrcLine(
+  result: EnhancedLrcParseResult,
+  contextualDurations: number[],
+  nextLineStartTime?: number,
+): AmlLyricLine {
+  if (result.inferredWordIndex === null) return result.line;
+
+  const words = result.line.words.map((word) => ({ ...word }));
+  const inferredWord = words[result.inferredWordIndex];
+  const localDurations = collectExplicitWordDurations(result);
+  const estimatedDuration = median(localDurations)
+    ?? median(contextualDurations)
+    ?? ENHANCED_INFERRED_WORD_DEFAULT_DURATION_MS;
+  const clampedDuration = Math.min(
+    ENHANCED_INFERRED_WORD_MAX_DURATION_MS,
+    Math.max(ENHANCED_INFERRED_WORD_MIN_DURATION_MS, estimatedDuration),
+  );
+  const estimatedEndTime = inferredWord.startTime + clampedDuration;
+  inferredWord.endTime = nextLineStartTime !== undefined
+    ? Math.max(inferredWord.startTime, Math.min(estimatedEndTime, nextLineStartTime))
+    : estimatedEndTime;
+
+  return {
+    ...result.line,
+    words,
+    endTime: inferredWord.endTime,
+  };
+}
+
+export function parseEnhancedLrcLine(line: string): AmlLyricLine | null {
+  const result = parseEnhancedLrcLineInternal(line);
+  return result ? finalizeEnhancedLrcLine(result, []) : null;
+}
+
 export function parseEnhancedLrc(source: string): AmlLyricLine[] {
-  const lines: AmlLyricLine[] = [];
+  const results: EnhancedLrcParseResult[] = [];
 
   for (const rawLine of source.split('\n')) {
     if (!isEnhancedLrcLine(rawLine)) continue;
 
-    const parsedLine = parseEnhancedLrcLine(rawLine);
-    if (parsedLine) lines.push(parsedLine);
+    const parsedLine = parseEnhancedLrcLineInternal(rawLine);
+    if (parsedLine) results.push(parsedLine);
   }
 
-  return lines;
+  const contextualDurations = results.flatMap(collectExplicitWordDurations);
+  const orderedStartTimes = [...new Set(results.map((result) => result.line.startTime))]
+    .sort((left, right) => left - right);
+
+  return results.map((result) => {
+    const nextLineStartTime = orderedStartTimes.find((startTime) => startTime > result.line.startTime);
+    return finalizeEnhancedLrcLine(result, contextualDurations, nextLineStartTime);
+  });
 }
 
 function lineContainsEnhancedMarkup(line: AmlLyricLine): boolean {
@@ -374,7 +466,8 @@ async function parseWithBestCandidate(raw: string): Promise<ParserCandidate | nu
     parseTTML,
     parseYrc,
   } = await getAmlModule();
-  const source = raw.replace(/^\uFEFF/, '').replace(/\r/g, '');
+  const normalizedTimestamps = normalizeLyricTimestamps(raw);
+  const source = normalizedTimestamps.replace(/^\uFEFF/, '').replace(/\r/g, '');
   const normalizedEslrcSource = normalizeEslrcSource(source);
   const candidates: ParserCandidate[] = [];
 

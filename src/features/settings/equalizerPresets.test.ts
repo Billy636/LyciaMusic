@@ -874,7 +874,7 @@ describe('replaceSettings and resetSettings preserve equalizer structure', () =>
     store.resetSettings();
 
     // Theme should reset to default
-    expect(store.settings.theme.mode).toBe('light');
+    expect(store.settings.theme.mode).toBe('system');
     // Lyrics should reset to default
     expect(store.settings.lyrics.showTranslation).toBe(true);
   });

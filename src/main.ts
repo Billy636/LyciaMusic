@@ -1,11 +1,11 @@
 import { createApp } from 'vue'
-import { createPinia } from 'pinia'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import './style.css'
-import '@applemusic-like-lyrics/core/style.css'
-import App from './App.vue'
-import router from './router'
 import { applyPersistedStartupTheme, shouldApplyStartupThemePaint } from './composables/startupTheme'
+import { loadWindowRoot, resolveWindowKind, windowUsesPinia, windowUsesRouter } from './windowBootstrap'
+import { installTouchClickSupport } from './utils/touchClickSupport'
+
+installTouchClickSupport()
 
 const currentWindowLabel = (() => {
   try {
@@ -67,15 +67,6 @@ const showFatalError = (title: string, error: unknown) => {
   `
 }
 
-const app = createApp(App)
-const pinia = createPinia()
-
-app.use(pinia)
-app.use(router)
-app.config.errorHandler = (error, _instance, info) => {
-  showFatalError(`前端运行错误: ${info}`, error)
-}
-
 document.addEventListener('contextmenu', (e) => e.preventDefault())
 
 window.addEventListener('error', (event) => {
@@ -86,8 +77,28 @@ window.addEventListener('unhandledrejection', (event) => {
   showFatalError('未处理的异步错误', event.reason)
 })
 
-try {
+const bootstrapApp = async () => {
+  const windowKind = resolveWindowKind(currentWindowLabel)
+  const [rootModule, routerModule, piniaModule] = await Promise.all([
+    loadWindowRoot(windowKind),
+    windowUsesRouter(windowKind) ? import('./router') : Promise.resolve(null),
+    windowUsesPinia(windowKind) ? import('pinia') : Promise.resolve(null),
+  ])
+
+  const app = createApp(rootModule.default)
+  if (piniaModule) {
+    app.use(piniaModule.createPinia())
+  }
+  if (routerModule) {
+    app.use(routerModule.default)
+  }
+  app.config.errorHandler = (error, _instance, info) => {
+    showFatalError(`前端运行错误: ${info}`, error)
+  }
+
   app.mount('#app')
-} catch (error) {
-  showFatalError('应用挂载失败', error)
 }
+
+void bootstrapApp().catch(error => {
+  showFatalError('应用挂载失败', error)
+})

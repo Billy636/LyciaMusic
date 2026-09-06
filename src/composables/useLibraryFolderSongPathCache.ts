@@ -2,17 +2,17 @@ import { ref } from 'vue';
 
 import type { FolderSortMode } from '../services/storage/playerStorage';
 import { tauriInvoke } from '../services/tauri/invoke';
-import { MemoryCache } from '../utils/MemoryCache';
+import {
+  activateLibrarySongPathCacheEntry,
+  clearLibrarySongPathCacheNamespace,
+  getLibrarySongPathCacheEntry,
+  setLibrarySongPathCacheEntry,
+} from '../caches/librarySongPathCache';
 
 type BackendFolderSortMode = Exclude<FolderSortMode, 'custom'>;
 
 const FOLDER_VIEW_PATH_CACHE_TTL_MS = 5 * 60 * 1000;
-const FOLDER_VIEW_PATH_CACHE_MAX_ENTRIES = 96;
-
-const folderViewPathCache = new MemoryCache<string, string[]>({
-  maxEntries: FOLDER_VIEW_PATH_CACHE_MAX_ENTRIES,
-  ttlMs: FOLDER_VIEW_PATH_CACHE_TTL_MS,
-});
+const FOLDER_VIEW_PATH_CACHE_NAMESPACE = 'folder';
 
 const inFlightRequests = new Map<string, Promise<string[]>>();
 const cacheVersion = ref(0);
@@ -38,9 +38,10 @@ export function useLibraryFolderSongPathCache() {
     }
 
     const cacheKey = makeCacheKey(folderPath, query, sortMode);
-    const cached = folderViewPathCache.get(cacheKey);
+    activateLibrarySongPathCacheEntry(FOLDER_VIEW_PATH_CACHE_NAMESPACE, cacheKey);
+    const cached = getLibrarySongPathCacheEntry(FOLDER_VIEW_PATH_CACHE_NAMESPACE, cacheKey);
     if (cached) {
-      return cached;
+      return cached.paths;
     }
 
     const inFlight = inFlightRequests.get(cacheKey);
@@ -54,7 +55,12 @@ export function useLibraryFolderSongPathCache() {
       sortMode,
     })
       .then((paths) => {
-        folderViewPathCache.set(cacheKey, paths);
+        setLibrarySongPathCacheEntry(
+          FOLDER_VIEW_PATH_CACHE_NAMESPACE,
+          cacheKey,
+          { paths },
+          FOLDER_VIEW_PATH_CACHE_TTL_MS,
+        );
         cacheVersion.value += 1;
         return paths;
       })
@@ -69,7 +75,7 @@ export function useLibraryFolderSongPathCache() {
   return {
     loadFolderViewSongPaths,
     clearLibraryFolderSongPathCache: () => {
-      folderViewPathCache.clear();
+      clearLibrarySongPathCacheNamespace(FOLDER_VIEW_PATH_CACHE_NAMESPACE);
       inFlightRequests.clear();
       cacheVersion.value += 1;
     },

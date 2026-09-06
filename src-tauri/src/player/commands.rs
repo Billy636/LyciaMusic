@@ -5,7 +5,6 @@ use crate::player::equalizer::EqualizerSettings;
 use crate::player::loudness::{
     calculate_playback_gain, get_song_loudness_record, process_song_on_play, LoudnessRecord,
 };
-use crate::player::spectrum::build_frequency_bands;
 use crate::player::types::{
     AudioCommand, AudioOutputMode, AudioSource, PlayerState, VISUALIZER_BAND_COUNT,
 };
@@ -56,8 +55,10 @@ pub async fn play_audio(
     album: String,
     cover: String,
     duration: u32,
+    duration_ms: Option<u64>,
     output_mode: AudioOutputMode,
     start_offset_ms: Option<u64>,
+    cue_start_offset_ms: Option<u64>,
     song_id: Option<i64>,
     volume_balance_enabled: Option<bool>,
     gain_offset_db: Option<f32>,
@@ -65,8 +66,13 @@ pub async fn play_audio(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbState>,
     state: tauri::State<'_, PlayerState>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let playback_id = state.playback_id.fetch_add(1, Ordering::Relaxed) + 1;
+    let cue_offset_ms = cue_start_offset_ms.unwrap_or(0);
+    let initial_media_seconds = start_offset_ms
+        .unwrap_or(cue_offset_ms)
+        .saturating_sub(cue_offset_ms) as f64
+        / 1000.0;
     let mut selected_output_mode = output_mode;
     let source = if is_remote_uri(&path) {
         match remote_playback_source(&db_state, &path)? {
@@ -101,12 +107,19 @@ pub async fn play_audio(
     }
 
     let normalized_cover = normalize_cover_for_smtc(&cover);
+    state
+        .progress
+        .cue_start_offset_ms
+        .store(cue_offset_ms, Ordering::Relaxed);
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
     tx.send(AudioCommand::Play {
         source,
         output_mode: selected_output_mode,
         start_offset_ms,
         volume_balance_gain,
+        duration_ms,
+        cue_start_offset_ms,
+        playback_id,
     })
     .map_err(|e| e.to_string())?;
 
@@ -124,12 +137,14 @@ pub async fn play_audio(
                 },
             });
             let _ = mc.set_playback(MediaPlayback::Playing {
-                progress: Some(MediaPosition(Duration::from_secs(0))),
+                progress: Some(MediaPosition(Duration::from_secs_f64(
+                    initial_media_seconds,
+                ))),
             });
         }
     }
 
-    Ok(())
+    Ok(playback_id)
 }
 
 fn schedule_remote_cache_after_half(
@@ -247,10 +262,16 @@ pub fn update_playback_metadata(
             });
             let _ = mc.set_playback(if is_playing {
                 MediaPlayback::Playing {
-                    progress: Some(MediaPosition(Duration::from_secs(0))),
+                    progress: Some(MediaPosition(Duration::from_secs_f64(
+                        state.progress.media_seconds(),
+                    ))),
                 }
             } else {
-                MediaPlayback::Paused { progress: None }
+                MediaPlayback::Paused {
+                    progress: Some(MediaPosition(Duration::from_secs_f64(
+                        state.progress.media_seconds(),
+                    ))),
+                }
             });
         }
     }
@@ -264,7 +285,11 @@ pub fn pause_audio(state: tauri::State<PlayerState>) -> Result<(), String> {
     tx.send(AudioCommand::Pause).map_err(|e| e.to_string())?;
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
-            let _ = mc.set_playback(MediaPlayback::Paused { progress: None });
+            let _ = mc.set_playback(MediaPlayback::Paused {
+                progress: Some(MediaPosition(Duration::from_secs_f64(
+                    state.progress.media_seconds(),
+                ))),
+            });
         }
     }
     Ok(())
@@ -288,7 +313,11 @@ pub fn resume_audio(state: tauri::State<PlayerState>) -> Result<(), String> {
     tx.send(AudioCommand::Resume).map_err(|e| e.to_string())?;
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
-            let _ = mc.set_playback(MediaPlayback::Playing { progress: None });
+            let _ = mc.set_playback(MediaPlayback::Playing {
+                progress: Some(MediaPosition(Duration::from_secs_f64(
+                    state.progress.media_seconds(),
+                ))),
+            });
         }
     }
     Ok(())
@@ -311,7 +340,9 @@ pub fn seek_audio(
 
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
-            let progress = MediaPosition(Duration::from_secs_f64(time.max(0.0)));
+            let progress = MediaPosition(Duration::from_secs_f64(
+                state.progress.media_seconds_from_absolute(time),
+            ));
             if is_playing {
                 let _ = mc.set_playback(MediaPlayback::Playing {
                     progress: Some(progress),
@@ -337,23 +368,23 @@ pub fn set_volume(volume: f32, state: tauri::State<PlayerState>) -> Result<(), S
 
 #[tauri::command]
 pub fn get_playback_progress(state: tauri::State<PlayerState>) -> f64 {
-    let samples = state.progress.samples_played.load(Ordering::Relaxed);
-    let rate = state.progress.sample_rate.load(Ordering::Relaxed);
-    let channels = state.progress.channels.load(Ordering::Relaxed);
-
-    if rate == 0 || channels == 0 {
-        return 0.0;
-    }
-
-    let total_samples_per_sec = rate as u64 * channels as u64;
-    samples as f64 / total_samples_per_sec as f64
+    state.progress.absolute_seconds()
 }
 
 #[tauri::command]
 pub fn get_audio_visualizer_samples(state: tauri::State<PlayerState>) -> Vec<f32> {
     let visualizer = &state.progress.visualizer;
     let sample_rate = state.progress.sample_rate.load(Ordering::Relaxed);
-    build_frequency_bands(&visualizer.snapshot(), sample_rate, VISUALIZER_BAND_COUNT)
+    state
+        .visualizer_analysis
+        .lock()
+        .map(|mut analyzer| analyzer.bands_for(visualizer, sample_rate).to_vec())
+        .unwrap_or_else(|_| vec![0.0; VISUALIZER_BAND_COUNT])
+}
+
+#[tauri::command]
+pub fn set_audio_visualizer_enabled(enabled: bool, state: tauri::State<PlayerState>) {
+    state.progress.visualizer.set_enabled(enabled);
 }
 
 #[tauri::command]

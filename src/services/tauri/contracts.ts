@@ -3,6 +3,13 @@ import type {
   ArtistCatalogItem,
   FolderNode,
   LibraryFolder,
+  LibrarySong,
+  LibrarySongLabel,
+  LibrarySongPage,
+  LibrarySongPathPage,
+  SearchIndexEntry,
+  SearchIndexSource,
+  SearchIndexStatus,
   RecentAlbumCatalogItem,
   RecentPlaylistCatalogItem,
   Playlist,
@@ -14,6 +21,7 @@ import type {
   RemoteSyncResult,
   Song,
   SongDetail,
+  SongRuntimeMetadata,
   SaveArtistAvatarResponse,
 } from '../../types';
 import type { AudioOutputMode } from '../../types';
@@ -132,8 +140,10 @@ export interface PlayAudioOptions {
   album: string;
   cover: string;
   duration: number;
+  durationMs?: number;
   outputMode: AudioOutputMode;
   startOffsetMs?: number;
+  cueStartOffsetMs?: number;
   songId?: number | null;
   volumeBalanceEnabled?: boolean | null;
   gainOffsetDb?: number | null;
@@ -176,6 +186,19 @@ export interface ForegroundFullscreenState {
   isFullscreen: boolean;
 }
 
+export interface PreparedCustomBackgroundImage {
+  displayPath: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  displayWidth: number;
+  displayHeight: number;
+}
+
+export interface ImmersiveFullscreenState {
+  isFullscreen: boolean;
+  wasMaximizedBeforeFullscreen: boolean;
+}
+
 export interface TauriCommandMap {
   add_library_folder: { payload: { path: string }; response: void };
   // Deprecated compat command. Do not use in new main-flow code.
@@ -187,14 +210,15 @@ export interface TauriCommandMap {
   get_library_artist_catalog: { payload: undefined; response: ArtistCatalogItem[] };
   save_artist_avatar: { payload: { artistId: number; imagePath: string; writeToTags: boolean }; response: SaveArtistAvatarResponse };
   get_library_album_catalog: { payload: undefined; response: AlbumCatalogItem[] };
+  get_library_album_catalog_by_artist: { payload: { artistName: string }; response: AlbumCatalogItem[] };
   get_library_song_paths_by_artist: { payload: { artistName: string }; response: string[] };
-  get_library_song_paths_by_album: { payload: { albumKey: string }; response: string[] };
+  get_library_song_paths_by_album: { payload: { albumKey: string; sortMode?: 'title' | 'track_number' | 'track_number_desc' }; response: string[] };
   get_library_song_paths_for_all_view: {
     payload: {
       query?: string;
       artistFilter?: string;
       albumFilter?: string;
-      sortMode: 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
+      sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
     };
     response: string[];
   };
@@ -203,6 +227,8 @@ export interface TauriCommandMap {
       folderPath: string;
       query?: string;
       sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'track_number';
+      offset?: number;
+      limit?: number;
     };
     response: string[];
   };
@@ -253,6 +279,7 @@ export interface TauriCommandMap {
   set_volume: { payload: { volume: number }; response: void };
   get_playback_progress: { payload: undefined; response: number };
   get_audio_visualizer_samples: { payload: undefined; response: number[] };
+  set_audio_visualizer_enabled: { payload: { enabled: boolean }; response: void };
   record_play: {
     payload: {
       payload: {
@@ -270,6 +297,15 @@ export interface TauriCommandMap {
   get_song_cover_thumbnail: { payload: { path: string }; response: string };
   get_song_cover: { payload: { path: string }; response: string };
   clear_cover_cache: { payload: undefined; response: void };
+  prepare_custom_background_image: {
+    payload: {
+      sourcePath: string;
+      targetWidth: number;
+      targetHeight: number;
+      blurRadius: number;
+    };
+    response: PreparedCustomBackgroundImage;
+  };
   get_song_lyrics: { payload: { path: string }; response: string };
   get_song_lyrics_for_edit: { payload: { path: string }; response: SongLyricsForEdit };
   save_song_lyrics: {
@@ -289,7 +325,45 @@ export interface TauriCommandMap {
     response: SaveSongInfoResponse;
   };
   get_song_detail: { payload: { path: string }; response: SongDetail };
-  play_audio: { payload: PlayAudioOptions; response: void };
+  get_song_runtime_metadata: { payload: { path: string }; response: SongRuntimeMetadata | null };
+  get_library_song_page: {
+    payload: {
+      query?: string;
+      artistFilter?: string;
+      albumFilter?: string;
+      sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
+      offset: number;
+      limit: number;
+    };
+    response: LibrarySongPage;
+  };
+  get_library_song_path_page_for_all_view: {
+    payload: {
+      query?: string;
+      artistFilter?: string;
+      albumFilter?: string;
+      sortMode: 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc' | 'track_number' | 'track_number_desc';
+      offset: number;
+      limit: number;
+    };
+    response: LibrarySongPathPage;
+  };
+  get_search_index_status: { payload: undefined; response: SearchIndexStatus };
+  get_search_index_batch: {
+    payload: { limit: number };
+    response: SearchIndexSource[];
+  };
+  upsert_search_index_batch: {
+    payload: { entries: SearchIndexEntry[] };
+    response: SearchIndexStatus;
+  };
+  get_library_songs_by_paths: { payload: { paths: string[] }; response: LibrarySong[] };
+  get_library_song_paths_cached: { payload: undefined; response: string[] };
+  get_library_song_labels_for_all_view: {
+    payload: { query?: string; artistFilter?: string; albumFilter?: string };
+    response: LibrarySongLabel[];
+  };
+  play_audio: { payload: PlayAudioOptions; response: number };
   update_playback_metadata: { payload: UpdatePlaybackMetadataOptions; response: void };
   pause_audio: { payload: undefined; response: void };
   stop_audio: { payload: undefined; response: void };
@@ -310,9 +384,11 @@ export interface TauriCommandMap {
     payload: {
       favoritePaths: string[];
       query?: string;
-      sortMode: 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
+      sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
       detailFilterType?: 'artist' | 'album';
       detailFilterValue?: string;
+      offset?: number;
+      limit?: number;
     };
     response: string[];
   };
@@ -325,6 +401,8 @@ export interface TauriCommandMap {
       recentEntries: RecentHistoryImportRecord[];
       query?: string;
       sortMode: 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
+      offset?: number;
+      limit?: number;
     };
     response: string[];
   };
@@ -367,6 +445,7 @@ export interface TauriCommandMap {
     response: StatisticsImportResult;
   };
   set_mini_boundary_enabled: { payload: { enabled: boolean }; response: void };
+  set_retain_material_on_unfocus: { payload: { enabled: boolean }; response: void };
   set_dark_mode_for_window: { payload: { dark: boolean }; response: void };
   get_window_material_capabilities: {
     payload: undefined;
@@ -375,6 +454,10 @@ export interface TauriCommandMap {
   get_foreground_fullscreen_state: {
     payload: undefined;
     response: ForegroundFullscreenState;
+  };
+  set_immersive_fullscreen: {
+    payload: { fullscreen: boolean; restoreMaximized: boolean };
+    response: ImmersiveFullscreenState;
   };
   refresh_current_window_topmost: {
     payload: { enabled: boolean };

@@ -8,6 +8,7 @@ use super::tags::{
 };
 use super::types::{
     LyricsStorageSource, SaveSongInfoResponse, SongDetail, SongInfoEditPayload, SongLyricsForEdit,
+    SongRuntimeMetadata,
 };
 use crate::database::DbState;
 use crate::error::CommandError;
@@ -25,7 +26,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use tauri::{State, Emitter};
+use tauri::{Emitter, State};
 use uuid::Uuid;
 
 use super::utils::normalize_path;
@@ -49,43 +50,35 @@ fn read_sidecar_lrc_with_path(path_obj: &Path) -> Option<(String, PathBuf)> {
     let stem = path_obj.file_stem()?.to_string_lossy().to_string();
     let parent = path_obj.parent()?;
 
-    // 支持的侧边歌词文件后缀，按照优先级排序
-    let extensions = ["lrc", "ttml", "qrc", "yrc", "lys", "txt"];
+    // 仅自动发现同名侧边文件时按信息完整度排序；用户指定的 source_path 不走这里。
+    let extensions = ["ttml", "yrc", "qrc", "lys", "lrc", "txt"];
+    let candidates = fs::read_dir(parent)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|candidate| candidate.is_file())
+        .collect::<Vec<_>>();
 
-    // 1. 优先尝试精确匹配
     for ext in &extensions {
         let exact_path = parent.join(format!("{}.{}", stem, ext));
         if let Ok(content) = fs::read_to_string(&exact_path) {
             return Some((content, exact_path));
         }
-    }
 
-    // 2. 如果没有精确匹配到，进行目录遍历（不区分后缀大小写）
-    let entries = fs::read_dir(parent).ok()?;
-    for entry in entries.flatten() {
-        let candidate = entry.path();
-        if !candidate.is_file() {
-            continue;
-        }
-
-        let is_valid_ext = candidate
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| {
-                extensions.iter().any(|&valid_ext| ext.eq_ignore_ascii_case(valid_ext))
-            })
-            .unwrap_or(false);
-        if !is_valid_ext {
-            continue;
-        }
-
-        let candidate_stem = candidate.file_stem()?.to_string_lossy().to_string();
-        if !candidate_stem.eq_ignore_ascii_case(&stem) {
-            continue;
-        }
-
-        if let Ok(content) = fs::read_to_string(&candidate) {
-            return Some((content, candidate));
+        if let Some(candidate) = candidates.iter().find(|candidate| {
+            let candidate_stem = candidate
+                .file_stem()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            let candidate_ext = candidate
+                .extension()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            candidate_stem.eq_ignore_ascii_case(&stem) && candidate_ext.eq_ignore_ascii_case(ext)
+        }) {
+            if let Ok(content) = fs::read_to_string(candidate) {
+                return Some((content, candidate.clone()));
+            }
         }
     }
 
@@ -335,15 +328,15 @@ fn sync_moved_song_paths(
 }
 
 fn read_song_lyrics_raw(path: &str) -> String {
-    if let Ok(tagged_file) = read_tagged_file_from_path(Path::new(path)) {
-        if let Some(lyrics) = extract_embedded_lyrics(&tagged_file) {
-            return lyrics;
-        }
-    }
-
     let path_obj = Path::new(path);
     if let Some(content) = read_sidecar_lrc(path_obj) {
         return content;
+    }
+
+    if let Ok(tagged_file) = read_tagged_file_from_path(path_obj) {
+        if let Some(lyrics) = extract_embedded_lyrics(&tagged_file) {
+            return lyrics;
+        }
     }
 
     String::new()
@@ -411,16 +404,6 @@ pub async fn get_song_lyrics_payload(
 
 #[tauri::command]
 pub async fn get_song_lyrics_for_edit(path: String) -> Result<SongLyricsForEdit, String> {
-    if let Ok(tagged_file) = read_tagged_file_from_path(Path::new(&path)) {
-        if let Some(lyrics) = extract_embedded_lyrics(&tagged_file) {
-            return Ok(SongLyricsForEdit {
-                lyrics,
-                source: LyricsStorageSource::Embedded,
-                source_path: None,
-            });
-        }
-    }
-
     let path_obj = Path::new(&path);
     if let Some((content, lrc_path)) = read_sidecar_lrc_with_path(path_obj) {
         return Ok(SongLyricsForEdit {
@@ -428,6 +411,16 @@ pub async fn get_song_lyrics_for_edit(path: String) -> Result<SongLyricsForEdit,
             source: LyricsStorageSource::Sidecar,
             source_path: Some(normalize_path(&lrc_path.to_string_lossy())),
         });
+    }
+
+    if let Ok(tagged_file) = read_tagged_file_from_path(path_obj) {
+        if let Some(lyrics) = extract_embedded_lyrics(&tagged_file) {
+            return Ok(SongLyricsForEdit {
+                lyrics,
+                source: LyricsStorageSource::Embedded,
+                source_path: None,
+            });
+        }
     }
 
     Ok(SongLyricsForEdit {
@@ -520,6 +513,97 @@ pub fn save_song_info(
     Ok(SaveSongInfoResponse { song, detail })
 }
 
+fn load_song_runtime_metadata(
+    conn: &rusqlite::Connection,
+    normalized_path: &str,
+) -> Result<Option<SongRuntimeMetadata>, String> {
+    conn.query_row(
+        "SELECT id, remote_source_id, cue_source_path, cue_start_offset, cue_end_offset
+         FROM songs
+         WHERE path = ?1
+         LIMIT 1",
+        params![normalized_path],
+        |row| {
+            Ok(SongRuntimeMetadata {
+                id: row.get(0)?,
+                remote_source_id: row.get(1)?,
+                cue_source_path: row.get(2)?,
+                cue_start_offset: row.get::<_, Option<i64>>(3)?.map(|value| value as u32),
+                cue_end_offset: row.get::<_, Option<i64>>(4)?.map(|value| value as u32),
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_song_runtime_metadata(
+    path: String,
+    db_state: State<'_, DbState>,
+) -> Result<Option<SongRuntimeMetadata>, String> {
+    let normalized_path = normalize_path(&path);
+    let conn = db_state.conn.lock().map_err(|e| e.to_string())?;
+    load_song_runtime_metadata(&conn, &normalized_path)
+}
+
+fn hydrate_song_detail_from_db(
+    conn: &rusqlite::Connection,
+    normalized_path: &str,
+    detail: &mut SongDetail,
+) -> Result<(), String> {
+    if let Some((
+        container,
+        codec,
+        file_size,
+        track_number,
+        disc_number,
+        comment,
+        bitrate,
+        sample_rate,
+        bit_depth,
+        format,
+    )) = conn
+        .query_row(
+            "SELECT container, codec, file_size, track_number, disc_number, comment,
+                    bitrate, sample_rate, bit_depth, format
+             FROM songs
+             WHERE path = ?1
+             LIMIT 1",
+            params![normalized_path],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<i64>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    {
+        detail.container = container.filter(|value| !value.trim().is_empty());
+        detail.codec = codec.filter(|value| !value.trim().is_empty());
+        detail.file_size = file_size.and_then(|value| u64::try_from(value).ok());
+        detail.track_number = track_number;
+        detail.disc_number = disc_number;
+        detail.comment = comment;
+        detail.bitrate = bitrate.and_then(|value| u32::try_from(value).ok());
+        detail.sample_rate = sample_rate.and_then(|value| u32::try_from(value).ok());
+        detail.bit_depth = bit_depth.and_then(|value| u8::try_from(value).ok());
+        detail.format = format.filter(|value| !value.trim().is_empty());
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn get_song_detail(
     path: String,
@@ -534,25 +618,7 @@ pub async fn get_song_detail(
 
     {
         let conn = db_state.conn.lock().map_err(|e| e.to_string())?;
-        if let Some((container, codec, file_size)) = conn
-            .query_row(
-                "SELECT container, codec, file_size FROM songs WHERE path = ?1 LIMIT 1",
-                params![&normalized_path],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<i64>>(2)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(|e| e.to_string())?
-        {
-            detail.container = container.filter(|value| !value.trim().is_empty());
-            detail.codec = codec.filter(|value| !value.trim().is_empty());
-            detail.file_size = file_size.and_then(|value| u64::try_from(value).ok());
-        }
+        hydrate_song_detail_from_db(&conn, &normalized_path, &mut detail)?;
     }
 
     if let Ok(metadata) = fs::metadata(path_obj) {
@@ -678,8 +744,33 @@ fn child_dummy() -> std::process::Child {
 }
 
 #[tauri::command]
-pub fn delete_music_file(path: String) -> Result<(), String> {
-    fs::remove_file(path).map_err(|e| e.to_string())
+pub fn delete_music_file(path: String, db_state: State<'_, DbState>) -> Result<(), String> {
+    let normalized_path = crate::music::utils::normalize_path(&path);
+
+    if let Err(e) = fs::remove_file(&path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            return Err(format!("Failed to delete file on disk: {}", e));
+        }
+    }
+
+    let conn = db_state.conn.lock().map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    let delete_sql = "DELETE FROM songs WHERE path = ?1 COLLATE NOCASE";
+    #[cfg(not(target_os = "windows"))]
+    let delete_sql = "DELETE FROM songs WHERE path = ?1";
+
+    let mut stmt = conn.prepare(delete_sql).map_err(|e| e.to_string())?;
+    stmt.execute([&normalized_path])
+        .map_err(|e| e.to_string())?;
+
+    let _ = conn.execute(
+        "DELETE FROM artists
+         WHERE id NOT IN (SELECT DISTINCT artist_id FROM song_artists)",
+        [],
+    );
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -719,6 +810,8 @@ pub fn create_folder(parent_path: String, folder_name: String) -> Result<String,
 mod tests {
     use super::*;
     use crate::database::DbState;
+    use id3::frame::Comment;
+    use id3::{TagLike, Version};
     use rusqlite::Connection;
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -729,6 +822,69 @@ mod tests {
             remote_sidecar_lrc_path("/Artist/Album/Demo.flac").as_deref(),
             Some("/Artist/Album/Demo.lrc")
         );
+    }
+
+    #[test]
+    fn local_sidecar_discovery_prefers_ttml_even_with_uppercase_extension() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("lycia_sidecar_priority_test_{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("Demo.flac");
+        let lrc = dir.join("Demo.lrc");
+        let ttml = dir.join("Demo.TTML");
+        fs::write(&audio, b"not real audio").unwrap();
+        fs::write(&lrc, "[00:01.00]lrc").unwrap();
+        fs::write(&ttml, "<tt></tt>").unwrap();
+
+        let (lyrics, path) = read_sidecar_lrc_with_path(&audio).expect("sidecar lyrics");
+
+        assert_eq!(lyrics, "<tt></tt>");
+        assert!(path
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(ttml.file_name().unwrap())));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn local_sidecar_lyrics_override_embedded_lyrics() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("lycia_sidecar_override_test_{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("Demo.mp3");
+        let lrc = dir.join("Demo.lrc");
+
+        let mut id3_tag = id3::Tag::new();
+        id3_tag.add_frame(Comment {
+            lang: "eng".to_string(),
+            description: "lyrics".to_string(),
+            text: "[00:01.00]embedded lyric".to_string(),
+        });
+        let mut audio_bytes = Vec::new();
+        id3_tag.write_to(&mut audio_bytes, Version::Id3v24).unwrap();
+        audio_bytes.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x64]);
+        audio_bytes.extend(std::iter::repeat(0).take(413));
+        fs::write(&audio, audio_bytes).unwrap();
+        fs::write(&lrc, "[00:01.00]sidecar lyric").unwrap();
+
+        assert_eq!(
+            read_song_lyrics_raw(audio.to_str().unwrap()),
+            "[00:01.00]sidecar lyric"
+        );
+
+        let editable = get_song_lyrics_for_edit(audio.to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        assert_eq!(editable.lyrics, "[00:01.00]sidecar lyric");
+        assert_eq!(editable.source, LyricsStorageSource::Sidecar);
+        assert_eq!(editable.source_path.as_deref(), lrc.to_str());
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
@@ -803,6 +959,94 @@ mod tests {
         assert_eq!(lyrics, "[00:01.00]cached lyric");
         let _ = fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn loads_runtime_metadata_only_when_requested() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE songs (
+                id INTEGER PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                remote_source_id TEXT,
+                cue_source_path TEXT,
+                cue_start_offset INTEGER,
+                cue_end_offset INTEGER
+            );
+            INSERT INTO songs VALUES (
+                7,
+                '/music/track.cue',
+                'remote-source',
+                '/music/album.flac',
+                12000,
+                34000
+            );",
+        )
+        .unwrap();
+
+        let metadata = load_song_runtime_metadata(&conn, "/music/track.cue")
+            .unwrap()
+            .expect("runtime metadata");
+
+        assert_eq!(metadata.id, Some(7));
+        assert_eq!(metadata.remote_source_id.as_deref(), Some("remote-source"));
+        assert_eq!(
+            metadata.cue_source_path.as_deref(),
+            Some("/music/album.flac")
+        );
+        assert_eq!(metadata.cue_start_offset, Some(12000));
+        assert_eq!(metadata.cue_end_offset, Some(34000));
+    }
+
+    #[test]
+    fn song_detail_uses_database_metadata_when_file_is_unavailable() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE songs (
+                path TEXT PRIMARY KEY,
+                container TEXT,
+                codec TEXT,
+                file_size INTEGER,
+                track_number TEXT,
+                disc_number TEXT,
+                comment TEXT,
+                bitrate INTEGER,
+                sample_rate INTEGER,
+                bit_depth INTEGER,
+                format TEXT
+            );
+            INSERT INTO songs VALUES (
+                'remote://source/track.flac',
+                'flac',
+                'flac',
+                123456,
+                '03',
+                '02',
+                'Remote comment',
+                1411,
+                96000,
+                24,
+                'flac'
+            );",
+        )
+        .unwrap();
+        let mut detail = SongDetail {
+            path: "remote://source/track.flac".to_string(),
+            ..SongDetail::default()
+        };
+
+        hydrate_song_detail_from_db(&conn, &detail.path.clone(), &mut detail).unwrap();
+
+        assert_eq!(detail.container.as_deref(), Some("flac"));
+        assert_eq!(detail.codec.as_deref(), Some("flac"));
+        assert_eq!(detail.file_size, Some(123456));
+        assert_eq!(detail.track_number.as_deref(), Some("03"));
+        assert_eq!(detail.disc_number.as_deref(), Some("02"));
+        assert_eq!(detail.comment.as_deref(), Some("Remote comment"));
+        assert_eq!(detail.bitrate, Some(1411));
+        assert_eq!(detail.sample_rate, Some(96000));
+        assert_eq!(detail.bit_depth, Some(24));
+        assert_eq!(detail.format.as_deref(), Some("flac"));
+    }
 }
 
 #[tauri::command]
@@ -857,7 +1101,9 @@ pub async fn save_artist_avatar(
 
     let mut file = fs::File::open(path).map_err(|e| format!("Failed to open image file: {}", e))?;
     let mut header = [0u8; 12];
-    let bytes_read = file.read(&mut header).map_err(|e| format!("Failed to read image header: {}", e))?;
+    let bytes_read = file
+        .read(&mut header)
+        .map_err(|e| format!("Failed to read image header: {}", e))?;
 
     if bytes_read < 3 {
         return Err("Invalid image file: too short".to_string());
@@ -874,12 +1120,15 @@ pub async fn save_artist_avatar(
     };
 
     // Reset file read pointer to compute SHA-256
-    file.seek(std::io::SeekFrom::Start(0)).map_err(|e| format!("Failed to seek image file: {}", e))?;
+    file.seek(std::io::SeekFrom::Start(0))
+        .map_err(|e| format!("Failed to seek image file: {}", e))?;
 
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 8192];
     loop {
-        let n = file.read(&mut buffer).map_err(|e| format!("Failed to read image file for hashing: {}", e))?;
+        let n = file
+            .read(&mut buffer)
+            .map_err(|e| format!("Failed to read image file for hashing: {}", e))?;
         if n == 0 {
             break;
         }
@@ -894,37 +1143,42 @@ pub async fn save_artist_avatar(
     let target_path = covers_dir.join(target_filename);
 
     // Copy file to target path
-    fs::copy(path, &target_path).map_err(|e| format!("Failed to copy image to covers directory: {}", e))?;
+    fs::copy(path, &target_path)
+        .map_err(|e| format!("Failed to copy image to covers directory: {}", e))?;
 
     let target_path_str = normalize_path(&target_path.to_string_lossy());
 
     // Update database & query song paths in a short-lived transaction block
     let (songs_info, task_id) = if write_to_tags {
         let conn = db_state.conn.lock().map_err(|e| e.to_string())?;
-        
+
         conn.execute(
             "UPDATE artists SET avatar_path = ?1 WHERE id = ?2",
             params![Some(&target_path_str), artist_id],
         )
         .map_err(|e| format!("Failed to update database: {}", e))?;
 
-        let mut stmt = conn.prepare(
-            "SELECT s.path, s.source_type, s.remote_source_id, s.cue_source_path, \
+        let mut stmt = conn
+            .prepare(
+                "SELECT s.path, s.source_type, s.remote_source_id, s.cue_source_path, \
              (SELECT COUNT(*) FROM song_artists sa2 WHERE sa2.song_id = s.id) AS artist_count \
              FROM songs s \
              INNER JOIN song_artists sa ON s.id = sa.song_id \
-             WHERE sa.artist_id = ?1"
-        ).map_err(|e| e.to_string())?;
-        
-        let rows = stmt.query_map(params![artist_id], |row| {
-            Ok(SongTagWriteInfo {
-                path: row.get(0)?,
-                source_type: row.get(1)?,
-                remote_source_id: row.get(2)?,
-                cue_source_path: row.get(3)?,
-                artist_count: row.get(4)?,
+             WHERE sa.artist_id = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map(params![artist_id], |row| {
+                Ok(SongTagWriteInfo {
+                    path: row.get(0)?,
+                    source_type: row.get(1)?,
+                    remote_source_id: row.get(2)?,
+                    cue_source_path: row.get(3)?,
+                    artist_count: row.get(4)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         let mut items = Vec::new();
         for r in rows {
@@ -965,22 +1219,25 @@ pub async fn save_artist_avatar(
             let mut skipped_missing = 0;
 
             // Emit initial progress event
-            let _ = app_clone.emit("artist-avatar:write-tags-progress", super::types::WriteTagsProgressPayload {
-                task_id: task_id_clone.clone(),
-                artist_id,
-                current: 0,
-                total,
-                success_count: 0,
-                failure_count: 0,
-                skipped_count: 0,
-                skipped_multi_artist: 0,
-                skipped_remote: 0,
-                skipped_cue: 0,
-                skipped_readonly: 0,
-                skipped_missing: 0,
-                done: false,
-                error: None,
-            });
+            let _ = app_clone.emit(
+                "artist-avatar:write-tags-progress",
+                super::types::WriteTagsProgressPayload {
+                    task_id: task_id_clone.clone(),
+                    artist_id,
+                    current: 0,
+                    total,
+                    success_count: 0,
+                    failure_count: 0,
+                    skipped_count: 0,
+                    skipped_multi_artist: 0,
+                    skipped_remote: 0,
+                    skipped_cue: 0,
+                    skipped_readonly: 0,
+                    skipped_missing: 0,
+                    done: false,
+                    error: None,
+                },
+            );
 
             if total > 0 {
                 match fs::read(&avatar_path_clone) {
@@ -1011,7 +1268,7 @@ pub async fn save_artist_avatar(
                             let is_cue = match &item.cue_source_path {
                                 Some(s) => !s.is_empty(),
                                 None => false,
-                              };
+                            };
 
                             if is_remote {
                                 skipped_remote += 1;
@@ -1054,7 +1311,9 @@ pub async fn save_artist_avatar(
                                                 tag.remove_picture_type(PictureType::Artist);
                                                 tag.push_picture(picture);
 
-                                                match tagged_file.save_to_path(path_obj, WriteOptions::default()) {
+                                                match tagged_file
+                                                    .save_to_path(path_obj, WriteOptions::default())
+                                                {
                                                     Ok(_) => {
                                                         success_count += 1;
                                                     }
@@ -1074,64 +1333,73 @@ pub async fn save_artist_avatar(
                             }
 
                             // Emit periodic progress
-                            let _ = app_clone.emit("artist-avatar:write-tags-progress", super::types::WriteTagsProgressPayload {
-                                task_id: task_id_clone.clone(),
-                                artist_id,
-                                current: idx + 1,
-                                total,
-                                success_count,
-                                failure_count,
-                                skipped_count,
-                                skipped_multi_artist,
-                                skipped_remote,
-                                skipped_cue,
-                                skipped_readonly,
-                                skipped_missing,
-                                done: false,
-                                error: None,
-                            });
+                            let _ = app_clone.emit(
+                                "artist-avatar:write-tags-progress",
+                                super::types::WriteTagsProgressPayload {
+                                    task_id: task_id_clone.clone(),
+                                    artist_id,
+                                    current: idx + 1,
+                                    total,
+                                    success_count,
+                                    failure_count,
+                                    skipped_count,
+                                    skipped_multi_artist,
+                                    skipped_remote,
+                                    skipped_cue,
+                                    skipped_readonly,
+                                    skipped_missing,
+                                    done: false,
+                                    error: None,
+                                },
+                            );
                         }
                     }
                     Err(e) => {
                         let error_msg = format!("Failed to read avatar cache: {}", e);
-                        let _ = app_clone.emit("artist-avatar:write-tags-progress", super::types::WriteTagsProgressPayload {
-                            task_id: task_id_clone.clone(),
-                            artist_id,
-                            current: 0,
-                            total,
-                            success_count: 0,
-                            failure_count: total,
-                            skipped_count: 0,
-                            skipped_multi_artist: 0,
-                            skipped_remote: 0,
-                            skipped_cue: 0,
-                            skipped_readonly: 0,
-                            skipped_missing: 0,
-                            done: true,
-                            error: Some(error_msg),
-                        });
+                        let _ = app_clone.emit(
+                            "artist-avatar:write-tags-progress",
+                            super::types::WriteTagsProgressPayload {
+                                task_id: task_id_clone.clone(),
+                                artist_id,
+                                current: 0,
+                                total,
+                                success_count: 0,
+                                failure_count: total,
+                                skipped_count: 0,
+                                skipped_multi_artist: 0,
+                                skipped_remote: 0,
+                                skipped_cue: 0,
+                                skipped_readonly: 0,
+                                skipped_missing: 0,
+                                done: true,
+                                error: Some(error_msg),
+                            },
+                        );
                         return;
                     }
                 }
             }
 
             // Emit final done event
-            let _ = app_clone.emit("artist-avatar:write-tags-progress", super::types::WriteTagsProgressPayload {
-                task_id: task_id_clone,
-                artist_id,
-                current: total,
-                total,
-                success_count,
-                failure_count,
-                skipped_count,
-                skipped_multi_artist,
-                skipped_remote,
-                skipped_cue,
-                skipped_readonly,
-                skipped_missing,
-                done: true,
-                error: None,
-            });
+            let _ = app_clone.emit(
+                "artist-avatar:write-tags-progress",
+                super::types::WriteTagsProgressPayload {
+                    task_id: task_id_clone,
+                    artist_id,
+                    current: total,
+                    total,
+                    success_count,
+                    failure_count,
+                    skipped_count,
+                    skipped_multi_artist,
+                    skipped_remote,
+                    skipped_cue,
+                    skipped_readonly,
+                    skipped_missing,
+                    done: true,
+                    error: None,
+                },
+            );
         });
     }
 
@@ -1141,4 +1409,3 @@ pub async fn save_artist_avatar(
         task_id,
     })
 }
-

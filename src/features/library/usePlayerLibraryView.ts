@@ -1,5 +1,5 @@
 import { computed } from 'vue';
-import { storeToRefs } from 'pinia';
+import { getActivePinia, storeToRefs, type Pinia } from 'pinia';
 
 import { useCollectionsStore } from '../collections/store';
 import { useLibraryStore } from './store';
@@ -8,9 +8,17 @@ import { useLibraryCatalogSelectors } from './useLibraryCatalogSelectors';
 import { useLibraryCollectionSelectors } from './useLibraryCollectionSelectors';
 import { useLibraryCurrentViewSongs } from './useLibraryCurrentViewSongs';
 import { useLibraryFolderSelectors } from './useLibraryFolderSelectors';
+import { isProfilingEnabled } from '../../utils/profiling';
 export type { AlbumListItem, ArtistListItem } from './playerLibraryViewShared';
 
-export function usePlayerLibraryView() {
+let playerLibraryViewInstanceCount = 0;
+const playerLibraryViewByPinia = new WeakMap<Pinia, PlayerLibraryView>();
+
+type PlayerLibraryView = ReturnType<typeof createPlayerLibraryView>;
+
+const createPlayerLibraryView = () => {
+  const debugInstanceId = ++playerLibraryViewInstanceCount;
+  const debugStart = isProfilingEnabled() ? performance.now() : 0;
   const collectionsStore = useCollectionsStore();
   const libraryStore = useLibraryStore();
   const navigationStore = useNavigationStore();
@@ -85,7 +93,13 @@ export function usePlayerLibraryView() {
     songLookup,
   });
 
-  const { currentViewSongs } = useLibraryCurrentViewSongs({
+  const {
+    currentViewSongPaths,
+    currentViewSongs,
+    loadMoreCurrentSearchResults,
+    hasMoreCurrentSearchResults,
+    currentSearchResultTotal,
+  } = useLibraryCurrentViewSongs({
     canonicalSongPaths,
     playlists,
     recentSongs,
@@ -106,7 +120,14 @@ export function usePlayerLibraryView() {
     albumDetailSortMode,
     localCustomOrder,
     playlistSortMode,
+    debugOwnerId: debugInstanceId,
   });
+
+  if (isProfilingEnabled()) {
+    console.log(
+      `[Profiling] usePlayerLibraryView#${debugInstanceId} created in ${(performance.now() - debugStart).toFixed(2)}ms (total instances: ${playerLibraryViewInstanceCount})`,
+    );
+  }
 
   return {
     activeRootPath,
@@ -114,7 +135,11 @@ export function usePlayerLibraryView() {
     artistList: catalogSelectors.artistList,
     canonicalSongs,
     currentFolderSongs: folderSelectors.currentFolderSongs,
+    currentViewSongPaths,
     currentViewSongs,
+    loadMoreCurrentSearchResults,
+    hasMoreCurrentSearchResults,
+    currentSearchResultTotal,
     favAlbumList: collectionSelectors.favAlbumList,
     favArtistList: collectionSelectors.favArtistList,
     favoriteSongList: collectionSelectors.favoriteSongList,
@@ -135,4 +160,20 @@ export function usePlayerLibraryView() {
     librarySongs: canonicalSongs,
     songList: sourceSongs,
   };
+};
+
+export function usePlayerLibraryView() {
+  const pinia = getActivePinia();
+  if (!pinia) {
+    return createPlayerLibraryView();
+  }
+
+  const existingView = playerLibraryViewByPinia.get(pinia);
+  if (existingView) {
+    return existingView;
+  }
+
+  const view = createPlayerLibraryView();
+  playerLibraryViewByPinia.set(pinia, view);
+  return view;
 }

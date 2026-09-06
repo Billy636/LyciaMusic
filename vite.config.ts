@@ -13,21 +13,22 @@ export default defineConfig(async () => ({
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-pixi': [
-            '@pixi/app',
-            '@pixi/core',
-            '@pixi/display',
-            '@pixi/sprite',
-            '@pixi/filter-blur',
-            '@pixi/filter-bulge-pinch',
-            '@pixi/filter-color-matrix',
-          ],
-          'vendor-amll': [
-            '@applemusic-like-lyrics/core',
-            '@applemusic-like-lyrics/lyric',
-            '@applemusic-like-lyrics/vue',
-          ],
+        // Keep shared runtime dependencies (especially Vue) outside the heavy
+        // AMLL/Pixi chunks so lightweight auxiliary windows do not load them.
+        manualChunks(id) {
+          const normalizedId = id.replace(/\\/g, '/');
+          if (
+            normalizedId.includes('/node_modules/vue/')
+            || normalizedId.includes('/node_modules/@vue/')
+          ) {
+            return 'vendor-vue';
+          }
+          if (normalizedId.includes('/node_modules/@applemusic-like-lyrics/')) {
+            return 'vendor-amll';
+          }
+          if (normalizedId.includes('/node_modules/@pixi/')) {
+            return 'vendor-pixi';
+          }
         },
       },
     },

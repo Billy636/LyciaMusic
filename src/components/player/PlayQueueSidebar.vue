@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue';
-import type { ComponentPublicInstance } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { usePlayer } from '../../composables/player';
 import { useThemeSettings } from '../../composables/useThemeSettings';
 import { isRemoteSong } from '../../utils/remoteSong';
 import ModernModal from '../common/ModernModal.vue';
+import { useLibrarySongWindowCache } from '../../composables/useLibrarySongWindowCache';
+import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver';
 
 const {
-  playQueue,
+  playQueuePaths,
   currentSong,
   showPlaylist,
   togglePlaylist,
@@ -17,9 +18,15 @@ const {
   removeSongFromQueue,
 } = usePlayer();
 const { theme } = useThemeSettings();
+const { ensureWindow, getSongAt } = useLibrarySongWindowCache();
+const { loadSong } = useLibrarySongResolver();
 
 const showClearModal = ref(false);
-const itemRefs = ref<HTMLElement[]>([]);
+const queueContainerRef = ref<HTMLElement | null>(null);
+const scrollTop = ref(0);
+const containerHeight = ref(600);
+const QUEUE_ROW_HEIGHT = 69;
+const QUEUE_OVERSCAN = 10;
 
 const handleClearClick = () => {
   showClearModal.value = true;
@@ -35,9 +42,60 @@ const handleRemove = (song: any, e: Event) => {
   removeSongFromQueue(song);
 };
 
-const setItemRef = (el: Element | ComponentPublicInstance | null, index: number) => {
-  if (el instanceof HTMLElement) {
-    itemRefs.value[index] = el;
+const createPlaceholderSong = (path: string) => ({
+  path,
+  name: path.split(/[\\/]/).pop() ?? path,
+  title: '',
+  artist: '',
+  artist_names: [],
+  effective_artist_names: [],
+  album: '',
+  album_artist: '',
+  album_key: '',
+  is_various_artists_album: false,
+  collapse_artist_credits: false,
+  duration: 0,
+});
+
+const virtualQueue = computed(() => {
+  const total = playQueuePaths.value.length;
+  const start = Math.floor(scrollTop.value / QUEUE_ROW_HEIGHT);
+  const visibleCount = Math.ceil(containerHeight.value / QUEUE_ROW_HEIGHT);
+  const renderStart = Math.max(0, start - QUEUE_OVERSCAN);
+  const renderEnd = Math.min(total, start + visibleCount + QUEUE_OVERSCAN);
+  return {
+    paddingTop: renderStart * QUEUE_ROW_HEIGHT,
+    paddingBottom: (total - renderEnd) * QUEUE_ROW_HEIGHT,
+    items: playQueuePaths.value.slice(renderStart, renderEnd).map((path, relativeIndex) => ({
+      ...(getSongAt(renderStart + relativeIndex)
+        ?? (currentSong.value?.path === path ? currentSong.value : null)
+        ?? createPlaceholderSong(path)),
+      virtualIndex: renderStart + relativeIndex,
+    })),
+  };
+});
+
+const ensureVisibleQueue = () => {
+  const firstVisible = Math.floor(scrollTop.value / QUEUE_ROW_HEIGHT);
+  const visibleCount = Math.ceil(containerHeight.value / QUEUE_ROW_HEIGHT);
+  void ensureWindow({
+    paths: playQueuePaths.value,
+    start: Math.max(0, firstVisible - QUEUE_OVERSCAN),
+    end: Math.min(playQueuePaths.value.length, firstVisible + visibleCount + QUEUE_OVERSCAN),
+    viewportHeight: containerHeight.value,
+    rowHeight: QUEUE_ROW_HEIGHT,
+  });
+};
+
+const handleQueueScroll = (event: Event) => {
+  scrollTop.value = (event.target as HTMLElement).scrollTop;
+  ensureVisibleQueue();
+};
+
+const handlePlayPath = async (path: string) => {
+  const song = await loadSong(path);
+  if (song) {
+    await playSong(song, { preserveQueue: true });
   }
 };
 
@@ -46,13 +104,13 @@ const scrollToCurrentSong = async (behavior: ScrollBehavior = 'auto') => {
 
   await nextTick();
 
-  const currentIndex = playQueue.value.findIndex(song => song.path === currentSong.value?.path);
+  const currentIndex = playQueuePaths.value.indexOf(currentSong.value.path);
   if (currentIndex === -1) return;
-
-  itemRefs.value[currentIndex]?.scrollIntoView({
+  queueContainerRef.value?.scrollTo({
+    top: Math.max(0, currentIndex * QUEUE_ROW_HEIGHT - containerHeight.value / 2),
     behavior,
-    block: 'center',
   });
+  ensureVisibleQueue();
 };
 
 watch(
@@ -62,6 +120,20 @@ watch(
     void scrollToCurrentSong();
   },
 );
+
+watch([playQueuePaths, showPlaylist], () => {
+  if (showPlaylist.value) {
+    ensureVisibleQueue();
+  }
+}, { immediate: true });
+
+const updateContainerHeight = () => {
+  containerHeight.value = queueContainerRef.value?.clientHeight || 600;
+  ensureVisibleQueue();
+};
+
+onMounted(() => window.addEventListener('resize', updateContainerHeight));
+onUnmounted(() => window.removeEventListener('resize', updateContainerHeight));
 
 watch(
   () => currentSong.value?.path,
@@ -84,9 +156,9 @@ watch(
         class="fixed right-0 rounded-l-2xl shadow-[0_18px_50px_rgba(15,23,42,0.22)] border-l border-t border-b border-white/70 dark:border-white/10 z-[100] flex flex-col overflow-hidden font-sans select-none bg-[#f7f9fc]/90 dark:bg-[#101827]/90 transition-all duration-300 ring-1 ring-black/5 dark:ring-white/5"
         :class="[
           (theme.dynamicBgType === 'none' && theme.mode === 'custom') ? '' : 'backdrop-blur-2xl',
-          playQueue.length > 0 ? 'bottom-24 w-[340px]' : 'bottom-5 w-[340px]'
+          playQueuePaths.length > 0 ? 'bottom-24 w-[340px]' : 'bottom-5 w-[340px]'
         ]"
-        :style="{ height: playQueue.length > 0 ? 'calc(100vh - 180px)' : 'calc(100vh - 40px)', 'min-height': '200px' }"
+        :style="{ height: playQueuePaths.length > 0 ? 'calc(100vh - 180px)' : 'calc(100vh - 40px)', 'min-height': '200px' }"
         @click.stop
       >
         <div
@@ -95,7 +167,7 @@ watch(
         >
           <div class="flex items-center gap-3">
             <h3 class="font-bold text-[#172033] dark:text-white text-lg tracking-tight">播放队列</h3>
-            <span class="text-xs text-[#34445c] dark:text-white font-semibold bg-[#e7edf5] dark:bg-white/12 px-2 py-0.5 rounded-full">{{ playQueue.length }}</span>
+            <span class="text-xs text-[#34445c] dark:text-white font-semibold bg-[#e7edf5] dark:bg-white/12 px-2 py-0.5 rounded-full">{{ playQueuePaths.length }}</span>
           </div>
           <button
             @click="handleClearClick"
@@ -107,20 +179,21 @@ watch(
           </button>
         </div>
 
-        <div class="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1 bg-[#eef3f8]/45 dark:bg-[#0b1220]/35">
-          <div v-if="playQueue.length === 0" class="h-full flex flex-col items-center justify-center text-[#34445c] dark:text-white/90 space-y-4 py-20">
+        <div ref="queueContainerRef" class="flex-1 overflow-y-auto custom-scrollbar p-3 bg-[#eef3f8]/45 dark:bg-[#0b1220]/35" @scroll="handleQueueScroll">
+          <div v-if="playQueuePaths.length === 0" class="h-full flex flex-col items-center justify-center text-[#34445c] dark:text-white/90 space-y-4 py-20">
             <div class="w-20 h-20 rounded-full bg-white/70 dark:bg-white/10 flex items-center justify-center shadow-inner">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-[#42526a] dark:text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
             </div>
             <span class="text-sm font-medium">播放队列为空</span>
           </div>
 
+          <div :style="{ height: `${virtualQueue.paddingTop}px` }"></div>
           <div
-            v-for="(song, index) in playQueue"
-            :key="song.path + index"
-            :ref="el => setItemRef(el, index)"
-            @click="playSong(song)"
+            v-for="song in virtualQueue.items"
+            :key="song.path + song.virtualIndex"
+            @click="handlePlayPath(song.path)"
             class="group relative p-2.5 rounded-xl flex justify-between items-center cursor-pointer transition-all duration-200 border"
+            :style="{ height: `${QUEUE_ROW_HEIGHT}px` }"
             :class="[
               currentSong?.path === song.path
                 ? 'bg-[#fff1f1]/95 dark:bg-[#EC4141]/18 text-[#EC4141] border-[#EC4141]/18 shadow-[0_10px_26px_rgba(15,23,42,0.14)]'
@@ -134,7 +207,7 @@ watch(
                 <div class="w-[3px] bg-[#EC4141] animate-music-bar-3"></div>
               </div>
               <template v-else>
-                <span class="text-xs text-[#52647d] dark:text-white/75 group-hover:hidden font-mono">{{ index + 1 }}</span>
+                <span class="text-xs text-[#52647d] dark:text-white/75 group-hover:hidden font-mono">{{ song.virtualIndex + 1 }}</span>
                 <svg xmlns="http://www.w3.org/2000/svg" class="hidden group-hover:block h-3 w-3 text-[#34445c] dark:text-white" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg>
               </template>
             </div>
@@ -166,6 +239,7 @@ watch(
               </button>
             </div>
           </div>
+          <div :style="{ height: `${virtualQueue.paddingBottom}px` }"></div>
         </div>
       </div>
     </transition>

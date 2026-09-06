@@ -35,7 +35,9 @@ export function useSongTableLibraryState({
   let heroScanHideTimer: ReturnType<typeof setTimeout> | null = null;
 
   const hasSearchQuery = computed(() => searchQuery.value.trim().length > 0);
-  const isLibraryEmpty = computed(() => librarySongs.value.length === 0);
+  const isLibraryEmpty = computed(() =>
+    libraryStore.canonicalSongPaths.length === 0 && librarySongs.value.length === 0,
+  );
   const isLibraryScanRunning = computed(() =>
     !!libraryScanProgress.value && !libraryScanProgress.value.done && !libraryScanProgress.value.failed,
   );

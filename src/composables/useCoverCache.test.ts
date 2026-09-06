@@ -103,4 +103,21 @@ describe('cover cache', () => {
     await expect(coverCache.loadCover(path)).resolves.toBe(`asset://${coverPath}`);
     expect(coreMocks.invoke).not.toHaveBeenCalled();
   });
+
+  it('loads full cover path from backend and caches it', async () => {
+    const path = '/music/current.flac';
+    const coverPath = 'C:\\covers\\current-full.png';
+    coreMocks.invoke.mockResolvedValueOnce(coverPath);
+
+    const { useCoverCache } = await import('./useCoverCache');
+    const coverCache = useCoverCache();
+
+    await expect(coverCache.loadFullCoverPath(path)).resolves.toBe(coverPath);
+    expect(coreMocks.invoke).toHaveBeenCalledWith('get_song_cover', { path });
+
+    // Subsequent call should use cached value and not invoke backend
+    coreMocks.invoke.mockClear();
+    await expect(coverCache.loadFullCoverPath(path)).resolves.toBe(coverPath);
+    expect(coreMocks.invoke).not.toHaveBeenCalled();
+  });
 });

@@ -27,6 +27,7 @@ import {
   MIN_PLAYER_OFFSET_Y,
   loadSystemLyricsFonts,
   normalizeLyricsFontPreset,
+  selectAmlLyricLines,
   systemLyricsFontOptions,
   type LyricLine,
   type LyricsFontPreset,
@@ -43,6 +44,8 @@ import LightLyricPlayer from './LightLyricPlayer.vue';
 
 const {
   parsedLyrics,
+  activeLyricsFormat,
+  nativeAmlLyrics,
   lyricsSettings,
   lyricsStatus,
   showLyricsPlayerSettingsPanel,
@@ -74,7 +77,7 @@ const fontPanelRef = ref<HTMLElement | null>(null);
 const systemFontPresetTriggerRef = ref<HTMLElement | null>(null);
 const customFontPresetTriggerRef = ref<HTMLElement | null>(null);
 const fontPresetMenuRef = ref<HTMLElement | null>(null);
-const amlPlayerRef = ref<InstanceType<typeof AmlLyricPlayer> | null>(null);
+const amlPlayerRef = ref<{ syncSeekLayout: (timeMs: number, lineIndex?: number) => void } | null>(null);
 const isFontPresetMenuOpen = ref(false);
 const fontPresetMenuMode = ref<FontPresetMenuMode | null>(null);
 const fontPresetMenuStyle = ref<Record<string, string>>({});
@@ -85,10 +88,13 @@ const previewPlayerOffsetY = ref(lyricsSettings.playerOffsetY);
 let lyricsSettingsCommitTimer: ReturnType<typeof setTimeout> | null = null;
 
 const amllLines = computed<AmlLyricLine[]>(() => {
-  return convertLyricsToAmlLines(
+  return selectAmlLyricLines(
+    activeLyricsFormat.value,
+    nativeAmlLyrics.value,
     parsedLyrics.value,
     lyricsSettings.showTranslation,
     lyricsSettings.showRomaji,
+    convertLyricsToAmlLines,
   );
 });
 
@@ -98,6 +104,7 @@ const amllCurrentTime = computed(() => {
 const lightCurrentTime = computed(() => {
   return Math.max(0, currentTime.value - audioDelay.value);
 });
+const lyricsTimeSyncKey = computed(() => `${currentSong.value?.path ?? ''}:${audioDelay.value}`);
 
 const emptyStateText = computed(() => {
   if (lyricsStatus.value === 'loading') return 'Loading lyrics...';
@@ -520,8 +527,7 @@ onUnmounted(() => {
     <div
       v-show="amllLines.length > 0"
       ref="fontPanelRef"
-      class="pointer-events-none absolute right-[100%] mr-[14vw] 2xl:mr-[22vw] top-2 bottom-12 z-[85] flex min-h-0 min-w-[260px] max-w-[320px] flex-col justify-center"
-      style="width: min(320px, calc(34vw - 24px));"
+      class="pointer-events-none absolute top-2 bottom-12 z-[85] flex min-h-0 min-w-[260px] max-w-[320px] flex-col justify-center lyric-style-panel"
     >
       <transition name="font-panel">
         <div
@@ -877,6 +883,7 @@ onUnmounted(() => {
           class="amll-host h-full min-h-0 w-full min-w-0"
           :lyric-lines="amllLines"
           :current-time="amllCurrentTime"
+          :time-sync-key="lyricsTimeSyncKey"
           :playing="isPlaying"
           :low-power="shouldReduceLyricsRendering"
           :layout-version="lyricsLayoutVersion"
@@ -1256,5 +1263,18 @@ onUnmounted(() => {
   height: 4px;
   border-radius: 9999px;
   background: transparent;
+}
+
+.lyric-style-panel {
+  --panel-width: min(320px, calc(34vw - 24px));
+  --shift-vw: 14vw;
+  width: var(--panel-width);
+  right: calc(100% + min(var(--shift-vw), max(40vw, 300px) + 40px - var(--panel-width) - 16px));
+}
+
+@media (min-width: 1536px) {
+  .lyric-style-panel {
+    --shift-vw: 22vw;
+  }
 }
 </style>

@@ -12,6 +12,7 @@ const scanMusicFolderMock = vi.fn();
 const batchMoveMusicFilesMock = vi.fn();
 const getFolderFirstSongMock = vi.fn();
 const deleteMusicFileMock = vi.fn();
+const fileExistsMock = vi.fn();
 
 vi.mock('../services/tauri/fileApi', () => ({
   fileApi: {
@@ -23,6 +24,7 @@ vi.mock('../services/tauri/fileApi', () => ({
     moveMusicFile: vi.fn(),
     showInFolder: vi.fn(),
     deleteMusicFile: (...args: unknown[]) => deleteMusicFileMock(...args),
+    fileExists: (...args: unknown[]) => fileExistsMock(...args),
   },
 }));
 
@@ -49,6 +51,8 @@ describe('playerFileManager.refreshFolder', () => {
     batchMoveMusicFilesMock.mockReset();
     getFolderFirstSongMock.mockReset();
     deleteMusicFileMock.mockReset();
+    fileExistsMock.mockReset();
+    fileExistsMock.mockResolvedValue(true);
   });
 
   it('removes deleted songs from library state and related collections when refreshing a folder', async () => {
@@ -109,13 +113,17 @@ describe('playerFileManager.refreshFolder', () => {
     expect(summary).toEqual({
       removedCount: 1,
       removedPaths: [removedSong.path],
+      addedCount: 1,
+      addedPaths: [addedSong.path],
     });
-    expect(libraryStore.librarySongs.map(song => song.path)).toEqual([
+    expect(libraryStore.getSongByPath(addedSong.path)).toEqual(addedSong);
+    expect(libraryStore.getSongByPath(removedSong.path)).toBeNull();
+    expect(libraryStore.canonicalSongPaths).toEqual([
       outsideSong.path,
       keptSong.path,
       addedSong.path,
     ]);
-    expect(libraryStore.songList.map(song => song.path)).toEqual([
+    expect(libraryStore.sourceSongPaths).toEqual([
       outsideSong.path,
       keptSong.path,
       addedSong.path,
@@ -146,6 +154,133 @@ describe('playerFileManager.refreshFolder', () => {
 
     expect(scanMusicFolderMock).toHaveBeenCalledWith('c:/music/a', 60);
   });
+
+  it('accurately syncs songs when path casing or slashes differ on Windows', async () => {
+    const libraryStore = useLibraryStore();
+    const removedSong = makeSong({
+      path: 'C:\\Music\\Rock\\deleted.mp3',
+      name: 'deleted.mp3',
+      title: 'Deleted',
+    });
+    const keptSong = makeSong({
+      path: 'c:/music/rock/kept.mp3',
+      name: 'kept.mp3',
+      title: 'Kept',
+    });
+
+    libraryStore.librarySongs = [removedSong, keptSong];
+    libraryStore.songList = [removedSong, keptSong];
+
+    // Scanner returns path with Windows backslashes and different casing
+    const scannedKeptSong = makeSong({
+      path: 'C:\\Music\\Rock\\kept.mp3',
+      name: 'kept.mp3',
+      title: 'Kept',
+    });
+    scanMusicFolderMock.mockResolvedValue([scannedKeptSong]);
+
+    const fileManager = createPlayerFileManager({
+      removeLibraryFolderLinked: vi.fn(),
+      removeFromHistory: vi.fn(),
+      showToast: vi.fn(),
+    });
+
+    const summary = await fileManager.refreshFolder('C:/Music/Rock');
+
+    expect(summary).toEqual({
+      removedCount: 1,
+      removedPaths: [removedSong.path],
+      addedCount: 0,
+      addedPaths: [],
+    });
+    expect(libraryStore.canonicalSongPaths).toEqual([scannedKeptSong.path]);
+    expect(libraryStore.getSongByPath(removedSong.path)).toBeNull();
+  });
+});
+
+describe('playerFileManager.refreshAllFolders', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    scanMusicFolderMock.mockReset();
+    batchMoveMusicFilesMock.mockReset();
+    getFolderFirstSongMock.mockReset();
+    deleteMusicFileMock.mockReset();
+    fileExistsMock.mockReset();
+    fileExistsMock.mockResolvedValue(true);
+  });
+
+  it('updates canonical songs with normalized folder matching and removes deleted external queue songs', async () => {
+    const libraryStore = useLibraryStore();
+    const collectionsStore = useCollectionsStore();
+    const playbackStore = usePlaybackStore();
+    const removeFromHistory = vi.fn().mockResolvedValue(undefined);
+    const showToast = vi.fn();
+
+    const removedSong = makeSong({
+      path: 'C:\\Music\\A\\removed.flac',
+      name: 'removed.flac',
+      title: 'Removed',
+    });
+    const keptSong = makeSong({
+      path: 'C:\\Music\\A\\kept.flac',
+      name: 'kept.flac',
+      title: 'Kept',
+    });
+    const outsideSong = makeSong({
+      path: 'D:\\Elsewhere\\outside.flac',
+      name: 'outside.flac',
+      title: 'Outside',
+    });
+    const externalDeletedSong = makeSong({
+      path: 'D:\\Downloads\\external.flac',
+      name: 'external.flac',
+      title: 'External',
+    });
+
+    libraryStore.setWatchedFolders(['c:/music/a']);
+    libraryStore.sourceSongs = [removedSong, outsideSong];
+    libraryStore.canonicalSongs = [removedSong, outsideSong];
+    collectionsStore.favoritePaths = [removedSong.path, externalDeletedSong.path, outsideSong.path];
+    collectionsStore.playlists = [
+      {
+        id: 'playlist-1',
+        name: 'Playlist',
+        songPaths: [removedSong.path, externalDeletedSong.path, outsideSong.path],
+      },
+    ];
+    collectionsStore.recentSongs = [
+      { path: removedSong.path, playedAt: 1 },
+      { path: externalDeletedSong.path, playedAt: 2 },
+      { path: outsideSong.path, playedAt: 3 },
+    ];
+    playbackStore.playQueue = [externalDeletedSong, outsideSong];
+    playbackStore.tempQueue = [externalDeletedSong];
+    playbackStore.currentSong = externalDeletedSong;
+
+    scanMusicFolderMock.mockResolvedValue([keptSong]);
+    fileExistsMock.mockImplementation((path: string) =>
+      Promise.resolve(path !== externalDeletedSong.path),
+    );
+
+    const fileManager = createPlayerFileManager({
+      removeLibraryFolderLinked: vi.fn(),
+      removeFromHistory,
+      showToast,
+    });
+
+    await fileManager.refreshAllFolders();
+
+    expect(libraryStore.sourceSongPaths).toEqual([outsideSong.path, keptSong.path]);
+    expect(libraryStore.canonicalSongPaths).toEqual([outsideSong.path, keptSong.path]);
+    expect(playbackStore.playQueue.map(song => song.path)).toEqual([outsideSong.path]);
+    expect(playbackStore.tempQueue).toEqual([]);
+    expect(playbackStore.currentSong).toBeNull();
+    expect(collectionsStore.favoritePaths).toEqual([outsideSong.path]);
+    expect(collectionsStore.playlists[0]?.songPaths).toEqual([outsideSong.path]);
+    expect(collectionsStore.recentSongs.map(item => item.path)).toEqual([outsideSong.path]);
+    expect(removeFromHistory).toHaveBeenCalledWith([removedSong.path, externalDeletedSong.path]);
+    expect(showToast).toHaveBeenCalledWith('已刷新所有文件夹', 'success');
+  });
 });
 
 describe('playerFileManager.moveFilesToFolder', () => {
@@ -155,6 +290,8 @@ describe('playerFileManager.moveFilesToFolder', () => {
     batchMoveMusicFilesMock.mockReset();
     getFolderFirstSongMock.mockReset();
     deleteMusicFileMock.mockReset();
+    fileExistsMock.mockReset();
+    fileExistsMock.mockResolvedValue(true);
   });
 
   it('keeps files that failed to move in the source list and counts only moved files', async () => {
@@ -241,6 +378,8 @@ describe('playerFileManager.deleteFromDisk', () => {
     batchMoveMusicFilesMock.mockReset();
     getFolderFirstSongMock.mockReset();
     deleteMusicFileMock.mockReset();
+    fileExistsMock.mockReset();
+    fileExistsMock.mockResolvedValue(true);
   });
 
   it('removes deleted songs from current playback and queues', async () => {

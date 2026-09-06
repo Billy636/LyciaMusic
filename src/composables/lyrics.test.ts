@@ -69,12 +69,21 @@ describe('enhanced lrc parser', async () => {
     parseEnhancedLrc,
     parseEnhancedLrcLine,
     parseTimestampToMs,
+    normalizeLyricTimestamps,
   } = await import('./lyrics');
 
   it('parses enhanced timestamp strings to milliseconds', () => {
     expect(parseTimestampToMs('00:36.111')).toBe(36111);
+    expect(parseTimestampToMs('00:36:111')).toBe(36111);
     expect(parseTimestampToMs('01:02.3')).toBe(62300);
+    expect(parseTimestampToMs('01:02:3')).toBe(62300);
+    expect(parseTimestampToMs('00:22:05')).toBe(22050);
     expect(parseTimestampToMs('bad')).toBeNull();
+  });
+
+  it('normalizes colon timestamps to dot format', () => {
+    expect(normalizeLyricTimestamps('[00:22:05]A<00:22:05>B')).toBe('[00:22.05]A<00:22.05>B');
+    expect(normalizeLyricTimestamps('[01:02:03]C')).toBe('[01:02.03]C');
   });
 
   it('detects enhanced lrc lines by angle-bracket timestamps', () => {
@@ -98,6 +107,73 @@ describe('enhanced lrc parser', async () => {
       { text: 'B', start: 36551, end: 36991 },
       { text: 'C', start: 36991, end: 37421 },
     ]);
+  });
+
+  it('parses enhanced lrc lines with voice prefixes before word timing', () => {
+    const parsed = parseEnhancedLrcLine('[00:13.749]v1:<00:13.749>海<00:14.062>平<00:14.409>面<00:14.867>远<00:15.359>方<00:15.691>开<00:16.027>始<00:16.589>阴<00:17.060>霾<00:18.432>');
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.startTime).toBe(13749);
+    expect(parsed?.words.map((word) => word.word).join('')).toBe('海平面远方开始阴霾');
+    expect(parsed?.words[0]).toMatchObject({
+      startTime: 13749,
+      endTime: 14062,
+      word: '海',
+    });
+  });
+
+  it('infers the final word end time when the closing timestamp is missing', () => {
+    const parsed = parseEnhancedLrcLine('[00:10.000]<00:10.000>A<00:10.400>B<00:11.001>C');
+
+    expect(parsed?.words.map((word) => ({
+      text: word.word,
+      start: word.startTime,
+      end: word.endTime,
+    }))).toEqual([
+      { text: 'A', start: 10000, end: 10400 },
+      { text: 'B', start: 10400, end: 11001 },
+      { text: 'C', start: 11001, end: 11501 },
+    ]);
+    expect(parsed?.endTime).toBe(11501);
+  });
+
+  it('uses the default duration for a single untimed final word', () => {
+    const parsed = parseEnhancedLrcLine('[00:10.000]<00:10.000>Hi');
+
+    expect(parsed?.words).toEqual([{
+      startTime: 10000,
+      endTime: 10300,
+      word: 'Hi',
+      romanWord: '',
+    }]);
+    expect(parsed?.endTime).toBe(10300);
+  });
+
+  it('clamps inferred final word durations to the configured range', () => {
+    const short = parseEnhancedLrcLine('[00:00.000]<00:00.000>A<00:00.050>B');
+    const long = parseEnhancedLrcLine('[00:00.000]<00:00.000>A<00:02.000>B');
+
+    expect(short?.words[1].endTime).toBe(200);
+    expect(long?.words[1].endTime).toBe(3000);
+  });
+
+  it('caps an inferred final word at the next enhanced line start', () => {
+    const parsed = parseEnhancedLrc([
+      '[00:00.000]<00:00.000>A<00:00.900>B',
+      '[00:01.000]<00:01.000>C<00:01.500>',
+    ].join('\n'));
+
+    expect(parsed[0].words[1].endTime).toBe(1000);
+    expect(parsed[0].endTime).toBe(1000);
+  });
+
+  it('uses timing context from other enhanced lines when local timing is unavailable', () => {
+    const parsed = parseEnhancedLrc([
+      '[00:00.000]<00:00.000>Hi',
+      '[00:10.000]<00:10.000>A<00:10.400>B<00:11.000>',
+    ].join('\n'));
+
+    expect(parsed[0].words[0].endTime).toBe(500);
   });
 
   it('allows line start time and first word time to differ', () => {
@@ -158,14 +234,13 @@ describe('enhanced lrc parser', async () => {
   it('falls back on malformed enhanced lines while preserving valid enhanced lines', () => {
     const parsed = parseEnhancedLrc([
       '[00:36.111]<00:36.111>A<00:36.551>B<00:36.991>',
-      '[00:40.000]<00:40.000>Broken<00:40.500>Line',
+      '[00:40.000]Broken<00:40.500>Line<00:41.000>',
       '[00:41.000]plain line',
     ].join('\n'));
 
     expect(parsed).toHaveLength(1);
     expect(parsed[0].startTime).toBe(36111);
   });
-
   it('merges enhanced lines into a plain lrc baseline without dropping ordinary lines', () => {
     const enhancedLines = parseEnhancedLrc('[00:10.000]<00:10.000>A<00:10.500>B<00:11.000>');
     const baseLines = [
@@ -1068,6 +1143,8 @@ describe('lyrics settings normalization', async () => {
     expect(normalized.textShadowColor).toBe('#000000');
     expect(normalized.firstLineTextShadowStrength).toBe(0);
     expect(normalized.secondLineTextShadowStrength).toBe(0);
+    expect(normalized.textStrokeColor).toBe('#000000');
+    expect(normalized.textStrokeDepth).toBe(0);
   });
 
   it('normalizes desktop readability settings from migrated values', () => {
@@ -1076,12 +1153,16 @@ describe('lyrics settings normalization', async () => {
       textShadowColor: 'not-a-color',
       firstLineTextShadowStrength: 180,
       secondLineTextShadowStrength: -20,
+      textStrokeColor: '#123abc',
+      textStrokeDepth: 180,
     } as any);
 
     expect(normalized.textOpacity).toBe(1);
     expect(normalized.textShadowColor).toBe('#000000');
     expect(normalized.firstLineTextShadowStrength).toBe(100);
     expect(normalized.secondLineTextShadowStrength).toBe(0);
+    expect(normalized.textStrokeColor).toBe('#123ABC');
+    expect(normalized.textStrokeDepth).toBe(100);
   });
 
   it('maps legacy desktop text shadow strength to both lyric lines', () => {
@@ -1091,6 +1172,7 @@ describe('lyrics settings normalization', async () => {
 
     expect(normalized.firstLineTextShadowStrength).toBe(45);
     expect(normalized.secondLineTextShadowStrength).toBe(45);
+    expect(normalized.textStrokeDepth).toBe(0);
   });
 });
 
@@ -1173,6 +1255,20 @@ describe('raw lyrics samples from the common formats checklist', async () => {
       { text: '许', start: 2.625, end: 3 },
       { text: '嵩', start: 3, end: 3.375 },
     ]);
+  });
+
+  it('parses voice-prefixed enhanced lrc with same-time plain fallback lines', async () => {
+    const lines = await parseRawToLyricLines([
+      '[00:13.749]v1:<00:13.749>海<00:14.062>平<00:14.409>面<00:14.867>远<00:15.359>方<00:15.691>开<00:16.027>始<00:16.589>阴<00:17.060>霾<00:18.432>',
+      '[00:13.749]海平面远方开始阴霾',
+      '[00:20.280]v1:<00:20.280>悲<00:20.599>伤<00:21.018>要<00:21.441><00:21.442>怎么<00:22.263>平静<00:23.121>纯<00:23.755>白<00:24.659>',
+      '[00:20.280]悲伤要怎么平静纯白',
+    ].join('\n'));
+
+    expect(lines).toHaveLength(2);
+    expect(lines[0]?.text).toBe('海平面远方开始阴霾');
+    expect(lines[0]?.words?.map((word) => word.text).join('')).toBe('海平面远方开始阴霾');
+    expect(lines[1]?.text).toBe('悲伤要怎么平静纯白');
   });
 
   it('classifies latin plus chinese bilingual lyrics as main plus translation across raw lrc input', async () => {

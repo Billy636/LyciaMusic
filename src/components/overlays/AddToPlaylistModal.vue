@@ -54,7 +54,7 @@ watch(() => props.visible, (val) => {
   }
 
   scheduleClear();
-});
+}, { immediate: true });
 
 onUnmounted(() => {
   cancelClearTimer();

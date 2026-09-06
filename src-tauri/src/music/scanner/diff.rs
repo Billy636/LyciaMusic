@@ -1,7 +1,8 @@
 use super::super::cue;
 use super::super::types::Song;
 use super::super::utils::{
-    descendant_like_patterns, is_cue_file_extension, is_supported_library_extension, normalize_path,
+    descendant_like_patterns, is_cue_file_extension, is_dot_prefixed_path,
+    is_supported_library_extension, normalize_path,
 };
 use super::parser::{
     build_cue_track_song, enrich_album_groups, parse_song_from_file, preferred_parse_workers,
@@ -30,6 +31,7 @@ pub(super) struct ScanDiff {
     pub(super) to_add: Vec<Song>,
     pub(super) to_update: Vec<Song>,
     pub(super) to_delete: Vec<String>,
+    #[allow(dead_code)]
     pub(super) has_disk_songs: bool,
 }
 
@@ -46,14 +48,24 @@ struct ParseTask {
     path: PathBuf,
     path_str: String,
     ext: String,
-    is_add: bool,
+    change: ChangeKind,
 }
 
-struct ParsedTaskResult {
-    index: usize,
-    path_str: String,
-    song: Option<Song>,
-    is_add: bool,
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ChangeKind {
+    Add,
+    Update,
+}
+
+enum ParsedTaskResult {
+    Song {
+        index: usize,
+        song: Song,
+        change: ChangeKind,
+    },
+    Delete {
+        path: String,
+    },
 }
 
 fn song_meets_duration_threshold(song: &Song, options: ScanOptions) -> bool {
@@ -163,10 +175,8 @@ fn collect_disk_candidates(
         reporter.emit_collecting(0, 0, Some("正在扫描文件夹".to_string()));
     }
 
-    for entry in WalkDir::new(normalized_folder)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-    {
+    let mut it = WalkDir::new(normalized_folder).into_iter();
+    while let Some(entry) = next_visible_walk_entry(&mut it) {
         let path = entry.path();
         if !path.is_file() {
             continue;
@@ -216,10 +226,8 @@ fn collect_disk_candidates(
     // Collect CUE sheet tracks and record referenced audio paths
     let mut cue_referenced_audio: Vec<String> = Vec::new();
 
-    for entry in WalkDir::new(normalized_folder)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-    {
+    let mut it = WalkDir::new(normalized_folder).into_iter();
+    while let Some(entry) = next_visible_walk_entry(&mut it) {
         let path = entry.path();
         if !path.is_file() {
             continue;
@@ -280,6 +288,26 @@ fn collect_disk_candidates(
     candidates
 }
 
+fn should_skip_dot_prefixed_child_directory(entry: &walkdir::DirEntry) -> bool {
+    entry.depth() > 0 && entry.file_type().is_dir() && is_dot_prefixed_path(entry.path())
+}
+
+fn next_visible_walk_entry(iter: &mut walkdir::IntoIter) -> Option<walkdir::DirEntry> {
+    loop {
+        let entry = match iter.next()? {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+
+        if should_skip_dot_prefixed_child_directory(&entry) {
+            iter.skip_current_dir();
+            continue;
+        }
+
+        return Some(entry);
+    }
+}
+
 fn parse_tasks_in_parallel(
     tasks: Vec<ParseTask>,
     reporter: Option<ScanProgressReporter>,
@@ -308,19 +336,15 @@ fn parse_tasks_in_parallel(
 
                 parsed.and_then(|song| {
                     if song_meets_duration_threshold(&song, options) {
-                        return Some(ParsedTaskResult {
+                        return Some(ParsedTaskResult::Song {
                             index: task.index,
-                            path_str: task.path_str,
-                            song: Some(song),
-                            is_add: task.is_add,
+                            song,
+                            change: task.change,
                         });
                     }
 
-                    (!task.is_add).then(|| ParsedTaskResult {
-                        index: task.index,
-                        path_str: task.path_str,
-                        song: None,
-                        is_add: task.is_add,
+                    (task.change == ChangeKind::Update).then(|| ParsedTaskResult::Delete {
+                        path: task.path_str,
                     })
                 })
             })
@@ -356,11 +380,32 @@ fn probe_audio_duration_ms(path: &Path) -> Option<u32> {
         .tracks()
         .iter()
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)?;
-    let time_base = track.codec_params.time_base?;
-    let frames = track.codec_params.n_frames?;
-    let time = time_base.calc_time(frames);
-    let seconds = time.seconds.saturating_add(u64::from(time.frac > 0.0));
-    Some((seconds.min(u32::MAX as u64) * 1000) as u32)
+    let seconds = if let (Some(time_base), Some(frames)) = (track.codec_params.time_base, track.codec_params.n_frames) {
+        if frames > 0 {
+            let time = time_base.calc_time(frames);
+            time.seconds.saturating_add(u64::from(time.frac > 0.0))
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
+    let seconds = if seconds == 0 {
+        if crate::music::tags::is_mp4_path(path) {
+            crate::music::tags::probe_mp4_duration(path).unwrap_or(0) as u64
+        } else {
+            0
+        }
+    } else {
+        seconds
+    };
+
+    if seconds > 0 {
+        Some((seconds.min(u32::MAX as u64) * 1000) as u32)
+    } else {
+        None
+    }
 }
 
 fn process_cue_parse_tasks(tasks: &[ParseTask], options: ScanOptions) -> Vec<ParsedTaskResult> {
@@ -410,18 +455,14 @@ fn process_cue_parse_tasks(tasks: &[ParseTask], options: ScanOptions) -> Vec<Par
                 flac_duration_ms,
             ) {
                 if song_meets_duration_threshold(&song, options) {
-                    results.push(ParsedTaskResult {
+                    results.push(ParsedTaskResult::Song {
                         index: task.index,
-                        path_str: task.path_str.clone(),
-                        song: Some(song),
-                        is_add: task.is_add,
+                        song,
+                        change: task.change,
                     });
-                } else if !task.is_add {
-                    results.push(ParsedTaskResult {
-                        index: task.index,
-                        path_str: task.path_str.clone(),
-                        song: None,
-                        is_add: task.is_add,
+                } else if task.change == ChangeKind::Update {
+                    results.push(ParsedTaskResult::Delete {
+                        path: task.path_str.clone(),
                     });
                 }
             }
@@ -440,10 +481,11 @@ pub(super) fn collect_scan_diff(
     let candidates = collect_disk_candidates(normalized_folder, reporter);
     let has_disk_songs = !candidates.is_empty();
     let mut songs_by_index: Vec<Option<Song>> = vec![None; candidates.len()];
+    let mut changes_by_index = vec![None; candidates.len()];
     let mut parse_tasks = Vec::new();
     let mut to_delete = Vec::new();
 
-    for (candidate_index, candidate) in candidates.iter().enumerate() {
+    for (candidate_index, candidate) in candidates.into_iter().enumerate() {
         if let Some(db_info) = db_snapshot.remove(&candidate.path_str) {
             let needs_parse = db_info.file_modified_at != candidate.disk_mtime
                 || db_info.file_size != candidate.disk_size
@@ -453,23 +495,23 @@ pub(super) fn collect_scan_diff(
             if needs_parse {
                 parse_tasks.push(ParseTask {
                     index: candidate_index,
-                    path: candidate.path.clone(),
-                    path_str: candidate.path_str.clone(),
-                    ext: candidate.ext.clone(),
-                    is_add: false,
+                    path: candidate.path,
+                    path_str: candidate.path_str,
+                    ext: candidate.ext,
+                    change: ChangeKind::Update,
                 });
             } else if song_meets_duration_threshold(&db_info.song, options) {
                 songs_by_index[candidate_index] = Some(db_info.song);
             } else {
-                to_delete.push(candidate.path_str.clone());
+                to_delete.push(candidate.path_str);
             }
         } else {
             parse_tasks.push(ParseTask {
                 index: candidate_index,
-                path: candidate.path.clone(),
-                path_str: candidate.path_str.clone(),
-                ext: candidate.ext.clone(),
-                is_add: true,
+                path: candidate.path,
+                path_str: candidate.path_str,
+                ext: candidate.ext,
+                change: ChangeKind::Add,
             });
         }
     }
@@ -487,56 +529,63 @@ pub(super) fn collect_scan_diff(
     }
 
     let parsed_results = parse_tasks_in_parallel(parse_tasks, reporter.cloned(), options)?;
-    let mut to_add = Vec::new();
-    let mut to_update = Vec::new();
 
     for result in parsed_results {
-        if let Some(song) = result.song {
-            songs_by_index[result.index] = Some(song.clone());
-            if result.is_add {
-                to_add.push(song);
-            } else {
-                to_update.push(song);
+        match result {
+            ParsedTaskResult::Song {
+                index,
+                song,
+                change,
+            } => {
+                songs_by_index[index] = Some(song);
+                changes_by_index[index] = Some(change);
             }
-        } else if !result.is_add {
-            to_delete.push(result.path_str);
+            ParsedTaskResult::Delete { path } => to_delete.push(path),
         }
     }
 
     // Merge CUE track results
     for result in cue_results {
-        if let Some(song) = result.song {
-            songs_by_index[result.index] = Some(song.clone());
-            if result.is_add {
-                to_add.push(song);
-            } else {
-                to_update.push(song);
+        match result {
+            ParsedTaskResult::Song {
+                index,
+                song,
+                change,
+            } => {
+                songs_by_index[index] = Some(song);
+                changes_by_index[index] = Some(change);
             }
-        } else if !result.is_add {
-            to_delete.push(result.path_str);
+            ParsedTaskResult::Delete { path } => to_delete.push(path),
         }
     }
 
-    let mut songs: Vec<Song> = songs_by_index.into_iter().flatten().collect();
+    let mut songs = Vec::with_capacity(songs_by_index.len());
+    let mut changes = Vec::with_capacity(songs_by_index.len());
+    for (index, song) in songs_by_index.into_iter().enumerate() {
+        if let Some(song) = song {
+            songs.push(song);
+            changes.push(changes_by_index[index]);
+        }
+    }
     to_delete.extend(db_snapshot.keys().cloned());
 
     enrich_album_groups(&mut songs);
 
-    let song_by_path: HashMap<String, Song> = songs
-        .iter()
-        .cloned()
-        .map(|song| (song.path.clone(), song))
-        .collect();
-
-    let to_add = to_add
-        .into_iter()
-        .map(|song| song_by_path.get(&song.path).cloned().unwrap_or(song))
-        .collect();
-
-    let to_update = to_update
-        .into_iter()
-        .map(|song| song_by_path.get(&song.path).cloned().unwrap_or(song))
-        .collect();
+    let mut to_add = Vec::new();
+    let mut to_update = Vec::new();
+    for (song, change) in songs.iter_mut().zip(&changes) {
+        let target = match change {
+            Some(ChangeKind::Add) => Some(&mut to_add),
+            Some(ChangeKind::Update) => Some(&mut to_update),
+            None => None,
+        };
+        if let Some(target) = target {
+            target.push(song.clone());
+            // Avatar bytes are only needed by the database-write copy. Avoid
+            // retaining them again in the full scan result.
+            let _ = song.artist_avatar_bytes.take();
+        }
+    }
 
     Ok(ScanDiff {
         songs,

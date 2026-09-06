@@ -23,6 +23,7 @@ import { usePlaybackStore } from '../features/playback/store';
 import { useSettingsStore } from '../features/settings/store';
 import { defaultDominantColors, useUiStore } from '../shared/stores/ui';
 import { isRemoteSong } from '../utils/remoteSong';
+import { FIXED_FLOW_PRESET } from '../constants/themeBackground';
 
 interface SeekCompletedPayload {
   request_id: number;
@@ -49,6 +50,8 @@ interface CreatePlayerLifecycleDeps {
   togglePlay: () => void | Promise<void>;
   nextSong: () => void;
   prevSong: () => void;
+  seekTo: (time: number) => Promise<void>;
+  handleAutoNext: () => void;
   applyLibraryScanBatch: (payload: LibraryScanBatchPayload) => void;
   flushBufferedLibraryScanBatch: () => void;
   handleSeekCompleted: (payload: SeekCompletedPayload) => void;
@@ -171,6 +174,8 @@ export const createPlayerLifecycle = ({
   togglePlay,
   nextSong,
   prevSong,
+  seekTo,
+  handleAutoNext,
   applyLibraryScanBatch,
   flushBufferedLibraryScanBatch,
   handleSeekCompleted,
@@ -214,7 +219,6 @@ export const createPlayerLifecycle = ({
     currentTime,
     isPlaying,
     playMode,
-    playQueue,
     playQueuePaths,
     volume,
   } = storeToRefs(playbackStore);
@@ -292,6 +296,15 @@ export const createPlayerLifecycle = ({
       listen('player:prev', () => {
         prevSong();
       }),
+      listen<number>('player:seek', event => {
+        const time = Number(event.payload);
+        if (!Number.isFinite(time) || time < 0) {
+          return;
+        }
+        void seekTo(time).catch(error => {
+          console.warn('Failed to seek from SMTC:', error);
+        });
+      }),
       listen<LibraryScanBatchPayload>('library-scan-batch', event => {
         applyLibraryScanBatch(event.payload);
       }),
@@ -311,6 +324,18 @@ export const createPlayerLifecycle = ({
       }),
       listen<SeekCompletedPayload>('seek_completed', event => {
         handleSeekCompleted(event.payload);
+      }),
+      listen<{ playbackId: number }>('playback-finished', event => {
+        if (import.meta.env.DEV) {
+          console.log('[playerLifecycle] Received playback-finished event:', event.payload);
+        }
+        if (
+          currentSong.value &&
+          isPlaying.value &&
+          event.payload.playbackId === playbackStore.currentPlaybackId
+        ) {
+          handleAutoNext();
+        }
       }),
       listen<RemoteLyricsCacheReadyPayload>('remote-lyrics-cache-ready', event => {
         const payload = event.payload;
@@ -412,8 +437,8 @@ export const createPlayerLifecycle = ({
       const coverUrl = resolveCoverUrl(cover);
       const signature = JSON.stringify({
         coverUrl,
-        colorBoost: settings.value.theme.flowColorBoost,
-        depth: settings.value.theme.flowDepth,
+        colorBoost: FIXED_FLOW_PRESET.colorBoost,
+        depth: FIXED_FLOW_PRESET.depth,
       });
 
       if (signature === dominantColorSignature) {
@@ -422,8 +447,8 @@ export const createPlayerLifecycle = ({
 
       const taskId = ++dominantColorTaskId;
       const colors = await extractDominantColors(coverUrl, 4, {
-        colorBoost: settings.value.theme.flowColorBoost,
-        depth: settings.value.theme.flowDepth,
+        colorBoost: FIXED_FLOW_PRESET.colorBoost,
+        depth: FIXED_FLOW_PRESET.depth,
       });
       if (taskId !== dominantColorTaskId) return;
       dominantColorSignature = signature;
@@ -435,19 +460,19 @@ export const createPlayerLifecycle = ({
     }, { immediate: true });
 
     let lastPrecachedRemotePath = '';
-    watch([currentSong, currentTime, playQueue], ([song, time, queue]) => {
+    watch([currentSong, currentTime, playQueuePaths], ([song, time, queuePaths]) => {
       if (!isPlaying.value || !song || song.duration <= 0 || time / song.duration < 0.6) {
         return;
       }
 
-      const index = queue.findIndex(item => item.path === song.path);
-      const nextSong = index >= 0 ? queue[index + 1] : null;
-      if (!nextSong || !isRemoteSong(nextSong) || nextSong.path === lastPrecachedRemotePath) {
+      const index = queuePaths.indexOf(song.path);
+      const nextPath = index >= 0 ? queuePaths[index + 1] : null;
+      if (!nextPath || !isRemoteSong({ path: nextPath }) || nextPath === lastPrecachedRemotePath) {
         return;
       }
 
-      lastPrecachedRemotePath = nextSong.path;
-      remoteLibraryApi.precacheRemoteSong(nextSong.path).catch(error => {
+      lastPrecachedRemotePath = nextPath;
+      remoteLibraryApi.precacheRemoteSong(nextPath).catch(error => {
         console.warn('Failed to precache remote song:', error);
       });
     });
@@ -476,9 +501,8 @@ export const createPlayerLifecycle = ({
       }
     };
 
-    // 流光/桌面歌词封面取色共用主色，参数微调时 debounce 延迟重提取，避免拖动滑块时频繁触发层切换闪烁
-    let flowTweakTimer: ReturnType<typeof setTimeout> | null = null;
     let lastPersistedPlaybackTime = Number.NaN;
+    let playbackStateRestored = false;
 
     const persistCurrentPlaybackTime = () => {
       if (!currentSong.value) return;
@@ -487,16 +511,6 @@ export const createPlayerLifecycle = ({
       lastPersistedPlaybackTime = nextTime;
       playerStorage.writeNumber(playerStorageKeys.lastTime, nextTime);
     };
-
-    watch([
-      () => settings.value.theme.flowColorBoost,
-      () => settings.value.theme.flowDepth,
-    ], () => {
-      if (flowTweakTimer) clearTimeout(flowTweakTimer);
-      flowTweakTimer = setTimeout(async () => {
-        void updateDominantColors(currentCover.value);
-      }, 500);
-    });
 
     watch(
       () => settings.value.theme.dynamicBgType,
@@ -524,7 +538,19 @@ export const createPlayerLifecycle = ({
       }
     });
 
-    const playbackTimePersistTimer = setInterval(persistCurrentPlaybackTime, 2000);
+    watch(currentSongPath, () => {
+      if (!playbackStateRestored) return;
+      lastPersistedPlaybackTime = Number.NaN;
+      queueMicrotask(persistCurrentPlaybackTime);
+    });
+
+    const playbackTimePersistTimer = setInterval(persistCurrentPlaybackTime, 5000);
+
+    const visibilityChangeHandler = () => {
+      if (document.visibilityState === 'hidden') {
+        persistCurrentPlaybackTime();
+      }
+    };
 
     const beforeUnloadHandler = () => {
       flushPersistedState();
@@ -584,16 +610,15 @@ export const createPlayerLifecycle = ({
       if (storedLastTime !== null) {
         currentTime.value = storedLastTime;
       }
+      playbackStateRestored = true;
 
       window.addEventListener('beforeunload', beforeUnloadHandler);
+      document.addEventListener('visibilitychange', visibilityChangeHandler);
       window.setTimeout(() => void runRemoteAutoSync(), 30_000);
       remoteAutoSyncTimer = setInterval(() => void runRemoteAutoSync(), 60 * 60 * 1000);
     });
 
     onScopeDispose(() => {
-      if (flowTweakTimer) {
-        clearTimeout(flowTweakTimer);
-      }
       if (remoteAutoSyncTimer) {
         clearInterval(remoteAutoSyncTimer);
       }
@@ -605,6 +630,7 @@ export const createPlayerLifecycle = ({
         unlisteners.forEach(unlisten => unlisten());
       });
       window.removeEventListener('beforeunload', beforeUnloadHandler);
+      document.removeEventListener('visibilitychange', visibilityChangeHandler);
       disposePlayerPlayback();
       disposeLibraryRuntime();
       disposePlayerPersistence();

@@ -1,6 +1,6 @@
 import { ref, watch, type Ref } from 'vue';
 
-import type { FolderNode, Song } from '../types';
+import type { FolderNode } from '../types';
 
 interface ConfirmOptions {
   title: string;
@@ -14,7 +14,7 @@ interface UseHomeFolderManagementOptions {
   activeRootPath: Ref<string | null>;
   currentFolderFilter: Ref<string>;
   libraryHierarchy: Ref<FolderNode[]>;
-  sourceSongs: Ref<Song[]>;
+  sourceSongPaths: Ref<string[]>;
   refreshFolder: (folderPath: string) => Promise<unknown>;
   fetchFolderTree: () => Promise<unknown>;
   createFolder: (parentPath: string, folderName: string) => Promise<string>;
@@ -31,7 +31,7 @@ export function useHomeFolderManagement({
   activeRootPath,
   currentFolderFilter,
   libraryHierarchy,
-  sourceSongs,
+  sourceSongPaths,
   refreshFolder,
   fetchFolderTree,
   createFolder,
@@ -181,7 +181,7 @@ export function useHomeFolderManagement({
           await syncRootSelection(nextRoot, { forceRefresh: true });
         } else {
           await syncRootSelection(null);
-          sourceSongs.value = [];
+          sourceSongPaths.value = [];
         }
       } else if (fallbackPath) {
         if (owningRootPath) {
@@ -221,14 +221,18 @@ export function useHomeFolderManagement({
     try {
       const summary = await refreshFolder(currentFolderFilter.value);
       await fetchFolderTree();
-      if (summary && typeof summary === 'object' && 'removedCount' in summary) {
-        const removedCount = Number(summary.removedCount) || 0;
-        showToast(
-          removedCount > 0
-            ? `刷新成功，检测到少了 ${removedCount} 首歌曲`
-            : '刷新成功',
-          'success',
-        );
+      if (summary && typeof summary === 'object') {
+        const removedCount = Number((summary as any).removedCount) || 0;
+        const addedCount = Number((summary as any).addedCount) || 0;
+        if (addedCount > 0 && removedCount > 0) {
+          showToast(`刷新成功，新增 ${addedCount} 首，减少 ${removedCount} 首歌曲`, 'success');
+        } else if (addedCount > 0) {
+          showToast(`刷新成功，检测到新增 ${addedCount} 首歌曲`, 'success');
+        } else if (removedCount > 0) {
+          showToast(`刷新成功，检测到少了 ${removedCount} 首歌曲`, 'success');
+        } else {
+          showToast('刷新成功，文件夹歌曲已是最新', 'success');
+        }
         return;
       }
 
@@ -254,7 +258,7 @@ export function useHomeFolderManagement({
             await syncRootSelection(libraryHierarchy.value[0].path, { forceRefresh: true });
           } else {
             await syncRootSelection(null);
-            sourceSongs.value = [];
+            sourceSongPaths.value = [];
           }
         }
       },

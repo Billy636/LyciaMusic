@@ -5,7 +5,6 @@ import type { Playlist, Song } from '../types';
 interface UseSidebarPlaylistContextMenuOptions {
   selectedPlaylistIds: Ref<Set<string>>;
   ensurePlaylistSelected: (id: string) => void;
-  viewPlaylist: (id: string) => void;
   getSongsFromPlaylist: (id: string) => Song[];
   addSongsToQueue: (songs: Song[]) => void;
   clearQueue: () => Promise<unknown> | unknown;
@@ -18,7 +17,6 @@ interface UseSidebarPlaylistContextMenuOptions {
 export function useSidebarPlaylistContextMenu({
   selectedPlaylistIds,
   ensurePlaylistSelected,
-  viewPlaylist,
   getSongsFromPlaylist,
   addSongsToQueue,
   clearQueue,
@@ -60,7 +58,6 @@ export function useSidebarPlaylistContextMenu({
     targetPlaylist.value = playlist;
 
     ensurePlaylistSelected(playlist.id);
-    viewPlaylist(playlist.id);
 
     contextMenuX.value = event.clientX;
     contextMenuY.value = event.clientY;

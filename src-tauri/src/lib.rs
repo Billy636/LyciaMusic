@@ -1,8 +1,10 @@
 mod app_runtime;
+mod custom_background;
 mod custom_fonts;
 mod database;
 pub mod error;
 mod foreground_window;
+mod highlights;
 mod music;
 mod player;
 mod remote;
@@ -11,32 +13,42 @@ mod system_fonts;
 mod taskbar;
 mod toolbox;
 mod window_boundary;
+mod window_fullscreen;
 mod window_material;
 mod window_theme;
 mod window_z_order;
 
-use tauri::Manager;
 use app_runtime::{consume_pending_open_paths, exit_app, handle_single_instance, setup_app};
+use custom_background::prepare_custom_background_image;
 use custom_fonts::{import_lyrics_font, read_lyrics_font_data_url};
 use database::clear_all_app_data;
 use foreground_window::get_foreground_fullscreen_state;
+use highlights::{
+    add_song_highlight_marker, delete_song_highlight_marker, get_song_highlight_markers,
+    set_song_highlight_marker_position, set_song_highlight_primary, undo_song_highlight_add,
+};
 use music::{
     add_library_folder, add_sidebar_folder, batch_move_music_files, clear_cover_cache,
     create_folder, delete_folder, delete_music_file, get_folder_children, get_folder_first_song,
-    get_library_album_catalog, get_library_artist_catalog, get_library_folders,
-    get_library_hierarchy, get_library_song_paths_by_album, get_library_song_paths_by_artist,
-    get_library_song_paths_for_all_view, get_library_song_paths_for_folder_view,
-    get_library_songs_cached, get_sidebar_folders, get_sidebar_hierarchy, get_song_cover,
-    get_song_cover_thumbnail, get_song_detail, get_song_lyrics, get_song_lyrics_for_edit,
-    get_song_lyrics_payload, is_directory, move_file_to_folder, move_music_file, parse_audio_files,
-    remove_library_folder, remove_sidebar_folder, save_artist_avatar, save_song_info, save_song_lyrics,
+    get_library_album_catalog, get_library_album_catalog_by_artist, get_library_artist_catalog,
+    get_library_folders, get_library_hierarchy, get_library_song_labels_for_all_view,
+    get_library_song_page, get_library_song_path_page_for_all_view,
+    get_library_song_paths_by_album, get_library_song_paths_by_artist,
+    get_library_song_paths_cached, get_library_song_paths_for_all_view,
+    get_library_song_paths_for_folder_view, get_library_songs_by_paths, get_library_songs_cached,
+    get_search_index_batch, get_search_index_status, get_sidebar_folders, get_sidebar_hierarchy,
+    get_song_cover, get_song_cover_thumbnail, get_song_detail, get_song_lyrics,
+    get_song_lyrics_for_edit, get_song_lyrics_payload, get_song_runtime_metadata, is_directory,
+    move_file_to_folder, move_music_file, parse_audio_files, remove_library_folder,
+    remove_sidebar_folder, save_artist_avatar, save_song_info, save_song_lyrics,
     scan_folder_as_playlists, scan_library, scan_music_folder, show_in_folder,
+    upsert_search_index_batch,
 };
 use player::{
     get_audio_visualizer_samples, get_current_output_device, get_output_devices,
     get_playback_progress, get_track_loudness_info, pause_audio, play_audio, resume_audio,
-    seek_audio, set_audio_output_mode, set_equalizer_settings, set_output_device, set_volume,
-    stop_audio, update_loudness_settings, update_playback_metadata,
+    seek_audio, set_audio_output_mode, set_audio_visualizer_enabled, set_equalizer_settings,
+    set_output_device, set_volume, stop_audio, update_loudness_settings, update_playback_metadata,
 };
 use remote::{
     add_remote_source, clear_remote_cache, get_remote_cache_usage, get_remote_sources,
@@ -56,6 +68,7 @@ use taskbar::{
     get_taskbar_tray_geometry, install_taskbar_zorder_guard, refresh_taskbar_window_topmost,
     setup_taskbar_window, uninstall_taskbar_zorder_guard,
 };
+use tauri::Manager;
 use toolbox::{
     apply_rename, check_update_by_rust, download_update_file, file_exists, open_external_program,
     preview_rename, refresh_folder_songs, run_installer, set_gpu_acceleration,
@@ -63,7 +76,8 @@ use toolbox::{
 
 #[cfg(target_os = "windows")]
 use toolbox::{append_webview2_browser_arg, should_disable_gpu_for_startup};
-use window_boundary::set_mini_boundary_enabled;
+use window_boundary::{set_mini_boundary_enabled, set_retain_material_on_unfocus};
+use window_fullscreen::set_immersive_fullscreen;
 use window_material::get_window_material_capabilities;
 use window_theme::set_dark_mode_for_window;
 use window_z_order::{refresh_current_window_topmost, start_topmost_guard, stop_topmost_guard};
@@ -90,10 +104,16 @@ pub fn run() {
         })
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_denylist(&["desktop-lyrics", "mini-player", "taskbar-player", "tray-menu"])
+                .with_denylist(&[
+                    "desktop-lyrics",
+                    "mini-player",
+                    "taskbar-player",
+                    "tray-menu",
+                ])
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| setup_app(app))
@@ -104,12 +124,20 @@ pub fn run() {
             get_song_cover_thumbnail,
             get_song_cover,
             clear_cover_cache,
+            prepare_custom_background_image,
             get_song_lyrics,
             get_song_lyrics_payload,
             get_song_lyrics_for_edit,
             save_song_lyrics,
             save_song_info,
             get_song_detail,
+            get_song_runtime_metadata,
+            get_song_highlight_markers,
+            add_song_highlight_marker,
+            set_song_highlight_marker_position,
+            set_song_highlight_primary,
+            delete_song_highlight_marker,
+            undo_song_highlight_add,
             batch_move_music_files,
             move_music_file,
             show_in_folder,
@@ -123,6 +151,7 @@ pub fn run() {
             set_volume,
             get_playback_progress,
             get_audio_visualizer_samples,
+            set_audio_visualizer_enabled,
             get_track_loudness_info,
             update_loudness_settings,
             set_equalizer_settings,
@@ -138,8 +167,17 @@ pub fn run() {
             add_library_folder,
             remove_library_folder,
             get_library_songs_cached,
+            get_library_song_paths_cached,
+            get_library_song_page,
+            get_library_song_path_page_for_all_view,
+            get_library_songs_by_paths,
+            get_library_song_labels_for_all_view,
+            get_search_index_status,
+            get_search_index_batch,
+            upsert_search_index_batch,
             get_library_artist_catalog,
             get_library_album_catalog,
+            get_library_album_catalog_by_artist,
             get_library_song_paths_by_artist,
             get_library_song_paths_by_album,
             get_library_song_paths_for_all_view,
@@ -191,8 +229,10 @@ pub fn run() {
             file_exists,
             refresh_folder_songs,
             set_mini_boundary_enabled,
+            set_retain_material_on_unfocus,
             get_window_material_capabilities,
             get_foreground_fullscreen_state,
+            set_immersive_fullscreen,
             set_dark_mode_for_window,
             refresh_current_window_topmost,
             start_topmost_guard,

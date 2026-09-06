@@ -12,17 +12,26 @@ const props = defineProps<{
 
 const BAR_COUNT = 48;
 const DISPLAY_BAR_COUNT = 112;
-const FETCH_INTERVAL_MS = 33;
+const VISUALIZER_TARGET_FPS = 30;
+const FETCH_INTERVAL_MS = Math.round(1000 / VISUALIZER_TARGET_FPS);
+const DRAW_INTERVAL_MS = 1000 / VISUALIZER_TARGET_FPS;
 const MIN_BAR_HEIGHT = 3;
+const GRADIENT_ALPHA_STEPS = 32;
+const MAX_GRADIENT_CACHE_SIZE = 256;
 const { isMainWindowLowPower } = useRenderingPower();
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
-const levels = ref<number[]>(Array(BAR_COUNT).fill(0));
-const renderedLevels = ref<number[]>(Array(DISPLAY_BAR_COUNT).fill(0));
+const levels = new Float32Array(BAR_COUNT);
+const renderedLevels = new Float32Array(DISPLAY_BAR_COUNT);
+const gradientCache = new Map<string, CanvasGradient>();
 
 let animationFrameId: number | null = null;
 let fetchTimerId: ReturnType<typeof setInterval> | null = null;
 let resizeObserver: ResizeObserver | null = null;
+let lastDrawTimestamp = Number.NEGATIVE_INFINITY;
+let fetchInFlight = false;
+let backendVisualizerEnabled = false;
+let backendVisualizerSync = Promise.resolve();
 
 const stopFetchTimer = () => {
   if (fetchTimerId !== null) {
@@ -43,6 +52,7 @@ const resizeCanvas = () => {
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
+    gradientCache.clear();
   }
 };
 
@@ -51,8 +61,8 @@ const getDisplayLevel = (index: number) => {
   const leftIndex = Math.floor(sourcePosition);
   const rightIndex = Math.min(BAR_COUNT - 1, leftIndex + 1);
   const mix = sourcePosition - leftIndex;
-  const left = levels.value[leftIndex] ?? 0;
-  const right = levels.value[rightIndex] ?? left;
+  const left = levels[leftIndex] ?? 0;
+  const right = levels[rightIndex] ?? left;
 
   return left + (right - left) * mix;
 };
@@ -60,16 +70,48 @@ const getDisplayLevel = (index: number) => {
 const shouldAnimate = () =>
   props.active && !isMainWindowLowPower.value && (
     props.isPlaying
-    || renderedLevels.value.some(level => level > 0.012)
+    || renderedLevels.some(level => level > 0.012)
   );
 
 const shouldFetchSamples = () => props.active && props.isPlaying && !isMainWindowLowPower.value;
+
+const getBarGradient = (
+  context: CanvasRenderingContext2D,
+  baselineY: number,
+  barHeight: number,
+  alpha: number,
+) => {
+  const heightBucket = Math.max(1, Math.round(barHeight));
+  const alphaBucket = Math.max(0, Math.min(
+    GRADIENT_ALPHA_STEPS,
+    Math.round(alpha * GRADIENT_ALPHA_STEPS),
+  ));
+  const key = `${heightBucket}:${alphaBucket}`;
+  const cached = gradientCache.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const quantizedAlpha = alphaBucket / GRADIENT_ALPHA_STEPS;
+  const gradient = context.createLinearGradient(0, baselineY - heightBucket, 0, baselineY);
+  gradient.addColorStop(0, `rgba(184, 219, 236, ${quantizedAlpha * 0.86})`);
+  gradient.addColorStop(0.45, `rgba(137, 183, 207, ${quantizedAlpha})`);
+  gradient.addColorStop(1, `rgba(95, 145, 174, ${quantizedAlpha * 0.72})`);
+
+  if (gradientCache.size >= MAX_GRADIENT_CACHE_SIZE) {
+    const oldestKey = gradientCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      gradientCache.delete(oldestKey);
+    }
+  }
+  gradientCache.set(key, gradient);
+  return gradient;
+};
 
 const draw = () => {
   const canvas = canvasRef.value;
   if (!canvas) return;
 
-  resizeCanvas();
   const context = canvas.getContext('2d');
   if (!context) return;
 
@@ -90,14 +132,14 @@ const draw = () => {
   for (let index = 0; index < DISPLAY_BAR_COUNT; index += 1) {
     const rawValue = Math.max(0, getDisplayLevel(index));
     const bandPosition = index / Math.max(1, DISPLAY_BAR_COUNT - 1);
-    const previousRendered = renderedLevels.value[index] ?? 0;
+    const previousRendered = renderedLevels[index] ?? 0;
     const lowFrequencyWeight = 1.12 - bandPosition * 0.28;
     const targetValue = props.isPlaying
       ? Math.min(1, Math.pow(rawValue, 0.72) * lowFrequencyWeight)
       : 0;
     const value = smoothVisualizerLevel(previousRendered, targetValue);
 
-    renderedLevels.value[index] = value;
+    renderedLevels[index] = value;
 
     const edgeDistance = Math.abs(index - (DISPLAY_BAR_COUNT - 1) / 2) / (DISPLAY_BAR_COUNT / 2);
     const edgeFade = 1 - Math.pow(edgeDistance, 2) * 0.16;
@@ -109,13 +151,7 @@ const draw = () => {
     const y = baselineY - barHeight;
     const radius = Math.min(barWidth / 2, 2 * pixelRatio);
     const alpha = props.isPlaying ? 0.36 + value * 0.42 : 0.2;
-    const barGradient = context.createLinearGradient(0, y, 0, baselineY);
-
-    barGradient.addColorStop(0, `rgba(184, 219, 236, ${alpha * 0.86})`);
-    barGradient.addColorStop(0.45, `rgba(137, 183, 207, ${alpha})`);
-    barGradient.addColorStop(1, `rgba(95, 145, 174, ${alpha * 0.72})`);
-
-    context.fillStyle = barGradient;
+    context.fillStyle = getBarGradient(context, baselineY, barHeight, alpha);
     context.beginPath();
     context.roundRect(x, y, barWidth, barHeight, radius);
     context.fill();
@@ -131,26 +167,55 @@ const draw = () => {
 const scheduleDraw = () => {
   if (animationFrameId !== null) return;
 
-  animationFrameId = requestAnimationFrame(() => {
+  animationFrameId = requestAnimationFrame((timestamp) => {
     animationFrameId = null;
+    if (timestamp - lastDrawTimestamp < DRAW_INTERVAL_MS - 1) {
+      if (shouldAnimate()) {
+        scheduleDraw();
+      }
+      return;
+    }
+    lastDrawTimestamp = timestamp;
     draw();
   });
 };
 
 const fetchSamples = async () => {
-  if (!shouldFetchSamples()) return;
+  if (!shouldFetchSamples() || fetchInFlight) return;
 
+  fetchInFlight = true;
   try {
     const nextLevels = await playbackApi.getAudioVisualizerSamples();
     if (nextLevels.length > 0) {
-      levels.value = nextLevels.slice(0, BAR_COUNT);
+      const length = Math.min(BAR_COUNT, nextLevels.length);
+      for (let index = 0; index < length; index += 1) {
+        levels[index] = nextLevels[index] ?? 0;
+      }
+      if (length < BAR_COUNT) {
+        levels.fill(0, length);
+      }
       scheduleDraw();
     }
-  } catch {}
+  } catch {
+  } finally {
+    fetchInFlight = false;
+  }
+};
+
+const syncBackendVisualizer = () => {
+  const enabled = shouldFetchSamples();
+  if (backendVisualizerEnabled === enabled) {
+    return;
+  }
+  backendVisualizerEnabled = enabled;
+  backendVisualizerSync = backendVisualizerSync
+    .then(() => playbackApi.setAudioVisualizerEnabled(enabled))
+    .catch(() => {});
 };
 
 const syncFetchTimer = () => {
   stopFetchTimer();
+  syncBackendVisualizer();
   if (!shouldFetchSamples()) {
     scheduleDraw();
     return;
@@ -165,8 +230,8 @@ const syncFetchTimer = () => {
 watch(() => [props.active, props.isPlaying, isMainWindowLowPower.value] as const, syncFetchTimer);
 
 watch(() => props.songPath, () => {
-  levels.value = Array(BAR_COUNT).fill(0);
-  renderedLevels.value = Array(DISPLAY_BAR_COUNT).fill(0);
+  levels.fill(0);
+  renderedLevels.fill(0);
   scheduleDraw();
   syncFetchTimer();
 });
@@ -174,7 +239,11 @@ watch(() => props.songPath, () => {
 onMounted(() => {
   const canvas = canvasRef.value;
   if (canvas) {
-    resizeObserver = new ResizeObserver(() => scheduleDraw());
+    resizeCanvas();
+    resizeObserver = new ResizeObserver(() => {
+      resizeCanvas();
+      scheduleDraw();
+    });
     resizeObserver.observe(canvas);
   }
 
@@ -186,6 +255,12 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopFetchTimer();
+  if (backendVisualizerEnabled) {
+    backendVisualizerEnabled = false;
+    backendVisualizerSync = backendVisualizerSync
+      .then(() => playbackApi.setAudioVisualizerEnabled(false))
+      .catch(() => {});
+  }
   if (animationFrameId !== null) {
     cancelAnimationFrame(animationFrameId);
   }

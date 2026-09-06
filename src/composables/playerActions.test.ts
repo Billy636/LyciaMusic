@@ -50,6 +50,7 @@ describe('player action hooks', () => {
         removeSongFromQueue: vi.fn(),
         addSongToQueue: vi.fn(),
         addSongsToQueue: vi.fn(),
+        addSongPathsToQueue: vi.fn(),
       }),
       playerUiShell: {
         handleVolume: vi.fn(),
@@ -74,7 +75,7 @@ describe('player action hooks', () => {
     windowActions.toggleAlwaysOnTop(true);
     windowActions.toggleQueue();
 
-    expect(playSong).toHaveBeenCalledWith(demoSong);
+    expect(playSong).toHaveBeenCalledWith(demoSong, { preserveQueue: true });
     expect(nextSong).not.toHaveBeenCalled();
     expect(toggleAlwaysOnTop).toHaveBeenCalledWith(true);
     expect(toggleQueue).toHaveBeenCalledTimes(1);

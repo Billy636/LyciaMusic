@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef } from 'vue';
 import { defineStore } from 'pinia';
 
+import { isProfilingEnabled } from '../../utils/profiling';
 import type {
   AlbumSortMode,
   AlbumDetailSortMode,
@@ -86,7 +87,9 @@ export const useLibraryStore = defineStore('library', () => {
       song.album_key = registerString(song.album_key) ?? '';
       song.track_number = registerString(song.track_number);
       song.disc_number = registerString(song.disc_number);
+      song.cover_thumb_path = registerString(song.cover_thumb_path);
       song.format = registerString(song.format);
+      song.source_type = registerString(song.source_type) as LibrarySong['source_type'];
     }
 
     stringPool.clear();
@@ -101,11 +104,9 @@ export const useLibraryStore = defineStore('library', () => {
   };
 
   const songKeys: Array<keyof LibrarySong> = [
-    'id',
     'name',
     'title',
     'path',
-    'comment',
     'artist',
     'artist_names',
     'effective_artist_names',
@@ -117,12 +118,14 @@ export const useLibraryStore = defineStore('library', () => {
     'is_various_artists_album',
     'collapse_artist_credits',
     'duration',
+    'cover_thumb_path',
     'bitrate',
     'sample_rate',
     'bit_depth',
     'format',
     'added_at',
     'file_modified_at',
+    'source_type',
   ];
 
   const canonicalSongPaths = shallowRef<string[]>([]);
@@ -161,10 +164,8 @@ export const useLibraryStore = defineStore('library', () => {
   };
 
   const normalizeSongRecord = (song: LibrarySong): LibrarySong => ({
-    ...song,
     name: internString(song.name) ?? '',
     title: internString(song.title),
-    comment: internString(song.comment),
     path: internString(song.path) ?? '',
     artist: internString(song.artist) ?? '',
     artist_names: internStringArray(song.artist_names),
@@ -172,9 +173,19 @@ export const useLibraryStore = defineStore('library', () => {
     album: internString(song.album) ?? '',
     album_artist: internString(song.album_artist) ?? '',
     album_key: internString(song.album_key) ?? '',
+    is_various_artists_album: song.is_various_artists_album,
+    collapse_artist_credits: song.collapse_artist_credits,
+    duration: song.duration,
+    cover_thumb_path: internString(song.cover_thumb_path),
+    bitrate: song.bitrate,
+    sample_rate: song.sample_rate,
+    bit_depth: song.bit_depth,
+    format: internString(song.format),
     track_number: internString(song.track_number),
     disc_number: internString(song.disc_number),
-    format: internString(song.format),
+    added_at: song.added_at,
+    file_modified_at: song.file_modified_at,
+    source_type: internString(song.source_type) as LibrarySong['source_type'],
   });
 
   const syncSongRecord = (target: LibrarySong, source: LibrarySong) => {
@@ -224,7 +235,7 @@ export const useLibraryStore = defineStore('library', () => {
   };
 
   const normalizeSongCollection = (songs: LibrarySong[]) => {
-    const startTime = import.meta.env.DEV ? performance.now() : 0;
+    const startTime = isProfilingEnabled() ? performance.now() : 0;
     const nextPaths: string[] = [];
     const seenPaths = new Set<string>();
     let changed = false;
@@ -243,7 +254,7 @@ export const useLibraryStore = defineStore('library', () => {
       }
     });
 
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       const duration = performance.now() - startTime;
       console.log(`[Profiling] normalizeSongCollection took ${duration.toFixed(2)}ms (input songs: ${songs.length}, changed: ${changed})`);
     }
@@ -318,10 +329,22 @@ export const useLibraryStore = defineStore('library', () => {
     updateSourceSongPaths(normalized.paths, normalized.changed);
   };
 
+  const setSourceSongOrder = (paths: string[]) => {
+    const seenPaths = new Set<string>();
+    updateSourceSongPaths(paths.filter((path) => {
+      if (!path || seenPaths.has(path)) {
+        return false;
+      }
+      seenPaths.add(path);
+      return true;
+    }));
+  };
+
   const setSongRecord = (song: LibrarySong) => {
     const interned = internSong(song);
     if (interned.changed) {
       songCatalogVersion.value += 1;
+      libraryDataVersion.value += 1;
     }
   };
 
@@ -330,7 +353,19 @@ export const useLibraryStore = defineStore('library', () => {
       return fallback ?? null;
     }
 
-    return songPool.get(path) ?? fallback ?? null;
+    const direct = songPool.get(path);
+    if (direct) {
+      return direct;
+    }
+
+    const normalized = path.replace(/\\/g, '/').toLowerCase();
+    for (const [key, song] of songPool.entries()) {
+      if (key.replace(/\\/g, '/').toLowerCase() === normalized) {
+        return song;
+      }
+    }
+
+    return fallback ?? null;
   };
 
   const resolveSongsByPaths = (paths: string[], fallbackSongs: Song[] = []) => {
@@ -421,7 +456,7 @@ export const useLibraryStore = defineStore('library', () => {
   };
 
   const patchLibrarySongs = (payload: { songs: LibrarySong[]; deleted_paths: string[] }) => {
-    const startTime = import.meta.env.DEV ? performance.now() : 0;
+    const startTime = isProfilingEnabled() ? performance.now() : 0;
     const incomingSongs = payload.songs ?? [];
     const incomingDeleted = payload.deleted_paths ?? [];
 
@@ -488,20 +523,58 @@ export const useLibraryStore = defineStore('library', () => {
       libraryDataVersion.value += 1;
     }
 
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       const duration = performance.now() - startTime;
       console.log(`[Profiling] patchLibrarySongs took ${duration.toFixed(2)}ms (added/updated payload: ${incomingSongs.length}, deleted: ${incomingDeleted.length})`);
     }
   };
 
+  const patchLibrarySongPaths = (payload: { added_paths: string[]; deleted_paths: string[] }) => {
+    const addedPaths = payload.added_paths.filter(Boolean);
+    const deletedSet = new Set(payload.deleted_paths.filter(Boolean));
+    const existingSet = new Set(canonicalSongPaths.value);
+    let nextCanonicalPaths = canonicalSongPaths.value.filter(path => !deletedSet.has(path));
+    let nextSourcePaths = sourceSongPaths.value.filter(path => !deletedSet.has(path));
+    const sourceSet = new Set(nextSourcePaths);
+
+    addedPaths.forEach((path) => {
+      if (!existingSet.has(path)) {
+        existingSet.add(path);
+        nextCanonicalPaths.push(path);
+      }
+      if (!sourceSet.has(path)) {
+        sourceSet.add(path);
+        nextSourcePaths.push(path);
+      }
+    });
+    deletedSet.forEach(path => songPool.delete(path));
+
+    if (
+      areSamePaths(canonicalSongPaths.value, nextCanonicalPaths)
+      && areSamePaths(sourceSongPaths.value, nextSourcePaths)
+    ) {
+      return;
+    }
+    canonicalSongPaths.value = nextCanonicalPaths;
+    sourceSongPaths.value = nextSourcePaths;
+    songCatalogVersion.value += 1;
+    libraryDataVersion.value += 1;
+  };
+
   const setCanonicalSongOrder = (paths: string[]) => {
-    const startTime = import.meta.env.DEV ? performance.now() : 0;
+    const startTime = isProfilingEnabled() ? performance.now() : 0;
     if (!Array.isArray(paths)) {
       return;
     }
 
-    // 安全边界：只接收已在前端缓存的路径项，排掉空洞风险项
-    const validPaths = paths.filter(path => songPool.has(path));
+    const seenPaths = new Set<string>();
+    const validPaths = paths.filter((path) => {
+      if (!path || seenPaths.has(path)) {
+        return false;
+      }
+      seenPaths.add(path);
+      return true;
+    });
 
     if (areSamePaths(canonicalSongPaths.value, validPaths)) {
       return;
@@ -510,8 +583,9 @@ export const useLibraryStore = defineStore('library', () => {
     canonicalSongPaths.value = validPaths;
     songCatalogVersion.value += 1;
     libraryDataVersion.value += 1;
+    pruneSongPool();
 
-    if (import.meta.env.DEV) {
+    if (isProfilingEnabled()) {
       const duration = performance.now() - startTime;
       console.log(`[Profiling] setCanonicalSongOrder took ${duration.toFixed(2)}ms (input order paths: ${paths.length}, filtered valid: ${validPaths.length})`);
     }
@@ -519,6 +593,7 @@ export const useLibraryStore = defineStore('library', () => {
 
   return {
     libraryDataVersion,
+    pruneSongPool,
     canonicalSongs,
     canonicalSongPaths,
     sourceSongs,
@@ -548,6 +623,7 @@ export const useLibraryStore = defineStore('library', () => {
     localSortMode,
     localCustomOrder,
     setSourceSongs,
+    setSourceSongOrder,
     setCanonicalSongs,
     setLibraryFolders,
     setLibraryHierarchy,
@@ -562,6 +638,7 @@ export const useLibraryStore = defineStore('library', () => {
     setWatchedFolders,
     reorderWatchedFolders,
     patchLibrarySongs,
+    patchLibrarySongPaths,
     setCanonicalSongOrder,
   };
 });

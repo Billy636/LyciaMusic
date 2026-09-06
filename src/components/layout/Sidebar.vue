@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onBeforeUnmount, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import ModernInputModal from '../common/ModernInputModal.vue';
@@ -35,7 +35,6 @@ const {
   playlists,
   createPlaylist,
   deletePlaylist,
-  viewPlaylist,
   reorderPlaylists,
   getSongsFromPlaylist,
 } = useLibraryCollections();
@@ -56,6 +55,62 @@ const { preloadCovers, loadCover } = useCoverCache();
 
 const isPlaylistOpen = ref(true);
 const showCreateModal = ref(false);
+
+const SIDEBAR_MIN_WIDTH = 192;
+const SIDEBAR_MAX_WIDTH = 360;
+const SIDEBAR_KEYBOARD_STEP = 16;
+const sidebarWidth = ref(SIDEBAR_MIN_WIDTH);
+const isResizing = ref(false);
+let resizeStartX = 0;
+let resizeStartWidth = SIDEBAR_MIN_WIDTH;
+
+const clampSidebarWidth = (width: number) =>
+  Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, width));
+
+const handleSidebarResize = (event: PointerEvent) => {
+  if (!isResizing.value) {
+    return;
+  }
+
+  sidebarWidth.value = clampSidebarWidth(
+    resizeStartWidth + event.clientX - resizeStartX,
+  );
+};
+
+const stopSidebarResize = () => {
+  if (!isResizing.value) {
+    return;
+  }
+
+  isResizing.value = false;
+  window.removeEventListener('pointermove', handleSidebarResize);
+  window.removeEventListener('pointerup', stopSidebarResize);
+  window.removeEventListener('pointercancel', stopSidebarResize);
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+};
+
+const startSidebarResize = (event: PointerEvent) => {
+  if (event.pointerType === 'mouse' && event.button !== 0) {
+    return;
+  }
+
+  event.preventDefault();
+  isResizing.value = true;
+  resizeStartX = event.clientX;
+  resizeStartWidth = sidebarWidth.value;
+  window.addEventListener('pointermove', handleSidebarResize);
+  window.addEventListener('pointerup', stopSidebarResize);
+  window.addEventListener('pointercancel', stopSidebarResize);
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+};
+
+const resizeSidebarBy = (delta: number) => {
+  sidebarWidth.value = clampSidebarWidth(sidebarWidth.value + delta);
+};
+
+onBeforeUnmount(stopSidebarResize);
 
 const handleHoverArtists = () => {
   if (artistList.value.length > 0) {
@@ -101,7 +156,6 @@ const {
 } = useSidebarPlaylistContextMenu({
   selectedPlaylistIds,
   ensurePlaylistSelected,
-  viewPlaylist,
   getSongsFromPlaylist,
   addSongsToQueue,
   clearQueue,
@@ -167,7 +221,25 @@ const handleOpenStatisticsView = () => {
 </script>
 
 <template>
-  <aside class="w-48 bg-transparent flex flex-col border-r border-transparent h-full select-none overflow-hidden relative transition-colors duration-600">
+  <aside
+    class="bg-transparent flex shrink-0 flex-col border-r border-transparent h-full select-none overflow-hidden relative transition-colors duration-600"
+    :style="{ width: `${sidebarWidth}px` }"
+  >
+    <div
+      class="absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize touch-none transition-colors hover:bg-[#EC4141]"
+      :class="{ 'bg-[#EC4141]': isResizing }"
+      role="separator"
+      aria-label="调整首页侧边栏宽度"
+      aria-orientation="vertical"
+      :aria-valuemin="SIDEBAR_MIN_WIDTH"
+      :aria-valuemax="SIDEBAR_MAX_WIDTH"
+      :aria-valuenow="sidebarWidth"
+      tabindex="0"
+      @pointerdown="startSidebarResize"
+      @keydown.left.prevent="resizeSidebarBy(-SIDEBAR_KEYBOARD_STEP)"
+      @keydown.right.prevent="resizeSidebarBy(SIDEBAR_KEYBOARD_STEP)"
+    ></div>
+
     <SidebarBrand />
 
     <nav class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4" @click="handleBackgroundClick">
@@ -188,6 +260,7 @@ const handleOpenStatisticsView = () => {
       />
 
       <SidebarPlaylists
+        v-if="settings.sidebar.showPlaylists"
         v-model:isOpen="isPlaylistOpen"
         :playlists="playlists"
         :selectedPlaylistIds="selectedPlaylistIds"

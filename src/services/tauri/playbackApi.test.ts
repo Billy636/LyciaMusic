@@ -59,6 +59,14 @@ describe('playbackApi', () => {
     expect(tauriInvoke).toHaveBeenCalledWith('stop_audio');
   });
 
+  it('toggles backend visualizer sampling explicitly', () => {
+    playbackApi.setAudioVisualizerEnabled(true);
+
+    expect(tauriInvoke).toHaveBeenCalledWith('set_audio_visualizer_enabled', {
+      enabled: true,
+    });
+  });
+
   it('passes loudness settings context to update_loudness_settings', () => {
     playbackApi.updateLoudnessSettings({
       enabled: true,

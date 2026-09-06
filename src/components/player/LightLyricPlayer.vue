@@ -222,17 +222,8 @@ function getLineText(line: LyricLine) {
 }
 
 // 空间平面距离渐隐与缩放样式计算
-function getLineDistanceStyle(lineIndex: number) {
-  const distance = Math.abs(lineIndex - activeLineIndex.value);
-
-  // 随着距离拉远，歌词行柔和缩小并逐步变暗淡出
-  const scale = Math.max(0.92, 1 - distance * 0.02);
-  const opacity = Math.max(0.12, 0.55 - (distance - 1) * 0.15);
-
-  return {
-    opacity: opacity.toFixed(2),
-    transform: `scale(${scale.toFixed(3)})`
-  };
+function getLineDistanceStyle(_lineIndex: number) {
+  return {};
 }
 
 // 融合渐隐景深样式与潜在填充样式

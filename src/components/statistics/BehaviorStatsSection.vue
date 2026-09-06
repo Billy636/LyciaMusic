@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, reactive, watch } from 'vue';
 import { useLibraryBrowse } from '../../features/library/useLibraryBrowse';
 import { useCoverCache } from '../../composables/useCoverCache';
+import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver';
 
 interface TopSong {
   song_path: string;
@@ -61,9 +62,11 @@ const emit = defineEmits<{
   hide: [title: string];
 }>();
 
-const { canonicalSongs } = useLibraryBrowse();
+const { canonicalSongPaths } = useLibraryBrowse();
+const { loadSongs, peekSong } = useLibrarySongResolver();
 const { coverCache, loadCover, touchCoverPaths, preloadPriorityCovers } = useCoverCache();
 const displayedCoverUrls = reactive(new Map<string, string>());
+const songInfoByPath = reactive(new Map<string, { title: string; artist: string }>());
 let trackedSongPaths = new Set<string>();
 
 function normalizePath(path: string): string {
@@ -72,7 +75,7 @@ function normalizePath(path: string): string {
 
 function getCoverUrl(songPath: string): string | null {
   const normalizedPath = normalizePath(songPath);
-  const existsInLibrary = canonicalSongs.value.some(item => normalizePath(item.path) === normalizedPath);
+  const existsInLibrary = canonicalSongPaths.value.some(path => normalizePath(path) === normalizedPath);
   if (!existsInLibrary) {
     return null;
   }
@@ -115,12 +118,14 @@ function syncDisplayedCoverUrls(paths: string[]) {
 }
 
 function getSongInfo(path: string) {
-  const normalizedPath = normalizePath(path);
-  const song = canonicalSongs.value.find(item => normalizePath(item.path) === normalizedPath);
+  const song = songInfoByPath.get(normalizePath(path)) ?? (() => {
+    const cached = peekSong(path);
+    return cached ? { title: cached.title || cached.name, artist: cached.artist } : null;
+  })();
 
   if (song) {
     return {
-      title: song.title || song.name || TEXT.unknownSong,
+      title: song.title || TEXT.unknownSong,
       artist: song.artist || TEXT.unknownArtist,
     };
   }
@@ -186,6 +191,20 @@ const peakTimeDesc = computed(() => `${getHourLabel(peakHour.value)} ${peakHour.
 watch(allSongPaths, paths => {
   syncDisplayedCoverUrls(paths);
   preloadPriorityCovers(paths);
+  const libraryPathByNormalized = new Map(
+    canonicalSongPaths.value.map(path => [normalizePath(path), path]),
+  );
+  const libraryPaths = paths
+    .map(path => libraryPathByNormalized.get(normalizePath(path)))
+    .filter((path): path is string => !!path);
+  void loadSongs(libraryPaths).then((songs) => {
+    songs.forEach(song => {
+      songInfoByPath.set(normalizePath(song.path), {
+        title: song.title || song.name || TEXT.unknownSong,
+        artist: song.artist || TEXT.unknownArtist,
+      });
+    });
+  });
 }, { immediate: true });
 
 onBeforeUnmount(() => {

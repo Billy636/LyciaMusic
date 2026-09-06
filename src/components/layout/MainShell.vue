@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent } from 'vue';
+import { defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 
 import { useAppShell } from '../../composables/useAppShell';
@@ -36,7 +36,54 @@ const {
 
 import { useSongInfoDialog } from '../../composables/useSongInfoDialog';
 const { isSongInfoVisible, currentSongInfo, closeSongInfo } = useSongInfoDialog();
-const { skipNextPageTransition, startupCompositionMaskVisible } = storeToRefs(useUiStore());
+const {
+  showPlaylist,
+  skipNextPageTransition,
+  startupCompositionMaskVisible,
+} = storeToRefs(useUiStore());
+
+const PLAY_QUEUE_LEAVE_MS = 300;
+const isPlayQueueMounted = ref(showPlaylist.value);
+let playQueueLeaveTimer: ReturnType<typeof window.setTimeout> | null = null;
+
+const updateDeferredMount = (
+  visible: boolean,
+  mounted: typeof isPlayQueueMounted,
+  delayMs: number,
+  getTimer: () => ReturnType<typeof window.setTimeout> | null,
+  setTimer: (timer: ReturnType<typeof window.setTimeout> | null) => void,
+) => {
+  const currentTimer = getTimer();
+  if (currentTimer !== null) {
+    window.clearTimeout(currentTimer);
+    setTimer(null);
+  }
+
+  if (visible) {
+    mounted.value = true;
+    return;
+  }
+
+  if (!mounted.value) return;
+  setTimer(window.setTimeout(() => {
+    mounted.value = false;
+    setTimer(null);
+  }, delayMs));
+};
+
+watch(showPlaylist, (visible) => {
+  updateDeferredMount(
+    visible,
+    isPlayQueueMounted,
+    PLAY_QUEUE_LEAVE_MS,
+    () => playQueueLeaveTimer,
+    (timer) => { playQueueLeaveTimer = timer; },
+  );
+});
+
+onBeforeUnmount(() => {
+  if (playQueueLeaveTimer !== null) window.clearTimeout(playQueueLeaveTimer);
+});
 
 useDesktopLyricsWindowBridge();
 </script>
@@ -171,10 +218,10 @@ useDesktopLyricsWindowBridge();
       </transition>
     </div>
 
-    <PlayQueueSidebar v-if="!isMiniMode" />
+    <PlayQueueSidebar v-if="!isMiniMode && isPlayQueueMounted" />
 
     <AddToPlaylistModal
-      v-if="!isMiniMode"
+      v-if="!isMiniMode && showAddToPlaylistModal"
       :visible="showAddToPlaylistModal"
       :selectedCount="playlistAddTargetSongs.length"
       @close="closeAddToPlaylistDialog"
@@ -182,7 +229,7 @@ useDesktopLyricsWindowBridge();
     />
 
     <SongInfoModal
-      v-if="!isMiniMode"
+      v-if="!isMiniMode && isSongInfoVisible"
       :visible="isSongInfoVisible"
       :song="currentSongInfo"
       @close="closeSongInfo"

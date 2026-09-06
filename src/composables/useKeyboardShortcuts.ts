@@ -1,9 +1,16 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from '@tauri-apps/plugin-notification';
 
 import { useLibraryCollections } from '../features/collections/useLibraryCollections';
 import { usePlaybackController } from '../features/playback/usePlaybackController';
 import { useSettings } from '../features/settings/useSettings';
+import { useSongHighlights } from '../features/highlights/useSongHighlights';
 import {
   matchesShortcutEvent,
   shortcutActionOrder,
@@ -13,6 +20,7 @@ import type { ShortcutActionId, ShortcutSettings } from '../types';
 import { useLyrics } from './lyrics';
 import { useUiStore } from '../shared/stores/ui';
 import { useToast } from './toast';
+import { toggleMainWindowVisibility } from './mainWindowVisibility';
 
 const INTERACTIVE_SELECTOR = [
   'input',
@@ -57,12 +65,30 @@ export function createGlobalShortcutSyncKey(shortcuts: ShortcutSettings) {
 }
 
 export function useKeyboardShortcuts() {
+  const mainWindow = getCurrentWindow();
   const { settings } = useSettings();
   const { currentSong, volume, togglePlay, nextSong, prevSong, handleVolume } = usePlaybackController();
   const { toggleFavorite } = useLibraryCollections();
   const { showDesktopLyrics, desktopLyricsSettings } = useLyrics();
   const uiStore = useUiStore();
   const { showToast } = useToast();
+  const { addAtCurrentTime, playPrimary, errorMessage } = useSongHighlights();
+
+  type ShortcutScope = 'local' | 'global';
+
+  const notifyGlobalFailure = async (message: string) => {
+    try {
+      let granted = await isPermissionGranted();
+      if (!granted) {
+        granted = (await requestPermission()) === 'granted';
+      }
+      if (granted) {
+        sendNotification({ title: 'LyciaMusic 高潮打点', body: message });
+      }
+    } catch {
+      // The main window may be hidden; avoid replacing a failed system notification with an invisible toast.
+    }
+  };
 
   const updateVolume = async (delta: number) => {
     const nextVolume = Math.max(0, Math.min(100, volume.value + delta));
@@ -73,7 +99,10 @@ export function useKeyboardShortcuts() {
     await handleVolume({ target: { value: nextVolume.toString() } } as unknown as Event);
   };
 
-  const actionHandlers: Record<ShortcutActionId, () => void | Promise<void>> = {
+  const actionHandlers: Record<ShortcutActionId, (scope: ShortcutScope) => void | Promise<void>> = {
+    toggleMainWindow: async () => {
+      await toggleMainWindowVisibility(mainWindow);
+    },
     togglePlay: () => togglePlay(),
     prevSong: () => prevSong(),
     nextSong: () => nextSong(),
@@ -87,12 +116,29 @@ export function useKeyboardShortcuts() {
         toggleFavorite(currentSong.value);
       }
     },
+    addSongHighlight: async scope => {
+      await addAtCurrentTime(scope === 'local');
+    },
+    playSongHighlight: () => playPrimary(),
     toggleDesktopLyrics: () => {
       showDesktopLyrics.value = !showDesktopLyrics.value;
     },
     toggleDesktopLyricsLock: () => {
       desktopLyricsSettings.isLocked = !desktopLyricsSettings.isLocked;
     },
+  };
+
+  const executeAction = async (actionId: ShortcutActionId, scope: ShortcutScope) => {
+    try {
+      await actionHandlers[actionId](scope);
+    } catch (error) {
+      const message = errorMessage(error);
+      if (scope === 'global') {
+        await notifyGlobalFailure(message);
+      } else {
+        showToast(message, 'error');
+      }
+    }
   };
 
   const globalActionByShortcut = new Map<string, ShortcutActionId>();
@@ -115,7 +161,7 @@ export function useKeyboardShortcuts() {
 
       event.preventDefault();
       event.stopPropagation();
-      void actionHandlers[actionId]();
+      void executeAction(actionId, 'local');
       return;
     }
   };
@@ -162,7 +208,7 @@ export function useKeyboardShortcuts() {
             return;
           }
 
-          void actionHandlers[currentActionId]();
+          void executeAction(currentActionId, 'global');
         });
 
         globalActionByShortcut.set(accelerator, actionId);

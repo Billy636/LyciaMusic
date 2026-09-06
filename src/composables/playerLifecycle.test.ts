@@ -66,11 +66,16 @@ const makeSong = (overrides: Partial<Song> = {}): Song => ({
   ...overrides,
 });
 
-const createLifecycleDeps = (loadLyrics = vi.fn()) => ({
+const createLifecycleDeps = (
+  loadLyrics = vi.fn(),
+  seekTo = vi.fn().mockResolvedValue(undefined)
+) => ({
   bootstrapLibrary: vi.fn().mockResolvedValue(undefined),
   togglePlay: vi.fn(),
   nextSong: vi.fn(),
   prevSong: vi.fn(),
+  seekTo,
+  handleAutoNext: vi.fn(),
   applyLibraryScanBatch: vi.fn(),
   flushBufferedLibraryScanBatch: vi.fn(),
   handleSeekCompleted: vi.fn(),
@@ -227,5 +232,95 @@ describe('player lifecycle', () => {
       gainOffsetDb: -2,
       preventClipping: false,
     });
+  });
+
+  it('handles playback-finished event with proper guards and playback ID matching', async () => {
+    const {
+      usePlaybackStore,
+      createPlayerLifecycle,
+    } = await loadModules();
+    const callbacks = new Map<string, (event: { payload: unknown }) => void>();
+    mocks.listen.mockImplementation((eventName: string, callback: (event: { payload: unknown }) => void) => {
+      callbacks.set(eventName, callback);
+      return Promise.resolve(vi.fn());
+    });
+
+    const playbackStore = usePlaybackStore();
+    playbackStore.currentSong = makeSong();
+    playbackStore.isPlaying = true;
+    playbackStore.currentPlaybackId = 42;
+
+    const deps = createLifecycleDeps();
+    createPlayerLifecycle(deps).init();
+
+    const triggerEvent = (playbackId: number) => {
+      const cb = callbacks.get('playback-finished');
+      if (cb) {
+        cb({ payload: { playbackId } });
+      }
+    };
+
+    // 1. Doesn't trigger if playback ID doesn't match
+    triggerEvent(41);
+    expect(deps.handleAutoNext).not.toHaveBeenCalled();
+
+    // 2. Doesn't trigger if not playing
+    playbackStore.isPlaying = false;
+    triggerEvent(42);
+    expect(deps.handleAutoNext).not.toHaveBeenCalled();
+
+    // 3. Doesn't trigger if currentSong is missing
+    playbackStore.isPlaying = true;
+    playbackStore.currentSong = null;
+    triggerEvent(42);
+    expect(deps.handleAutoNext).not.toHaveBeenCalled();
+
+    // 4. Triggers when matching, playing, and song exists
+    playbackStore.currentSong = makeSong();
+    playbackStore.isPlaying = true;
+    triggerEvent(42);
+    expect(deps.handleAutoNext).toHaveBeenCalledTimes(1);
+  });
+
+  it('seeks to the specified time when player:seek event is received', async () => {
+    const { createPlayerLifecycle } = await loadModules();
+    const callbacks = new Map<string, (event: { payload: unknown }) => void>();
+    mocks.listen.mockImplementation((eventName: string, callback: (event: { payload: unknown }) => void) => {
+      callbacks.set(eventName, callback);
+      return Promise.resolve(vi.fn());
+    });
+
+    const seekTo = vi.fn().mockResolvedValue(undefined);
+    const deps = createLifecycleDeps(vi.fn(), seekTo);
+    createPlayerLifecycle(deps).init();
+
+    const seekHandler = callbacks.get('player:seek');
+    expect(seekHandler).toBeDefined();
+
+    if (seekHandler) {
+      // 1. 正常数值跳转
+      await seekHandler({ payload: 120 } as any);
+      expect(deps.seekTo).toHaveBeenCalledWith(120);
+
+      // 2. 字符串类型数字跳转
+      seekTo.mockClear();
+      await seekHandler({ payload: '120' } as any);
+      expect(deps.seekTo).toHaveBeenCalledWith(120);
+
+      // 3. 负数过滤
+      seekTo.mockClear();
+      await seekHandler({ payload: -10 } as any);
+      expect(deps.seekTo).not.toHaveBeenCalled();
+
+      // 4. 非法字符串过滤
+      seekTo.mockClear();
+      await seekHandler({ payload: 'abc' } as any);
+      expect(deps.seekTo).not.toHaveBeenCalled();
+
+      // 5. NaN/非有限数值过滤
+      seekTo.mockClear();
+      await seekHandler({ payload: NaN } as any);
+      expect(deps.seekTo).not.toHaveBeenCalled();
+    }
   });
 });

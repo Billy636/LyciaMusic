@@ -6,7 +6,8 @@ import { useToast } from '../../composables/toast';
 import { dragSession } from '../../composables/dragState';
 import { useLibraryFolderSongPathCache } from '../../composables/useLibraryFolderSongPathCache';
 import { useListScrollMemory } from '../../composables/useListScrollMemory';
-import type { FolderNode, Song } from '../../types';
+import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver';
+import type { FolderNode } from '../../types';
 import FolderTreeItem from '../common/FolderTreeItem.vue';
 import ModernInputModal from '../common/ModernInputModal.vue';
 import ModernModal from '../common/ModernModal.vue';
@@ -27,18 +28,15 @@ const {
   searchQuery,
   folderSortMode,
   folderCustomOrder,
-  songLookup,
   fetchFolderTree,
   toggleFolderNode,
   expandFolderPath,
   refreshFolder,
-  refreshAllFolders,
   removeLibraryFolder,
   deleteFolder,
   moveFilesToFolder,
-  getSongsInFolder,
   playSong,
-  addSongsToQueue,
+  addSongPathsToQueue,
   openInFinder,
   createPlaylist,
   createFolder,
@@ -46,6 +44,7 @@ const {
 
 const toast = useToast();
 const { loadFolderViewSongPaths } = useLibraryFolderSongPathCache();
+const { loadSong } = useLibrarySongResolver();
 
 const sidebarWidth = ref(240);
 const isResizing = ref(false);
@@ -198,15 +197,20 @@ const handleRefreshFolder = async () => {
   }
 
   try {
-    const summary = await refreshAllFolders();
-    if (summary && typeof summary === 'object' && 'removedCount' in summary) {
-      const removedCount = Number(summary.removedCount) || 0;
-      toast.showToast(
-        removedCount > 0
-          ? `刷新成功，检测到少了 ${removedCount} 首歌曲`
-          : '刷新成功',
-        'success',
-      );
+    const summary = await refreshFolder(targetFolder.value.path);
+    await fetchFolderTree();
+    if (summary && typeof summary === 'object') {
+      const removedCount = Number((summary as any).removedCount) || 0;
+      const addedCount = Number((summary as any).addedCount) || 0;
+      if (addedCount > 0 && removedCount > 0) {
+        toast.showToast(`刷新成功，新增 ${addedCount} 首，减少 ${removedCount} 首歌曲`, 'success');
+      } else if (addedCount > 0) {
+        toast.showToast(`刷新成功，检测到新增 ${addedCount} 首歌曲`, 'success');
+      } else if (removedCount > 0) {
+        toast.showToast(`刷新成功，检测到少了 ${removedCount} 首歌曲`, 'success');
+      } else {
+        toast.showToast('刷新成功，文件夹歌曲已是最新', 'success');
+      }
     } else {
       toast.showToast('刷新成功', 'success');
     }
@@ -217,66 +221,28 @@ const handleRefreshFolder = async () => {
   }
 };
 
-const normalizeSearchText = (value: string) => value.trim().toLowerCase();
-
-const songMatchesFolderSearch = (path: string, query: string) => {
-  const song = songLookup.value.get(path);
-  if (!song) {
-    return false;
-  }
-
-  const loweredQuery = normalizeSearchText(query);
-  if (!loweredQuery) {
-    return true;
-  }
-
-  return song.name.toLowerCase().includes(loweredQuery)
-    || (song.title || '').toLowerCase().includes(loweredQuery)
-    || song.artist.toLowerCase().includes(loweredQuery)
-    || song.album.toLowerCase().includes(loweredQuery)
-    || path.toLowerCase().includes(loweredQuery)
-    || song.artist_names.some(name => name.toLowerCase().includes(loweredQuery))
-    || song.effective_artist_names.some(name => name.toLowerCase().includes(loweredQuery));
-};
-
-const resolveFolderMenuSongs = async (folderPath: string) => {
+const resolveFolderMenuPaths = async (folderPath: string) => {
   if (!folderPath) {
     return [];
   }
 
-  if (currentViewMode.value !== 'folder') {
-    return getSongsInFolder(folderPath);
-  }
-
-  if (folderSortMode.value !== 'custom') {
-    const sortedPaths = await loadFolderViewSongPaths({
-      folderPath,
-      query: searchQuery.value,
-      sortMode: folderSortMode.value,
-    });
-
-    return sortedPaths
-      .map(path => songLookup.value.get(path))
-      .filter((song): song is Song => !!song);
-  }
-
-  let songs = getSongsInFolder(folderPath);
-
-  if (searchQuery.value.trim()) {
-    songs = songs.filter(song => songMatchesFolderSearch(song.path, searchQuery.value));
-  }
+  const paths = await loadFolderViewSongPaths({
+    folderPath,
+    query: currentViewMode.value === 'folder' ? searchQuery.value : '',
+    sortMode: folderSortMode.value === 'custom' ? 'title' : folderSortMode.value,
+  });
 
   const customOrder = folderCustomOrder.value[folderPath] || [];
-  if (customOrder.length > 0) {
+  if (folderSortMode.value === 'custom' && customOrder.length > 0) {
     const orderMap = new Map(customOrder.map((path, index) => [path, index]));
-    songs = [...songs].sort((left, right) => {
-      const leftIndex = orderMap.has(left.path) ? orderMap.get(left.path)! : Number.MAX_SAFE_INTEGER;
-      const rightIndex = orderMap.has(right.path) ? orderMap.get(right.path)! : Number.MAX_SAFE_INTEGER;
+    return [...paths].sort((left, right) => {
+      const leftIndex = orderMap.has(left) ? orderMap.get(left)! : Number.MAX_SAFE_INTEGER;
+      const rightIndex = orderMap.has(right) ? orderMap.get(right)! : Number.MAX_SAFE_INTEGER;
       return leftIndex - rightIndex;
     });
   }
 
-  return songs;
+  return paths;
 };
 
 const playFolder = async () => {
@@ -284,9 +250,10 @@ const playFolder = async () => {
     return;
   }
 
-  const songs = await resolveFolderMenuSongs(targetFolder.value.path);
-  if (songs.length > 0) {
-    await playSong(songs[0]);
+  const paths = await resolveFolderMenuPaths(targetFolder.value.path);
+  const song = await loadSong(paths[0] ?? '');
+  if (song) {
+    await playSong(song);
     currentFolderFilter.value = targetFolder.value.path;
   }
 
@@ -298,7 +265,7 @@ const addToQueue = async () => {
     return;
   }
 
-  addSongsToQueue(await resolveFolderMenuSongs(targetFolder.value.path));
+  addSongPathsToQueue(await resolveFolderMenuPaths(targetFolder.value.path));
   showMenu.value = false;
 };
 
@@ -307,9 +274,9 @@ const createPlaylistFromFolder = async () => {
     return;
   }
 
-  const songs = await resolveFolderMenuSongs(targetFolder.value.path);
-  if (songs.length > 0) {
-    createPlaylist(targetFolder.value.name, songs.map(song => song.path));
+  const paths = await resolveFolderMenuPaths(targetFolder.value.path);
+  if (paths.length > 0) {
+    createPlaylist(targetFolder.value.name, paths);
     toast.showToast('Playlist created from folder', 'success');
   } else {
     toast.showToast('No songs found in folder', 'info');
@@ -323,10 +290,10 @@ const addFolderToPlaylist = async () => {
     return;
   }
 
-  const songs = await resolveFolderMenuSongs(targetFolder.value.path);
-  if (songs.length > 0) {
+  const paths = await resolveFolderMenuPaths(targetFolder.value.path);
+  if (paths.length > 0) {
     const { openAddToPlaylistDialog } = useAddToPlaylistDialog();
-    openAddToPlaylistDialog(songs.map(song => song.path));
+    openAddToPlaylistDialog(paths);
   } else {
     toast.showToast('No songs found in folder', 'info');
   }

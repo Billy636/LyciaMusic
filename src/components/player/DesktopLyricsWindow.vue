@@ -89,6 +89,7 @@ const {
                       v-if="activeLyricLine"
                       :key="blockTransitionKey"
                       class="desktop-lyric-block"
+                      :class="{ 'desktop-lyric-block--stroked': settings.textStrokeDepth > 0 }"
                       :style="blockStyle"
                     >
                       <div
@@ -119,14 +120,16 @@ const {
                                 class="desktop-lyric-word-main"
                                 :style="displayLine.active ? getWordStyle(word.start, word.end) : undefined"
                               >
-                                {{ word.text }}
+                                <span class="desktop-lyric-word-base">{{ word.text }}</span>
+                                <span class="desktop-lyric-word-fill" aria-hidden="true">{{ word.text }}</span>
                               </span>
                               <span
                                 v-if="displayLine.hasAlignedRomaji"
                                 class="desktop-lyric-word-romaji"
                                 :style="displayLine.active ? getRomajiWordStyle(word.start, word.end) : undefined"
                               >
-                                {{ word.romaji?.trim() }}
+                                <span class="desktop-lyric-romaji-base">{{ word.romaji?.trim() }}</span>
+                                <span class="desktop-lyric-romaji-fill" aria-hidden="true">{{ word.romaji?.trim() }}</span>
                               </span>
                             </span>
                           </template>
@@ -144,7 +147,13 @@ const {
                             ? getRomajiLineStyle(displayLine.line, displayLine.lineIndex)
                             : undefined"
                         >
-                          {{ secondaryLine.text }}
+                          <template v-if="secondaryLine.kind === 'romaji'">
+                            <span class="desktop-lyric-romaji-base">{{ secondaryLine.text }}</span>
+                            <span class="desktop-lyric-romaji-fill" aria-hidden="true">{{ secondaryLine.text }}</span>
+                          </template>
+                          <template v-else>
+                            {{ secondaryLine.text }}
+                          </template>
                         </div>
                       </div>
                     </div>
@@ -153,6 +162,7 @@ const {
                       v-else
                       :key="'empty-' + blockTransitionKey"
                       class="desktop-empty-state flex h-full items-center justify-center text-center"
+                      :class="{ 'desktop-empty-state--stroked': settings.textStrokeDepth > 0 }"
                     >
                       {{ fallbackStateText }}
                     </div>
@@ -302,6 +312,11 @@ const {
   transition: opacity 220ms ease;
 }
 
+.desktop-lyric-block--stroked {
+  -webkit-text-stroke: var(--desktop-text-stroke-width, 0px) var(--desktop-text-stroke-color, #000000);
+  paint-order: stroke fill;
+}
+
 .desktop-lyric-row {
   width: 100%;
   display: flex;
@@ -395,11 +410,41 @@ const {
 }
 
 .desktop-lyric-word-main {
+  position: relative;
   display: inline-block;
   white-space: pre-wrap;
 }
 
+.desktop-lyric-word-base {
+  color: currentColor;
+}
+
+.desktop-lyric-word-fill,
+.desktop-lyric-romaji-fill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  -webkit-clip-path: inset(-4px calc(100% - var(--desktop-karaoke-progress, 0%)) -4px 0);
+  clip-path: inset(-4px calc(100% - var(--desktop-karaoke-progress, 0%)) -4px 0);
+  pointer-events: none;
+}
+
+.desktop-lyric-word-fill {
+  background-image: linear-gradient(
+    90deg,
+    var(--desktop-accent-a) 0%,
+    var(--desktop-accent-b) var(--desktop-karaoke-progress, 0%),
+    var(--desktop-accent-b) 100%
+  );
+  background-clip: text;
+  color: transparent;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  white-space: pre-wrap;
+}
+
 .desktop-lyric-word-romaji {
+  position: relative;
   display: block;
   margin-top: 0.08em;
   color: var(--desktop-romaji-unplayed-color);
@@ -412,6 +457,17 @@ const {
     drop-shadow(0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.48)))
     drop-shadow(0 0 calc(var(--desktop-first-line-text-shadow-blur, 0px) * 0.86) rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.86)))
     drop-shadow(0 0 16px color-mix(in srgb, var(--desktop-romaji-unplayed-color) 20%, transparent));
+}
+
+.desktop-lyric-word-romaji .desktop-lyric-romaji-base,
+.desktop-lyric-sub--romaji .desktop-lyric-romaji-base {
+  color: var(--desktop-romaji-unplayed-color);
+}
+
+.desktop-lyric-word-romaji .desktop-lyric-romaji-fill,
+.desktop-lyric-sub--romaji .desktop-lyric-romaji-fill {
+  color: var(--desktop-romaji-played-color);
+  white-space: pre;
 }
 
 .desktop-lyric-sub {
@@ -429,6 +485,7 @@ const {
 }
 
 .desktop-lyric-sub--romaji {
+  position: relative;
   color: var(--desktop-romaji-unplayed-color);
   filter:
     drop-shadow(0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.48)))
@@ -516,6 +573,11 @@ const {
     drop-shadow(0 1px 2px rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.48)))
     drop-shadow(0 0 calc(var(--desktop-first-line-text-shadow-blur, 0px) * 0.82) rgb(var(--desktop-text-shadow-color, 0 0 0) / calc(var(--desktop-first-line-text-shadow-alpha, 0) * 0.82)))
     drop-shadow(0 0 16px color-mix(in srgb, var(--desktop-accent-a) 12%, transparent));
+}
+
+.desktop-empty-state--stroked {
+  -webkit-text-stroke: var(--desktop-text-stroke-width, 0px) var(--desktop-text-stroke-color, #000000);
+  paint-order: stroke fill;
 }
 
 .desktop-block-enter-active,

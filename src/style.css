@@ -15,12 +15,24 @@ body {
   width: 100%;
   min-height: 100vh;
   background-color: transparent;
+  /* Keep scrolling/pinch zoom, but make taps reliable on the whole custom UI. */
+  touch-action: manipulation;
 }
 
 #app {
   width: 100%;
   height: 100vh;
   background: transparent;
+}
+
+/* Prefer low-latency taps on interactive controls while keeping page scrolling native. */
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+  touch-action: manipulation;
 }
 
 /* 🟢 全局自定义滚动条样式 */
@@ -58,3 +70,16 @@ button:focus {
   outline: none !important;
 }
 
+html,
+body,
+#app {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}

@@ -16,6 +16,7 @@ const props = withDefaults(defineProps<{
   hidePassedLines?: boolean;
   lyricLines?: AmlLyricLine[];
   currentTime?: number;
+  timeSyncKey?: string | number;
   wordFadeWidth?: number;
   lineGap?: number;
   layoutVersion?: string | number;
@@ -31,6 +32,7 @@ const props = withDefaults(defineProps<{
   hidePassedLines: false,
   lyricLines: () => [],
   currentTime: 0,
+  timeSyncKey: '',
   wordFadeWidth: 0.5,
   lineGap: 1,
   layoutVersion: 0,
@@ -41,6 +43,7 @@ const emit = defineEmits<{
 }>();
 
 const wrapperRef = ref<HTMLDivElement | null>(null);
+const LOCAL_CLOCK_SYNC_DRIFT_MS = 350;
 
 let player: PatchedLyricPlayer | null = null;
 let resizeObserver: ResizeObserver | null = null;
@@ -50,6 +53,44 @@ let queueRecoveryMaxAttempts = 0;
 let queueRecoveryAttempts = 0;
 let queueRecoveryReason = '';
 let pendingLowPowerRecoveryReason = '';
+let localCurrentTime = Math.trunc(props.currentTime);
+let anchorCurrentTime = Math.trunc(props.currentTime);
+let anchorFrameTime = 0;
+let lastAppliedCurrentTime = Number.NaN;
+
+function getFrameNow() {
+  return typeof performance !== 'undefined' ? performance.now() : 0;
+}
+
+function applyCurrentTime(timeMs: number) {
+  localCurrentTime = Math.max(0, Math.trunc(timeMs));
+  if (!player || localCurrentTime === lastAppliedCurrentTime) return;
+
+  player.setCurrentTime(localCurrentTime);
+  lastAppliedCurrentTime = localCurrentTime;
+}
+
+function resetLocalClock(timeMs = props.currentTime, frameTime = getFrameNow()) {
+  anchorCurrentTime = Math.max(0, Math.trunc(timeMs));
+  anchorFrameTime = frameTime;
+  applyCurrentTime(anchorCurrentTime);
+}
+
+function resolveLocalCurrentTime(frameTime: number) {
+  if (!props.playing) {
+    return anchorCurrentTime;
+  }
+
+  return anchorCurrentTime + Math.max(0, frameTime - anchorFrameTime);
+}
+
+function syncExternalCurrentTime(force: boolean) {
+  const nextTime = Math.max(0, Math.trunc(props.currentTime));
+  const drift = Math.abs(nextTime - localCurrentTime);
+  if (!force && props.playing && drift <= LOCAL_CLOCK_SYNC_DRIFT_MS) return;
+
+  resetLocalClock(nextTime);
+}
 
 function stopAnimationLoop() {
   if (frameId !== 0) {
@@ -74,8 +115,10 @@ function startAnimationLoop() {
 
     if (lastTime === -1) {
       lastTime = time;
+      resetLocalClock(localCurrentTime, time);
     }
 
+    applyCurrentTime(resolveLocalCurrentTime(time));
     player.update(time - lastTime);
     lastTime = time;
     frameId = requestAnimationFrame(onFrame);
@@ -110,7 +153,7 @@ function attachPlayer(nextPlayer: PatchedLyricPlayer) {
   player = nextPlayer;
   applyPlayerProps();
   player.setLyricLines(props.lyricLines, Math.trunc(props.currentTime));
-  player.setCurrentTime(Math.trunc(props.currentTime));
+  resetLocalClock(props.currentTime);
 }
 
 function detachPlayer() {
@@ -227,6 +270,7 @@ watch(() => props.lowPower, (lowPower) => {
     return;
   }
 
+  syncExternalCurrentTime(true);
   startAnimationLoop();
   queueRecovery(pendingLowPowerRecoveryReason || 'low-power-toggle');
   pendingLowPowerRecoveryReason = '';
@@ -235,6 +279,7 @@ watch(() => props.lowPower, (lowPower) => {
 watch(() => props.playing, (playing) => {
   if (!player) return;
 
+  syncExternalCurrentTime(true);
   player.setPlaybackPaused(!playing);
 });
 
@@ -286,11 +331,16 @@ watch(() => props.lyricLines, (value) => {
   if (!player) return;
 
   player.setLyricLines(value, Math.trunc(props.currentTime));
+  syncExternalCurrentTime(true);
   queueRecovery('lyrics');
 }, { deep: false });
 
-watch(() => props.currentTime, (value) => {
-  player?.setCurrentTime(Math.trunc(value));
+watch(() => props.currentTime, () => {
+  syncExternalCurrentTime(false);
+});
+
+watch(() => props.timeSyncKey, () => {
+  syncExternalCurrentTime(true);
 });
 </script>
 

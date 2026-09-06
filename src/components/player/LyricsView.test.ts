@@ -53,6 +53,11 @@ describe('LyricsView custom font import', () => {
     expect(source).toContain(':low-power="shouldReduceLyricsRendering"');
   });
 
+  it('passes a sync key so AMLL can distinguish seeks from low-frequency clock ticks', () => {
+    expect(source).toContain('lyricsTimeSyncKey');
+    expect(source).toContain(':time-sync-key="lyricsTimeSyncKey"');
+  });
+
   it('offers AMLL and light lyrics render modes at the top of the style panel', () => {
     expect(source).toContain('PLAYER_RENDER_MODE_OPTIONS');
     expect(source).toContain('AMLL');
@@ -62,6 +67,9 @@ describe('LyricsView custom font import', () => {
 
   it('switches the player lyrics renderer based on the persisted render mode', () => {
     expect(source).toContain('LightLyricPlayer');
+    expect(source).toContain("import AmlLyricPlayer from './AmlLyricPlayer.vue'");
+    expect(source).toContain("import LightLyricPlayer from './LightLyricPlayer.vue'");
+    expect(source).not.toContain('defineAsyncComponent');
     expect(source).toContain('lyricsSettings.playerRenderMode === \'amll\'');
     expect(source).toContain('lyricsSettings.playerRenderMode === \'light\'');
   });

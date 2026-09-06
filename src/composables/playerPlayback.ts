@@ -22,14 +22,15 @@ interface SeekCompletedPayload {
 }
 
 interface CreatePlayerPlaybackDeps {
-  getDisplaySongList: () => Song[];
+  getDisplaySongPaths?: () => string[];
+  getDisplaySongList?: () => Song[];
   addToHistory: (song: Song) => void | Promise<void>;
   loadLyrics: () => void | Promise<void>;
   handleAutoNext: () => void;
   onBeforePlay?: (song: Song, options: PlaySongOptions) => void;
+  resolveSongForPlayback?: (song: Song) => Promise<Song>;
 }
 
-let progressFrameId: number | null = null;
 let progressTimerId: ReturnType<typeof setTimeout> | null = null;
 let syncIntervalId: ReturnType<typeof setInterval> | null = null;
 let playRequestId = 0;
@@ -41,15 +42,20 @@ let accumulatedTime = 0;
 let isSeeking = false;
 
 const getSmtcTitle = (song: Song) => song.title?.trim() || song.name.replace(/\.[^/.]+$/, '');
+const NORMAL_PROGRESS_UPDATE_MS = 100;
 const LOW_POWER_PROGRESS_UPDATE_MS = 1000;
 
 export const createPlayerPlayback = ({
+  getDisplaySongPaths,
   getDisplaySongList,
   addToHistory,
   loadLyrics,
   handleAutoNext,
   onBeforePlay,
+  resolveSongForPlayback,
 }: CreatePlayerPlaybackDeps) => {
+  const resolveDisplaySongPaths = () =>
+    getDisplaySongPaths?.() ?? getDisplaySongList?.().map(song => song.path) ?? [];
   const playbackStore = usePlaybackStore();
   const settingsStore = useSettingsStore();
   const uiStore = useUiStore();
@@ -57,6 +63,7 @@ export const createPlayerPlayback = ({
   const {
     loadCover,
     loadCoverPath,
+    loadFullCoverPath,
     primeCoverPath,
     loadFullCover,
     peekCoverUrl,
@@ -74,33 +81,34 @@ export const createPlayerPlayback = ({
     currentTime,
     isPlaying,
     isSongLoaded,
-    playQueue,
+    currentPlaybackId,
+    playQueuePaths,
     playMode,
-    tempQueue,
+    tempQueuePaths,
   } = storeToRefs(playbackStore);
   const { showPlayerDetail } = storeToRefs(uiStore);
 
-  const buildQueueWithInsertedSong = (song: Song, previousSong: Song | null, queue: Song[]) => {
-    if (previousSong?.path === song.path) {
-      return queue.length > 0 ? [...queue] : [song];
+  const buildQueueWithInsertedPath = (songPath: string, previousPath: string | null, queue: string[]) => {
+    if (previousPath === songPath) {
+      return queue.length > 0 ? [...queue] : [songPath];
     }
 
-    const queueWithoutSong = queue.filter(item => item.path !== song.path);
+    const queueWithoutSong = queue.filter(path => path !== songPath);
 
-    if (!previousSong) {
-      return [song];
+    if (!previousPath) {
+      return [songPath];
     }
 
-    const baseQueue = queueWithoutSong.length > 0 ? queueWithoutSong : [previousSong];
-    const currentIndex = baseQueue.findIndex(item => item.path === previousSong.path);
+    const baseQueue = queueWithoutSong.length > 0 ? queueWithoutSong : [previousPath];
+    const currentIndex = baseQueue.indexOf(previousPath);
 
     if (currentIndex === -1) {
-      return [previousSong, song, ...baseQueue];
+      return [previousPath, songPath, ...baseQueue];
     }
 
     return [
       ...baseQueue.slice(0, currentIndex + 1),
-      song,
+      songPath,
       ...baseQueue.slice(currentIndex + 1),
     ];
   };
@@ -115,13 +123,13 @@ export const createPlayerPlayback = ({
       retainedPaths.push(path);
     };
 
-    pushUniquePath(tempQueue.value[0]?.path);
+    pushUniquePath(tempQueuePaths.value[0]);
 
-    const queue = playQueue.value;
-    const currentIndex = queue.findIndex(item => item.path === song.path);
+    const queue = playQueuePaths.value;
+    const currentIndex = queue.indexOf(song.path);
     if (currentIndex >= 0 && queue.length > 1) {
-      pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]?.path);
-      pushUniquePath(queue[(currentIndex + 1) % queue.length]?.path);
+      pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]);
+      pushUniquePath(queue[(currentIndex + 1) % queue.length]);
     }
 
     return retainedPaths.slice(0, 4);
@@ -147,30 +155,26 @@ export const createPlayerPlayback = ({
     };
 
     pushUniquePath(song.path);
-    pushUniquePath(tempQueue.value[0]?.path);
+    pushUniquePath(tempQueuePaths.value[0]);
 
-    const queue = playQueue.value;
-    const currentIndex = queue.findIndex(item => item.path === song.path);
+    const queue = playQueuePaths.value;
+    const currentIndex = queue.indexOf(song.path);
     if (currentIndex >= 0 && queue.length > 1) {
-      pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]?.path);
-      pushUniquePath(queue[(currentIndex + 1) % queue.length]?.path);
+      pushUniquePath(queue[(currentIndex - 1 + queue.length) % queue.length]);
+      pushUniquePath(queue[(currentIndex + 1) % queue.length]);
     }
 
     if (playMode.value === 2) {
-      const randomCandidates = (queue.length ? queue : getDisplaySongList())
-        .filter(item => item.path !== song.path)
+      const randomCandidates = (queue.length ? queue : resolveDisplaySongPaths())
+        .filter(path => path !== song.path)
         .slice(0, 5);
-      randomCandidates.forEach(item => pushUniquePath(item.path));
+      randomCandidates.forEach(pushUniquePath);
     }
 
     return paths;
   };
 
   const stopPlaybackRuntime = () => {
-    if (progressFrameId !== null) {
-      cancelAnimationFrame(progressFrameId);
-      progressFrameId = null;
-    }
     if (progressTimerId !== null) {
       clearTimeout(progressTimerId);
       progressTimerId = null;
@@ -191,16 +195,11 @@ export const createPlayerPlayback = ({
     stopPlaybackRuntime();
     reanchorPlaybackClock(currentTime.value);
 
-    const scheduleUpdate = (update: FrameRequestCallback) => {
-      if (isMainWindowLowPower.value) {
-        progressTimerId = setTimeout(() => {
-          progressTimerId = null;
-          update(performance.now());
-        }, LOW_POWER_PROGRESS_UPDATE_MS);
-        return;
-      }
-
-      progressFrameId = requestAnimationFrame(update);
+    const scheduleUpdate = (update: () => void) => {
+      progressTimerId = setTimeout(() => {
+        progressTimerId = null;
+        update();
+      }, isMainWindowLowPower.value ? LOW_POWER_PROGRESS_UPDATE_MS : NORMAL_PROGRESS_UPDATE_MS);
     };
 
     const update = () => {
@@ -262,8 +261,16 @@ export const createPlayerPlayback = ({
 
   const playSong = async (song: Song, options: PlaySongOptions = {}) => {
     const requestId = ++playRequestId;
+    const resolvedSong = resolveSongForPlayback
+      ? await resolveSongForPlayback(song).catch(() => song)
+      : song;
+    if (requestId !== playRequestId) {
+      return;
+    }
+    song = resolvedSong;
     const previousSong = currentSong.value;
 
+    currentPlaybackId.value = 0;
     flushPlaySession();
     onBeforePlay?.(song, options);
 
@@ -272,16 +279,20 @@ export const createPlayerPlayback = ({
 
     if (!preserveQueue) {
       if (options.insertAfterCurrent) {
-        playQueue.value = buildQueueWithInsertedSong(song, previousSong, playQueue.value);
+        playQueuePaths.value = buildQueueWithInsertedPath(
+          song.path,
+          previousSong?.path ?? null,
+          playQueuePaths.value,
+        );
       } else {
-        const displaySongList = getDisplaySongList();
-        if (displaySongList.some(item => item.path === song.path)) {
-          playQueue.value = displaySongList;
-        } else if (!playQueue.value.some(item => item.path === song.path)) {
-          if (playQueue.value.length === 0) {
-            playQueue.value = [song];
+        const displaySongPaths = resolveDisplaySongPaths();
+        if (displaySongPaths.includes(song.path)) {
+          playQueuePaths.value = [...displaySongPaths];
+        } else if (!playQueuePaths.value.includes(song.path)) {
+          if (playQueuePaths.value.length === 0) {
+            playQueuePaths.value = [song.path];
           } else {
-            playQueue.value = [...playQueue.value, song];
+            playQueuePaths.value = [...playQueuePaths.value, song.path];
           }
         }
       }
@@ -294,6 +305,8 @@ export const createPlayerPlayback = ({
     const coverLookupPath = song.cue_source_path || song.path;
     const cachedCover = peekCoverUrl(coverLookupPath);
     const cachedCoverPath = peekCoverPath(coverLookupPath) || song.cover_thumb_path || '';
+    const cachedFullCoverPath = peekCoverPath(coverLookupPath, 'full');
+    const smtcCoverPath = cachedFullCoverPath || cachedCoverPath;
     const persistedCover = primeCoverPath(coverLookupPath, song.cover_thumb_path);
     const cachedFullCover = getFullCoverUrl(coverLookupPath);
     const immediateCover = cachedCover || persistedCover;
@@ -336,6 +349,7 @@ export const createPlayerPlayback = ({
     if (retainedFullCoverPaths.length > 1) {
       preloadFullCovers(retainedFullCoverPaths.filter(path => path !== song.path));
     }
+    const isCueTrack = Boolean(song.cue_source_path);
     const cueStartOffset = song.cue_start_offset || 0;
     const requestedStartTime = Number.isFinite(options.startTime) ? (options.startTime as number) : 0;
     const resumeTime = Math.max(0, Math.min(requestedStartTime, song.duration || requestedStartTime));
@@ -351,15 +365,17 @@ export const createPlayerPlayback = ({
     const startOffsetMs = cueStartOffset + Math.round(resumeTime * 1000);
 
     try {
-      await playbackApi.playAudio({
+      const pId = await playbackApi.playAudio({
         path: audioFilePath,
         title: getSmtcTitle(song),
         artist: song.artist || 'Unknown Artist',
         album: song.album || 'Unknown Album',
-        cover: cachedCoverPath,
+        cover: smtcCoverPath,
         duration: Math.floor(song.duration),
+        durationMs: isCueTrack ? Math.round(song.duration * 1000) : undefined,
         outputMode: settingsStore.settings.audio.outputMode,
         startOffsetMs: startOffsetMs || undefined,
+        cueStartOffsetMs: isCueTrack ? cueStartOffset : undefined,
         songId: song.id,
         volumeBalanceEnabled: settingsStore.settings.audio.volumeBalance?.enabled,
         gainOffsetDb: settingsStore.settings.audio.volumeBalance?.gainOffsetDb,
@@ -367,32 +383,27 @@ export const createPlayerPlayback = ({
       });
       if (requestId !== playRequestId || currentSong.value?.path !== song.path) return;
 
+      currentPlaybackId.value = pId;
       isSongLoaded.value = true;
       sessionStartTime = Date.now();
       loadLyrics();
       startPlaybackRuntime();
 
-      void currentThumbnailLoad
-        .then(async ([cover, coverPath]) => {
+      void loadFullCoverPath(coverLookupPath)
+        .then(async (fullCoverPath) => {
           if (requestId !== playRequestId || currentSong.value?.path !== song.path) {
             return;
           }
-
-          const normalizedCover = cover || '';
-          const normalizedCoverPath = coverPath || '';
-          currentCover.value = normalizedCover;
-          if (!currentCoverFull.value) {
-            currentCoverFull.value = normalizedCover;
+          if (fullCoverPath) {
+            await playbackApi.updatePlaybackMetadata({
+              title: getSmtcTitle(song),
+              artist: song.artist || 'Unknown Artist',
+              album: song.album || 'Unknown Album',
+              cover: fullCoverPath,
+              duration: Math.floor(song.duration),
+              isPlaying: isPlaying.value,
+            }).catch(() => {});
           }
-
-          await playbackApi.updatePlaybackMetadata({
-            title: getSmtcTitle(song),
-            artist: song.artist || 'Unknown Artist',
-            album: song.album || 'Unknown Album',
-            cover: normalizedCoverPath,
-            duration: Math.floor(song.duration),
-            isPlaying: isPlaying.value,
-          }).catch(() => {});
         })
         .catch(() => {});
     } catch {
@@ -432,7 +443,10 @@ export const createPlayerPlayback = ({
     }
 
     if (!isSongLoaded.value) {
-      await playSong(currentSong.value, { startTime: currentTime.value });
+      await playSong(currentSong.value, {
+        startTime: currentTime.value,
+        preserveQueue: true,
+      });
     } else {
       await playbackApi.resumeAudio();
       sessionStartTime = Date.now();

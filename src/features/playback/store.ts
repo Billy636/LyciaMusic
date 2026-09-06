@@ -14,6 +14,7 @@ export const usePlaybackStore = defineStore('playback', () => {
   const currentTime = ref(0);
   const playMode = ref(0);
   const isSongLoaded = ref(false);
+  const currentPlaybackId = ref(0);
   const playQueuePaths = shallowRef<string[]>([]);
   const tempQueuePaths = shallowRef<string[]>([]);
   const currentSongPath = ref<string | null>(null);
@@ -108,6 +109,12 @@ export const usePlaybackStore = defineStore('playback', () => {
     },
   });
 
+  const getKnownSongByPath = (path: string) =>
+    libraryStore.getSongByPath(path)
+    ?? queueFallbackSongs.get(path)
+    ?? tempQueueFallbackSongs.get(path)
+    ?? (currentSongFallback.value?.path === path ? currentSongFallback.value : null);
+
   const resetPlaybackState = () => {
     isPlaying.value = false;
     currentTime.value = 0;
@@ -151,12 +158,14 @@ export const usePlaybackStore = defineStore('playback', () => {
     currentTime,
     playMode,
     isSongLoaded,
+    currentPlaybackId,
     playQueue,
     playQueuePaths,
     tempQueue,
     tempQueuePaths,
     currentSong,
     currentSongPath,
+    getKnownSongByPath,
     currentCover,
     currentCoverPath,
     currentCoverFull,

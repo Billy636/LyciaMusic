@@ -17,6 +17,7 @@ mod progress;
 #[path = "scanner/repository.rs"]
 mod repository;
 
+pub(crate) use orchestrator::scan_single_directory_summary_internal;
 pub use orchestrator::{
     get_folder_first_song, parse_audio_files, scan_folder_as_playlists, scan_folder_recursive,
     scan_music_folder, scan_single_directory_internal,
@@ -223,6 +224,7 @@ pub(super) fn fill_text_fields_from_tags(
 #[cfg(test)]
 mod tests {
     use super::diff::{collect_scan_diff, DbSongSnapshot};
+    use super::orchestrator::scan_single_directory_summary_internal;
     use super::parser::{
         preferred_parse_workers_for_available, song_identity_missing, song_metadata_incomplete,
     };
@@ -234,6 +236,7 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn make_song(path: &str) -> Song {
@@ -348,20 +351,38 @@ mod tests {
     }
 
     #[test]
-    fn parse_workers_reserve_one_core_on_smaller_cpus() {
-        assert_eq!(preferred_parse_workers_for_available(10, 8), 7);
-        assert_eq!(preferred_parse_workers_for_available(10, 4), 3);
+    fn parse_workers_use_at_most_half_of_smaller_cpus() {
+        assert_eq!(preferred_parse_workers_for_available(10, 8), 4);
+        assert_eq!(preferred_parse_workers_for_available(10, 4), 2);
+        assert_eq!(preferred_parse_workers_for_available(10, 2), 1);
     }
 
     #[test]
-    fn parse_workers_reserve_two_cores_on_larger_cpus() {
-        assert_eq!(preferred_parse_workers_for_available(32, 16), 14);
-        assert_eq!(preferred_parse_workers_for_available(32, 24), 22);
+    fn parse_workers_cap_large_cpu_scans_to_eight_workers() {
+        assert_eq!(preferred_parse_workers_for_available(32, 16), 8);
+        assert_eq!(preferred_parse_workers_for_available(32, 24), 8);
     }
 
     #[test]
     fn parse_workers_never_exceed_task_count() {
         assert_eq!(preferred_parse_workers_for_available(3, 16), 3);
+    }
+
+    #[test]
+    fn summary_scan_returns_count_without_a_song_result_vector() {
+        let temp_dir = create_empty_temp_dir();
+        let count = scan_single_directory_summary_internal(
+            temp_dir.to_string_lossy().into_owned(),
+            Arc::new(Mutex::new(setup_test_db())),
+            None,
+            1,
+            1,
+            ScanOptions::default(),
+        )
+        .expect("scan summary");
+
+        assert_eq!(count, 0);
+        fs::remove_dir_all(temp_dir).expect("remove temp dir");
     }
 
     #[test]
@@ -578,13 +599,13 @@ mod tests {
         assert_eq!(remaining_artists, 0);
         assert_eq!(remaining_links, 0);
     }
-      
+
     #[test]
     fn large_import_chunk_size_stays_under_sqlite_variable_limit() {
         assert!(scan_change_chunk_size(0, 6000) <= 999);
     }
-  
-   #[test]
+
+    #[test]
     fn split_artist_names_chinese_enumeration_comma() {
         let names = super::split_artist_names("周杰伦、林俊杰、王力宏");
         assert_eq!(names, vec!["周杰伦", "林俊杰", "王力宏"]);
@@ -634,11 +655,11 @@ mod tests {
 
     // 最小真实可解码的 1x1 透明 PNG 图片数据 (真实为 68 字节)
     const MINIMAL_PNG: &[u8] = &[
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-        0x89, 0x00, 0x00, 0x00, 0x0B, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x60, 0x00, 0x02, 0x00,
-        0x00, 0x05, 0x00, 0x01, 0xE7, 0x2A, 0x24, 0x8C, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,
-        0xAE, 0x42, 0x60, 0x82
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0B, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x60,
+        0x00, 0x02, 0x00, 0x00, 0x05, 0x00, 0x01, 0xE7, 0x2A, 0x24, 0x8C, 0x00, 0x00, 0x00, 0x00,
+        0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ];
 
     #[test]
@@ -646,7 +667,10 @@ mod tests {
         // 复用 make_song
         let mut song_single = make_song("/music/test.flac");
         song_single.artist_names = vec!["周杰伦".to_string()];
-        assert_eq!(super::get_song_single_valid_artist(&song_single), Some("周杰伦".to_string()));
+        assert_eq!(
+            super::get_song_single_valid_artist(&song_single),
+            Some("周杰伦".to_string())
+        );
 
         let mut song_multi = make_song("/music/test.flac");
         song_multi.artist_names = vec!["周杰伦".to_string(), "方文山".to_string()];
@@ -686,7 +710,11 @@ mod tests {
         // 首次写入
         super::apply_scan_changes(&mut conn, &[song.clone()], &[], &[], None).unwrap();
         let db_path: Option<String> = conn
-            .query_row("SELECT avatar_path FROM artists WHERE name = '周杰伦'", [], |row| row.get(0))
+            .query_row(
+                "SELECT avatar_path FROM artists WHERE name = '周杰伦'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(db_path, Some("/cache/avatar.jpg".to_string()));
 
@@ -696,8 +724,114 @@ mod tests {
         super::apply_scan_changes(&mut conn, &[], &[song_new], &[], None).unwrap();
 
         let db_path_after: Option<String> = conn
-            .query_row("SELECT avatar_path FROM artists WHERE name = '周杰伦'", [], |row| row.get(0))
+            .query_row(
+                "SELECT avatar_path FROM artists WHERE name = '周杰伦'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(db_path_after, Some("/cache/avatar.jpg".to_string()));
+    }
+
+    #[test]
+    fn collect_scan_diff_ignores_dot_prefixed_directories() {
+        let temp_dir = create_empty_temp_dir();
+        let normalized_folder = temp_dir.to_string_lossy().replace('\\', "/");
+
+        let song_dir = temp_dir.join("normal_dir");
+        fs::create_dir_all(&song_dir).unwrap();
+        fs::write(song_dir.join("album.flac"), b"fake flac content").unwrap();
+        fs::write(
+            song_dir.join("album.cue"),
+            concat!(
+                "TITLE \"Visible Album\"\n",
+                "PERFORMER \"Visible Artist\"\n",
+                "FILE \"album.flac\" WAVE\n",
+                "  TRACK 01 AUDIO\n",
+                "    TITLE \"Visible Track\"\n",
+                "    INDEX 01 00:00:00\n",
+            ),
+        )
+        .unwrap();
+
+        let dot_dir = temp_dir.join(".fnsync_temp_dir");
+        fs::create_dir_all(&dot_dir).unwrap();
+        fs::write(dot_dir.join("ignored.flac"), b"fake flac content").unwrap();
+        fs::write(
+            dot_dir.join("ignored.cue"),
+            concat!(
+                "TITLE \"Hidden Album\"\n",
+                "PERFORMER \"Hidden Artist\"\n",
+                "FILE \"ignored.flac\" WAVE\n",
+                "  TRACK 01 AUDIO\n",
+                "    TITLE \"Hidden Track\"\n",
+                "    INDEX 01 00:00:00\n",
+            ),
+        )
+        .unwrap();
+
+        let diff = collect_scan_diff(
+            &normalized_folder,
+            HashMap::new(),
+            None,
+            ScanOptions::default(),
+        )
+        .expect("collect diff");
+
+        assert!(diff.has_disk_songs);
+        assert_eq!(diff.songs.len(), 1);
+        assert_eq!(diff.to_add.len(), 1);
+        assert!(diff
+            .to_add
+            .iter()
+            .all(|song| !song.path.contains(".fnsync_temp_dir")));
+        assert!(diff.to_add[0].path.contains("normal_dir"));
+        assert!(diff.to_add[0].path.contains("album.cue::track01"));
+
+        fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn scan_inaccessible_directory_retains_db_songs_without_deleting() {
+        let mut conn = setup_test_db();
+        let inaccessible_folder = normalize_path("Z:/LockedBitLockerDrive/Music");
+
+        let mut existing_song = make_song(&normalize_path("Z:/LockedBitLockerDrive/Music/song.flac"));
+        existing_song.id = None;
+        apply_scan_changes(&mut conn, &[existing_song], &[], &[], None).expect("insert existing song");
+
+        let song_count_before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM songs", [], |row| row.get(0))
+            .expect("count songs before scan");
+        assert_eq!(song_count_before, 1);
+
+        let scanned_count = scan_single_directory_summary_internal(
+            inaccessible_folder,
+            Arc::new(Mutex::new(conn)),
+            None,
+            1,
+            1,
+            ScanOptions::default(),
+        )
+        .expect("inaccessible scan should return Ok with retained count");
+
+        assert_eq!(scanned_count, 1);
+    }
+
+    #[test]
+    fn scan_folder_recursive_retains_inaccessible_root_node() {
+        let mut conn = setup_test_db();
+        let inaccessible_path = PathBuf::from(normalize_path("Z:/LockedBitLockerDrive/Music"));
+
+        let mut song = make_song(&normalize_path("Z:/LockedBitLockerDrive/Music/test.flac"));
+        song.id = None;
+        apply_scan_changes(&mut conn, &[song], &[], &[], None).expect("insert song");
+
+        let root_node = super::orchestrator::scan_folder_recursive(inaccessible_path, 0, 1, &conn);
+        assert!(root_node.is_some());
+        let node = root_node.unwrap();
+        assert_eq!(node.song_count, 1);
+        assert_eq!(node.child_count, 0);
+        assert!(node.children.is_empty());
     }
 }

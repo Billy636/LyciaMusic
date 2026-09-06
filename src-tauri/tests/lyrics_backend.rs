@@ -439,3 +439,101 @@ fn keeps_japanese_main_after_english_interlude_in_romaji_translation_lyrics() {
     assert_eq!(mixed_line.romaji, "to me do na i resonant harm");
     assert_eq!(mixed_line.translation, "是那从不曾间断的杀戮之音");
 }
+
+#[test]
+fn parses_enhanced_lrc_line_without_trailing_timestamp() {
+    // Test case 1: Inferred duration using median of local durations
+    // Word A: 400ms, Word B: 601ms. The integer median is 500ms.
+    // Word C starts at 11.001s, so it should end at 11.501s.
+    let median_payload = build_structured_lyrics_payload(
+        "[00:10.000]<00:10.000>A<00:10.400>B<00:11.001>C".to_string(),
+    );
+    let line1 = find_display_line_by_time(&median_payload, 10.0).unwrap();
+    assert_eq!(line1.text, "ABC");
+    let words1 = line1.words.as_ref().unwrap();
+    assert_eq!(words1.len(), 3);
+    assert_eq!(words1[2].text, "C");
+    assert_eq!((words1[2].start * 1000.0).round() as i64, 11001);
+    assert_eq!((words1[2].end * 1000.0).round() as i64, 11501);
+
+    // Test case 2: Single untimed word using default 300ms duration
+    let default_payload = build_structured_lyrics_payload("[00:20.000]<00:20.000>Hi".to_string());
+    let line2 = find_display_line_by_time(&default_payload, 20.0).unwrap();
+    assert_eq!(line2.text, "Hi");
+    let words2 = line2.words.as_ref().unwrap();
+    assert_eq!(words2.len(), 1);
+    assert_eq!(words2[0].text, "Hi");
+    assert_eq!((words2[0].start * 1000.0).round() as i64, 20000);
+    assert_eq!((words2[0].end * 1000.0).round() as i64, 20300);
+
+    // Test case 3: Clamping to minimum duration 150ms
+    let minimum_payload =
+        build_structured_lyrics_payload("[00:30.000]<00:30.000>A<00:30.050>B".to_string());
+    let line3 = find_display_line_by_time(&minimum_payload, 30.0).unwrap();
+    let words3 = line3.words.as_ref().unwrap();
+    assert_eq!((words3[1].start * 1000.0).round() as i64, 30050);
+    assert_eq!((words3[1].end * 1000.0).round() as i64, 30200); // 30050 + 150
+
+    // Test case 4: Clamping to maximum duration 1000ms
+    let maximum_payload =
+        build_structured_lyrics_payload("[00:40.000]<00:40.000>A<00:42.000>B".to_string());
+    let line4 = find_display_line_by_time(&maximum_payload, 40.0).unwrap();
+    let words4 = line4.words.as_ref().unwrap();
+    assert_eq!((words4[1].start * 1000.0).round() as i64, 42000);
+    assert_eq!((words4[1].end * 1000.0).round() as i64, 43000); // 42000 + 1000
+
+    // Test case 5: A single-word line can use timing context from another enhanced line.
+    let contextual_payload = build_structured_lyrics_payload(
+        [
+            "[00:00.000]<00:00.000>Hi",
+            "[00:10.000]<00:10.000>A<00:10.400>B<00:11.000>",
+        ]
+        .join("\n"),
+    );
+    let contextual_line = find_display_line_by_time(&contextual_payload, 0.0).unwrap();
+    let contextual_words = contextual_line.words.as_ref().unwrap();
+    assert_eq!((contextual_words[0].end * 1000.0).round() as i64, 500);
+
+    // Test case 6: Inference never extends beyond the next enhanced line.
+    let capped_payload = build_structured_lyrics_payload(
+        [
+            "[00:00.000]<00:00.000>A<00:00.900>B",
+            "[00:01.000]<00:01.000>C<00:01.500>",
+        ]
+        .join("\n"),
+    );
+    let capped_line = find_display_line_by_time(&capped_payload, 0.0).unwrap();
+    let capped_words = capped_line.words.as_ref().unwrap();
+    assert_eq!((capped_words[1].end * 1000.0).round() as i64, 1000);
+}
+
+#[test]
+fn parses_voice_prefixed_enhanced_lrc_payload() {
+    let payload = build_structured_lyrics_payload(
+        [
+            "[00:13.749]v1:<00:13.749>海<00:14.062>平<00:14.409>面<00:14.867>远<00:15.359>方<00:15.691>开<00:16.027>始<00:16.589>阴<00:17.060>霾<00:18.432>",
+            "[00:13.749]海平面远方开始阴霾",
+            "[00:20.280]v1:<00:20.280>悲<00:20.599>伤<00:21.018>要<00:21.441><00:21.442>怎么<00:22.263>平静<00:23.121>纯<00:23.755>白<00:24.659>",
+            "[00:20.280]悲伤要怎么平静纯白",
+        ]
+        .join("\n"),
+    );
+
+    assert_eq!(payload.display_lines.len(), 2);
+
+    let first_line = find_display_line_by_time(&payload, 13.749).expect("first line exists");
+    assert_eq!(first_line.text, "海平面远方开始阴霾");
+    let first_words = first_line.words.as_ref().expect("first line has words");
+    assert_eq!(
+        first_words
+            .iter()
+            .map(|word| word.text.as_str())
+            .collect::<String>(),
+        "海平面远方开始阴霾"
+    );
+    assert_eq!((first_words[0].start * 1000.0).round() as i64, 13749);
+    assert_eq!((first_words[0].end * 1000.0).round() as i64, 14062);
+
+    let second_line = find_display_line_by_time(&payload, 20.280).expect("second line exists");
+    assert_eq!(second_line.text, "悲伤要怎么平静纯白");
+}

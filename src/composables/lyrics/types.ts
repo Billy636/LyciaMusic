@@ -26,6 +26,8 @@ export interface LyricLine {
   text: string;
   translation: string;
   romaji: string;
+  isBG?: boolean;
+  isDuet?: boolean;
   words?: LyricWord[];
   romajiWords?: LyricWord[];
   secondary?: string[];
@@ -43,6 +45,15 @@ export interface LyricWord {
   start: number;
   end: number;
   romaji?: string;
+  ruby?: LyricRubyWord[];
+  obscene?: boolean;
+  emptyBeat?: number;
+}
+
+export interface LyricRubyWord {
+  text: string;
+  start: number;
+  end: number;
 }
 
 export interface CurrentLyricDisplayLine {
@@ -58,6 +69,16 @@ export interface CurrentLyricDisplayState {
 }
 
 export type LyricsStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
+
+export type ActiveLyricsFormat =
+  | 'ttml'
+  | 'lrc'
+  | 'enhanced_lrc'
+  | 'eslrc'
+  | 'yrc'
+  | 'qrc'
+  | 'lys'
+  | 'unknown';
 
 export type ParsedLineSourceFormat =
   | 'lrc'

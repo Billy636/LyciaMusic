@@ -5,6 +5,7 @@ import {
   getShortcutBindingFromEvent,
   isSystemReservedShortcutEvent,
   matchesShortcutEvent,
+  normalizeShortcutSettings,
   shortcutActionLabels,
   shortcutActionOrder,
   toGlobalShortcutAccelerator,
@@ -13,6 +14,37 @@ import {
 describe('shortcut settings helpers', () => {
   it('keeps global shortcuts disabled by default', () => {
     expect(createDefaultShortcutSettings().globalEnabled).toBe(false);
+  });
+
+  it('offers a configurable main window toggle with Ctrl+W as the local default', () => {
+    const defaults = createDefaultShortcutSettings();
+
+    expect(shortcutActionLabels.toggleMainWindow).toBe('显示/收起主窗口');
+    expect(defaults.local.toggleMainWindow).toEqual({
+      code: 'KeyW',
+      ctrl: true,
+      alt: false,
+      shift: false,
+      meta: false,
+    });
+    expect(defaults.global.toggleMainWindow).toBeNull();
+  });
+
+  it('adds the main window toggle when loading shortcut settings saved by an older version', () => {
+    const legacySettings = createDefaultShortcutSettings();
+    delete (legacySettings.local as Partial<typeof legacySettings.local>).toggleMainWindow;
+    delete (legacySettings.global as Partial<typeof legacySettings.global>).toggleMainWindow;
+
+    const normalized = normalizeShortcutSettings(legacySettings);
+
+    expect(normalized.local.toggleMainWindow).toEqual({
+      code: 'KeyW',
+      ctrl: true,
+      alt: false,
+      shift: false,
+      meta: false,
+    });
+    expect(normalized.global.toggleMainWindow).toBeNull();
   });
 
   it('offers desktop lyrics lock shortcuts instead of lyric translation shortcuts', () => {
@@ -29,6 +61,29 @@ describe('shortcut settings helpers', () => {
       meta: false,
     });
     expect(defaults.global.toggleDesktopLyricsLock).toBeNull();
+  });
+
+  it('offers local song highlight shortcuts while leaving global bindings empty', () => {
+    const defaults = createDefaultShortcutSettings();
+
+    expect(shortcutActionLabels.addSongHighlight).toBe('添加/更新高潮点');
+    expect(shortcutActionLabels.playSongHighlight).toBe('跳到主高潮并播放');
+    expect(defaults.local.addSongHighlight).toEqual({
+      code: 'KeyM',
+      ctrl: false,
+      alt: false,
+      shift: false,
+      meta: false,
+    });
+    expect(defaults.local.playSongHighlight).toEqual({
+      code: 'KeyM',
+      ctrl: false,
+      alt: false,
+      shift: true,
+      meta: false,
+    });
+    expect(defaults.global.addSongHighlight).toBeNull();
+    expect(defaults.global.playSongHighlight).toBeNull();
   });
 
   it('converts shortcut bindings to tauri global accelerators', () => {

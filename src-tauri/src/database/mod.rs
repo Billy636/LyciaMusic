@@ -1,6 +1,6 @@
 mod migrations;
 mod reset;
-mod schema;
+pub(crate) mod schema;
 mod state;
 
 pub use reset::clear_all_app_data;

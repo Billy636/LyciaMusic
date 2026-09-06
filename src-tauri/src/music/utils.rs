@@ -1,6 +1,7 @@
 // music/utils.rs - 辅助函数
 
 use std::fs;
+use std::path::Path;
 
 pub const SUPPORTED_LIBRARY_EXTENSIONS: &[&str] = &[
     "aac", "aif", "aiff", "flac", "m4a", "m4b", "mp3", "mp4", "oga", "ogg", "wav",
@@ -17,12 +18,19 @@ pub fn normalize_path(path_str: &str) -> String {
         }
         return s;
     }
-    let s = path_str.to_string();
+    let mut s = path_str.to_string();
     if cfg!(windows) {
-        s.replace("/", "\\")
-    } else {
-        s
+        s = s.replace("/", "\\");
+        if s.len() >= 2 {
+            let first_char = s.chars().next().unwrap();
+            let second_char = s.chars().nth(1).unwrap();
+            if first_char.is_ascii_alphabetic() && second_char == ':' {
+                let upper_drive = first_char.to_ascii_uppercase();
+                s = format!("{}{}", upper_drive, &s[1..]);
+            }
+        }
     }
+    s
 }
 
 /// Escape special characters for SQL LIKE pattern with `ESCAPE '^'`.
@@ -53,6 +61,12 @@ pub fn descendant_like_patterns(folder_path: &str) -> (String, String) {
         format!("{}%", escape_like(&forward_base)),
         format!("{}%", escape_like(&backward_base)),
     )
+}
+
+pub fn is_dot_prefixed_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map_or(false, |name| name.starts_with('.'))
 }
 
 pub fn is_supported_library_extension(ext: &str) -> bool {

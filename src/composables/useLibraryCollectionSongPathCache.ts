@@ -3,18 +3,19 @@ import { ref } from 'vue';
 import type { HistoryItem } from '../types';
 import type { LocalSortMode } from '../services/storage/playerStorage';
 import { tauriInvoke } from '../services/tauri/invoke';
-import { MemoryCache } from '../utils/MemoryCache';
+import {
+  activateLibrarySongPathCacheEntry,
+  clearLibrarySongPathCacheNamespace,
+  getLibrarySongPathCacheEntry,
+  setLibrarySongPathCacheEntry,
+} from '../caches/librarySongPathCache';
 
 type BackendLocalSortMode = Exclude<LocalSortMode, 'custom'>;
+type SelectionSortMode = BackendLocalSortMode | 'name';
 type FavoriteDetailFilter = { type: 'artist' | 'album'; name: string } | null;
 
 const COLLECTION_VIEW_PATH_CACHE_TTL_MS = 5 * 60 * 1000;
-const COLLECTION_VIEW_PATH_CACHE_MAX_ENTRIES = 96;
-
-const collectionViewPathCache = new MemoryCache<string, string[]>({
-  maxEntries: COLLECTION_VIEW_PATH_CACHE_MAX_ENTRIES,
-  ttlMs: COLLECTION_VIEW_PATH_CACHE_TTL_MS,
-});
+const COLLECTION_VIEW_PATH_CACHE_NAMESPACE = 'collection';
 
 const inFlightRequests = new Map<string, Promise<string[]>>();
 const cacheVersion = ref(0);
@@ -30,7 +31,7 @@ const serializeFavoriteDetailFilter = (filter: FavoriteDetailFilter) =>
 const makeFavoriteCacheKey = (
   favoritePaths: string[],
   query: string,
-  sortMode: BackendLocalSortMode,
+  sortMode: SelectionSortMode,
   detailFilter: FavoriteDetailFilter,
 ) => [
   'favorites',
@@ -52,9 +53,10 @@ const makeRecentCacheKey = (
 ].join('\u0001');
 
 const loadWithCache = async (key: string, loader: () => Promise<string[]>) => {
-  const cached = collectionViewPathCache.get(key);
+  activateLibrarySongPathCacheEntry(COLLECTION_VIEW_PATH_CACHE_NAMESPACE, key);
+  const cached = getLibrarySongPathCacheEntry(COLLECTION_VIEW_PATH_CACHE_NAMESPACE, key);
   if (cached) {
-    return cached;
+    return cached.paths;
   }
 
   const inFlight = inFlightRequests.get(key);
@@ -64,7 +66,12 @@ const loadWithCache = async (key: string, loader: () => Promise<string[]>) => {
 
   const request = loader()
     .then((paths) => {
-      collectionViewPathCache.set(key, paths);
+      setLibrarySongPathCacheEntry(
+        COLLECTION_VIEW_PATH_CACHE_NAMESPACE,
+        key,
+        { paths },
+        COLLECTION_VIEW_PATH_CACHE_TTL_MS,
+      );
       cacheVersion.value += 1;
       return paths;
     })
@@ -85,7 +92,7 @@ export function useLibraryCollectionSongPathCache() {
   }: {
     favoritePaths: string[];
     query?: string;
-    sortMode: BackendLocalSortMode;
+    sortMode: SelectionSortMode;
     detailFilter?: FavoriteDetailFilter;
   }) => {
     if (favoritePaths.length === 0) {
@@ -134,7 +141,7 @@ export function useLibraryCollectionSongPathCache() {
     loadFavoriteSongPaths,
     loadRecentSongPaths,
     clearLibraryCollectionSongPathCache: () => {
-      collectionViewPathCache.clear();
+      clearLibrarySongPathCacheNamespace(COLLECTION_VIEW_PATH_CACHE_NAMESPACE);
       inFlightRequests.clear();
       cacheVersion.value += 1;
     },

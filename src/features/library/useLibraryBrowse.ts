@@ -18,6 +18,8 @@ export function useLibraryBrowse() {
   } = storeToRefs(navigationStore);
   const {
     libraryFolders,
+    canonicalSongPaths,
+    sourceSongPaths,
     canonicalSongs,
     sourceSongs,
     libraryHierarchy,
@@ -53,6 +55,8 @@ export function useLibraryBrowse() {
     activeRootPath,
     libraryHierarchy,
     libraryFolders,
+    canonicalSongPaths,
+    sourceSongPaths,
     canonicalSongs,
     sourceSongs,
     artistSortMode,

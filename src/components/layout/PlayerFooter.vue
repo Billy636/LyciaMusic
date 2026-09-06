@@ -5,11 +5,14 @@ import { useLibraryCollections } from '../../features/collections/useLibraryColl
 import { useLyrics } from '../../composables/lyrics';
 import { usePlaybackController } from '../../features/playback/usePlaybackController';
 import AudioVisualizer from '../player/AudioVisualizer.vue';
+import SongHighlightMarkers from '../player/SongHighlightMarkers.vue';
 import FooterContextMenu from "../overlays/FooterContextMenu.vue";
 import EqualizerPanel from '../player/EqualizerPanel.vue';
 import { useSettings } from '../../features/settings/useSettings';
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import type { RemoteDownloadProgress } from '../../types';
+import { useSongHighlights } from '../../features/highlights/useSongHighlights';
+import { useToast } from '../../composables/toast';
 import {
   FOOTER_PROGRESS_HIDDEN_KEY,
   getProgressVisualState,
@@ -23,6 +26,8 @@ const {
   togglePlayerDetail, seekTo, formatDuration
 } = usePlaybackController();
 const { isFavorite, toggleFavorite } = useLibraryCollections();
+const { addMarker, formatMarkerTime, errorMessage } = useSongHighlights();
+const { showToast } = useToast();
 
 const handleOpenDetail = () => {
   togglePlayerDetail();
@@ -34,6 +39,10 @@ const { showDesktopLyrics, showLyricsPlayerSettingsPanel } = useLyrics();
 const showContextMenu = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
+const showProgressContextMenu = ref(false);
+const progressContextMenuX = ref(0);
+const progressContextMenuY = ref(0);
+const progressContextTimeMs = ref(0);
 
 const handleContextMenu = (e: MouseEvent) => {
   if (!currentSong.value) return;
@@ -41,6 +50,27 @@ const handleContextMenu = (e: MouseEvent) => {
   contextMenuX.value = e.clientX;
   contextMenuY.value = e.clientY;
   showContextMenu.value = true;
+};
+
+const handleProgressContextMenu = (e: MouseEvent) => {
+  if (!currentSong.value || !progressBarRef.value || currentSong.value.duration <= 0) return;
+  e.preventDefault();
+  const rect = progressBarRef.value.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  progressContextTimeMs.value = Math.round(ratio * currentSong.value.duration * 1000);
+  progressContextMenuX.value = e.clientX;
+  progressContextMenuY.value = e.clientY;
+  showContextMenu.value = false;
+  showProgressContextMenu.value = true;
+};
+
+const addProgressHighlight = async () => {
+  showProgressContextMenu.value = false;
+  try {
+    await addMarker(progressContextTimeMs.value, true);
+  } catch (error) {
+    showToast(errorMessage(error), 'error');
+  }
 };
 
 const toggleLyrics = () => { showDesktopLyrics.value = !showDesktopLyrics.value; };
@@ -214,6 +244,7 @@ const toggleEqPanel = (e: MouseEvent) => {
 };
 
 const handleWindowClick = (e: MouseEvent) => {
+  showProgressContextMenu.value = false;
   if (showEqPanel.value && eqPanelRef.value && eqButtonRef.value) {
     const target = e.target as HTMLElement;
     if (!eqPanelRef.value.contains(target) && !eqButtonRef.value.contains(target)) {
@@ -222,14 +253,36 @@ const handleWindowClick = (e: MouseEvent) => {
   }
 };
 
-// --- Idle State for Auto-Hide ---
-const isPinned = ref(localStorage.getItem('footer_pinned') === 'true');
+// --- Idle State for Auto-Hide (Decoupled Main vs Lyric Detail) ---
+const isPinnedMain = ref(
+  localStorage.getItem('footer_pinned_main') !== null
+    ? localStorage.getItem('footer_pinned_main') === 'true'
+    : (localStorage.getItem('footer_pinned') !== null ? localStorage.getItem('footer_pinned') === 'true' : true)
+);
+
+const isPinnedDetail = ref(
+  localStorage.getItem('footer_pinned_detail') !== null
+    ? localStorage.getItem('footer_pinned_detail') === 'true'
+    : false
+);
+
+const isPinned = computed(() => (
+  showPlayerDetail.value ? isPinnedDetail.value : isPinnedMain.value
+));
+
 const isIdle = ref(false);
 let idleTimer: any = null;
 
 const togglePin = () => {
-  isPinned.value = !isPinned.value;
-  localStorage.setItem('footer_pinned', isPinned.value.toString());
+  if (showPlayerDetail.value) {
+    isPinnedDetail.value = !isPinnedDetail.value;
+    localStorage.setItem('footer_pinned_detail', isPinnedDetail.value.toString());
+  } else {
+    isPinnedMain.value = !isPinnedMain.value;
+    localStorage.setItem('footer_pinned_main', isPinnedMain.value.toString());
+    localStorage.setItem('footer_pinned', isPinnedMain.value.toString());
+  }
+
   if (!isPinned.value) {
     startIdleTimer();
   } else {
@@ -237,6 +290,15 @@ const togglePin = () => {
     if (idleTimer) clearTimeout(idleTimer);
   }
 };
+
+watch(showPlayerDetail, () => {
+  if (isPinned.value) {
+    isIdle.value = false;
+    if (idleTimer) clearTimeout(idleTimer);
+  } else {
+    startIdleTimer();
+  }
+});
 
 const startIdleTimer = () => {
   if (idleTimer) clearTimeout(idleTimer);
@@ -305,8 +367,10 @@ onUnmounted(() => {
 
     <div 
       ref="progressBarRef"
+      data-player-progress
       class="absolute top-[-10px] left-0 w-full h-[22px] cursor-pointer group/progress z-50 [touch-action:none]"
       @pointerdown="startProgressDrag"
+      @contextmenu="handleProgressContextMenu"
     >
       <div class="absolute inset-y-0 left-0 right-0 flex items-center">
         <div
@@ -344,6 +408,19 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+      <SongHighlightMarkers :hidden="isProgressHidden" />
+    </div>
+
+    <div
+      v-if="showProgressContextMenu"
+      class="fixed z-[9999] min-w-[210px] overflow-hidden rounded-lg border border-black/10 bg-white/95 py-1 text-sm text-gray-800 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-[#252525]/95 dark:text-white"
+      :style="{ left: `${progressContextMenuX}px`, top: `${progressContextMenuY}px` }"
+      @click.stop
+      @contextmenu.prevent
+    >
+      <button class="block w-full px-3 py-2 text-left hover:bg-black/5 dark:hover:bg-white/10" @click="addProgressHighlight">
+        在 {{ formatMarkerTime(progressContextTimeMs) }} 添加高潮点
+      </button>
     </div>
 
     <div class="flex items-center w-1/3 min-w-[200px]" @contextmenu="handleContextMenu">
@@ -565,7 +642,7 @@ onUnmounted(() => {
       <button @click="togglePin"
         class="transition-colors w-8 h-8 flex items-center justify-center rounded-full"
         :class="showPlayerDetail ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'"
-        :title="isPinned ? '取消固定 (当前已常驻)' : '固定状态栏 (当前离开后消失)'"
+        :title="isPinned ? (showPlayerDetail ? '取消固定歌词页底部栏 (当前已常驻)' : '取消固定底部栏 (当前已常驻)') : (showPlayerDetail ? '固定歌词页底部栏 (当前离开后消失)' : '固定底部栏 (当前离开后消失)')"
       >
         <!-- 已固定：完整图钉 -->
         <svg v-if="isPinned" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
