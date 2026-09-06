@@ -32,7 +32,6 @@ const {
   toggleFolderNode,
   expandFolderPath,
   refreshFolder,
-  refreshAllFolders,
   removeLibraryFolder,
   deleteFolder,
   moveFilesToFolder,
