@@ -330,9 +330,15 @@ pub fn seek_audio(
     request_id: u64,
     state: tauri::State<PlayerState>,
 ) -> Result<(), String> {
+    let sanitized_time = if time.is_finite() && time >= 0.0 {
+        time
+    } else {
+        0.0
+    };
+
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
     tx.send(AudioCommand::Seek {
-        time,
+        time: sanitized_time,
         is_playing,
         request_id,
     })
@@ -341,7 +347,7 @@ pub fn seek_audio(
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
             let progress = MediaPosition(Duration::from_secs_f64(
-                state.progress.media_seconds_from_absolute(time),
+                state.progress.media_seconds_from_absolute(sanitized_time),
             ));
             if is_playing {
                 let _ = mc.set_playback(MediaPlayback::Playing {

@@ -443,62 +443,74 @@ fn append_decoded_source<R>(
     R: Read + Seek + Send + Sync + 'static,
 {
     if let Some(output) = output {
-        *current_sink = output.create_sink().ok();
-
-        if let Ok(prefetch_source) = crate::player::decoder_thread::create_prefetch_source(
+        match crate::player::decoder_thread::create_prefetch_source(
             reader,
             start_offset,
             cue_start_offset,
             total_duration,
         ) {
-            let rate = prefetch_source.sample_rate();
-            let playback_channels = prefetch_source.channels();
+            Ok(prefetch_source) => {
+                let sink = match output.create_sink() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Failed to create sink: {e}");
+                        *current_sink = None;
+                        return;
+                    }
+                };
 
-            let offset = start_offset.unwrap_or(Duration::ZERO);
-            if start_offset.is_none() {
-                progress.visualizer.reset();
-            }
+                let rate = prefetch_source.sample_rate();
+                let playback_channels = prefetch_source.channels();
 
-            progress.sample_rate.store(rate, Ordering::Relaxed);
-            progress
-                .channels
-                .store(playback_channels as u32, Ordering::Relaxed);
-            let skip_samples =
-                (offset.as_secs_f64() * rate as f64 * playback_channels as f64).round() as u64;
-            progress
-                .samples_played
-                .store(skip_samples, Ordering::Relaxed);
+                let offset = start_offset.unwrap_or(Duration::ZERO);
+                if start_offset.is_none() {
+                    progress.visualizer.reset();
+                }
 
-            // 1. VolumeNormalizer 音量平衡节点
-            let (normalized_source, handle) = VolumeNormalizer::new(
-                prefetch_source,
-                volume_balance_gain,
-                100, // ramp 100ms
-            );
-            *current_normalizer_handle = Some(handle);
+                progress.sample_rate.store(rate, Ordering::Relaxed);
+                progress
+                    .channels
+                    .store(playback_channels as u32, Ordering::Relaxed);
+                let skip_samples =
+                    (offset.as_secs_f64() * rate as f64 * playback_channels as f64).round() as u64;
+                progress
+                    .samples_played
+                    .store(skip_samples, Ordering::Relaxed);
 
-            // 2. Equalizer 10段级联滤波器组
-            let eq_source =
-                crate::player::equalizer::Equalizer::new(normalized_source, equalizer_handle);
+                // 1. VolumeNormalizer 音量平衡节点
+                let (normalized_source, handle) = VolumeNormalizer::new(
+                    prefetch_source,
+                    volume_balance_gain,
+                    100, // ramp 100ms
+                );
+                *current_normalizer_handle = Some(handle);
 
-            // 3. UserVolumeSource 自定义主音量节点
-            let vol_source =
-                crate::player::equalizer::UserVolumeSource::new(eq_source, user_volume);
+                // 2. Equalizer 10段级联滤波器组
+                let eq_source =
+                    crate::player::equalizer::Equalizer::new(normalized_source, equalizer_handle);
 
-            // 4. ClipGuardSource 最终安全限幅源
-            let clip_source = crate::player::equalizer::ClipGuardSource::new(vol_source);
+                // 3. UserVolumeSource 自定义主音量节点
+                let vol_source =
+                    crate::player::equalizer::UserVolumeSource::new(eq_source, user_volume);
 
-            // 5. TimedSource 可视化进度节点
-            let timed_source = TimedSource::new(
-                clip_source,
-                progress.samples_played.clone(),
-                progress.visualizer.clone(),
-            );
+                // 4. ClipGuardSource 最终安全限幅源
+                let clip_source = crate::player::equalizer::ClipGuardSource::new(vol_source);
 
-            if let Some(sink) = current_sink {
+                // 5. TimedSource 可视化进度节点
+                let timed_source = TimedSource::new(
+                    clip_source,
+                    progress.samples_played.clone(),
+                    progress.visualizer.clone(),
+                );
+
                 sink.append(timed_source);
                 sink.set_volume(1.0); // 必须固定共享模式 Sink 自身音量恒为 1.0，由 UserVolumeSource 接管主音量
                 sink.play();
+                *current_sink = Some(sink);
+            }
+            Err(e) => {
+                eprintln!("Failed to create prefetch source: {e}");
+                *current_sink = None;
             }
         }
     }

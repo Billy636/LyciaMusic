@@ -146,21 +146,39 @@ where
         }
         let _ = reader.seek(SeekFrom::Start(0));
 
+        fn prepare_source<S: Read + Seek + Send + Sync + 'static>(
+            mut decoder: Decoder<BufReader<S>>,
+            offset: Duration,
+        ) -> (Box<dyn Source<Item = f32> + Send>, u32) {
+            let rate = decoder.sample_rate();
+            let source: Box<dyn Source<Item = f32> + Send> = if offset.is_zero() {
+                Box::new(decoder.convert_samples::<f32>())
+            } else {
+                match decoder.try_seek(offset) {
+                    Ok(()) => Box::new(decoder.convert_samples::<f32>()),
+                    Err(err) => {
+                        eprintln!(
+                            "Decoder try_seek to {:?} failed ({err:?}), falling back to linear skip_duration",
+                            offset
+                        );
+                        Box::new(decoder.convert_samples::<f32>().skip_duration(offset))
+                    }
+                }
+            };
+            (source, rate)
+        }
+
         if is_id3_prefixed_m4a {
             let offset_reader = crate::music::tags::OffsetReader::new(reader, m4a_offset);
             let buf_reader = BufReader::with_capacity(512 * 1024, offset_reader);
             let decoder = Decoder::new(buf_reader)
                 .map_err(|e| format!("Failed to create decoder: {e}"))?;
-            let rate = decoder.sample_rate();
-            let skipped = decoder.convert_samples::<f32>().skip_duration(offset);
-            (Box::new(skipped), rate)
+            prepare_source(decoder, offset)
         } else {
             let buf_reader = BufReader::with_capacity(512 * 1024, reader);
             let decoder = Decoder::new(buf_reader)
                 .map_err(|e| format!("Failed to create decoder: {e}"))?;
-            let rate = decoder.sample_rate();
-            let skipped = decoder.convert_samples::<f32>().skip_duration(offset);
-            (Box::new(skipped), rate)
+            prepare_source(decoder, offset)
         }
     };
 
@@ -369,5 +387,44 @@ mod tests {
         }
 
         drop(source); // should signal worker stop and not hang
+    }
+
+    #[test]
+    fn test_prefetch_source_with_seek_offset() {
+        let sample_count = 44_100; // 1 second of mono audio at 44.1kHz
+        let wav = generate_wav_bytes(sample_count);
+        let cursor = Cursor::new(wav);
+
+        // Seek to 0.5s (offset of 500ms)
+        let mut source = create_prefetch_source(
+            cursor,
+            Some(Duration::from_millis(500)),
+            Duration::ZERO,
+            None,
+        )
+        .expect("should create prefetch source with offset");
+
+        assert_eq!(source.sample_rate(), 44100);
+        assert_eq!(source.channels(), 2);
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !source.is_eof() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(source.is_eof(), "decoder worker should reach EOF");
+
+        let mut total_samples = 0;
+        while let Some(_) = source.next() {
+            total_samples += 1;
+        }
+
+        // 0.5s of stereo audio = 44100 * 0.5 * 2 = 44100 samples
+        // Allow a small tolerance for block-based decoder alignment
+        let expected_samples = (sample_count as f64 * 0.5 * 2.0).round() as usize;
+        let diff = (total_samples as isize - expected_samples as isize).abs();
+        assert!(
+            diff < 200,
+            "Expected around {expected_samples} samples, got {total_samples} (diff {diff})"
+        );
     }
 }
