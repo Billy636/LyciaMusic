@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
+import { useRoute } from 'vue-router';
 
 import { useAppShell } from '../../composables/useAppShell';
 import { useDesktopLyricsWindowBridge } from '../../composables/useDesktopLyricsWindowBridge';
 import { useUiStore } from '../../shared/stores/ui';
-import Sidebar from './Sidebar.vue';
+import Sidebar, { SIDEBAR_MAX_WIDTH } from './Sidebar.vue';
 import TitleBar from './TitleBar.vue';
 import PlayerFooter from './PlayerFooter.vue';
 import GlobalBackground from './GlobalBackground.vue';
@@ -15,6 +16,10 @@ const PlayerDetail = defineAsyncComponent(() => import('../player/PlayerDetail.v
 const AddToPlaylistModal = defineAsyncComponent(() => import('../overlays/AddToPlaylistModal.vue'));
 const Toast = defineAsyncComponent(() => import('../common/Toast.vue'));
 const SongInfoModal = defineAsyncComponent(() => import('../overlays/SongInfoModal.vue'));
+
+const route = useRoute();
+// 设置页整页呈现：音乐侧边栏折叠让位，仅保留标题栏与播放条
+const isSettingsRoute = computed(() => route.path.startsWith('/settings'));
 
 const {
   isMiniMode,
@@ -181,7 +186,14 @@ useDesktopLyricsWindowBridge();
       :class="mainContainerClass"
       :style="{ backdropFilter: mainBlurStyle }"
     >
-      <Sidebar />
+      <div
+        class="h-full shrink-0 overflow-hidden transition-[max-width,visibility] duration-200 ease-out"
+        :class="isSettingsRoute ? 'invisible' : ''"
+        :style="{ maxWidth: isSettingsRoute ? '0px' : `${SIDEBAR_MAX_WIDTH}px` }"
+        :aria-hidden="isSettingsRoute"
+      >
+        <Sidebar />
+      </div>
 
       <div class="flex-1 flex flex-col min-w-0">
         <TitleBar />

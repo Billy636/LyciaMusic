@@ -1,3 +1,8 @@
+<script lang="ts">
+// MainShell 按路由折叠侧边栏时以此为 max-width 上界，保证展开状态下不裁剪内容
+export const SIDEBAR_MAX_WIDTH = 360;
+</script>
+
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -57,7 +62,6 @@ const isPlaylistOpen = ref(true);
 const showCreateModal = ref(false);
 
 const SIDEBAR_MIN_WIDTH = 192;
-const SIDEBAR_MAX_WIDTH = 360;
 const SIDEBAR_KEYBOARD_STEP = 16;
 const sidebarWidth = ref(SIDEBAR_MIN_WIDTH);
 const isResizing = ref(false);
