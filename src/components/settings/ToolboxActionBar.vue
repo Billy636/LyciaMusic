@@ -54,12 +54,12 @@ const store = useToolboxStore();
       class="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs leading-6 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200"
     >
       有 {{ store.conflictCount }} 个文件的目标名与其他文件重名，或已被文件夹里的现有文件占用，这些行已排除。可开启上方的
-      「重名自动加序号」自动区分（追加 (2)、(3) 后缀），或在 MusicTag 中修正标签后重新扫描。
+      「重名自动加序号」自动区分（追加 (2)、(3) 后缀），或在 MusicTag 中获取标签后重新扫描。
     </div>
 
     <!-- 底部操作条 -->
     <div
-      class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/40 bg-white/55 px-4 py-3 backdrop-blur-md dark:border-white/10 dark:bg-white/5"
+      class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-white/40 pt-4 dark:border-white/5"
     >
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
         <span class="text-sm text-gray-600 dark:text-white/70">

@@ -23,28 +23,29 @@ const toggleRule = (key: keyof ToolboxRules, value: boolean) => {
 </script>
 
 <template>
-  <section
-    class="overflow-hidden rounded-xl border border-white/40 bg-white/55 backdrop-blur-md dark:border-white/10 dark:bg-white/5"
-  >
-    <header class="border-b border-white/30 px-4 py-3 dark:border-white/5">
-      <h3 class="text-sm font-bold text-gray-800 dark:text-gray-200">清理规则</h3>
-      <p class="mt-0.5 text-xs text-gray-400 dark:text-white/50">按需勾选，预览实时更新</p>
-    </header>
+  <section>
+    <h3 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">
+      <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
+      清理规则
+    </h3>
+    <p class="mt-1 pl-3 text-xs text-gray-400 dark:text-white/50">按需勾选，预览实时更新</p>
 
-    <div
-      v-for="option in ruleOptions"
-      :key="option.key"
-      class="flex items-start gap-3 border-b border-white/30 px-4 py-3 transition-colors last:border-0 hover:bg-white/40 dark:border-white/5 dark:hover:bg-white/10"
-    >
-      <AppCheckbox
-        class="mt-0.5"
-        :checked="store.rules[option.key]"
-        @change="(value) => toggleRule(option.key, value)"
-      />
-      <div class="min-w-0">
-        <div class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ option.label }}</div>
-        <div class="mt-0.5 truncate font-mono text-xs text-gray-400 dark:text-white/50">
-          {{ option.example }}
+    <div class="mt-2">
+      <div
+        v-for="option in ruleOptions"
+        :key="option.key"
+        class="flex items-start gap-3 rounded-lg border-b border-white/40 px-2 py-3 transition-colors last:border-0 hover:bg-white/25 dark:border-white/5 dark:hover:bg-white/[0.05]"
+      >
+        <AppCheckbox
+          class="mt-0.5"
+          :checked="store.rules[option.key]"
+          @change="(value) => toggleRule(option.key, value)"
+        />
+        <div class="min-w-0">
+          <div class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ option.label }}</div>
+          <div class="mt-0.5 truncate font-mono text-xs text-gray-400 dark:text-white/50">
+            {{ option.example }}
+          </div>
         </div>
       </div>
     </div>

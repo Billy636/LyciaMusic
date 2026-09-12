@@ -47,15 +47,14 @@ const setAsDefault = () => {
 </script>
 
 <template>
-  <section
-    class="rounded-xl border border-white/40 bg-white/55 p-4 backdrop-blur-md dark:border-white/10 dark:bg-white/5"
-  >
-    <header>
-      <h3 class="text-sm font-bold text-gray-800 dark:text-gray-200">命名模板</h3>
-      <p class="mt-0.5 text-xs text-gray-400 dark:text-white/50">
-        有标签的文件按模板重命名，缺标签的文件仅套用清理规则
-      </p>
-    </header>
+  <section>
+    <h3 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">
+      <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
+      命名模板
+    </h3>
+    <p class="mt-1 pl-3 text-xs text-gray-400 dark:text-white/50">
+      有标签的文件按模板重命名，缺标签的文件仅套用清理规则
+    </p>
 
     <div class="mt-3 flex flex-wrap gap-2">
       <button
@@ -66,7 +65,7 @@ const setAsDefault = () => {
         :class="
           activePreset?.value === preset.value
             ? 'border-[#EC4141] bg-[#EC4141] text-white'
-            : 'border-gray-200 bg-white/70 text-gray-600 hover:border-[#EC4141] hover:text-[#EC4141] dark:border-white/10 dark:bg-white/5 dark:text-gray-300'
+            : 'border-gray-200/80 bg-white/45 text-gray-600 hover:border-[#EC4141] hover:text-[#EC4141] dark:border-white/10 dark:bg-white/[0.06] dark:text-gray-300'
         "
         @click="store.setTemplate(preset.value)"
       >
@@ -79,7 +78,7 @@ const setAsDefault = () => {
       v-model="template"
       type="text"
       placeholder="自定义模板，如 {track}. {title}"
-      class="mt-3 w-full rounded-lg border border-gray-200 bg-white/70 px-3 py-2 font-mono text-sm text-gray-800 transition focus:outline-none focus:ring-2 focus:ring-[#EC4141] dark:border-white/10 dark:bg-black/20 dark:text-gray-100"
+      class="mt-3 w-full rounded-lg border border-gray-200/80 bg-white/50 px-3 py-2 font-mono text-sm text-gray-800 transition focus:outline-none focus:ring-2 focus:ring-[#EC4141] dark:border-white/10 dark:bg-black/20 dark:text-gray-100"
     />
 
     <div class="mt-3 flex flex-wrap gap-1.5">
@@ -87,7 +86,7 @@ const setAsDefault = () => {
         v-for="variable in variables"
         :key="variable.code"
         type="button"
-        class="rounded-md border border-gray-200 bg-white/70 px-2 py-1 text-xs transition hover:border-[#EC4141] dark:border-white/10 dark:bg-white/5"
+        class="rounded-md border border-gray-200/80 bg-white/45 px-2 py-1 text-xs transition hover:border-[#EC4141] dark:border-white/10 dark:bg-white/[0.06]"
         :title="`插入变量 ${variable.name}`"
         @click="insertVariable(variable.code)"
       >

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import settingsToolboxSource from './SettingsToolbox.vue?raw';
 import fileTableSource from './ToolboxFileTable.vue?raw';
 import actionBarSource from './ToolboxActionBar.vue?raw';
+import rulesPanelSource from './ToolboxRulesPanel.vue?raw';
+import templatePanelSource from './ToolboxTemplatePanel.vue?raw';
 
 describe('SettingsToolbox workbench structure', () => {
   it('uses the store-driven workbench instead of the removed step wizard', () => {
@@ -14,6 +16,13 @@ describe('SettingsToolbox workbench structure', () => {
   it('keeps the MusicTag path lazily configured instead of blocking startup', () => {
     expect(settingsToolboxSource).toContain('launchMusicTagForTarget');
     expect(settingsToolboxSource).not.toContain('MUSICTAG_PATH_KEY');
+  });
+
+  it('describes MusicTag as fetching tags rather than repairing them', () => {
+    expect(settingsToolboxSource).toContain('MusicTag 获取标签');
+    expect(settingsToolboxSource).toContain('使用外部软件 MusicTag 获取标签信息，需自行下载');
+    expect(settingsToolboxSource).not.toContain('修复标签');
+    expect(actionBarSource).not.toContain('修正标签');
   });
 
   it('restores the previous session when the tab is revisited', () => {
@@ -60,5 +69,34 @@ describe('ToolboxActionBar flow', () => {
     expect(actionBarSource).toContain('应用后自动刷新音乐库');
     expect(actionBarSource).toContain('store.lastApplyResult');
     expect(actionBarSource).toContain('处理另一个文件夹');
+  });
+});
+
+describe('Toolbox flat layout', () => {
+  const sources = [
+    settingsToolboxSource,
+    fileTableSource,
+    actionBarSource,
+    rulesPanelSource,
+    templatePanelSource,
+  ];
+
+  it('drops the glass card containers in favour of a flat layout', () => {
+    for (const source of sources) {
+      expect(source).not.toContain('backdrop-blur');
+      expect(source).not.toContain('bg-white/55');
+    }
+  });
+
+  it('uses the brand-red section header convention across panels', () => {
+    expect(rulesPanelSource).toContain('清理规则');
+    expect(templatePanelSource).toContain('命名模板');
+    for (const source of [rulesPanelSource, templatePanelSource, settingsToolboxSource]) {
+      expect(source).toContain('rounded-full bg-[#EC4141]');
+    }
+  });
+
+  it('keeps a light surface only for the long file list', () => {
+    expect(fileTableSource).toContain('bg-white/25 dark:bg-white/[0.04]');
   });
 });

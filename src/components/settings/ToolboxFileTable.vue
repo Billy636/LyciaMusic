@@ -15,12 +15,10 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
 </script>
 
 <template>
-  <div
-    class="overflow-hidden rounded-xl border border-white/40 bg-white/55 backdrop-blur-md dark:border-white/10 dark:bg-white/5"
-  >
+  <div>
     <!-- 工具行：全选 + 统计 + 重新扫描 -->
     <div
-      class="flex flex-wrap items-center justify-between gap-3 border-b border-white/30 px-4 py-3 dark:border-white/5"
+      class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-white/40 pb-3 dark:border-white/5"
     >
       <div class="flex items-center gap-3">
         <AppCheckbox
@@ -81,7 +79,7 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
 
     <!-- 表头 -->
     <div
-      class="grid grid-cols-[28px_minmax(0,1fr)_20px_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/30 bg-white/40 px-4 py-2 text-xs font-semibold text-gray-500 dark:border-white/5 dark:bg-white/5 dark:text-white/50"
+      class="grid grid-cols-[28px_minmax(0,1fr)_20px_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/40 py-2 text-xs font-semibold text-gray-500 dark:border-white/5 dark:text-white/50"
     >
       <span></span>
       <span>当前文件名</span>
@@ -132,12 +130,15 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
       该文件夹下没有找到支持的音频文件。
     </div>
 
-    <!-- 文件列表 -->
-    <div v-else class="custom-scrollbar max-h-[480px] overflow-y-auto">
+    <!-- 文件列表：极轻表面保证长列表可读性 -->
+    <div
+      v-else
+      class="custom-scrollbar mt-3 max-h-[480px] overflow-y-auto rounded-xl bg-white/25 dark:bg-white/[0.04]"
+    >
       <div
         v-for="item in store.previewItems"
         :key="item.original_path"
-        class="grid grid-cols-[28px_minmax(0,1fr)_20px_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/25 px-4 py-2.5 text-sm transition-colors last:border-0 odd:bg-white/30 hover:bg-white/50 dark:border-white/5 dark:odd:bg-white/[0.03] dark:hover:bg-white/10"
+        class="grid grid-cols-[28px_minmax(0,1fr)_20px_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/30 px-4 py-2.5 text-sm transition-colors last:border-0 hover:bg-white/30 dark:border-white/5 dark:hover:bg-white/[0.06]"
       >
         <AppCheckbox
           :checked="isRowSelected(item.original_path)"

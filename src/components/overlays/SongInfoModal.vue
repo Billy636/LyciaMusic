@@ -697,7 +697,7 @@ const formatTime = (timestampSeconds?: number) => {
               class="modal-action-button modal-action-button--wide"
             >
               <Tag class="w-4 h-4 mr-2 text-gray-500 dark:text-gray-400" />
-              用 MusicTag 修正标签
+              用 MusicTag 获取标签
             </button>
             <template v-else>
               <button

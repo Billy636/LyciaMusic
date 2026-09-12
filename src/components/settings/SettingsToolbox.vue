@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FolderOpen, Wrench } from 'lucide-vue-next';
 import { useToast } from '../../composables/toast';
 import { useSettingsStore } from '../../features/settings/store';
 import { useToolboxStore } from '../../features/toolbox/store';
@@ -43,7 +42,7 @@ const selectTargetFolder = async () => {
 const launchMusicTag = async () => {
   const launched = await store.launchMusicTagForTarget();
   if (launched) {
-    toast.showToast('MusicTag 已启动，整理完标签后回到这里重新扫描', 'success');
+    toast.showToast('MusicTag 已启动，获取标签并保存后回到这里重新扫描', 'success');
   }
 };
 
@@ -81,39 +80,37 @@ const handleReset = () => {
         歌曲文件整理
       </h2>
       <p class="mt-2 text-xs leading-6 text-gray-400 dark:text-white/50">
-        选择下载目录，勾选清理规则和命名模板，预览确认后一键应用。缺标签的文件可以交给 MusicTag 修复。
+        选择下载目录，勾选清理规则和命名模板，预览确认后一键应用。缺标签的文件可以用 MusicTag 在线获取标签。
       </p>
     </section>
 
     <!-- 顶部配置：目标文件夹 + MusicTag -->
-    <section
-      class="mx-5 overflow-hidden rounded-xl border border-white/40 bg-white/55 backdrop-blur-md dark:border-white/10 dark:bg-white/5"
-    >
+    <section class="mx-5">
       <div
-        class="flex flex-wrap items-center justify-between gap-4 border-b border-white/30 px-4 py-4 dark:border-white/5"
+        class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-white/40 py-4 dark:border-white/5"
       >
         <div class="min-w-0">
-          <div class="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
-            <FolderOpen class="h-4 w-4 text-gray-400 dark:text-white/50" />
+          <h3 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">
+            <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
             目标文件夹
-          </div>
-          <div
-            class="mt-1 truncate text-xs text-gray-400 dark:text-white/50"
+          </h3>
+          <p
+            class="mt-1 truncate pl-3 text-xs text-gray-400 dark:text-white/50"
             :title="store.targetPath"
           >
             {{ store.hasTarget ? store.targetPath : '尚未选择，选择后自动扫描' }}
-          </div>
+          </p>
         </div>
         <div class="flex items-center gap-3">
           <span
             v-if="store.hasTarget"
-            class="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600 dark:bg-white/10 dark:text-slate-300"
+            class="rounded-full bg-black/5 px-2.5 py-1 text-xs text-gray-500 dark:bg-white/10 dark:text-gray-300"
           >
             {{ pathLeaf(store.targetPath) }}
           </span>
           <button
             type="button"
-            class="rounded-lg border border-gray-200 bg-white/70 px-4 py-2 text-xs text-gray-600 transition hover:border-[#EC4141] hover:text-[#EC4141] dark:border-white/10 dark:bg-white/5 dark:text-gray-300"
+            class="rounded-lg border border-gray-200/80 bg-white/45 px-4 py-2 text-xs text-gray-600 transition hover:border-[#EC4141] hover:text-[#EC4141] dark:border-white/10 dark:bg-white/[0.06] dark:text-gray-300"
             @click="selectTargetFolder"
           >
             {{ store.hasTarget ? '更换文件夹' : '选择文件夹' }}
@@ -121,22 +118,22 @@ const handleReset = () => {
         </div>
       </div>
 
-      <div class="flex flex-wrap items-center justify-between gap-4 px-4 py-4">
+      <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 py-4">
         <div class="min-w-0">
-          <div class="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
-            <Wrench class="h-4 w-4 text-gray-400 dark:text-white/50" />
-            MusicTag 标签修复
-          </div>
-          <div class="mt-1 text-xs text-gray-400 dark:text-white/50">
+          <h3 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">
+            <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
+            MusicTag 获取标签
+          </h3>
+          <div class="mt-1 pl-3 text-xs text-gray-400 dark:text-white/50">
             <template v-if="store.missingTagCount > 0">
               {{ store.missingTagCount }} 个文件缺标签，重命名只能套用清理规则
             </template>
-            <template v-else> 外部标签编辑器，按需选配；不使用也不影响清理和重命名 </template>
+            <template v-else> 使用外部软件 MusicTag 获取标签信息，需自行下载。 </template>
           </div>
         </div>
         <button
           type="button"
-          class="flex items-center gap-2 rounded-lg border border-gray-200 bg-white/70 px-4 py-2 text-xs text-gray-600 transition hover:border-[#EC4141] hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-gray-300"
+          class="flex items-center gap-2 rounded-lg border border-gray-200/80 bg-white/45 px-4 py-2 text-xs text-gray-600 transition hover:border-[#EC4141] hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-gray-300"
           :disabled="!store.hasTarget"
           @click="launchMusicTag"
         >
@@ -146,16 +143,16 @@ const handleReset = () => {
           ></span>
           {{
             store.missingTagCount > 0
-              ? `用 MusicTag 修复标签 (${store.missingTagCount})`
-              : '用 MusicTag 修复标签'
+              ? `用 MusicTag 获取标签 (${store.missingTagCount})`
+              : '用 MusicTag 获取标签'
           }}
         </button>
       </div>
     </section>
 
     <!-- 工作台主体：左侧配置 / 右侧预览 -->
-    <div class="grid items-start gap-6 px-5 lg:grid-cols-[320px_minmax(0,1fr)]">
-      <div class="space-y-4 lg:sticky lg:top-4">
+    <div class="grid items-start gap-x-8 gap-y-6 px-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+      <div class="space-y-8 lg:sticky lg:top-4">
         <ToolboxRulesPanel />
         <ToolboxTemplatePanel />
       </div>
