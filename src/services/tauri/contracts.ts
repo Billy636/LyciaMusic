@@ -49,6 +49,41 @@ export interface BatchMoveMusicFilesResult {
   moved_paths: MovedMusicFilePath[];
 }
 
+export interface ToolboxPreviewConfig {
+  template: string;
+  remove_track_prefix: boolean;
+  remove_source_prefix: boolean;
+  replace_underscore: boolean;
+  collapse_spaces: boolean;
+}
+
+export interface ToolboxPreviewItem {
+  original_path: string;
+  original_name: string;
+  cleaned_name: string;
+  tag_name: string | null;
+  missing_fields: string[];
+  final_name: string;
+  will_change: boolean;
+  conflict: boolean;
+}
+
+export interface RenameOperation {
+  original_path: string;
+  new_name: string;
+}
+
+export interface RenameFailure {
+  original_path: string;
+  new_name: string;
+  error: string;
+}
+
+export interface RenameApplyResult {
+  success_count: number;
+  failures: RenameFailure[];
+}
+
 export type LyricsStorageSource = 'embedded' | 'sidecar' | 'empty';
 
 export interface SongLyricsForEdit {
@@ -487,5 +522,13 @@ export interface TauriCommandMap {
   file_exists: {
     payload: { path: string };
     response: boolean;
+  };
+  preview_toolbox: {
+    payload: { rootPath: string; config: ToolboxPreviewConfig };
+    response: ToolboxPreviewItem[];
+  };
+  apply_rename: {
+    payload: { operations: RenameOperation[] };
+    response: RenameApplyResult;
   };
 }

@@ -6,6 +6,7 @@ import { SquarePen, Tag } from 'lucide-vue-next';
 import type { Song, SongDetail } from '../../types';
 import { useCoverCache } from '../../composables/useCoverCache';
 import { usePlayer } from '../../composables/player';
+import { ensureMusicTagPath } from '../../composables/musicTag';
 import { useSongDetailCache } from '../../composables/useSongDetailCache';
 import { useThemeSettings } from '../../composables/useThemeSettings';
 import { useToast } from '../../composables/toast';
@@ -201,50 +202,6 @@ const handleOpenFolder = () => {
     void openInFinder(props.song.path);
     handleClose();
   }
-};
-
-const ensureMusicTagPath = async (): Promise<string | null> => {
-  const MUSICTAG_PATH_KEY = 'toolbox_musictag_path';
-  let path = localStorage.getItem(MUSICTAG_PATH_KEY);
-
-  if (path) {
-    const exists = await tauriInvoke('file_exists', { path });
-    if (!exists) {
-      localStorage.removeItem(MUSICTAG_PATH_KEY);
-      showToast('MusicTag 路径无效，请重新选择', 'error');
-      path = null;
-    }
-  }
-
-  if (!path) {
-    const selected = await open({
-      multiple: false,
-      directory: false,
-      title: '选择 MusicTag 可执行文件',
-      filters: [
-        {
-          name: '可执行文件',
-          extensions: ['exe'],
-        },
-      ],
-    });
-
-    if (!selected || typeof selected !== 'string') {
-      showToast('已取消选择 MusicTag', 'info');
-      return null;
-    }
-
-    const exists = await tauriInvoke('file_exists', { path: selected });
-    if (!exists) {
-      showToast('MusicTag 路径无效', 'error');
-      return null;
-    }
-
-    localStorage.setItem(MUSICTAG_PATH_KEY, selected);
-    path = selected;
-  }
-
-  return path;
 };
 
 const handleOpenInMusicTag = async () => {

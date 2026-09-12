@@ -1,33 +1,67 @@
-use crate::music::tags::{extract_text_metadata, read_tagged_file_from_path};
+use crate::music::tags::{extract_text_metadata, read_tagged_file_from_path_for_scan};
 use crate::music::utils::is_supported_library_extension;
 use lofty::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// 工具箱工作台的预览配置：命名模板 + 文件名清理规则。
 #[derive(Debug, Serialize, Deserialize)]
-pub struct RenameConfig {
-    pub mode: String,     // "tags", "rules", "auto"
+#[serde(default)]
+pub struct ToolboxPreviewConfig {
     pub template: String, // e.g. "{artist} - {title}"
     pub remove_track_prefix: bool,
     pub remove_source_prefix: bool,
+    pub replace_underscore: bool,
+    pub collapse_spaces: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RenamePreview {
+impl Default for ToolboxPreviewConfig {
+    fn default() -> Self {
+        Self {
+            template: "{title} - {artist}".to_string(),
+            remove_track_prefix: false,
+            remove_source_prefix: false,
+            replace_underscore: false,
+            collapse_spaces: false,
+        }
+    }
+}
+
+/// 单个文件的预览结果。cleaned_name 是清理规则的结果，tag_name 是标签模板的结果；
+/// final_name 是工作台将实际应用的名字（标签优先，缺标签时退回清理结果）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolboxPreviewItem {
     pub original_path: String,
     pub original_name: String,
-    pub new_name: String,
-    pub status: String, // "tags" (success via tags), "rules" (cleaned via rules), "skipped" (no change/error)
-    pub error: Option<String>,
+    pub cleaned_name: String,
+    pub tag_name: Option<String>,
+    pub missing_fields: Vec<String>,
+    pub final_name: String,
+    pub will_change: bool,
+    pub conflict: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct RenameOperation {
     pub original_path: String,
     pub new_name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RenameFailure {
+    pub original_path: String,
+    pub new_name: String,
+    pub error: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RenameApplyResult {
+    pub success_count: u32,
+    pub failures: Vec<RenameFailure>,
 }
 
 fn sanitize_filename(name: &str) -> String {
@@ -43,178 +77,331 @@ fn sanitize_filename(name: &str) -> String {
     sanitized.trim().to_string()
 }
 
-fn process_file(path: &Path, config: &RenameConfig) -> RenamePreview {
+fn render_template(
+    template: &str,
+    title: &str,
+    artist: &str,
+    album: &str,
+    year: &str,
+    track: &str,
+) -> String {
+    template
+        .replace("{title}", title)
+        .replace("{artist}", artist)
+        .replace("{album}", album)
+        .replace("{year}", year)
+        .replace("{track}", track)
+}
+
+/// 预览一批文件前统一编译一次正则，避免逐文件重复编译。
+struct CleanupRules {
+    track_prefix_re: Option<Regex>,
+    source_prefix_re: Option<Regex>,
+    collapse_spaces_re: Option<Regex>,
+    replace_underscore: bool,
+}
+
+impl CleanupRules {
+    fn new(config: &ToolboxPreviewConfig) -> Self {
+        Self {
+            track_prefix_re: config
+                .remove_track_prefix
+                .then(|| Regex::new(r"^\d+[.\-\s]+").unwrap()),
+            source_prefix_re: config
+                .remove_source_prefix
+                .then(|| Regex::new(r"^\s*\[[^\]]*\]\s*").unwrap()),
+            collapse_spaces_re: config
+                .collapse_spaces
+                .then(|| Regex::new(r"\s{2,}").unwrap()),
+            replace_underscore: config.replace_underscore,
+        }
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.track_prefix_re.is_some()
+            || self.source_prefix_re.is_some()
+            || self.collapse_spaces_re.is_some()
+            || self.replace_underscore
+    }
+
+    fn apply(&self, stem: &str) -> String {
+        let mut s = stem.to_string();
+        if let Some(re) = &self.track_prefix_re {
+            s = re.replace(&s, "").to_string();
+        }
+        if let Some(re) = &self.source_prefix_re {
+            s = re.replace(&s, "").to_string();
+        }
+        if self.replace_underscore {
+            s = s.replace('_', " ");
+        }
+        if let Some(re) = &self.collapse_spaces_re {
+            s = re.replace(&s, " ").to_string();
+        }
+        s.trim().to_string()
+    }
+}
+
+fn build_preview_item(
+    path: &Path,
+    config: &ToolboxPreviewConfig,
+    rules: &CleanupRules,
+) -> ToolboxPreviewItem {
     let original_name = path
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let original_path_str = path.to_string_lossy().to_string();
     let ext = path
         .extension()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
 
-    // Mode A: Standardize via Tags
-    if config.mode == "tags" || config.mode == "auto" {
-        if let Ok(tagged_file) = read_tagged_file_from_path(path) {
+    // 清理规则只作用于主文件名（不含扩展名）；清空或未命中时保持原名
+    let cleaned_name = match path.file_stem() {
+        Some(stem) if rules.is_enabled() => {
+            let cleaned = rules.apply(&stem.to_string_lossy());
+            if cleaned.is_empty() || cleaned == stem.to_string_lossy() {
+                original_name.clone()
+            } else {
+                format!("{}.{}", cleaned, ext)
+            }
+        }
+        _ => original_name.clone(),
+    };
+
+    // 标签模板要求标题存在；歌手缺失时记录但不阻塞生成
+    let mut missing_fields: Vec<String> = Vec::new();
+    let tag_name = match read_tagged_file_from_path_for_scan(path) {
+        Ok(tagged_file) => {
             let metadata = extract_text_metadata(&tagged_file);
             let title = metadata.title.unwrap_or_default();
             let artist = metadata.artist.unwrap_or_default();
             let album = metadata.album.unwrap_or_default();
 
-            let year = tagged_file
-                .primary_tag()
-                .and_then(|tag| tag.year())
-                .map(|y| y.to_string())
-                .unwrap_or_default();
-            let track = tagged_file
-                .primary_tag()
-                .and_then(|tag| tag.track())
-                .map(|t| format!("{:02}", t))
-                .unwrap_or_default();
-
-            if !title.is_empty() {
-                let mut new_name_base = config.template.clone();
-                new_name_base = new_name_base.replace("{title}", &title);
-                new_name_base = new_name_base.replace("{artist}", &artist);
-                new_name_base = new_name_base.replace("{album}", &album);
-                new_name_base = new_name_base.replace("{year}", &year);
-                new_name_base = new_name_base.replace("{track}", &track);
-
-                let new_name = format!("{}.{}", sanitize_filename(&new_name_base), ext);
-
-                if new_name != original_name {
-                    return RenamePreview {
-                        original_path: original_path_str,
-                        original_name,
-                        new_name,
-                        status: "tags".to_string(),
-                        error: None,
-                    };
-                } else if config.mode == "tags" {
-                    return RenamePreview {
-                        original_path: original_path_str,
-                        original_name: original_name.clone(),
-                        new_name: original_name,
-                        status: "skipped".to_string(),
-                        error: Some("Already named correctly".to_string()),
-                    };
+            if title.trim().is_empty() {
+                missing_fields.push("title".to_string());
+                None
+            } else {
+                if artist.trim().is_empty() {
+                    missing_fields.push("artist".to_string());
+                }
+                let year = tagged_file
+                    .primary_tag()
+                    .and_then(|tag| tag.year())
+                    .map(|y| y.to_string())
+                    .unwrap_or_default();
+                let track = tagged_file
+                    .primary_tag()
+                    .and_then(|tag| tag.track())
+                    .map(|t| format!("{:02}", t))
+                    .unwrap_or_default();
+                let base = sanitize_filename(&render_template(
+                    &config.template, &title, &artist, &album, &year, &track,
+                ));
+                if base.is_empty() {
+                    None
+                } else {
+                    Some(format!("{}.{}", base, ext))
                 }
             }
         }
+        Err(_) => {
+            missing_fields.push("title".to_string());
+            None
+        }
+    };
 
-        // If mode is "tags" and we failed, return skipped
-        if config.mode == "tags" {
-            return RenamePreview {
-                original_path: original_path_str,
-                original_name: original_name.clone(),
-                new_name: original_name,
-                status: "skipped".to_string(),
-                error: Some("Missing tags".to_string()),
-            };
+    let final_name = tag_name.clone().unwrap_or_else(|| cleaned_name.clone());
+    let will_change = final_name != original_name;
+
+    ToolboxPreviewItem {
+        original_path: path.to_string_lossy().to_string(),
+        original_name,
+        cleaned_name,
+        tag_name,
+        missing_fields,
+        final_name,
+        will_change,
+        conflict: false,
+    }
+}
+
+/// 标记批内目标重名，以及目标名已被其他文件占用（且该文件不会在本批被改名让出）的情况。
+fn mark_conflicts(items: &mut [ToolboxPreviewItem], folder_names: &HashMap<String, usize>) {
+    let mut target_counts: HashMap<String, usize> = HashMap::new();
+    for item in items.iter() {
+        if item.will_change {
+            *target_counts
+                .entry(item.final_name.to_lowercase())
+                .or_default() += 1;
         }
     }
 
-    // Mode B: Clean via Rules (or Auto fallback)
-    if config.mode == "rules" || config.mode == "auto" {
-        let mut cleaned_name = original_name.clone();
+    let renaming_away: HashSet<String> = items
+        .iter()
+        .filter(|item| item.will_change)
+        .map(|item| item.original_name.to_lowercase())
+        .collect();
 
-        // Apply regex rules only to the stem (filename without extension)
-        if let Some(stem) = path.file_stem() {
-            let mut stem_str = stem.to_string_lossy().to_string();
-
-            if config.remove_track_prefix {
-                let re = Regex::new(r"^\d+[\.\-\s]+").unwrap();
-                stem_str = re.replace(&stem_str, "").to_string();
-            }
-
-            if config.remove_source_prefix {
-                let re = Regex::new(r"^\s*\[.*?\]\s*").unwrap();
-                stem_str = re.replace(&stem_str, "").to_string();
-            }
-
-            cleaned_name = format!("{}.{}", stem_str.trim(), ext);
+    for item in items.iter_mut() {
+        if !item.will_change {
+            continue;
         }
-
-        if cleaned_name != original_name {
-            return RenamePreview {
-                original_path: original_path_str,
-                original_name,
-                new_name: cleaned_name,
-                status: "rules".to_string(),
-                error: None,
-            };
+        let key = item.final_name.to_lowercase();
+        if target_counts.get(&key).copied().unwrap_or(0) > 1 {
+            item.conflict = true;
+        } else if folder_names.contains_key(&key) && !renaming_away.contains(&key) {
+            item.conflict = true;
         }
-    }
-
-    // Fallback: Skipped
-    RenamePreview {
-        original_path: original_path_str,
-        original_name: original_name.clone(),
-        new_name: original_name,
-        status: "skipped".to_string(),
-        error: Some("No rules matched or missing tags".to_string()),
     }
 }
 
 #[tauri::command]
-pub fn preview_rename(
+pub fn preview_toolbox(
     root_path: String,
-    config: RenameConfig,
-) -> Result<Vec<RenamePreview>, String> {
-    let mut results = Vec::new();
+    config: ToolboxPreviewConfig,
+) -> Result<Vec<ToolboxPreviewItem>, String> {
+    let root = PathBuf::from(&root_path);
+    if !root.is_dir() {
+        return Err(format!("文件夹不存在: {}", root_path));
+    }
 
-    for entry in WalkDir::new(root_path)
+    // 先收集文件夹里的全部文件名，供“目标名已被占用”检测使用
+    let mut folder_names: HashMap<String, usize> = HashMap::new();
+    let mut audio_paths: Vec<PathBuf> = Vec::new();
+    for entry in WalkDir::new(&root)
         .max_depth(1)
         .into_iter()
         .filter_map(|e| e.ok())
     {
         let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                let ext = ext.to_string_lossy().to_lowercase();
-                if is_supported_library_extension(&ext) {
-                    results.push(process_file(path, &config));
-                }
-            }
+        if !path.is_file() {
+            continue;
+        }
+        if let Some(name) = path.file_name() {
+            *folder_names
+                .entry(name.to_string_lossy().to_lowercase())
+                .or_default() += 1;
+        }
+        let Some(ext) = path.extension() else {
+            continue;
+        };
+        let ext = ext.to_string_lossy().to_lowercase();
+        if is_supported_library_extension(&ext) {
+            audio_paths.push(path.to_path_buf());
         }
     }
 
-    // Sort logic: changed files first
-    results.sort_by(|a, b| {
-        let a_changed = a.status != "skipped";
-        let b_changed = b.status != "skipped";
-        if a_changed && !b_changed {
-            std::cmp::Ordering::Less
-        } else if !a_changed && b_changed {
-            std::cmp::Ordering::Greater
-        } else {
-            a.original_name.cmp(&b.original_name)
-        }
+    let rules = CleanupRules::new(&config);
+    let mut items: Vec<ToolboxPreviewItem> = audio_paths
+        .iter()
+        .map(|path| build_preview_item(path, &config, &rules))
+        .collect();
+
+    mark_conflicts(&mut items, &folder_names);
+
+    items.sort_by(|a, b| {
+        a.original_name
+            .to_lowercase()
+            .cmp(&b.original_name.to_lowercase())
     });
 
-    Ok(results)
+    Ok(items)
 }
 
 #[tauri::command]
-pub fn apply_rename(operations: Vec<RenameOperation>) -> Result<u32, String> {
-    let mut success_count = 0;
+pub fn apply_rename(operations: Vec<RenameOperation>) -> Result<RenameApplyResult, String> {
+    let mut result = RenameApplyResult {
+        success_count: 0,
+        failures: Vec::new(),
+    };
 
-    for op in operations {
-        let src = PathBuf::from(&op.original_path);
-        if let Some(parent) = src.parent() {
-            let dest = parent.join(&op.new_name);
-            if fs::rename(&src, &dest).is_ok() {
-                success_count += 1;
-            } else {
-                eprintln!("Failed to rename {:?} to {:?}", src, dest);
+    // 预检：批内目标重名（Windows 文件系统大小写不敏感）
+    let mut seen_targets: HashMap<String, String> = HashMap::new();
+    let mut blocked_paths: HashSet<String> = HashSet::new();
+    for op in &operations {
+        let key = match Path::new(&op.original_path).parent() {
+            Some(parent) => format!(
+                "{}|{}",
+                parent.to_string_lossy().to_lowercase(),
+                op.new_name.to_lowercase()
+            ),
+            None => op.new_name.to_lowercase(),
+        };
+        match seen_targets.get(&key) {
+            Some(first_path) => {
+                blocked_paths.insert(op.original_path.clone());
+                result.failures.push(RenameFailure {
+                    original_path: op.original_path.clone(),
+                    new_name: op.new_name.clone(),
+                    error: format!("批内重名，与 {} 的目标相同", first_path),
+                });
+            }
+            None => {
+                seen_targets.insert(key, op.original_path.clone());
             }
         }
     }
 
-    Ok(success_count)
+    // 本批将被改走的源文件名：允许把名字让给其他文件（链式改名）
+    let renaming_away: HashSet<String> = operations
+        .iter()
+        .map(|op| {
+            Path::new(&op.original_path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_lowercase()
+        })
+        .collect();
+
+    for op in operations {
+        if blocked_paths.contains(&op.original_path) {
+            continue;
+        }
+
+        let src = PathBuf::from(&op.original_path);
+        if !src.is_file() {
+            result.failures.push(RenameFailure {
+                original_path: op.original_path.clone(),
+                new_name: op.new_name.clone(),
+                error: "源文件不存在或已被移动".to_string(),
+            });
+            continue;
+        }
+
+        let Some(parent) = src.parent() else {
+            result.failures.push(RenameFailure {
+                original_path: op.original_path.clone(),
+                new_name: op.new_name.clone(),
+                error: "无法解析所在文件夹".to_string(),
+            });
+            continue;
+        };
+
+        let dest = parent.join(&op.new_name);
+        if dest.exists() && !renaming_away.contains(&op.new_name.to_lowercase()) {
+            result.failures.push(RenameFailure {
+                original_path: op.original_path.clone(),
+                new_name: op.new_name.clone(),
+                error: "目标文件名已被占用".to_string(),
+            });
+            continue;
+        }
+
+        match fs::rename(&src, &dest) {
+            Ok(()) => result.success_count += 1,
+            Err(e) => result.failures.push(RenameFailure {
+                original_path: op.original_path.clone(),
+                new_name: op.new_name.clone(),
+                error: e.to_string(),
+            }),
+        }
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -502,4 +689,235 @@ pub fn run_installer(path: String) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        apply_rename, preview_toolbox, render_template, sanitize_filename, CleanupRules,
+        RenameOperation, ToolboxPreviewConfig,
+    };
+    use id3::TagLike;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "lycia_toolbox_{}_{}_{}",
+            label,
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// 构造一个带 ID3v2 头的最小 mp3（仿 tags.rs 的测试夹具）
+    fn write_mp3(dir: &Path, filename: &str, title: Option<&str>, artist: Option<&str>) {
+        let mut tag = id3::Tag::new();
+        if let Some(t) = title {
+            tag.set_title(t);
+        }
+        if let Some(a) = artist {
+            tag.set_artist(a);
+        }
+
+        let mut bytes = Vec::new();
+        tag.write_to(&mut bytes, id3::Version::Id3v23)
+            .expect("id3 tag should serialize");
+        bytes.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x64]);
+        bytes.extend(std::iter::repeat(0u8).take(413));
+
+        fs::write(dir.join(filename), bytes).unwrap();
+    }
+
+    fn find_item<'a>(
+        items: &'a [super::ToolboxPreviewItem],
+        name: &str,
+    ) -> &'a super::ToolboxPreviewItem {
+        items
+            .iter()
+            .find(|item| item.original_name == name)
+            .unwrap_or_else(|| panic!("preview should contain {name}"))
+    }
+
+    #[test]
+    fn sanitize_filename_replaces_invalid_chars_and_trims() {
+        assert_eq!(sanitize_filename("a<b>c:d"), "a_b_c_d");
+        assert_eq!(sanitize_filename("  name  "), "name");
+        assert_eq!(sanitize_filename("普通-name.mp3"), "普通-name.mp3");
+    }
+
+    #[test]
+    fn render_template_replaces_all_variables() {
+        assert_eq!(
+            render_template("{track}. {title} ({year})", "歌", "人", "专辑", "2024", "07"),
+            "07. 歌 (2024)"
+        );
+        assert_eq!(render_template("{artist} - {album}", "", "", "专辑", "", ""), " - 专辑");
+    }
+
+    #[test]
+    fn apply_rules_combines_all_rules_in_order() {
+        let config = ToolboxPreviewConfig {
+            remove_track_prefix: true,
+            remove_source_prefix: true,
+            replace_underscore: true,
+            collapse_spaces: true,
+            template: String::new(),
+        };
+        let rules = CleanupRules::new(&config);
+
+        assert_eq!(rules.apply("02. [网易云] track_one  name"), "track one name");
+        assert_eq!(rules.apply("no__match"), "no match");
+    }
+
+    #[test]
+    fn cleanup_rules_disabled_reports_not_enabled() {
+        let config = ToolboxPreviewConfig::default();
+        let rules = CleanupRules::new(&config);
+        assert!(!rules.is_enabled());
+        assert_eq!(rules.apply("01. song"), "01. song");
+    }
+
+    #[test]
+    fn preview_toolbox_reports_tags_rules_missing_and_conflicts() {
+        let dir = temp_dir("preview");
+        write_mp3(&dir, "01. 爱琴海.mp3", Some("爱琴海"), Some("班得瑞"));
+        write_mp3(&dir, "a.mp3", Some("爱琴海"), Some("周杰伦"));
+        write_mp3(&dir, "b.mp3", Some("爱琴海"), Some("周杰伦"));
+        write_mp3(&dir, "notag.mp3", None, None);
+        write_mp3(&dir, "02. [网易云] track_one.mp3", None, None);
+
+        let config = ToolboxPreviewConfig {
+            template: "{title} - {artist}".to_string(),
+            remove_track_prefix: true,
+            remove_source_prefix: true,
+            replace_underscore: true,
+            collapse_spaces: true,
+        };
+
+        let items = preview_toolbox(dir.to_string_lossy().to_string(), config).unwrap();
+
+        let tagged = find_item(&items, "01. 爱琴海.mp3");
+        assert_eq!(tagged.tag_name.as_deref(), Some("爱琴海 - 班得瑞.mp3"));
+        assert_eq!(tagged.final_name, "爱琴海 - 班得瑞.mp3");
+        assert!(tagged.will_change);
+        assert!(!tagged.conflict);
+        assert!(tagged.missing_fields.is_empty());
+
+        // a/b 的标签渲染出同一个目标名 → 批内重名
+        for name in ["a.mp3", "b.mp3"] {
+            let item = find_item(&items, name);
+            assert_eq!(item.tag_name.as_deref(), Some("爱琴海 - 周杰伦.mp3"));
+            assert!(item.conflict, "{name} should be conflicting");
+        }
+
+        let notag = find_item(&items, "notag.mp3");
+        assert!(notag.tag_name.is_none());
+        assert!(notag.missing_fields.iter().any(|f| f == "title"));
+        assert!(!notag.will_change);
+
+        let cleaned = find_item(&items, "02. [网易云] track_one.mp3");
+        assert!(cleaned.tag_name.is_none());
+        assert_eq!(cleaned.cleaned_name, "track one.mp3");
+        assert_eq!(cleaned.final_name, "track one.mp3");
+        assert!(cleaned.will_change);
+        assert!(!cleaned.conflict);
+    }
+
+    #[test]
+    fn preview_toolbox_flags_target_occupied_by_untouched_file() {
+        let dir = temp_dir("occupied");
+        // 该文件命名已符合模板，本身不会变
+        write_mp3(
+            &dir,
+            "晴天 - 周杰伦.mp3",
+            Some("晴天"),
+            Some("周杰伦"),
+        );
+        // 该文件的标签会渲染出同名目标 → 与既有文件冲突
+        write_mp3(&dir, "q.mp3", Some("晴天"), Some("周杰伦"));
+
+        let items = preview_toolbox(
+            dir.to_string_lossy().to_string(),
+            ToolboxPreviewConfig::default(),
+        )
+        .unwrap();
+
+        let untouched = find_item(&items, "晴天 - 周杰伦.mp3");
+        assert!(!untouched.will_change);
+        assert!(!untouched.conflict);
+
+        let mover = find_item(&items, "q.mp3");
+        assert_eq!(mover.final_name, "晴天 - 周杰伦.mp3");
+        assert!(mover.conflict);
+    }
+
+    #[test]
+    fn preview_toolbox_rejects_missing_folder() {
+        let result = preview_toolbox(
+            "Z:/definitely/not/exist_toolbox_test".to_string(),
+            ToolboxPreviewConfig::default(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn apply_rename_reports_per_file_results_without_aborting() {
+        let dir = temp_dir("apply");
+        let f1 = dir.join("old_name.txt");
+        fs::write(&f1, b"1").unwrap();
+        let f2 = dir.join("second.txt");
+        fs::write(&f2, b"2").unwrap();
+        let f3 = dir.join("third.txt");
+        fs::write(&f3, b"3").unwrap();
+        let f4 = dir.join("fourth.txt");
+        fs::write(&f4, b"4").unwrap();
+        fs::write(dir.join("occupied.txt"), b"o").unwrap();
+
+        let ops = vec![
+            RenameOperation {
+                original_path: f1.to_string_lossy().to_string(),
+                new_name: "new_name.txt".to_string(),
+            },
+            RenameOperation {
+                original_path: f2.to_string_lossy().to_string(),
+                new_name: "occupied.txt".to_string(),
+            },
+            RenameOperation {
+                original_path: f3.to_string_lossy().to_string(),
+                new_name: "dup.txt".to_string(),
+            },
+            // 大小写不同但 Windows 下同名 → 预检拦截
+            RenameOperation {
+                original_path: f4.to_string_lossy().to_string(),
+                new_name: "DUP.txt".to_string(),
+            },
+            RenameOperation {
+                original_path: dir.join("ghost.txt").to_string_lossy().to_string(),
+                new_name: "whatever.txt".to_string(),
+            },
+        ];
+
+        let result = apply_rename(ops).unwrap();
+
+        assert_eq!(result.success_count, 2);
+        assert_eq!(result.failures.len(), 3);
+
+        assert!(dir.join("new_name.txt").is_file());
+        assert!(dir.join("dup.txt").is_file());
+
+        let errors: Vec<&str> = result
+            .failures
+            .iter()
+            .map(|f| f.error.as_str())
+            .collect();
+        assert!(errors.iter().any(|e| e.contains("目标文件名已被占用")));
+        assert!(errors.iter().any(|e| e.contains("批内重名")));
+        assert!(errors.iter().any(|e| e.contains("源文件不存在")));
+    }
 }

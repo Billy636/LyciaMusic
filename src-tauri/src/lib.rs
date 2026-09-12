@@ -71,7 +71,7 @@ use taskbar::{
 use tauri::Manager;
 use toolbox::{
     apply_rename, check_update_by_rust, download_update_file, file_exists, open_external_program,
-    preview_rename, refresh_folder_songs, run_installer, set_gpu_acceleration,
+    preview_toolbox, refresh_folder_songs, run_installer, set_gpu_acceleration,
 };
 
 #[cfg(target_os = "windows")]
@@ -155,7 +155,7 @@ pub fn run() {
             get_track_loudness_info,
             update_loudness_settings,
             set_equalizer_settings,
-            preview_rename,
+            preview_toolbox,
             apply_rename,
             get_output_devices,
             get_current_output_device,

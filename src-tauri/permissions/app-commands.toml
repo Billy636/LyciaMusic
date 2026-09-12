@@ -39,7 +39,7 @@ commands.allow = [
   "get_track_loudness_info",
   "update_loudness_settings",
   "set_equalizer_settings",
-  "preview_rename",
+  "preview_toolbox",
   "apply_rename",
   "get_output_devices",
   "get_current_output_device",
