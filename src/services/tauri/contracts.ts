@@ -55,7 +55,11 @@ export interface ToolboxPreviewConfig {
   remove_source_prefix: boolean;
   replace_underscore: boolean;
   collapse_spaces: boolean;
+  /** 重名/占用冲突时自动追加 (2)、(3) 序号后缀 */
+  resolve_conflicts: boolean;
 }
+
+export type ToolboxConflictReason = 'duplicate' | 'occupied';
 
 export interface ToolboxPreviewItem {
   original_path: string;
@@ -66,6 +70,7 @@ export interface ToolboxPreviewItem {
   final_name: string;
   will_change: boolean;
   conflict: boolean;
+  conflict_reason: ToolboxConflictReason | null;
 }
 
 export interface RenameOperation {

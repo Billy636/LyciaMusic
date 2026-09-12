@@ -53,8 +53,8 @@ const store = useToolboxStore();
       v-if="store.conflictCount > 0"
       class="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs leading-6 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200"
     >
-      有 {{ store.conflictCount }} 个文件的命名结果相互冲突或与现有文件重名，这些行已排除。可调整模板（如加入
-      {track} 变量）后重新扫描。
+      有 {{ store.conflictCount }} 个文件的目标名与其他文件重名，或已被文件夹里的现有文件占用，这些行已排除。可开启上方的
+      「重名自动加序号」自动区分（追加 (2)、(3) 后缀），或在 MusicTag 中修正标签后重新扫描。
     </div>
 
     <!-- 底部操作条 -->

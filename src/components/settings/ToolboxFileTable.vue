@@ -54,6 +54,16 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
           >
             缺标签 {{ store.missingTagCount }}
           </span>
+          <label
+            class="ml-1 flex cursor-pointer items-center gap-1.5 text-xs text-gray-500 transition hover:text-[#EC4141] dark:text-white/60"
+            title="目标名冲突时自动追加 (2)、(3) 后缀，让同名文件都能改名"
+          >
+            <AppCheckbox
+              :checked="store.resolveConflicts"
+              @change="store.setResolveConflicts($event)"
+            />
+            重名自动加序号
+          </label>
         </div>
       </div>
 
@@ -177,9 +187,13 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
           <span
             v-else-if="item.conflict"
             class="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
-            title="目标文件名与其他文件重复，请调整模板或规则"
+            :title="
+              item.conflict_reason === 'occupied'
+                ? '目标文件名已被现有文件占用：文件夹里可能已有一份符合命名规范的文件。可删除重复文件，或开启「重名自动加序号」'
+                : '标签与另一文件完全相同，渲染出了同一个目标名。可开启「重名自动加序号」，或在 MusicTag 中区分两份文件的标签'
+            "
           >
-            冲突
+            {{ item.conflict_reason === 'occupied' ? '占用' : '重名' }}
           </span>
           <span
             v-else-if="!item.will_change"

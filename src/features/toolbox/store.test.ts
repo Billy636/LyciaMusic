@@ -37,6 +37,7 @@ const createPreviewItem = (overrides: Partial<ToolboxPreviewItem>): ToolboxPrevi
   final_name: 'old.flac',
   will_change: false,
   conflict: false,
+  conflict_reason: null,
   ...overrides,
 });
 
@@ -86,6 +87,7 @@ describe('toolbox selection helpers', () => {
       rules: { ...DEFAULT_TOOLBOX_RULES },
       template: DEFAULT_TOOLBOX_TEMPLATE,
       autoRefresh: true,
+      resolveConflicts: true,
     });
 
     const weird = normalizePersistedWorkbenchState({
@@ -103,6 +105,10 @@ describe('toolbox selection helpers', () => {
     });
     expect(weird.template).toBe(DEFAULT_TOOLBOX_TEMPLATE);
     expect(weird.autoRefresh).toBe(false);
+    expect(weird.resolveConflicts).toBe(true);
+
+    const optOut = normalizePersistedWorkbenchState({ resolveConflicts: false });
+    expect(optOut.resolveConflicts).toBe(false);
   });
 
   it('normalizes rules flags strictly', () => {
@@ -142,6 +148,7 @@ describe('toolbox store', () => {
 
     expect(mockedPreview).toHaveBeenCalledWith('C:\\music', {
       template: DEFAULT_TOOLBOX_TEMPLATE,
+      resolve_conflicts: true,
       ...DEFAULT_TOOLBOX_RULES,
     });
     expect(store.selectedPaths.has('C:\\music\\a.flac')).toBe(true);

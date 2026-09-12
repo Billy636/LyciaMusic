@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-/// 工具箱工作台的预览配置：命名模板 + 文件名清理规则。
+/// 工具箱工作台的预览配置：命名模板 + 文件名清理规则 + 冲突处理策略。
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ToolboxPreviewConfig {
@@ -17,6 +17,7 @@ pub struct ToolboxPreviewConfig {
     pub remove_source_prefix: bool,
     pub replace_underscore: bool,
     pub collapse_spaces: bool,
+    pub resolve_conflicts: bool,
 }
 
 impl Default for ToolboxPreviewConfig {
@@ -27,12 +28,15 @@ impl Default for ToolboxPreviewConfig {
             remove_source_prefix: false,
             replace_underscore: false,
             collapse_spaces: false,
+            resolve_conflicts: false,
         }
     }
 }
 
 /// 单个文件的预览结果。cleaned_name 是清理规则的结果，tag_name 是标签模板的结果；
 /// final_name 是工作台将实际应用的名字（标签优先，缺标签时退回清理结果）。
+/// conflict_reason: "duplicate"（与批内其他文件的目标名相同）或 "occupied"（目标名已被
+/// 现有文件占用且该文件不会在本批被改名让出）。
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolboxPreviewItem {
     pub original_path: String,
@@ -43,6 +47,7 @@ pub struct ToolboxPreviewItem {
     pub final_name: String,
     pub will_change: bool,
     pub conflict: bool,
+    pub conflict_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -225,36 +230,78 @@ fn build_preview_item(
         final_name,
         will_change,
         conflict: false,
+        conflict_reason: None,
     }
 }
 
-/// 标记批内目标重名，以及目标名已被其他文件占用（且该文件不会在本批被改名让出）的情况。
-fn mark_conflicts(items: &mut [ToolboxPreviewItem], folder_names: &HashMap<String, usize>) {
-    let mut target_counts: HashMap<String, usize> = HashMap::new();
-    for item in items.iter() {
-        if item.will_change {
-            *target_counts
-                .entry(item.final_name.to_lowercase())
-                .or_default() += 1;
-        }
-    }
-
+/// 按确定性顺序为目标名登记归属。批内重名标记为 duplicate，目标名被现有文件占用（且该文件
+/// 不会在本批被改名让出）标记为 occupied。开启 resolve_conflicts 时为冲突项追加 "(2)"、"(3)"
+/// 序号后缀直到找到未占用名，无法解决时仍标记冲突。items 需已按 original_name 排序，
+/// 保证后缀分配结果是确定性的。
+fn assign_final_names(
+    items: &mut [ToolboxPreviewItem],
+    folder_names: &HashMap<String, usize>,
+    resolve_conflicts: bool,
+) {
     let renaming_away: HashSet<String> = items
         .iter()
         .filter(|item| item.will_change)
         .map(|item| item.original_name.to_lowercase())
         .collect();
 
+    let is_taken = |candidate: &str, claimed_finals: &HashSet<String>| -> bool {
+        let key = candidate.to_lowercase();
+        claimed_finals.contains(&key)
+            || (folder_names.contains_key(&key) && !renaming_away.contains(&key))
+    };
+
+    let mut claimed_finals: HashSet<String> = HashSet::new();
+
     for item in items.iter_mut() {
         if !item.will_change {
             continue;
         }
-        let key = item.final_name.to_lowercase();
-        if target_counts.get(&key).copied().unwrap_or(0) > 1 {
-            item.conflict = true;
-        } else if folder_names.contains_key(&key) && !renaming_away.contains(&key) {
-            item.conflict = true;
+
+        let reason = if claimed_finals.contains(&item.final_name.to_lowercase()) {
+            Some("duplicate")
+        } else if is_taken(&item.final_name, &claimed_finals) {
+            Some("occupied")
+        } else {
+            None
+        };
+
+        if let Some(reason) = reason {
+            if !resolve_conflicts {
+                item.conflict = true;
+                item.conflict_reason = Some(reason.to_string());
+                continue;
+            }
+
+            let (stem, ext) = match item.final_name.rsplit_once('.') {
+                Some((stem, ext)) => (stem.to_string(), ext.to_string()),
+                None => (item.final_name.clone(), String::new()),
+            };
+
+            let mut resolved = false;
+            for n in 2..=99 {
+                let candidate = format!("{} ({}).{}", stem, n, ext);
+                if !is_taken(&candidate, &claimed_finals) {
+                    item.final_name = candidate;
+                    resolved = true;
+                    break;
+                }
+            }
+
+            if !resolved {
+                item.conflict = true;
+                item.conflict_reason = Some(reason.to_string());
+                continue;
+            }
         }
+
+        item.conflict = false;
+        item.conflict_reason = None;
+        claimed_finals.insert(item.final_name.to_lowercase());
     }
 }
 
@@ -300,13 +347,14 @@ pub fn preview_toolbox(
         .map(|path| build_preview_item(path, &config, &rules))
         .collect();
 
-    mark_conflicts(&mut items, &folder_names);
-
+    // 先排序再做目标名分配，保证同名结果的后缀（(2)、(3)…）是确定性的
     items.sort_by(|a, b| {
         a.original_name
             .to_lowercase()
             .cmp(&b.original_name.to_lowercase())
     });
+
+    assign_final_names(&mut items, &folder_names, config.resolve_conflicts);
 
     Ok(items)
 }
@@ -767,6 +815,7 @@ mod tests {
             remove_source_prefix: true,
             replace_underscore: true,
             collapse_spaces: true,
+            resolve_conflicts: false,
             template: String::new(),
         };
         let rules = CleanupRules::new(&config);
@@ -798,6 +847,7 @@ mod tests {
             remove_source_prefix: true,
             replace_underscore: true,
             collapse_spaces: true,
+            resolve_conflicts: false,
         };
 
         let items = preview_toolbox(dir.to_string_lossy().to_string(), config).unwrap();
@@ -809,12 +859,16 @@ mod tests {
         assert!(!tagged.conflict);
         assert!(tagged.missing_fields.is_empty());
 
-        // a/b 的标签渲染出同一个目标名 → 批内重名
-        for name in ["a.mp3", "b.mp3"] {
-            let item = find_item(&items, name);
-            assert_eq!(item.tag_name.as_deref(), Some("爱琴海 - 周杰伦.mp3"));
-            assert!(item.conflict, "{name} should be conflicting");
-        }
+        // a/b 标签渲染出同一个目标名：字母序靠前的 a 先认领，b 被标记批内重名
+        let claimant = find_item(&items, "a.mp3");
+        assert_eq!(claimant.tag_name.as_deref(), Some("爱琴海 - 周杰伦.mp3"));
+        assert!(!claimant.conflict);
+        assert!(claimant.will_change);
+
+        let duplicate = find_item(&items, "b.mp3");
+        assert_eq!(duplicate.final_name, "爱琴海 - 周杰伦.mp3");
+        assert!(duplicate.conflict, "b.mp3 should be conflicting");
+        assert_eq!(duplicate.conflict_reason.as_deref(), Some("duplicate"));
 
         let notag = find_item(&items, "notag.mp3");
         assert!(notag.tag_name.is_none());
@@ -855,6 +909,56 @@ mod tests {
         let mover = find_item(&items, "q.mp3");
         assert_eq!(mover.final_name, "晴天 - 周杰伦.mp3");
         assert!(mover.conflict);
+        assert_eq!(mover.conflict_reason.as_deref(), Some("occupied"));
+    }
+
+    #[test]
+    fn preview_toolbox_suffixes_duplicates_when_resolving() {
+        let dir = temp_dir("suffix_dup");
+        write_mp3(&dir, "a.mp3", Some("晴天"), Some("周杰伦"));
+        write_mp3(&dir, "b.mp3", Some("晴天"), Some("周杰伦"));
+        write_mp3(&dir, "c.mp3", Some("晴天"), Some("周杰伦"));
+
+        let config = ToolboxPreviewConfig {
+            resolve_conflicts: true,
+            ..ToolboxPreviewConfig::default()
+        };
+        let items = preview_toolbox(dir.to_string_lossy().to_string(), config).unwrap();
+
+        let first = find_item(&items, "a.mp3");
+        assert_eq!(first.final_name, "晴天 - 周杰伦.mp3");
+        assert!(!first.conflict);
+
+        let second = find_item(&items, "b.mp3");
+        assert_eq!(second.final_name, "晴天 - 周杰伦 (2).mp3");
+        assert!(second.will_change);
+        assert!(!second.conflict);
+        assert!(second.conflict_reason.is_none());
+
+        let third = find_item(&items, "c.mp3");
+        assert_eq!(third.final_name, "晴天 - 周杰伦 (3).mp3");
+        assert!(!third.conflict);
+    }
+
+    #[test]
+    fn preview_toolbox_suffix_skips_already_taken_suffix() {
+        let dir = temp_dir("suffix_skip");
+        // 已符合模板命名的文件（无变化，持续占用原名）
+        write_mp3(&dir, "晴天 - 周杰伦.mp3", Some("晴天"), Some("周杰伦"));
+        // 无标签的 "(2)" 文件保持原名，占用 "(2)" 后缀位
+        write_mp3(&dir, "晴天 - 周杰伦 (2).mp3", None, None);
+        write_mp3(&dir, "q.mp3", Some("晴天"), Some("周杰伦"));
+
+        let config = ToolboxPreviewConfig {
+            resolve_conflicts: true,
+            ..ToolboxPreviewConfig::default()
+        };
+        let items = preview_toolbox(dir.to_string_lossy().to_string(), config).unwrap();
+
+        let mover = find_item(&items, "q.mp3");
+        assert_eq!(mover.final_name, "晴天 - 周杰伦 (3).mp3");
+        assert!(!mover.conflict);
+        assert!(mover.will_change);
     }
 
     #[test]

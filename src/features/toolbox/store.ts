@@ -30,6 +30,7 @@ interface ToolboxPersistedState {
   rules: ToolboxRules;
   template: string;
   autoRefresh: boolean;
+  resolveConflicts: boolean;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -48,13 +49,14 @@ export const normalizeToolboxRules = (raw: unknown): ToolboxRules => {
 export const normalizePersistedWorkbenchState = (raw: unknown): ToolboxPersistedState => {
   const source = asRecord(raw);
 
-  // 首次使用（无存储状态）时套用默认偏好：去序号前缀开启
+  // 首次使用（无存储状态）时套用默认偏好：去序号前缀开启、重名自动加序号
   if (!source) {
     return {
       targetPath: '',
       rules: { ...DEFAULT_TOOLBOX_RULES },
       template: DEFAULT_TOOLBOX_TEMPLATE,
       autoRefresh: true,
+      resolveConflicts: true,
     };
   }
 
@@ -68,6 +70,7 @@ export const normalizePersistedWorkbenchState = (raw: unknown): ToolboxPersisted
     rules: normalizeToolboxRules(source.rules),
     template,
     autoRefresh: source.autoRefresh !== false,
+    resolveConflicts: source.resolveConflicts !== false,
   };
 };
 
@@ -116,6 +119,7 @@ export const useToolboxStore = defineStore('toolbox', () => {
   const rules = ref<ToolboxRules>(persisted.rules);
   const template = ref(persisted.template);
   const autoRefresh = ref(persisted.autoRefresh);
+  const resolveConflicts = ref(persisted.resolveConflicts);
   const musicTagConfigured = ref(Boolean(getSavedMusicTagPath()));
 
   const previewItems = ref<ToolboxPreviewItem[]>([]);
@@ -150,12 +154,13 @@ export const useToolboxStore = defineStore('toolbox', () => {
       !isApplying.value,
   );
 
-  watch([targetPath, rules, template, autoRefresh], () => {
+  watch([targetPath, rules, template, autoRefresh, resolveConflicts], () => {
     localStore.setJson(WORKBENCH_STORAGE_KEY, {
       targetPath: targetPath.value,
       rules: rules.value,
       template: template.value,
       autoRefresh: autoRefresh.value,
+      resolveConflicts: resolveConflicts.value,
     });
   });
 
@@ -175,6 +180,7 @@ export const useToolboxStore = defineStore('toolbox', () => {
     try {
       const items = await toolboxApi.preview(targetPath.value, {
         template: template.value,
+        resolve_conflicts: resolveConflicts.value,
         ...rules.value,
       });
       if (token !== scanToken) return;
@@ -225,6 +231,11 @@ export const useToolboxStore = defineStore('toolbox', () => {
 
   function patchRules(patch: Partial<ToolboxRules>) {
     rules.value = { ...rules.value, ...patch };
+    schedulePreview();
+  }
+
+  function setResolveConflicts(value: boolean) {
+    resolveConflicts.value = value;
     schedulePreview();
   }
 
@@ -343,6 +354,7 @@ export const useToolboxStore = defineStore('toolbox', () => {
     rules,
     template,
     autoRefresh,
+    resolveConflicts,
     musicTagConfigured,
     previewItems,
     selectedPaths,
@@ -363,6 +375,7 @@ export const useToolboxStore = defineStore('toolbox', () => {
     schedulePreview,
     setTargetPath,
     patchRules,
+    setResolveConflicts,
     setTemplate,
     toggleRow,
     selectAllSelectable,

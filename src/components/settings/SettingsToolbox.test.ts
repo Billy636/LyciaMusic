@@ -34,6 +34,14 @@ describe('ToolboxFileTable rendering contract', () => {
     expect(fileTableSource).toContain('applyFailures');
   });
 
+  it('explains conflict reasons instead of a generic badge', () => {
+    expect(fileTableSource).toContain("conflict_reason === 'occupied'");
+    expect(fileTableSource).toContain('占用');
+    expect(fileTableSource).toContain('重名');
+    expect(fileTableSource).toContain('重名自动加序号');
+    expect(fileTableSource).toContain('store.resolveConflicts');
+  });
+
   it('shows the old-to-new name diff with a master checkbox', () => {
     expect(fileTableSource).toContain('toggleMasterSelection');
     expect(fileTableSource).toContain('indeterminate');
