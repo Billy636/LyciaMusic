@@ -296,6 +296,29 @@ fn find_cached_full_cover(cache_dir: &Path, stem: &str) -> Option<String> {
     None
 }
 
+const SIDECAR_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp"];
+
+/// 查找与音频文件同名的外部封面图片：优先 `歌曲名.jpg`，其次 `歌曲名.mp3.jpg` 这类
+/// 带原始音频扩展名的形式。两种命名都按 SIDECAR_EXTENSIONS 顺序匹配。
+fn find_sidecar_image(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    for base in [
+        path.file_stem().and_then(|s| s.to_str()),
+        path.file_name().and_then(|s| s.to_str()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        for ext in SIDECAR_EXTENSIONS {
+            let candidate = parent.join(format!("{base}.{ext}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 pub fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
     let source_hash = generate_source_hash(path);
     let cache_dir = get_cover_cache_dir(app);
@@ -325,6 +348,22 @@ pub fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
                     image::imageops::FilterType::Triangle,
                 );
                 let persisted = persist_image_atomically(&resized, ImageFormat::Jpeg, &cache_path)?;
+                let _ = persist_alias_target(&alias_path, &cache_path);
+                return Some(persisted);
+            }
+        }
+    }
+
+    // 内嵌封面缺失时回退到同名外部图片（如 song.mp3 旁的 song.jpg）
+    if let Some(sidecar) = find_sidecar_image(path) {
+        if let Ok(img) = image::open(&sidecar) {
+            let resized = img.resize(
+                THUMBNAIL_EDGE_PX,
+                THUMBNAIL_EDGE_PX,
+                image::imageops::FilterType::Triangle,
+            );
+            let cache_path = cache_dir.join(format!("{}.jpg", thumbnail_cache_stem(&source_hash)));
+            if let Some(persisted) = persist_image_atomically(&resized, ImageFormat::Jpeg, &cache_path) {
                 let _ = persist_alias_target(&alias_path, &cache_path);
                 return Some(persisted);
             }
@@ -391,6 +430,29 @@ pub fn get_or_create_full_cover(path: &Path, app: &AppHandle) -> Option<String> 
             if let Some(ext) = full_cover_extension_from_mime(pic.mime_type()) {
                 let cache_path = cache_dir.join(format!("{cache_stem}.{ext}"));
                 let persisted = persist_bytes_atomically(pic.data(), &cache_path)?;
+                let _ = persist_alias_target(&alias_path, &cache_path);
+                return Some(persisted);
+            }
+        }
+    }
+
+    // 内嵌封面缺失时回退到同名外部图片（如 song.mp3 旁的 song.jpg）
+    if let Some(sidecar) = find_sidecar_image(path) {
+        if let Ok(img) = image::open(&sidecar) {
+            let should_resize =
+                img.width() > FULL_COVER_EDGE_PX || img.height() > FULL_COVER_EDGE_PX;
+            let display_img = if should_resize {
+                img.resize(
+                    FULL_COVER_EDGE_PX,
+                    FULL_COVER_EDGE_PX,
+                    image::imageops::FilterType::Lanczos3,
+                )
+            } else {
+                img
+            };
+            let cache_stem = full_cover_cache_stem(&source_hash);
+            let cache_path = cache_dir.join(format!("{cache_stem}.{FULL_COVER_FALLBACK_EXT}"));
+            if let Some(persisted) = persist_image_atomically(&display_img, ImageFormat::Png, &cache_path) {
                 let _ = persist_alias_target(&alias_path, &cache_path);
                 return Some(persisted);
             }
