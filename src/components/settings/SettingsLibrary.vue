@@ -51,7 +51,8 @@
           </div>
           <div class="folder-info">
             <div class="folder-path" :title="folder.path">{{ folder.path }}</div>
-            <div class="folder-stats">{{ folder.song_count }} 首歌曲</div>
+            <div v-if="folder.locked" class="folder-stats" title="文件夹已被 BitLocker 锁定或暂时无法访问">🔒 已锁定</div>
+            <div v-else class="folder-stats">{{ folder.song_count }} 首歌曲</div>
           </div>
           <button class="remove-btn" title="移除文件夹" @click="requestRemove(folder.path)">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

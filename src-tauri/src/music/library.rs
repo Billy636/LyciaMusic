@@ -276,7 +276,33 @@ fn song_title_label(title: &str, path: &str) -> String {
     }
 }
 
-fn load_cached_songs(conn: &rusqlite::Connection) -> Result<Vec<LibrarySong>, String> {
+/// 找出当前无法访问的库文件夹（如 BitLocker 锁定、盘符断开），其下歌曲在本次加载中不返回给前端。
+fn get_locked_folder_paths(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT path FROM library_folders")
+        .map_err(|e| e.to_string())?;
+
+    let paths: Vec<String> = stmt
+        .query_map([], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let locked: Vec<String> = paths
+        .into_iter()
+        .filter(|path| {
+            let p = std::path::Path::new(path);
+            !p.is_dir() || std::fs::read_dir(p).is_err()
+        })
+        .collect();
+
+    Ok(locked)
+}
+
+fn load_cached_songs(
+    conn: &rusqlite::Connection,
+    exclude_locked: &[String],
+) -> Result<Vec<LibrarySong>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT path, title, artist, artist_names, effective_artist_names, album, album_artist, album_key, is_various_artists_album, collapse_artist_credits, duration, cover_thumb_path, bitrate, sample_rate, bit_depth, format, track_number, disc_number, added_at, file_modified_at, source_type
@@ -290,6 +316,17 @@ fn load_cached_songs(conn: &rusqlite::Connection) -> Result<Vec<LibrarySong>, St
 
     let mut songs: Vec<LibrarySong> = rows.filter_map(|row| row.ok()).collect();
     songs.sort_by(|a, b| a.name.cmp(&b.name));
+
+    if !exclude_locked.is_empty() {
+        songs.retain(|song| {
+            !exclude_locked.iter().any(|locked_path| {
+                song.path == *locked_path
+                    || song.path.starts_with(&format!("{locked_path}\\"))
+                    || song.path.starts_with(&format!("{locked_path}/"))
+            })
+        });
+    }
+
     Ok(songs)
 }
 
@@ -496,9 +533,14 @@ pub async fn get_library_folders(
                 .filter(|song_path| is_descendant_path(song_path, &folder_path))
                 .count();
 
+            // 检测文件夹是否可访问（如 BitLocker 锁定、盘符断开）
+            let folder_path_obj = std::path::Path::new(&folder_path);
+            let is_locked = !folder_path_obj.is_dir() || std::fs::read_dir(folder_path_obj).is_err();
+
             folders.push(LibraryFolder {
                 path: folder_path,
-                song_count: count,
+                song_count: if is_locked { 0 } else { count },
+                locked: is_locked,
             });
         }
         Ok::<Vec<LibraryFolder>, String>(folders)
@@ -563,7 +605,8 @@ pub async fn get_library_songs_cached(
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
-        load_cached_songs(&conn)
+        let locked = get_locked_folder_paths(&conn).unwrap_or_default();
+        load_cached_songs(&conn, &locked)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1749,7 +1792,7 @@ mod tests {
         )
         .expect("insert cached song");
 
-        let songs = load_cached_songs(&conn).expect("load cached songs");
+        let songs = load_cached_songs(&conn, &[]).expect("load cached songs");
 
         assert_eq!(songs.len(), 1);
         assert_eq!(songs[0].path, "/library/song.flac");
@@ -1912,7 +1955,7 @@ mod tests {
             .len();
 
         let full_started = Instant::now();
-        let full = load_cached_songs(&conn).expect("materialize complete library");
+        let full = load_cached_songs(&conn, &[]).expect("materialize complete library");
         let full_elapsed = full_started.elapsed();
         let full_json_bytes = serde_json::to_vec(&full)
             .expect("serialize complete library")
