@@ -72,7 +72,6 @@ export function useLibraryCurrentViewSongs({
   const allViewLoading = ref(false);
   const allViewUseCanonicalFallback = ref(false);
   const lastSuccessfulAllViewSongPaths = ref<string[]>([]);
-  const currentQueryKey = ref('');
 
   const { loadAllViewSongPaths } = useLibraryAllSongPathCache();
   const { loadFavoriteSongPaths, loadRecentSongPaths } = useLibraryCollectionSongPathCache();
@@ -147,16 +146,9 @@ export function useLibraryCurrentViewSongs({
       }
 
       const nextQueryKey = `${musicTab}\u0001${artistFilter}\u0001${albumFilter}\u0001${sortMode}\u0001${query}`;
-      const isQueryKeyChanged = currentQueryKey.value !== nextQueryKey;
-      currentQueryKey.value = nextQueryKey;
 
-      // 如果过滤/查询条件变了，立即清空上一次结果，防旧数据筛选错乱
-      if (isQueryKeyChanged) {
-        allViewSongPaths.value = [];
-        allViewUseCanonicalFallback.value = false;
-        lastSuccessfulAllViewSongPaths.value = [];
-      }
-
+      // 查询/过滤条件变化时保留旧结果渲染，直到新结果到达（实时输入时不闪烁）；
+      // 过期响应由 requestId 与 activeAllSearchKey 双守卫拦截，不会错误落地
       allViewLoading.value = true;
 
       if (query.trim() && sortMode !== 'custom') {

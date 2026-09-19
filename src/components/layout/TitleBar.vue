@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Moon, Sun } from 'lucide-vue-next';
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePlayerViewState } from '../../composables/usePlayerViewState';
 import { useThemeSettings } from '../../composables/useThemeSettings';
@@ -64,14 +64,6 @@ const toggleTaskbarPlayer = () => {
   settings.value.showTaskbarPlayer = !settings.value.showTaskbarPlayer;
 };
 
-// 切换页面或首页子视图（本地音乐/文件夹/统计等）时清空搜索词，避免过滤条件残留
-watch(
-  [() => route.path, currentViewMode],
-  () => {
-    setSearch('');
-  },
-);
-
 // 最小化
 const minimize = async () => {
   await appWindow.minimize();
@@ -119,20 +111,48 @@ const closeWindow = async () => {
   }
 };
 
+// 输入停顿后自动提交搜索，无需回车；回车/搜索按钮/清空仍立即生效
+const SEARCH_COMMIT_DELAY_MS = 250;
+let searchCommitTimer: ReturnType<typeof window.setTimeout> | null = null;
+
+const cancelPendingSearchCommit = () => {
+  if (searchCommitTimer !== null) {
+    window.clearTimeout(searchCommitTimer);
+    searchCommitTimer = null;
+  }
+};
+
 const commitSearch = (value: string) => {
+  cancelPendingSearchCommit();
   searchDraft.value = value;
   setSearch(value);
 };
 
 const handleInput = (event: Event) => {
-  searchDraft.value = (event.target as HTMLInputElement).value;
+  const value = (event.target as HTMLInputElement).value;
+  searchDraft.value = value;
+  cancelPendingSearchCommit();
+  searchCommitTimer = window.setTimeout(() => {
+    searchCommitTimer = null;
+    setSearch(searchDraft.value);
+  }, SEARCH_COMMIT_DELAY_MS);
 };
+
+// 切换页面或首页子视图（本地音乐/文件夹/统计等）时清空搜索词，避免过滤条件残留
+watch(
+  [() => route.path, currentViewMode],
+  () => {
+    commitSearch('');
+  },
+);
 
 watch(searchQuery, (value) => {
   if (value !== searchDraft.value) {
     searchDraft.value = value;
   }
 });
+
+onBeforeUnmount(cancelPendingSearchCommit);
 
 const goBack = () => { router.back(); };
 </script>
