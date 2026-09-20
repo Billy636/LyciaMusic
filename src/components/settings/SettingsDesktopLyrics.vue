@@ -1051,7 +1051,7 @@ onUnmounted(() => {
             <!-- 深浅色预览背景切换按钮 -->
             <button
               type="button"
-              class="desktop-preview-btn desktop-preview-btn--theme flex items-center gap-1.5"
+              class="desktop-preview-btn desktop-preview-btn--theme flex items-center gap-1.5 text-gray-700 dark:text-gray-100"
               :title="previewBgMode === 'dark' ? '切换至浅色预览背景' : '切换至深色预览背景'"
               @click="previewBgMode = previewBgMode === 'dark' ? 'light' : 'dark'"
             >
@@ -1061,8 +1061,8 @@ onUnmounted(() => {
             </button>
             <button
               type="button"
-              class="desktop-preview-btn desktop-preview-btn--cancel"
-              :class="!isModified ? 'opacity-50 cursor-not-allowed' : ''"
+              class="desktop-preview-btn desktop-preview-btn--cancel text-gray-700 dark:text-gray-100"
+              :class="!isModified ? 'opacity-40 cursor-not-allowed' : ''"
               :disabled="!isModified"
               @click="cancelChanges"
             >
@@ -1070,8 +1070,8 @@ onUnmounted(() => {
             </button>
             <button
               type="button"
-              class="desktop-preview-btn"
-              :class="isModified ? 'desktop-preview-btn--apply' : 'desktop-preview-btn--cancel opacity-50 cursor-not-allowed'"
+              class="desktop-preview-btn text-gray-700 dark:text-gray-100"
+              :class="isModified ? 'desktop-preview-btn--apply !text-white' : 'desktop-preview-btn--cancel opacity-40 cursor-not-allowed'"
               :disabled="!isModified"
               @click="applyChanges"
             >
@@ -1141,7 +1141,7 @@ onUnmounted(() => {
         <div class="desktop-compact-row">
           <!-- 字号 -->
           <div class="desktop-compact-slider-cell">
-            <div class="desktop-compact-label shrink-0 text-left">字号</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0 text-left">字号</div>
             <input
               v-model.number="localSettings.playerFontScale"
               type="range"
@@ -1151,13 +1151,13 @@ onUnmounted(() => {
               aria-label="字号"
               class="desktop-compact-range-slider"
             />
-            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-300">
+            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-200">
               {{ Math.round(localSettings.playerFontScale * 100) }}%
             </span>
           </div>
           <!-- 行距 -->
           <div class="desktop-compact-slider-cell">
-            <div class="desktop-compact-label shrink-0 text-left">行距</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0 text-left">行距</div>
             <input
               v-model.number="localSettings.playerLineGap"
               type="range"
@@ -1167,7 +1167,7 @@ onUnmounted(() => {
               aria-label="行距"
               class="desktop-compact-range-slider"
             />
-            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-300">
+            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-200">
               {{ Math.round(localSettings.playerLineGap * 100) }}%
             </span>
           </div>
@@ -1178,7 +1178,7 @@ onUnmounted(() => {
         <div class="desktop-compact-row">
           <!-- 文字不透明度 -->
           <div class="desktop-compact-slider-cell">
-            <div class="desktop-compact-label shrink-0 text-left">不透明度</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0 text-left">不透明度</div>
             <input
               v-model.number="localSettings.textOpacity"
               type="range"
@@ -1188,13 +1188,13 @@ onUnmounted(() => {
               aria-label="不透明度"
               class="desktop-compact-range-slider"
             />
-            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-300">
+            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-200">
               {{ Math.round(localSettings.textOpacity * 100) }}%
             </span>
           </div>
           <!-- 描边阴影 -->
           <div class="desktop-compact-slider-cell">
-            <div class="desktop-compact-label shrink-0 text-left">描边阴影</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0 text-left">描边阴影</div>
             <input
               type="range"
               min="0"
@@ -1205,7 +1205,7 @@ onUnmounted(() => {
               aria-label="描边阴影"
               class="desktop-compact-range-slider"
             />
-            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-300">
+            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-200">
               {{ localSettings.firstLineTextShadowStrength }}
             </span>
           </div>
@@ -1215,7 +1215,7 @@ onUnmounted(() => {
         <div class="desktop-compact-row">
           <!-- 阴影颜色 -->
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label">阴影颜色</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200">阴影颜色</div>
             <div class="desktop-compact-selector-shadow flex items-center gap-1.5">
               <button
                 v-for="preset in SHADOW_COLOR_PRESETS"
@@ -1244,13 +1244,13 @@ onUnmounted(() => {
           </div>
           <!-- 对齐方式 (Segmented Control) -->
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label shrink-0">对齐</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">对齐</div>
             <div class="desktop-segmented-control flex overflow-hidden rounded-xl border border-gray-200 bg-white/40 dark:border-white/10 dark:bg-white/5">
               <button
                 v-for="option in ALIGNMENT_OPTIONS"
                 :key="option.value"
                 type="button"
-                class="desktop-segmented-btn text-center text-xs font-semibold py-1.5 px-3 transition-all"
+                class="desktop-segmented-btn text-gray-600 dark:text-gray-300 text-center text-xs font-semibold py-1.5 px-3 transition-all"
                 :class="localSettings.playerAlignment === option.value ? 'desktop-segmented-btn--active' : ''"
                 @click="setDesktopAlignment(option.value)"
               >
@@ -1263,7 +1263,7 @@ onUnmounted(() => {
         <!-- 行五：描边深度 & 描边颜色 -->
         <div class="desktop-compact-row">
           <div class="desktop-compact-slider-cell">
-            <div class="desktop-compact-label shrink-0 text-left">描边深度</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0 text-left">描边深度</div>
             <input
               type="range"
               min="0"
@@ -1274,13 +1274,13 @@ onUnmounted(() => {
               aria-label="描边深度"
               class="desktop-compact-range-slider"
             />
-            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-300">
+            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-200">
               {{ localSettings.textStrokeDepth }}
             </span>
           </div>
 
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label">描边颜色</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200">描边颜色</div>
             <div class="desktop-compact-selector-shadow flex items-center gap-1.5">
               <button
                 v-for="preset in STROKE_COLOR_PRESETS"
@@ -1312,7 +1312,7 @@ onUnmounted(() => {
         <!-- 行六：显示翻译 & 显示罗马音 -->
         <div class="desktop-compact-row">
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label shrink-0">显示翻译</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">显示翻译</div>
             <div class="desktop-segmented-control flex overflow-hidden rounded-xl border border-gray-200 bg-white/40 dark:border-white/10 dark:bg-white/5">
               <button
                 v-if="lyricsSettings.showTranslation"
@@ -1325,7 +1325,7 @@ onUnmounted(() => {
               <button
                 v-else
                 type="button"
-                class="desktop-segmented-btn text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
+                class="desktop-segmented-btn text-gray-600 dark:text-gray-300 text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
                 @click="lyricsSettings.showTranslation = true"
               >
                 关
@@ -1333,7 +1333,7 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label shrink-0">显示罗马音</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">显示罗马音</div>
             <div class="desktop-segmented-control flex overflow-hidden rounded-xl border border-gray-200 bg-white/40 dark:border-white/10 dark:bg-white/5">
               <button
                 v-if="lyricsSettings.showRomaji"
@@ -1346,7 +1346,7 @@ onUnmounted(() => {
               <button
                 v-else
                 type="button"
-                class="desktop-segmented-btn text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
+                class="desktop-segmented-btn text-gray-600 dark:text-gray-300 text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
                 @click="lyricsSettings.showRomaji = true"
               >
                 关
@@ -1358,7 +1358,7 @@ onUnmounted(() => {
         <!-- 行六：双行显示 & 字体方案 -->
         <div class="desktop-compact-row">
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label shrink-0">双行显示</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">双行显示</div>
             <div class="desktop-segmented-control flex overflow-hidden rounded-xl border border-gray-200 bg-white/40 dark:border-white/10 dark:bg-white/5">
               <button
                 v-if="desktopLyricsSettings.showDoubleLine"
@@ -1371,7 +1371,7 @@ onUnmounted(() => {
               <button
                 v-else
                 type="button"
-                class="desktop-segmented-btn text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
+                class="desktop-segmented-btn text-gray-600 dark:text-gray-300 text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
                 @click="desktopLyricsSettings.showDoubleLine = true"
               >
                 关
@@ -1380,7 +1380,7 @@ onUnmounted(() => {
           </div>
 
           <div class="desktop-compact-cell flex items-center justify-between gap-4">
-            <div class="desktop-compact-label shrink-0">字体方案</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">字体方案</div>
             <div ref="fontPresetFieldRef" class="desktop-font-picker flex-1 min-w-0">
               <button
                 ref="fontPresetTriggerRef"
@@ -1440,7 +1440,7 @@ onUnmounted(() => {
         <!-- 行七：配色方案 (独占一行，展示小圆点 Preset，极致美观与对称) -->
         <div class="desktop-compact-row-full">
           <div class="desktop-compact-cell w-full flex items-center justify-between gap-4">
-            <div class="desktop-compact-label shrink-0">配色方案</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">配色方案</div>
             <div class="desktop-compact-selector-scheme flex items-center gap-1.5">
               <button
                 v-for="option in COLOR_SCHEME_OPTIONS"
@@ -1736,8 +1736,6 @@ onUnmounted(() => {
 .desktop-typography-panel {
   display: flex;
   flex-direction: column;
-  border-radius: 16px;
-  overflow: hidden;
 }
 
 .desktop-setting-expand {
@@ -2531,14 +2529,16 @@ onUnmounted(() => {
   background: rgba(148, 163, 184, 0.16);
   border-color: rgba(148, 163, 184, 0.36);
 }
-:global(.dark) .desktop-preview-btn--cancel {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.76);
-}
-.desktop-preview-btn--cancel:hover {
+:global(.dark) .desktop-preview-btn--cancel,
+.dark .desktop-preview-btn--cancel {
+  border-color: rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.16);
+  color: #f1f5f9 !important;
+}
+:global(.dark) .desktop-preview-btn--cancel:hover,
+.dark .desktop-preview-btn--cancel:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .desktop-preview-btn--theme {
@@ -2550,14 +2550,16 @@ onUnmounted(() => {
   background: rgba(148, 163, 184, 0.16);
   border-color: rgba(148, 163, 184, 0.36);
 }
-:global(.dark) .desktop-preview-btn--theme {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.76);
-}
-:global(.dark) .desktop-preview-btn--theme:hover {
+:global(.dark) .desktop-preview-btn--theme,
+.dark .desktop-preview-btn--theme {
+  border-color: rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.16);
+  color: #f1f5f9 !important;
+}
+:global(.dark) .desktop-preview-btn--theme:hover,
+.dark .desktop-preview-btn--theme:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .desktop-preview-btn--apply {
@@ -2785,31 +2787,19 @@ onUnmounted(() => {
    网易云式极致紧凑排版仪表盘样式 (Compact Panel)
    ========================================================================== */
 
-/* 紧凑容器：使用极具现代感和高级感的磨砂边框与圆角 */
+/* 紧凑容器 */
 .desktop-typography-panel--compact {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: rgba(255, 255, 255, 0.45);
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  border-radius: 20px;
-  padding: 14px;
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.6), 0 8px 24px rgba(15, 23, 42, 0.03);
-  transition: all 250ms ease;
 }
 
-:global(.dark) .desktop-typography-panel--compact {
-  background: rgba(255, 255, 255, 0.02);
-  border-color: rgba(255, 255, 255, 0.05);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.02), 0 8px 24px rgba(0, 0, 0, 0.12);
-}
-
-/* 紧凑控制行：横向二等分 */
+/* 紧凑控制行：横向二等分，更舒展的列间距 */
 .desktop-compact-row {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 12px 24px;
   width: 100%;
 }
 
@@ -2819,84 +2809,47 @@ onUnmounted(() => {
   width: 100%;
 }
 
-/* 紧凑单元格：平分 50% 宽度 */
+/* 紧凑单元格：纯净无卡片设计 */
 .desktop-compact-cell {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  height: 40px;
-  padding: 0 4px 0 10px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(15, 23, 42, 0.04);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
-  transition: all 180ms ease;
-}
-
-:global(.dark) .desktop-compact-cell {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.03);
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border: none;
   box-shadow: none;
 }
 
-.desktop-compact-cell:hover {
-  background: rgba(255, 255, 255, 0.85);
-  border-color: rgba(236, 65, 65, 0.18);
-  box-shadow: 0 4px 12px rgba(236, 65, 65, 0.03);
-}
-
-:global(.dark) .desktop-compact-cell:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(236, 65, 65, 0.28);
-}
-
-/* 精致等宽网格单元格：专门用于滑块 Cell，强制使用 Grid 布局保证 Label 56px 固定且滑块起点完美对齐 */
+/* 纯净等宽网格单元格：专门用于滑块 Cell，强制使用 Grid 布局保证 Label 60px 固定且滑块起点完美对齐 */
 .desktop-compact-slider-cell {
   flex: 1;
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) 46px;
+  grid-template-columns: 60px minmax(0, 1fr) 46px;
   align-items: center;
   gap: 12px;
   min-width: 0;
-  height: 40px;
-  padding: 0 10px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(15, 23, 42, 0.04);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
-  transition: all 180ms ease;
-}
-
-:global(.dark) .desktop-compact-slider-cell {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.03);
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border: none;
   box-shadow: none;
-}
-
-.desktop-compact-slider-cell:hover {
-  background: rgba(255, 255, 255, 0.85);
-  border-color: rgba(236, 65, 65, 0.18);
-  box-shadow: 0 4px 12px rgba(236, 65, 65, 0.03);
-}
-
-:global(.dark) .desktop-compact-slider-cell:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(236, 65, 65, 0.28);
 }
 
 /* 紧凑标签：左侧标签，易读大气 */
 .desktop-compact-label {
   font-size: 13px;
-  font-weight: 700;
-  color: rgb(55 65 81);
+  font-weight: 600;
+  color: #374151;
   user-select: none;
   white-space: nowrap;
 }
 
-:global(.dark) .desktop-compact-label {
-  color: rgba(255, 255, 255, 0.68);
+:global(.dark) .desktop-compact-label,
+.dark .desktop-compact-label {
+  color: #e5e7eb !important;
 }
 
 
@@ -3045,8 +2998,9 @@ onUnmounted(() => {
   user-select: none;
 }
 
-:global(.dark) .desktop-segmented-btn {
-  color: rgba(255, 255, 255, 0.68);
+:global(.dark) .desktop-segmented-btn,
+.dark .desktop-segmented-btn {
+  color: rgba(255, 255, 255, 0.85) !important;
 }
 
 .desktop-segmented-btn:hover {
@@ -3054,9 +3008,10 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.5);
 }
 
-:global(.dark) .desktop-segmented-btn:hover {
-  color: #ff8b8b;
-  background: rgba(255, 255, 255, 0.05);
+:global(.dark) .desktop-segmented-btn:hover,
+.dark .desktop-segmented-btn:hover {
+  color: #ff8b8b !important;
+  background: rgba(255, 255, 255, 0.1) !important;
 }
 
 /* 激活态的分段按钮 */
@@ -3066,10 +3021,11 @@ onUnmounted(() => {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 4px 10px rgba(15, 23, 42, 0.03);
 }
 
-:global(.dark) .desktop-segmented-btn--active {
-  background: rgba(255, 255, 255, 0.12) !important;
+:global(.dark) .desktop-segmented-btn--active,
+.dark .desktop-segmented-btn--active {
+  background: rgba(255, 255, 255, 0.18) !important;
   color: #ff8b8b !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 /* ==========================================================================
@@ -3098,16 +3054,18 @@ onUnmounted(() => {
   transition: background 150ms ease;
 }
 
-:global(.dark) .desktop-compact-range-slider::-webkit-slider-runnable-track {
-  background: rgba(255, 255, 255, 0.16);
+:global(.dark) .desktop-compact-range-slider::-webkit-slider-runnable-track,
+.dark .desktop-compact-range-slider::-webkit-slider-runnable-track {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .desktop-compact-range-slider:hover::-webkit-slider-runnable-track {
   background: rgba(15, 23, 42, 0.16);
 }
 
-:global(.dark) .desktop-compact-range-slider:hover::-webkit-slider-runnable-track {
-  background: rgba(255, 255, 255, 0.24);
+:global(.dark) .desktop-compact-range-slider:hover::-webkit-slider-runnable-track,
+.dark .desktop-compact-range-slider:hover::-webkit-slider-runnable-track {
+  background: rgba(255, 255, 255, 0.32);
 }
 
 /* Firefox Runnable Track 轨道 */
@@ -3120,16 +3078,18 @@ onUnmounted(() => {
   border: none;
 }
 
-:global(.dark) .desktop-compact-range-slider::-moz-range-track {
-  background: rgba(255, 255, 255, 0.16);
+:global(.dark) .desktop-compact-range-slider::-moz-range-track,
+.dark .desktop-compact-range-slider::-moz-range-track {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .desktop-compact-range-slider:hover::-moz-range-track {
   background: rgba(15, 23, 42, 0.16);
 }
 
-:global(.dark) .desktop-compact-range-slider:hover::-moz-range-track {
-  background: rgba(255, 255, 255, 0.24);
+:global(.dark) .desktop-compact-range-slider:hover::-moz-range-track,
+.dark .desktop-compact-range-slider:hover::-moz-range-track {
+  background: rgba(255, 255, 255, 0.32);
 }
 
 /* Chrome / Safari / Edge / Tauri Thumb 圆形按钮 (居中) */
