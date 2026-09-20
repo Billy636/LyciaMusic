@@ -17,6 +17,10 @@ const APP_SHOW_MAIN_EVENT: &str = "app:show-main";
 const APP_TRAY_MENU_OPEN_EVENT: &str = "app:tray-menu-open";
 const MAIN_WINDOW_LABEL: &str = "main";
 const MINI_PLAYER_WINDOW_LABEL: &str = "mini-player";
+const TRAY_ID: &str = "tray";
+const DEFAULT_TRAY_TOOLTIP: &str = "LyciaMusic";
+// Windows 托盘 tooltip 上限为 128 字符，留出余量
+const MAX_TRAY_TOOLTIP_CHARS: usize = 120;
 
 #[derive(serde::Serialize, Clone, Copy)]
 #[serde(rename_all = "camelCase")]
@@ -122,9 +126,17 @@ fn install_window_boundary<R: tauri::Runtime>(app: &tauri::App<R>) {
     }
 }
 
+fn set_tray_tooltip<R: tauri::Runtime>(app: &tauri::AppHandle<R>, tooltip: &str) {
+    let truncated: String = tooltip.chars().take(MAX_TRAY_TOOLTIP_CHARS).collect();
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_tooltip(Some(truncated));
+    }
+}
+
 fn build_tray<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
-    let _tray = TrayIconBuilder::with_id("tray")
+    let _tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(app.default_window_icon().unwrap().clone())
+        .tooltip(DEFAULT_TRAY_TOOLTIP)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
@@ -201,6 +213,11 @@ pub(crate) fn consume_pending_open_paths(
 ) -> Result<Vec<String>, String> {
     let mut pending_paths = state.0.lock().map_err(|error| error.to_string())?;
     Ok(std::mem::take(&mut *pending_paths))
+}
+
+#[tauri::command]
+pub(crate) fn update_tray_tooltip(app: tauri::AppHandle, tooltip: String) {
+    set_tray_tooltip(&app, &tooltip);
 }
 
 #[tauri::command]

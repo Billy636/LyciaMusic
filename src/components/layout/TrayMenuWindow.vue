@@ -20,8 +20,14 @@ import { computed, onMounted, onUnmounted, ref, type Component } from 'vue';
 
 import {
   APP_TRAY_MENU_EVENT,
+  formatTraySongLabel,
+  TRAY_MENU_PANEL_WIDTH,
+  TRAY_MENU_PING_EVENT,
   TRAY_MENU_READY_EVENT,
   TRAY_MENU_STATE_EVENT,
+  TRAY_MENU_SUBMENU_GAP,
+  TRAY_MENU_WINDOW_HEIGHT,
+  TRAY_MENU_WINDOW_WIDTH,
   type TrayMenuAction,
   type TrayMenuStatePayload,
 } from '../../features/tray/actions';
@@ -32,19 +38,61 @@ const currentSong = ref<Song | null>(null);
 const isPlaying = ref(false);
 const isDarkTheme = ref(true);
 const playMode = ref(0);
+const isMiniMode = ref(false);
+const showDesktopLyrics = ref(false);
 const isPlayModeMenuOpen = ref(false);
 const submenuPlacement = ref<'left' | 'right'>('left');
 let unlistenState: UnlistenFn | null = null;
 let unlistenFocus: UnlistenFn | null = null;
 let unlistenCloseRequested: UnlistenFn | null = null;
+let unlistenPing: UnlistenFn | null = null;
 
-const trackLabel = computed(() => {
-  const song = currentSong.value;
-  if (!song) return 'Lycia Player';
+// 尺寸常量单一来源：由 features/tray/actions.ts 注入，定位逻辑使用同一组数值
+const shellStyleVars: Record<string, string> = {
+  '--tray-shell-width': `${TRAY_MENU_WINDOW_WIDTH}px`,
+  '--tray-shell-height': `${TRAY_MENU_WINDOW_HEIGHT}px`,
+  '--tray-panel-width': `${TRAY_MENU_PANEL_WIDTH}px`,
+  '--tray-submenu-gap': `${TRAY_MENU_SUBMENU_GAP}px`,
+};
 
-  const title = song.title || song.name.replace(/\.[^/.]+$/, '');
-  return song.artist ? `${title} - ${song.artist}` : title;
-});
+// 托盘右键后系统可能拒绝本窗口抢占前台，导致收不到失焦事件；
+// 超时仍未获得焦点且鼠标不在菜单上时自动隐藏，避免菜单残留屏幕
+const FOCUS_FALLBACK_DELAY_MS = 1500;
+let focusFallbackTimer: number | null = null;
+let isPointerInsideShell = false;
+
+const markShellPointerInside = (inside: boolean) => {
+  isPointerInsideShell = inside;
+};
+
+const clearFocusFallbackTimer = () => {
+  if (focusFallbackTimer !== null) {
+    window.clearTimeout(focusFallbackTimer);
+    focusFallbackTimer = null;
+  }
+};
+
+const armFocusFallback = () => {
+  clearFocusFallbackTimer();
+  focusFallbackTimer = window.setTimeout(() => {
+    focusFallbackTimer = null;
+    void (async () => {
+      try {
+        if (!(await appWindow.isVisible())) return;
+        if (await appWindow.isFocused()) return;
+        if (isPointerInsideShell) {
+          armFocusFallback();
+          return;
+        }
+        await appWindow.hide();
+      } catch {
+        // 窗口可能已销毁，忽略
+      }
+    })();
+  }, FOCUS_FALLBACK_DELAY_MS);
+};
+
+const trackLabel = computed(() => formatTraySongLabel(currentSong.value) || 'Lycia Player');
 
 const playModeConfig = computed(() => {
   switch (playMode.value) {
@@ -132,14 +180,20 @@ onMounted(async () => {
     isPlaying.value = event.payload.isPlaying;
     isDarkTheme.value = event.payload.isDarkTheme;
     playMode.value = event.payload.playMode;
+    isMiniMode.value = event.payload.isMiniMode;
+    showDesktopLyrics.value = event.payload.showDesktopLyrics;
     submenuPlacement.value = event.payload.submenuPlacement;
     isPlayModeMenuOpen.value = false;
+    armFocusFallback();
   });
 
   unlistenFocus = await appWindow.onFocusChanged((event) => {
-    if (!event.payload) {
-      hideWindow();
+    if (event.payload) {
+      // 已获得焦点，走常规的失焦隐藏路径，无需兜底
+      clearFocusFallbackTimer();
+      return;
     }
+    hideWindow();
   });
 
   unlistenCloseRequested = await appWindow.onCloseRequested((event) => {
@@ -147,14 +201,21 @@ onMounted(async () => {
     hideWindow();
   });
 
+  // 主窗口刷新后不会重建本窗口，收到 ping 时重发 READY 以恢复 ready 标记与状态同步
+  unlistenPing = await listen(TRAY_MENU_PING_EVENT, () => {
+    void emitTo('main', TRAY_MENU_READY_EVENT);
+  });
+
   await emitTo('main', TRAY_MENU_READY_EVENT);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown);
+  clearFocusFallbackTimer();
   unlistenState?.();
   unlistenFocus?.();
   unlistenCloseRequested?.();
+  unlistenPing?.();
 });
 </script>
 
@@ -165,6 +226,9 @@ onUnmounted(() => {
       { 'tray-menu-shell--light': !isDarkTheme },
       `tray-menu-shell--submenu-${submenuPlacement}`,
     ]"
+    :style="shellStyleVars"
+    @pointerenter="markShellPointerInside(true)"
+    @pointerleave="markShellPointerInside(false)"
     @pointerdown.self="hideWindow"
   >
     <div class="tray-menu-panel">
@@ -203,18 +267,20 @@ onUnmounted(() => {
         <ChevronRight class="row-chevron" :size="18" :stroke-width="2.2" />
       </button>
 
-      <button class="menu-row" @mouseenter="closePlayModeMenu" @click="sendAction('show-mini-player')">
+      <button class="menu-row" @mouseenter="closePlayModeMenu" @click="sendAction('toggle-mini-player')">
         <span class="row-icon">
           <Minimize2 :size="18" :stroke-width="2.15" />
         </span>
         <span class="row-label">mini窗口</span>
+        <Check v-if="isMiniMode" class="row-check" :size="16" :stroke-width="2.3" />
       </button>
 
       <div class="menu-divider" />
 
-      <button class="menu-row" @mouseenter="closePlayModeMenu" @click="sendAction('open-desktop-lyrics')">
+      <button class="menu-row" @mouseenter="closePlayModeMenu" @click="sendAction('toggle-desktop-lyrics')">
         <span class="row-icon row-icon--text">词</span>
-        <span class="row-label">打开桌面歌词</span>
+        <span class="row-label">桌面歌词</span>
+        <Check v-if="showDesktopLyrics" class="row-check" :size="16" :stroke-width="2.3" />
       </button>
 
       <div class="menu-divider" />
@@ -259,9 +325,16 @@ onUnmounted(() => {
   --text-muted: rgba(241, 243, 249, 0.68);
   --divider: rgba(255, 255, 255, 0.075);
   --hover-bg: rgba(255, 255, 255, 0.075);
+  --panel-padding-y: 6px;
+  --track-row-height: 30px;
+  --transport-height: 36px;
+  --menu-row-height: 30px;
+  --divider-margin-y: 4px;
+  /* 分隔线占位 = 上下 margin + 1px 线高，供子菜单 popover 垂直对齐使用 */
+  --divider-span: calc(var(--divider-margin-y) * 2 + 1px);
 
-  width: 330px;
-  height: 273px;
+  width: var(--tray-shell-width);
+  height: var(--tray-shell-height);
   padding: 0;
   overflow: hidden;
   background: transparent;
@@ -285,11 +358,11 @@ onUnmounted(() => {
   top: 0;
   display: flex;
   flex-direction: column;
-  width: 190px;
+  width: var(--tray-panel-width);
   height: 100%;
   box-sizing: border-box;
   overflow: hidden;
-  padding: 6px 0;
+  padding: var(--panel-padding-y) 0;
   border: 0;
   border-radius: 10px;
   background: var(--panel-bg);
@@ -308,7 +381,7 @@ onUnmounted(() => {
 .track-row {
   display: flex;
   align-items: center;
-  height: 30px;
+  height: var(--track-row-height);
   gap: 9px;
   padding: 0 12px;
 }
@@ -331,7 +404,7 @@ onUnmounted(() => {
 
 .menu-divider {
   height: 1px;
-  margin: 4px 12px;
+  margin: var(--divider-margin-y) 12px;
   background: var(--divider);
 }
 
@@ -339,7 +412,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   align-items: center;
-  height: 36px;
+  height: var(--transport-height);
   padding: 0 12px;
 }
 
@@ -373,7 +446,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   width: calc(100% - 12px);
-  height: 30px;
+  height: var(--menu-row-height);
   margin: 0 6px;
   gap: 9px;
   border-radius: 6px;
@@ -413,14 +486,19 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.row-chevron {
+.row-chevron,
+.row-check {
   flex: 0 0 auto;
   color: currentColor;
 }
 
 .play-mode-popover {
   position: absolute;
-  top: 89px;
+  /* 与播放模式行顶部对齐：面板上内边距 + 曲目行 + 分隔线 + 传输区 + 分隔线 */
+  top: calc(
+    var(--panel-padding-y) + var(--track-row-height) + var(--divider-span)
+    + var(--transport-height) + var(--divider-span)
+  );
   z-index: 5;
   width: 132px;
   overflow: hidden;
@@ -431,11 +509,11 @@ onUnmounted(() => {
 }
 
 .tray-menu-shell--submenu-left .play-mode-popover {
-  right: 198px;
+  right: calc(var(--tray-panel-width) + var(--tray-submenu-gap));
 }
 
 .tray-menu-shell--submenu-right .play-mode-popover {
-  left: 198px;
+  left: calc(var(--tray-panel-width) + var(--tray-submenu-gap));
 }
 
 .play-mode-option {

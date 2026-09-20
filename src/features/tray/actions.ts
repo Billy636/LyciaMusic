@@ -6,6 +6,7 @@ export const APP_TRAY_MENU_OPEN_EVENT = 'app:tray-menu-open';
 export { TRAY_MENU_WINDOW_LABEL } from '../../windowLabels';
 export const TRAY_MENU_STATE_EVENT = 'tray-menu:state';
 export const TRAY_MENU_READY_EVENT = 'tray-menu:ready';
+export const TRAY_MENU_PING_EVENT = 'tray-menu:ping';
 export const TRAY_MENU_PANEL_WIDTH = 190;
 export const TRAY_MENU_SUBMENU_WIDTH = 132;
 export const TRAY_MENU_SUBMENU_GAP = 8;
@@ -21,8 +22,8 @@ export type TrayMenuAction =
   | 'play-mode-list-loop'
   | 'play-mode-single-loop'
   | 'play-mode-shuffle'
-  | 'show-mini-player'
-  | 'open-desktop-lyrics'
+  | 'toggle-mini-player'
+  | 'toggle-desktop-lyrics'
   | 'open-settings'
   | 'quit';
 
@@ -36,6 +37,7 @@ export interface TrayMenuStatePayload {
   isPlaying: boolean;
   isDarkTheme: boolean;
   playMode: number;
+  isMiniMode: boolean;
   showDesktopLyrics: boolean;
   submenuPlacement: TrayMenuSubmenuPlacement;
 }
@@ -50,6 +52,12 @@ export interface TrayMenuActionDeps {
   revealMainWindow: () => Promise<unknown>;
   openSettings: () => Promise<unknown>;
   quitApp: () => Promise<unknown>;
+}
+
+export function formatTraySongLabel(song: Song | null): string {
+  if (!song) return '';
+  const title = song.title || song.name.replace(/\.[^/.]+$/, '');
+  return song.artist ? `${title} - ${song.artist}` : title;
 }
 
 export async function handleTrayMenuAction(action: TrayMenuAction, deps: TrayMenuActionDeps) {
@@ -72,11 +80,16 @@ export async function handleTrayMenuAction(action: TrayMenuAction, deps: TrayMen
     case 'play-mode-shuffle':
       deps.playMode.value = 2;
       break;
-    case 'show-mini-player':
-      deps.isMiniMode.value = true;
+    case 'toggle-mini-player': {
+      const nextIsMiniMode = !deps.isMiniMode.value;
+      deps.isMiniMode.value = nextIsMiniMode;
+      if (!nextIsMiniMode) {
+        await deps.revealMainWindow();
+      }
       break;
-    case 'open-desktop-lyrics':
-      deps.showDesktopLyrics.value = true;
+    }
+    case 'toggle-desktop-lyrics':
+      deps.showDesktopLyrics.value = !deps.showDesktopLyrics.value;
       break;
     case 'open-settings':
       deps.isMiniMode.value = false;
