@@ -17,6 +17,7 @@ import { isProfilingEnabled } from '../../utils/profiling';
 import {
   compareSongPathsByTrackNumber,
   getSongArtistSearchText,
+  sortSongPathsByArtist,
 } from './playerLibraryViewShared';
 
 interface UseLibraryCurrentViewSongsOptions {
@@ -596,9 +597,7 @@ export function useLibraryCurrentViewSongs({
         ),
       );
     } else if (mode === 'artist') {
-      sortedPaths.sort((left, right) =>
-        (songLookup.value.get(left)?.artist || '').localeCompare(songLookup.value.get(right)?.artist || '', 'zh-CN'),
-      );
+      return sortSongPathsByArtist(paths, path => songLookup.value.get(path));
     } else if (mode === 'added_at') {
       sortedPaths.sort((left, right) =>
         (songLookup.value.get(right)?.added_at || 0) - (songLookup.value.get(left)?.added_at || 0),
@@ -741,12 +740,17 @@ export function useLibraryCurrentViewSongs({
     }
 
     if (currentViewMode.value === 'artist') {
-      return localSortMode.value === 'custom'
+      // Artist grouping is ordered by the backend across the complete result.
+      // The metadata window can be sparse, so sorting it again would move unloaded songs.
+      return localSortMode.value === 'custom' || localSortMode.value === 'artist'
         ? detailViewSongPaths.value
         : sortSongPathsByLocalMode(detailViewSongPaths.value, localSortMode.value);
     }
 
     if (currentViewMode.value === 'album') {
+      if (albumDetailSortMode.value === 'artist') {
+        return detailViewSongPaths.value;
+      }
       return sortSongPathsByAlbumDetailMode(detailViewSongPaths.value, albumDetailSortMode.value);
     }
 

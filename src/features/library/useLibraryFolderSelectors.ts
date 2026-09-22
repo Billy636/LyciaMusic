@@ -8,6 +8,7 @@ import {
   getSongFileNameLabel,
   getSongTitleLabel,
   isDirectParent,
+  sortSongPathsByArtist,
 } from './playerLibraryViewShared';
 
 interface FolderListItem {
@@ -71,9 +72,7 @@ export function useLibraryFolderSelectors({
     }
 
     if (folderSortMode.value === 'artist') {
-      return [...paths].sort((left, right) =>
-        (lookupSong(left)?.artist || '').localeCompare(lookupSong(right)?.artist || '', 'zh-CN'),
-      );
+      return sortSongPathsByArtist(paths, lookupSong);
     }
 
     if (folderSortMode.value === 'added_at') {

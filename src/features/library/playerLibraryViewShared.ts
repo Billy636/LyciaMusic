@@ -1,4 +1,5 @@
 import type { AlbumCatalogItem, ArtistCatalogItem, Song } from '../../types';
+import { getAlphabetIndexKey, getAlphabetSortKey, INDEX_ORDER } from '../../utils/alphabetIndex';
 
 export type ArtistListItem = ArtistCatalogItem;
 export type AlbumListItem = AlbumCatalogItem;
@@ -71,6 +72,77 @@ export const parseSortIndexValue = (value?: string) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const artistSortCollator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+const compareStableText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
+const compareOptionalIndex = (left: number | null, right: number | null) => {
+  if (left === null) return right === null ? 0 : 1;
+  if (right === null) return -1;
+  return left - right;
+};
+const parseArtistSortIndex = (value?: string) => {
+  const parsed = parseSortIndexValue(value);
+  return parsed !== null && parsed <= 2_147_483_647 ? parsed : null;
+};
+
+/** The local fallback for the backend's artist -> album -> disc/track order. */
+export const sortSongPathsByArtist = (
+  paths: readonly string[],
+  lookupSong: (path: string) => Song | null | undefined,
+): string[] => {
+  const songs: Array<{ path: string; song: Song }> = [];
+  for (const path of paths) {
+    const song = lookupSong(path);
+    // Windowed metadata must not reorder unknown songs as empty artist names.
+    if (!song) return [...paths];
+    songs.push({ path, song });
+  }
+
+  type AlphabetKey = { group: number; value: string };
+  const alphabetKeys = new Map<string, AlphabetKey>();
+  const alphabetKey = (label: string): AlphabetKey => {
+    const cached = alphabetKeys.get(label);
+    if (cached) return cached;
+    const key = {
+      group: INDEX_ORDER.get(getAlphabetIndexKey(label)) ?? 999,
+      value: getAlphabetSortKey(label),
+    };
+    alphabetKeys.set(label, key);
+    return key;
+  };
+  const compareAlphabetKeys = (left: AlphabetKey, right: AlphabetKey) =>
+    left.group - right.group || artistSortCollator.compare(left.value, right.value);
+
+  const keyedSongs = songs.map(({ path, song }) => {
+    const artist = song.artist?.trim() || 'Unknown';
+    const album = song.album?.trim() || 'Unknown';
+    const albumArtist = song.album_artist?.trim() || artist;
+    const albumIdentity = (song.album_key?.trim() || `${album}::${albumArtist}`).toLowerCase();
+    const title = song.title?.trim() || path;
+    return {
+      path,
+      artistKey: alphabetKey(artist),
+      artistIdentity: artist.toLowerCase(),
+      albumKey: alphabetKey(album),
+      albumIdentity,
+      disc: parseArtistSortIndex(song.disc_number),
+      track: parseArtistSortIndex(song.track_number),
+      titleKey: alphabetKey(title),
+    };
+  });
+
+  keyedSongs.sort((left, right) =>
+    compareAlphabetKeys(left.artistKey, right.artistKey)
+    || compareStableText(left.artistIdentity, right.artistIdentity)
+    || compareAlphabetKeys(left.albumKey, right.albumKey)
+    || compareStableText(left.albumIdentity, right.albumIdentity)
+    || compareOptionalIndex(left.disc, right.disc)
+    || compareOptionalIndex(left.track, right.track)
+    || compareAlphabetKeys(left.titleKey, right.titleKey)
+    || compareStableText(left.path, right.path),
+  );
+  return keyedSongs.map(song => song.path);
+};
+
 export const compareSongPathsByTrackNumber = (
   left: string,
   right: string,
@@ -124,4 +196,3 @@ export const compareSongPathsByTrackNumber = (
 
   return result;
 };
-

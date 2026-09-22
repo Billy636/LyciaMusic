@@ -8,6 +8,7 @@ pub mod lyrics;
 pub mod scanner;
 pub mod search;
 pub mod sidebar;
+pub(crate) mod sorting;
 pub mod tags;
 pub mod types;
 pub mod utils;

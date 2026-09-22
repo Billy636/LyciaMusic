@@ -22,6 +22,30 @@ const makeSong = (overrides: Partial<Song> = {}): Song => ({
 });
 
 describe('useLibraryFolderSelectors', () => {
+  it('groups artist-sorted folder songs by pinyin, album and numeric track order', () => {
+    const songs = [
+      makeSong({ path: 'C:/Music/Rock/jay.flac', artist: '周杰伦' }),
+      makeSong({ path: 'C:/Music/Rock/eason-other.flac', artist: '陈奕迅', album: 'Album 10', album_key: 'album-10', track_number: '1' }),
+      makeSong({ path: 'C:/Music/Rock/eason-2.flac', artist: '陈奕迅', album: 'Album 2', album_key: 'album-2', track_number: '2' }),
+      makeSong({ path: 'C:/Music/Rock/eason-1.flac', artist: '陈奕迅', album: 'Album 2', album_key: 'album-2', track_number: '1' }),
+    ];
+    const { currentFolderSongPaths } = useLibraryFolderSelectors({
+      watchedFolders: ref(['C:/Music/Rock']),
+      sourceSongPaths: ref(songs.map(song => song.path)),
+      songLookup: computed(() => new Map(songs.map(song => [song.path, song]))),
+      currentFolderFilter: ref('C:/Music/Rock'),
+      folderSortMode: ref('artist'),
+      folderCustomOrder: ref({}),
+    });
+
+    expect(currentFolderSongPaths.value).toEqual([
+      songs[3].path,
+      songs[2].path,
+      songs[1].path,
+      songs[0].path,
+    ]);
+  });
+
   it('does not throw when some songs in folder are missing from songLookup during title sorting', () => {
     const watchedFolders = ref(['C:/Music/Rock']);
     const sourceSongPaths = ref([

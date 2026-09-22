@@ -65,7 +65,7 @@ const executableGridScript = transpileModule(gridScript.replace(/^import .*;?$/g
 
 const createGridHarness = (paths: string[], withObserver = true) => {
   const props = { albums: paths.map((firstSongPath, index) => ({ key: `album-${index}`, firstSongPath })) };
-  let elements = paths.map(coverPath => ({ dataset: { coverPath } }) as HTMLElement);
+  let elements = paths.map(coverPath => ({ dataset: { coverPath } }) as unknown as HTMLElement);
   const container = { querySelectorAll: () => elements } as unknown as HTMLElement;
   let mount = () => {};
   let refresh = () => {};
@@ -82,7 +82,7 @@ const createGridHarness = (paths: string[], withObserver = true) => {
       observers.push(this);
     }
     emit(entries: Array<{ target: HTMLElement; isIntersecting: boolean }>) {
-      this.callback(entries as IntersectionObserverEntry[], this as unknown as IntersectionObserver);
+      this.callback(entries as unknown as IntersectionObserverEntry[], this as unknown as IntersectionObserver);
     }
   }
 

@@ -33,7 +33,8 @@ rodio = { version = "0.20", default-features = false, features = ["wav", "mp3", 
 symphonia = { version = "0.5.5", default-features = false, features = ["aac", "adpcm", "aiff", "alac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 image = { version = "0.25", features = ["jpeg", "png", "webp"] }
 urlencoding = "2"
-rusqlite = { version = "0.38.0", features = ["bundled"] }
+rusqlite = { version = "0.38.0", features = ["bundled", "collation", "functions"] }
+pinyin = { version = "0.11", default-features = false, features = ["plain"] }
 sha2 = "0.10.9"
 hex = "0.4.3"
 tokio = { version = "1.48.0", features = ["full"] }
