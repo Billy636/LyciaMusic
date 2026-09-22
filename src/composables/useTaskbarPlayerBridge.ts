@@ -3,16 +3,19 @@ import { emitTo, listen } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { availableMonitors, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { onMounted, onUnmounted, ref, toRaw, watch } from 'vue';
 
 import { useCoverCache } from './useCoverCache';
 import { usePlayer } from './player';
+import { useLyrics } from './lyrics';
 import { useThemeSettings } from './useThemeSettings';
 import { toggleMainWindowVisibility } from './mainWindowVisibility';
 import { useSettings } from '../features/settings/useSettings';
+import { createTaskbarPlaybackClockTracker } from '../features/taskbarPlayer/lyrics';
 import {
   TASKBAR_PLAYER_WINDOW_LABEL,
   TASKBAR_PLAYER_STATE_EVENT,
+  TASKBAR_PLAYER_PLAYBACK_EVENT,
   TASKBAR_PLAYER_STATE_APPLIED_EVENT,
   TASKBAR_PLAYER_ACTION_EVENT,
   TASKBAR_PLAYER_REQUEST_STATE_EVENT,
@@ -24,6 +27,7 @@ import {
   readSavedTaskbarPositionX,
   type TaskbarTrayGeometry,
   type TaskbarPlayerStatePayload,
+  type TaskbarPlayerPlaybackPayload,
   type TaskbarPlayerAction,
 } from '../features/taskbarPlayer/shared';
 
@@ -36,6 +40,7 @@ let unlistenScaleChange: (() => void) | null = null;
 
 const TASKBAR_FULLSCREEN_CHECK_INTERVAL_MS = 1_000;
 const TASKBAR_GEOMETRY_FALLBACK_INTERVAL_MS = 10_000;
+const TASKBAR_PLAYBACK_SYNC_INTERVAL_MS = 250;
 
 // 高可用定位并发控制锁
 let isPositioning = false;
@@ -305,14 +310,16 @@ function waitForTaskbarPlayerStateApplied(timeoutMs = 500) {
 
 export function useTaskbarPlayerBridge() {
   const mainWindow = getCurrentWindow();
-  const { settings } = useSettings();
+  const { settings, audioDelay } = useSettings();
   const {
     currentSong,
+    currentTime,
     isPlaying,
     togglePlay,
     prevSong,
     nextSong,
   } = usePlayer();
+  const { parsedLyrics, lyricsStatus } = useLyrics();
   const { loadCover } = useCoverCache();
   const { isDarkTheme } = useThemeSettings();
 
@@ -322,28 +329,83 @@ export function useTaskbarPlayerBridge() {
   let lastGeometryFallbackAt = 0;
   let isMainWindowClosing = false;
   let updateSequence = 0;
+  let playbackSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  const playbackClockTracker = createTaskbarPlaybackClockTracker();
+  let lyricsSongPath = currentSong.value?.path ?? null;
+
+  // Audio loading can change currentSong before loadLyrics clears the previous
+  // document. Do not label the previous song's lyrics as belonging to the new one.
+  watch(parsedLyrics, () => {
+    lyricsSongPath = currentSong.value?.path ?? null;
+  }, { flush: 'sync' });
+
+  const createPlaybackPayload = (): TaskbarPlayerPlaybackPayload => ({
+    songPath: currentSong.value?.path ?? null,
+    playbackTime: currentTime.value,
+    syncedAt: playbackClockTracker.resolveSyncedAt(currentTime.value),
+    isPlaying: isPlaying.value,
+    audioDelay: audioDelay.value,
+  });
+
+  // Send only the clock on progress ticks; covers and lyric documents change much less often.
+  const emitPlaybackToTaskbarPlayer = () => {
+    if (!isTaskbarPlayerVisible.value) return;
+    void emitTo<TaskbarPlayerPlaybackPayload>(
+      TASKBAR_PLAYER_WINDOW_LABEL,
+      TASKBAR_PLAYER_PLAYBACK_EVENT,
+      createPlaybackPayload(),
+    ).catch(error => console.warn('Failed to sync taskbar player playback:', error));
+  };
+
+  const cancelPlaybackSync = () => {
+    if (playbackSyncTimer !== null) {
+      clearTimeout(playbackSyncTimer);
+      playbackSyncTimer = null;
+    }
+  };
+
+  // Preserve the timestamp of the actual sample, including while the main window
+  // is in low-power mode. Resuming must not project across time spent paused.
+  watch([currentTime, isPlaying, () => currentSong.value?.path], () => {
+    playbackClockTracker.markPlaybackTimeSample(currentTime.value);
+  }, { immediate: true, flush: 'sync' });
+
+  watch(currentTime, () => {
+    if (!isTaskbarPlayerVisible.value || playbackSyncTimer !== null) return;
+    playbackSyncTimer = setTimeout(() => {
+      playbackSyncTimer = null;
+      emitPlaybackToTaskbarPlayer();
+    }, TASKBAR_PLAYBACK_SYNC_INTERVAL_MS);
+  });
+
+  watch([isPlaying, audioDelay], () => {
+    cancelPlaybackSync();
+    emitPlaybackToTaskbarPlayer();
+  });
 
   const createStatePayload = async (): Promise<TaskbarPlayerStatePayload> => {
     const song = currentSong.value;
     const coverUrl = song?.path ? await loadCover(song.path).catch(() => '') : '';
 
     return {
+      ...createPlaybackPayload(),
       currentSong: song,
       coverUrl: coverUrl || '',
-      isPlaying: isPlaying.value,
       isDarkTheme: isDarkTheme.value,
+      parsedLyrics: lyricsStatus.value === 'ready' && lyricsSongPath === song?.path
+        ? toRaw(parsedLyrics.value)
+        : [],
+      lyricsStatus: lyricsStatus.value,
     };
   };
 
   const emitStateToTaskbarPlayer = async () => {
+    const currentSeq = ++updateSequence;
     const targetWindow = await getTaskbarPlayerWindow();
     if (!targetWindow) return;
 
-    updateSequence++;
-    const currentSeq = updateSequence;
-
     const payload = await createStatePayload();
-    if (currentSeq !== updateSequence) {
+    if (currentSeq !== updateSequence || payload.currentSong?.path !== currentSong.value?.path) {
       return;
     }
 
@@ -369,6 +431,8 @@ export function useTaskbarPlayerBridge() {
     await stabilizeTaskbarWindowGeometry(targetWindow);
     lastGeometryFallbackAt = Date.now();
     isTaskbarPlayerVisible.value = true;
+    // Lyrics may have finished loading during the initial state/show handshake.
+    await emitStateToTaskbarPlayer();
 
     // 安装 Z-order 守护，防止点击任务栏时播控窗口被遮盖
     void invoke('install_taskbar_zorder_guard').catch((err) => {
@@ -391,6 +455,8 @@ export function useTaskbarPlayerBridge() {
   };
 
   const destroyTaskbarPlayerWindow = async () => {
+    cancelPlaybackSync();
+    updateSequence++;
     const targetWindow = await getTaskbarPlayerWindow();
     if (!targetWindow) {
       isTaskbarPlayerReady = false;
@@ -432,17 +498,21 @@ export function useTaskbarPlayerBridge() {
         const state = await invoke<{ isFullscreen: boolean }>('get_foreground_fullscreen_state');
         if (state.isFullscreen) {
           if (isTaskbarPlayerVisible.value) {
+            await emitTo(TASKBAR_PLAYER_WINDOW_LABEL, TASKBAR_PLAYER_VISIBILITY_EVENT, { visible: false });
             await targetWindow.hide();
             isTaskbarPlayerVisible.value = false;
+            cancelPlaybackSync();
           }
         } else {
           if (!isTaskbarPlayerVisible.value) {
             // 对齐一次坐标并显示
             await stabilizeTaskbarWindowGeometry(targetWindow);
             await emitStateToTaskbarPlayer();
+            await emitTo(TASKBAR_PLAYER_WINDOW_LABEL, TASKBAR_PLAYER_VISIBILITY_EVENT, { visible: true });
             await targetWindow.show();
             await stabilizeTaskbarWindowGeometry(targetWindow);
             isTaskbarPlayerVisible.value = true;
+            await emitStateToTaskbarPlayer();
           } else if (
             !isTaskbarPlayerDragging
             && Date.now() - lastGeometryFallbackAt >= TASKBAR_GEOMETRY_FALLBACK_INTERVAL_MS
@@ -547,8 +617,9 @@ export function useTaskbarPlayerBridge() {
     watch(
       [
         currentSong,
-        isPlaying,
         isDarkTheme,
+        parsedLyrics,
+        lyricsStatus,
       ],
       () => {
         if (!isTaskbarPlayerVisible.value) return;
@@ -559,6 +630,8 @@ export function useTaskbarPlayerBridge() {
   });
 
   onUnmounted(() => {
+    cancelPlaybackSync();
+    updateSequence++;
     stopCheckLoop();
     if (unlistenScaleChange) {
       unlistenScaleChange();

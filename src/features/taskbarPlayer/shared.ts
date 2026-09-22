@@ -1,7 +1,9 @@
 import type { Song } from '../../types';
+import type { LyricLine, LyricsStatus } from '../../composables/lyrics/types';
 
 export { TASKBAR_PLAYER_WINDOW_LABEL } from '../../windowLabels';
 export const TASKBAR_PLAYER_STATE_EVENT = 'taskbar-player:state';
+export const TASKBAR_PLAYER_PLAYBACK_EVENT = 'taskbar-player:playback';
 export const TASKBAR_PLAYER_STATE_APPLIED_EVENT = 'taskbar-player:state-applied';
 export const TASKBAR_PLAYER_ACTION_EVENT = 'taskbar-player:action';
 export const TASKBAR_PLAYER_REQUEST_STATE_EVENT = 'taskbar-player:request-state';
@@ -45,11 +47,20 @@ export function writeSavedTaskbarPositionX(x: number) {
   localStorage.setItem(TASKBAR_PLAYER_POSITION_X_KEY, String(Math.round(x)));
 }
 
-export interface TaskbarPlayerStatePayload {
+export interface TaskbarPlayerPlaybackPayload {
+  songPath: string | null;
+  playbackTime: number;
+  syncedAt: number;
+  isPlaying: boolean;
+  audioDelay: number;
+}
+
+export interface TaskbarPlayerStatePayload extends TaskbarPlayerPlaybackPayload {
   currentSong: Song | null;
   coverUrl: string;
-  isPlaying: boolean;
   isDarkTheme: boolean;
+  parsedLyrics: LyricLine[];
+  lyricsStatus: LyricsStatus;
 }
 
 export type TaskbarPlayerAction =
