@@ -339,6 +339,17 @@ describe('settings store', () => {
     expect(settingsStore.settings.desktopLyrics.playerAlignment).toBe('center');
   });
 
+  it('defaults old desktop settings to scrolling and persists optional wrapping', () => {
+    const settingsStore = useSettingsStore();
+    expect(settingsStore.settings.desktopLyrics.overflowMode).toBe('scroll');
+    const restored = mergeAppSettings(settingsStore.settings, { desktopLyrics: { showDoubleLine: true } });
+    expect(restored.desktopLyrics.overflowMode).toBe('scroll');
+    settingsStore.patchSettings({ desktopLyrics: { overflowMode: 'wrap' } });
+    expect(settingsStore.settings.desktopLyrics.overflowMode).toBe('wrap');
+    settingsStore.patchSettings({ desktopLyrics: { overflowMode: 'invalid' as 'scroll' } });
+    expect(settingsStore.settings.desktopLyrics.overflowMode).toBe('scroll');
+  });
+
   it('merges desktop romaji played and unplayed custom colors independently', () => {
     const settingsStore = useSettingsStore();
 

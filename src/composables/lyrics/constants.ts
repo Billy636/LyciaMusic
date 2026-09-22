@@ -120,6 +120,7 @@ export const defaultDesktopLyricsSettings: DesktopLyricsSettings = {
   autoHideWhenFullscreen: true,
   autoHideWhenPaused: false,
   showDoubleLine: false,
+  overflowMode: 'scroll',
   enableWordEffect: true,
   isLocked: false,
   persistLock: false,
@@ -337,6 +338,7 @@ export function normalizeDesktopLyricsSettingsPatch(
     showDoubleLine: typeof patch.showDoubleLine === 'boolean'
       ? patch.showDoubleLine
       : defaultDesktopLyricsSettings.showDoubleLine,
+    overflowMode: patch.overflowMode === 'wrap' ? 'wrap' : 'scroll',
     enableWordEffect: typeof patch.enableWordEffect === 'boolean'
       ? patch.enableWordEffect
       : defaultDesktopLyricsSettings.enableWordEffect,

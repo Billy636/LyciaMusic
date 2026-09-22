@@ -34,4 +34,27 @@ describe('Tauri app command permissions', () => {
   it('allows on-demand audio visualizer sampling control', () => {
     expect(permissionFile).toContain('"set_audio_visualizer_enabled"');
   });
+
+  it('registers and authorizes every native desktop lyrics command for the main window', () => {
+    const nativeBridge = readFileSync(new URL('../../features/desktopLyrics/native.ts', import.meta.url), 'utf8') as string;
+    const backend = readFileSync(new URL('../../../src-tauri/src/lib.rs', import.meta.url), 'utf8') as string;
+    const capability = JSON.parse(readFileSync(
+      new URL('../../../src-tauri/capabilities/default.json', import.meta.url), 'utf8',
+    )) as { windows: string[]; permissions: string[] };
+    const commands = [...nativeBridge.matchAll(/invoke<void>\('(native_desktop_lyrics_\w+)'/g)]
+      .map((match) => match[1]);
+    const allowedCommands = new Set(
+      [...(permissionFile.match(/commands\.allow\s*=\s*\[([\s\S]*?)\]/)?.[1] ?? '').matchAll(/"([^"]+)"/g)]
+        .map((match) => match[1]),
+    );
+    const handlers = backend.match(/tauri::generate_handler!\[([\s\S]*?)\]/)?.[1] ?? '';
+
+    expect(commands).toHaveLength(5);
+    expect(capability.windows).toContain('main');
+    expect(capability.permissions).toContain('allow-app-commands');
+    for (const command of commands) {
+      expect(handlers).toContain(`desktop_lyrics::${command},`);
+      expect(allowedCommands.has(command), `${command} must be allowed by the application ACL`).toBe(true);
+    }
+  });
 });

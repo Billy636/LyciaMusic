@@ -30,6 +30,7 @@ import {
   createDefaultDesktopLyricsSettings,
 } from '../../composables/lyrics';
 import { DESKTOP_LYRICS_RESET_BOUNDS_EVENT } from '../../features/desktopLyrics/shared';
+import { usesNativeDesktopLyrics } from '../../features/desktopLyrics/native';
 import { useSettings } from '../../features/settings/useSettings';
 import { useLyricsSettingsStore } from '../../features/lyricsSettings/store';
 
@@ -912,7 +913,17 @@ onUnmounted(() => {
           </span>
         </button>
 
-
+        <div v-if="usesNativeDesktopLyrics()" class="desktop-setting-row">
+          <div>
+            <label for="desktop-lyrics-overflow" class="text-sm font-medium text-gray-800 dark:text-gray-200">长句处理</label>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">横向跟随：最多缩小 15%，仍超宽时跟随演唱位置；空间不足时整体适配高度。</div>
+          </div>
+          <select id="desktop-lyrics-overflow" v-model="desktopLyricsSettings.overflowMode"
+            class="rounded-lg border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-800 dark:text-gray-200">
+            <option value="scroll">横向跟随（推荐）</option>
+            <option value="wrap">自动换行（正文最多两行）</option>
+          </select>
+        </div>
 
         <button
           type="button"

@@ -2,6 +2,7 @@ mod app_runtime;
 mod custom_background;
 mod custom_fonts;
 mod database;
+mod desktop_lyrics;
 pub mod error;
 mod foreground_window;
 mod highlights;
@@ -120,6 +121,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| setup_app(app))
         .invoke_handler(tauri::generate_handler![
+            desktop_lyrics::native_desktop_lyrics_open,
+            desktop_lyrics::native_desktop_lyrics_state,
+            desktop_lyrics::native_desktop_lyrics_playback,
+            desktop_lyrics::native_desktop_lyrics_reveal,
+            desktop_lyrics::native_desktop_lyrics_close,
             scan_music_folder,
             parse_audio_files,
             scan_folder_as_playlists,

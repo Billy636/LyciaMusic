@@ -365,6 +365,8 @@ export interface DesktopLyricsSettings {
   autoHideWhenFullscreen: boolean;
   autoHideWhenPaused: boolean;
   showDoubleLine: boolean;
+  /** Windows native renderer: follow long lines, or fit up to two wrapped rows. */
+  overflowMode?: 'scroll' | 'wrap';
   enableWordEffect: boolean;
   isLocked: boolean;
   persistLock: boolean;

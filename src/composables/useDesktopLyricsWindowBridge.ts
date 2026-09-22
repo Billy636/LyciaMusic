@@ -7,9 +7,11 @@ import { storeToRefs } from 'pinia';
 
 import { useLyrics } from './lyrics';
 import { usePlayer } from './player';
+import { useToast } from './toast';
 import { usePlaybackStore } from '../features/playback/store';
 import { useSettingsStore } from '../features/settings/store';
 import { useUiStore } from '../shared/stores/ui';
+import { nativeDesktopLyrics, usesNativeDesktopLyrics } from '../features/desktopLyrics/native';
 import {
   applyDesktopLyricsVisibilityPreference,
   persistDesktopLyricsVisibilityPreference,
@@ -19,6 +21,7 @@ import {
   DESKTOP_LYRICS_ACTION_EVENT,
   DESKTOP_LYRICS_BOUNDS_EVENT,
   DESKTOP_LYRICS_BOUNDS_KEY,
+  DESKTOP_LYRICS_ERROR_EVENT,
   DESKTOP_LYRICS_PLAYBACK_EVENT,
   DESKTOP_LYRICS_READY_EVENT,
   DESKTOP_LYRICS_RESET_BOUNDS_EVENT,
@@ -46,6 +49,13 @@ const DESKTOP_LYRICS_READY_TIMEOUT_MS = 1200;
 
 function logDesktopLyricsBridgeError(action: string, error: unknown) {
   console.warn(`Failed to ${action} desktop lyrics window:`, error);
+}
+
+export function formatDesktopLyricsOpenError(error: unknown): string {
+  const detail = error instanceof Error ? error.message
+    : typeof error === 'string' ? error
+      : '未知错误';
+  return `桌面歌词打开失败：${detail}`;
 }
 
 export function createDesktopLyricsPlaybackClockTracker(now = () => Date.now()) {
@@ -285,7 +295,12 @@ async function ensureDesktopLyricsWindow(alwaysOnTop: boolean, centerHorizontall
 }
 
 export function useDesktopLyricsWindowBridge() {
+  const useNativeRenderer = usesNativeDesktopLyrics();
+  let nativeWindowOpen = false;
+  let lifecycleTask = Promise.resolve();
+  let disposed = false;
   const mainWindow = getCurrentWindow();
+  const { showToast } = useToast();
   const {
     showDesktopLyrics,
     parsedLyrics,
@@ -324,6 +339,7 @@ export function useDesktopLyricsWindowBridge() {
       autoHideWhenFullscreen: desktopLyricsSettings.autoHideWhenFullscreen,
       autoHideWhenPaused: desktopLyricsSettings.autoHideWhenPaused,
       showDoubleLine: desktopLyricsSettings.showDoubleLine,
+      overflowMode: desktopLyricsSettings.overflowMode ?? 'scroll',
       enableWordEffect: desktopLyricsSettings.enableWordEffect,
       isLocked: desktopLyricsSettings.isLocked,
       persistLock: desktopLyricsSettings.persistLock,
@@ -364,6 +380,10 @@ export function useDesktopLyricsWindowBridge() {
   let throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
   const emitStateToDesktopLyrics = async (immediate = false) => {
+    if (useNativeRenderer) {
+      if (nativeWindowOpen) await nativeDesktopLyrics.state(createStatePayload());
+      return;
+    }
     const targetWindow = await getDesktopLyricsWindow();
     if (!targetWindow) return;
 
@@ -406,6 +426,10 @@ export function useDesktopLyricsWindowBridge() {
   };
 
   const emitPlaybackToDesktopLyrics = async () => {
+    if (useNativeRenderer) {
+      if (nativeWindowOpen) await nativeDesktopLyrics.playback(createPlaybackPayload());
+      return;
+    }
     const targetWindow = await getDesktopLyricsWindow();
     if (!targetWindow) return;
 
@@ -417,6 +441,10 @@ export function useDesktopLyricsWindowBridge() {
   };
 
   const revealDesktopLyricsSurface = async () => {
+    if (useNativeRenderer) {
+      if (nativeWindowOpen) await nativeDesktopLyrics.reveal();
+      return;
+    }
     const targetWindow = await getDesktopLyricsWindow();
     if (!targetWindow) return;
 
@@ -424,6 +452,7 @@ export function useDesktopLyricsWindowBridge() {
   };
 
   const syncWindowFlags = async () => {
+    if (useNativeRenderer) return; // Native flags are applied atomically with the settings snapshot.
     const targetWindow = await getDesktopLyricsWindow();
     if (!targetWindow) return;
 
@@ -431,6 +460,16 @@ export function useDesktopLyricsWindowBridge() {
   };
 
   const openDesktopLyricsWindow = async () => {
+    if (useNativeRenderer) {
+      await nativeDesktopLyrics.open(createStatePayload(), await resolveDesktopLyricsBounds(
+        desktopLyricsSettings.centerHorizontally,
+      ));
+      nativeWindowOpen = true;
+      // Settings/playback may have changed during native initialization.
+      await emitStateToDesktopLyrics(true);
+      if (!disposed && !isMainWindowClosing && showDesktopLyrics.value) startSyncLoop();
+      return;
+    }
     const targetWindow = await ensureDesktopLyricsWindow(
       desktopLyricsSettings.isAlwaysOnTop,
       desktopLyricsSettings.centerHorizontally,
@@ -505,6 +544,11 @@ export function useDesktopLyricsWindowBridge() {
   };
 
   const destroyDesktopLyricsWindow = async () => {
+    if (useNativeRenderer) {
+      nativeWindowOpen = false;
+      await nativeDesktopLyrics.close();
+      return;
+    }
     const targetWindow = await getDesktopLyricsWindow();
     if (!targetWindow) return;
 
@@ -530,6 +574,7 @@ export function useDesktopLyricsWindowBridge() {
       isMainWindowClosing = true;
       event.preventDefault();
       stopSyncLoop();
+      await lifecycleTask;
       await destroyDesktopLyricsWindow();
       await mainWindow.close();
     }));
@@ -546,6 +591,15 @@ export function useDesktopLyricsWindowBridge() {
     unlisteners.push(await listen(DESKTOP_LYRICS_READY_EVENT, () => {
       desktopLyricsReadyGate.markReady();
     }));
+
+    if (useNativeRenderer) {
+      unlisteners.push(await listen<string>(DESKTOP_LYRICS_ERROR_EVENT, (event) => {
+        logDesktopLyricsBridgeError('render native', event.payload);
+        // Initialization failures are reported by the open() catch below; only
+        // report post-open render failures here, avoiding duplicate notifications.
+        if (nativeWindowOpen) showToast(`原生桌面歌词渲染失败：${event.payload}`, 'error');
+      }));
+    }
 
     unlisteners.push(await listen<DesktopLyricsAction>(DESKTOP_LYRICS_ACTION_EVENT, (event) => {
       void handleAction(event.payload).catch((error) => {
@@ -569,18 +623,31 @@ export function useDesktopLyricsWindowBridge() {
         return;
       }
 
-      stopSyncLoop();
-      await destroyDesktopLyricsWindow();
-      await openDesktopLyricsWindow().catch((error) => {
+      lifecycleTask = lifecycleTask.then(async () => {
+        stopSyncLoop();
+        await destroyDesktopLyricsWindow();
+        if (!disposed && showDesktopLyrics.value) await openDesktopLyricsWindow();
+      }).catch((error) => {
         logDesktopLyricsBridgeError('reopen', error);
         showDesktopLyrics.value = false;
       });
+      await lifecycleTask;
     }));
   });
 
   onUnmounted(() => {
+    disposed = true;
     stopSyncLoop();
+    if (throttleTimer) clearTimeout(throttleTimer);
     unlisteners.splice(0).forEach((unlisten) => unlisten());
+    if (useNativeRenderer) {
+      void lifecycleTask.then(async () => {
+        stopSyncLoop();
+        await destroyDesktopLyricsWindow();
+      }).catch((error) => {
+        logDesktopLyricsBridgeError('dispose', error);
+      });
+    }
   });
 
   watch(showDesktopLyrics, async (visible) => {
@@ -590,21 +657,29 @@ export function useDesktopLyricsWindowBridge() {
       visible,
     );
 
-    if (visible) {
-      try {
-        await openDesktopLyricsWindow();
-      } catch (error) {
-        logDesktopLyricsBridgeError('open', error);
-        stopSyncLoop();
-        desktopLyricsWindowPromise = null;
-        desktopLyricsReadyGate.reset();
-        showDesktopLyrics.value = false;
+    lifecycleTask = lifecycleTask.then(async () => {
+      if (disposed || isMainWindowClosing) return;
+      // Coalesce rapid toggles, so a late open cannot resurrect a closed window.
+      if (visible !== showDesktopLyrics.value) return;
+      if (visible) {
+        try {
+          await openDesktopLyricsWindow();
+        } catch (error) {
+          logDesktopLyricsBridgeError('open', error);
+          showToast(formatDesktopLyricsOpenError(error), 'error');
+          stopSyncLoop();
+          desktopLyricsWindowPromise = null;
+          desktopLyricsReadyGate.reset();
+          await destroyDesktopLyricsWindow().catch(() => undefined);
+          showDesktopLyrics.value = false;
+        }
+        return;
       }
-      return;
-    }
 
-    stopSyncLoop();
-    await destroyDesktopLyricsWindow();
+      stopSyncLoop();
+      await destroyDesktopLyricsWindow();
+    }).catch((error) => logDesktopLyricsBridgeError('change visibility of', error));
+    await lifecycleTask;
   });
 
   watch(
@@ -641,6 +716,7 @@ export function useDesktopLyricsWindowBridge() {
       () => desktopLyricsSettings.autoHideWhenFullscreen,
       () => desktopLyricsSettings.autoHideWhenPaused,
       () => desktopLyricsSettings.showDoubleLine,
+      () => desktopLyricsSettings.overflowMode,
       () => desktopLyricsSettings.enableWordEffect,
       () => desktopLyricsSettings.isLocked,
       () => desktopLyricsSettings.persistLock,

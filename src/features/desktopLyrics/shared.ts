@@ -8,6 +8,7 @@ import type { Song } from '../../types';
 
 export { DESKTOP_LYRICS_WINDOW_LABEL } from '../../windowLabels';
 export const DESKTOP_LYRICS_STATE_EVENT = 'desktop-lyrics:state';
+export const DESKTOP_LYRICS_ERROR_EVENT = 'desktop-lyrics:error';
 export const DESKTOP_LYRICS_PLAYBACK_EVENT = 'desktop-lyrics:playback';
 export const DESKTOP_LYRICS_READY_EVENT = 'desktop-lyrics:ready';
 export const DESKTOP_LYRICS_REQUEST_STATE_EVENT = 'desktop-lyrics:request-state';

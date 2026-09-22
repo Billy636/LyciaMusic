@@ -5,6 +5,7 @@ import {
   createDesktopLyricsPlaybackClockTracker,
   createDesktopLyricsReadyGate,
   createDesktopLyricsWindowOptions,
+  formatDesktopLyricsOpenError,
   useDesktopLyricsWindowBridge,
 } from './useDesktopLyricsWindowBridge';
 import source from './useDesktopLyricsWindowBridge.ts?raw';
@@ -87,11 +88,25 @@ const mocks = vi.hoisted(() => {
     desktopLyricsSettings,
     targetWindow,
     WebviewWindow,
+    usesNative: vi.fn(() => false),
+    showToast: vi.fn(),
+    native: {
+      open: vi.fn().mockResolvedValue(undefined), state: vi.fn().mockResolvedValue(undefined),
+      playback: vi.fn().mockResolvedValue(undefined), reveal: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    },
     patchSettings: vi.fn((patch) => {
       Object.assign(settings, patch);
     }),
   };
 });
+
+vi.mock('../features/desktopLyrics/native', () => ({
+  usesNativeDesktopLyrics: mocks.usesNative,
+  nativeDesktopLyrics: mocks.native,
+}));
+
+vi.mock('./toast', () => ({ useToast: () => ({ showToast: mocks.showToast }) }));
 
 vi.mock('@tauri-apps/api/dpi', () => ({
   PhysicalPosition: class {
@@ -164,6 +179,9 @@ describe('desktop lyrics window bridge', () => {
     mocks.showDesktopLyrics.value = false;
     mocks.settings.showDesktopLyrics = false;
     mocks.patchSettings.mockClear();
+    mocks.showToast.mockClear();
+    mocks.usesNative.mockReturnValue(false);
+    Object.values(mocks.native).forEach((method) => method.mockReset().mockResolvedValue(undefined));
     mocks.targetWindow.once.mockImplementation((event: string, handler: () => void) => {
       if (event === 'tauri://created') {
         queueMicrotask(handler);
@@ -239,6 +257,76 @@ describe('desktop lyrics window bridge', () => {
   });
 
   it('stops desktop lyrics IPC sync and destroys the window when hidden', () => {
-    expect(source).toContain('stopSyncLoop();\n    await destroyDesktopLyricsWindow();');
+    expect(source).toMatch(/stopSyncLoop\(\);\s+await destroyDesktopLyricsWindow\(\);/);
+  });
+
+  it('uses the native Windows renderer without constructing or looking up a WebView', async () => {
+    vi.useFakeTimers();
+    mocks.usesNative.mockReturnValue(true);
+    mocks.WebviewWindow.getByLabel.mockClear();
+    const scope = effectScope();
+    scope.run(() => useDesktopLyricsWindowBridge());
+    mocks.showDesktopLyrics.value = true;
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.native.open).toHaveBeenCalledWith(expect.objectContaining({
+      settings: expect.objectContaining({ showTranslation: true, showDoubleLine: false, overflowMode: 'scroll' }),
+    }), null);
+    expect(mocks.WebviewWindow).not.toHaveBeenCalled();
+    expect(mocks.WebviewWindow.getByLabel).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(mocks.native.playback).toHaveBeenCalledTimes(1);
+    mocks.showDesktopLyrics.value = false;
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.native.close).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(800);
+    expect(mocks.native.playback).toHaveBeenCalledTimes(1);
+    scope.stop();
+  });
+
+  it('serializes a close behind an in-flight native open', async () => {
+    vi.useFakeTimers();
+    mocks.usesNative.mockReturnValue(true);
+    let finishOpen!: () => void;
+    mocks.native.open.mockImplementationOnce(() => new Promise<void>((resolve) => { finishOpen = resolve; }));
+    const scope = effectScope();
+    scope.run(() => useDesktopLyricsWindowBridge());
+    mocks.showDesktopLyrics.value = true;
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(0);
+    mocks.showDesktopLyrics.value = false;
+    await nextTick();
+    expect(mocks.native.close).not.toHaveBeenCalled();
+    finishOpen();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.native.close).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(800);
+    expect(mocks.native.playback).not.toHaveBeenCalled();
+    scope.stop();
+  });
+
+  it('rolls back failed native initialization and does not silently allocate a WebView', async () => {
+    vi.useFakeTimers();
+    mocks.usesNative.mockReturnValue(true);
+    mocks.native.open.mockRejectedValueOnce(new Error('D2D unavailable'));
+    const scope = effectScope();
+    scope.run(() => useDesktopLyricsWindowBridge());
+    mocks.showDesktopLyrics.value = true;
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.showDesktopLyrics.value).toBe(false);
+    expect(mocks.WebviewWindow).not.toHaveBeenCalled();
+    expect(mocks.native.close).toHaveBeenCalled();
+    expect(mocks.showToast).toHaveBeenCalledWith('桌面歌词打开失败：D2D unavailable', 'error');
+    scope.stop();
+  });
+
+  it('preserves native command errors in the visible failure notification', () => {
+    expect(formatDesktopLyricsOpenError('Invalid lyrics state: invalid type: null'))
+      .toBe('桌面歌词打开失败：Invalid lyrics state: invalid type: null');
+    expect(formatDesktopLyricsOpenError(new Error('Command not found')))
+      .toBe('桌面歌词打开失败：Command not found');
+    expect(formatDesktopLyricsOpenError(undefined)).toBe('桌面歌词打开失败：未知错误');
   });
 });
