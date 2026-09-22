@@ -107,9 +107,10 @@ impl SharedVisualizer {
     }
 }
 
+/// Samples the final output for the visualizer. The prefetch source owns the
+/// media clock, since output silence during an underrun is not media progress.
 pub struct TimedSource<S> {
     pub inner: S,
-    pub samples_played: Arc<AtomicU64>,
     pub visualizer: Arc<SharedVisualizer>,
     channel_sum: f32,
     channel_samples: u16,
@@ -120,14 +121,9 @@ impl<S> TimedSource<S>
 where
     S: Source<Item = f32>,
 {
-    pub fn new(
-        inner: S,
-        samples_played: Arc<AtomicU64>,
-        visualizer: Arc<SharedVisualizer>,
-    ) -> Self {
+    pub fn new(inner: S, visualizer: Arc<SharedVisualizer>) -> Self {
         Self {
             inner,
-            samples_played,
             visualizer,
             channel_sum: 0.0,
             channel_samples: 0,
@@ -145,7 +141,6 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         let sample = self.inner.next();
         if let Some(value) = sample {
-            self.samples_played.fetch_add(1, Ordering::Relaxed);
             if self.channel_samples == 0 {
                 self.visualizer_enabled_for_frame = self.visualizer.is_enabled();
             }
@@ -229,7 +224,7 @@ impl SharedProgress {
 mod shared_progress_tests {
     use super::{relative_media_seconds, SharedVisualizer, TimedSource};
     use rodio::buffer::SamplesBuffer;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
     #[test]
@@ -262,15 +257,12 @@ mod shared_progress_tests {
     }
 
     #[test]
-    fn timed_source_keeps_progress_counting_while_visualizer_is_disabled() {
-        let samples_played = Arc::new(AtomicU64::new(0));
+    fn timed_source_preserves_samples_while_visualizer_is_disabled() {
         let visualizer = Arc::new(SharedVisualizer::new());
         let source = SamplesBuffer::new(2, 44_100, vec![0.1_f32, 0.2, 0.3, 0.4]);
-        let output = TimedSource::new(source, samples_played.clone(), visualizer.clone())
-            .collect::<Vec<_>>();
+        let output = TimedSource::new(source, visualizer.clone()).collect::<Vec<_>>();
 
-        assert_eq!(output.len(), 4);
-        assert_eq!(samples_played.load(Ordering::Relaxed), 4);
+        assert_eq!(output, vec![0.1_f32, 0.2, 0.3, 0.4]);
         assert_eq!(visualizer.cursor.load(Ordering::Relaxed), 0);
     }
 }

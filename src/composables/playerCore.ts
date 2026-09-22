@@ -388,6 +388,8 @@ function createPlayerCore() {
     applyLibraryScanBatch,
     flushBufferedLibraryScanBatch,
     handleSeekCompleted: payload => playerPlayback.handleSeekCompleted(payload),
+    handlePlaybackError: payload => playerPlayback.handlePlaybackError(payload),
+    handlePlaybackFinished: payload => playerPlayback.handlePlaybackFinished(payload),
     schedulePersistedState,
     flushPersistedState,
     restorePathBackedState,
@@ -413,6 +415,7 @@ function createPlayerCore() {
     addToHistory,
     loadLyrics,
     handleAutoNext: playbackActions.handleAutoNext,
+    onPlaybackError: message => showToast(message, 'error'),
     resolveSongForPlayback,
     onBeforePlay: (song, options) => {
       playerQueue.handleBeforePlay(song, options);

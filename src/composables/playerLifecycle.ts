@@ -24,6 +24,7 @@ import { useSettingsStore } from '../features/settings/store';
 import { defaultDominantColors, useUiStore } from '../shared/stores/ui';
 import { isRemoteSong } from '../utils/remoteSong';
 import { FIXED_FLOW_PRESET } from '../constants/themeBackground';
+import type { PlaybackErrorPayload, PlaybackFinishedPayload } from './playerPlayback';
 
 interface SeekCompletedPayload {
   request_id: number;
@@ -55,6 +56,8 @@ interface CreatePlayerLifecycleDeps {
   applyLibraryScanBatch: (payload: LibraryScanBatchPayload) => void;
   flushBufferedLibraryScanBatch: () => void;
   handleSeekCompleted: (payload: SeekCompletedPayload) => void;
+  handlePlaybackError: (payload: PlaybackErrorPayload) => void;
+  handlePlaybackFinished: (payload: PlaybackFinishedPayload) => void;
   schedulePersistedState: () => void;
   flushPersistedState: () => void;
   restorePathBackedState: () => Promise<void>;
@@ -175,10 +178,11 @@ export const createPlayerLifecycle = ({
   nextSong,
   prevSong,
   seekTo,
-  handleAutoNext,
   applyLibraryScanBatch,
   flushBufferedLibraryScanBatch,
   handleSeekCompleted,
+  handlePlaybackError,
+  handlePlaybackFinished,
   schedulePersistedState,
   flushPersistedState,
   restorePathBackedState,
@@ -325,17 +329,11 @@ export const createPlayerLifecycle = ({
       listen<SeekCompletedPayload>('seek_completed', event => {
         handleSeekCompleted(event.payload);
       }),
-      listen<{ playbackId: number }>('playback-finished', event => {
-        if (import.meta.env.DEV) {
-          console.log('[playerLifecycle] Received playback-finished event:', event.payload);
-        }
-        if (
-          currentSong.value &&
-          isPlaying.value &&
-          event.payload.playbackId === playbackStore.currentPlaybackId
-        ) {
-          handleAutoNext();
-        }
+      listen<PlaybackErrorPayload>('playback-error', event => {
+        handlePlaybackError(event.payload);
+      }),
+      listen<PlaybackFinishedPayload>('playback-finished', event => {
+        handlePlaybackFinished(event.payload);
       }),
       listen<RemoteLyricsCacheReadyPayload>('remote-lyrics-cache-ready', event => {
         const payload = event.payload;

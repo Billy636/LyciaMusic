@@ -79,6 +79,8 @@ const createLifecycleDeps = (
   applyLibraryScanBatch: vi.fn(),
   flushBufferedLibraryScanBatch: vi.fn(),
   handleSeekCompleted: vi.fn(),
+  handlePlaybackError: vi.fn(),
+  handlePlaybackFinished: vi.fn(),
   schedulePersistedState: vi.fn(),
   flushPersistedState: vi.fn(),
   restorePathBackedState: vi.fn().mockResolvedValue(undefined),
@@ -234,7 +236,7 @@ describe('player lifecycle', () => {
     });
   });
 
-  it('handles playback-finished event with proper guards and playback ID matching', async () => {
+  it('forwards EOF even before the playback ID has been acknowledged', async () => {
     const {
       usePlaybackStore,
       createPlayerLifecycle,
@@ -248,7 +250,7 @@ describe('player lifecycle', () => {
     const playbackStore = usePlaybackStore();
     playbackStore.currentSong = makeSong();
     playbackStore.isPlaying = true;
-    playbackStore.currentPlaybackId = 42;
+    playbackStore.currentPlaybackId = 0;
 
     const deps = createLifecycleDeps();
     createPlayerLifecycle(deps).init();
@@ -260,26 +262,26 @@ describe('player lifecycle', () => {
       }
     };
 
-    // 1. Doesn't trigger if playback ID doesn't match
-    triggerEvent(41);
-    expect(deps.handleAutoNext).not.toHaveBeenCalled();
-
-    // 2. Doesn't trigger if not playing
-    playbackStore.isPlaying = false;
     triggerEvent(42);
+    expect(deps.handlePlaybackFinished).toHaveBeenCalledExactlyOnceWith({ playbackId: 42 });
     expect(deps.handleAutoNext).not.toHaveBeenCalled();
+  });
 
-    // 3. Doesn't trigger if currentSong is missing
-    playbackStore.isPlaying = true;
-    playbackStore.currentSong = null;
-    triggerEvent(42);
+  it('forwards playback errors without treating them as successful EOF', async () => {
+    const { createPlayerLifecycle } = await loadModules();
+    const callbacks = new Map<string, (event: { payload: unknown }) => void>();
+    mocks.listen.mockImplementation((name: string, callback: (event: { payload: unknown }) => void) => {
+      callbacks.set(name, callback);
+      return Promise.resolve(vi.fn());
+    });
+    const deps = createLifecycleDeps();
+    createPlayerLifecycle(deps).init();
+    const payload = { playbackId: 42, message: 'invalid audio' };
+
+    callbacks.get('playback-error')?.({ payload });
+
+    expect(deps.handlePlaybackError).toHaveBeenCalledExactlyOnceWith(payload);
     expect(deps.handleAutoNext).not.toHaveBeenCalled();
-
-    // 4. Triggers when matching, playing, and song exists
-    playbackStore.currentSong = makeSong();
-    playbackStore.isPlaying = true;
-    triggerEvent(42);
-    expect(deps.handleAutoNext).toHaveBeenCalledTimes(1);
   });
 
   it('seeks to the specified time when player:seek event is received', async () => {

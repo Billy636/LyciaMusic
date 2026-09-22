@@ -21,12 +21,22 @@ interface SeekCompletedPayload {
   time: number;
 }
 
+export interface PlaybackErrorPayload {
+  playbackId: number;
+  message: string;
+}
+
+export interface PlaybackFinishedPayload {
+  playbackId: number;
+}
+
 interface CreatePlayerPlaybackDeps {
   getDisplaySongPaths?: () => string[];
   getDisplaySongList?: () => Song[];
   addToHistory: (song: Song) => void | Promise<void>;
   loadLyrics: () => void | Promise<void>;
   handleAutoNext: () => void;
+  onPlaybackError?: (message: string) => void;
   onBeforePlay?: (song: Song, options: PlaySongOptions) => void;
   resolveSongForPlayback?: (song: Song) => Promise<Song>;
 }
@@ -51,6 +61,7 @@ export const createPlayerPlayback = ({
   addToHistory,
   loadLyrics,
   handleAutoNext,
+  onPlaybackError,
   onBeforePlay,
   resolveSongForPlayback,
 }: CreatePlayerPlaybackDeps) => {
@@ -87,6 +98,12 @@ export const createPlayerPlayback = ({
     tempQueuePaths,
   } = storeToRefs(playbackStore);
   const { showPlayerDetail } = storeToRefs(uiStore);
+  let runtimeGeneration = 0;
+  let pendingPlayRequest: number | null = null;
+  let failedPlaybackId: number | null = null;
+  let finishedPlaybackId: number | null = null;
+  const pendingPlaybackErrors = new Map<number, PlaybackErrorPayload>();
+  const pendingPlaybackFinished = new Set<number>();
 
   const buildQueueWithInsertedPath = (songPath: string, previousPath: string | null, queue: string[]) => {
     if (previousPath === songPath) {
@@ -175,6 +192,7 @@ export const createPlayerPlayback = ({
   };
 
   const stopPlaybackRuntime = () => {
+    runtimeGeneration += 1;
     if (progressTimerId !== null) {
       clearTimeout(progressTimerId);
       progressTimerId = null;
@@ -193,6 +211,7 @@ export const createPlayerPlayback = ({
 
   const startPlaybackRuntime = () => {
     stopPlaybackRuntime();
+    const generation = runtimeGeneration;
     reanchorPlaybackClock(currentTime.value);
 
     const scheduleUpdate = (update: () => void) => {
@@ -203,26 +222,24 @@ export const createPlayerPlayback = ({
     };
 
     const update = () => {
-      if (!currentSong.value || !isPlaying.value) return;
+      if (generation !== runtimeGeneration || !currentSong.value || !isPlaying.value) return;
 
       const now = performance.now();
       const delta = (now - playbackAnchorTime) / 1000.0;
       currentTime.value = playbackStartOffset + delta;
 
-      if (currentSong.value.duration > 0 && currentTime.value >= currentSong.value.duration) {
-        handleAutoNext();
-        return;
-      }
-
+      // Only the backend's playback-finished event can end a track. Wall time
+      // keeps moving during an underrun, and imported duration can be too short.
       scheduleUpdate(update);
     };
 
     scheduleUpdate(update);
     syncIntervalId = setInterval(async () => {
-      if (!isPlaying.value || isSeeking) return;
+      if (generation !== runtimeGeneration || !isPlaying.value || isSeeking) return;
 
       try {
         const rawTime = await playbackApi.getPlaybackProgress();
+        if (generation !== runtimeGeneration || !isPlaying.value || isSeeking) return;
         const offsetSec = (currentSong.value?.cue_start_offset || 0) / 1000;
         const adjustedTime = Math.max(0, rawTime - offsetSec);
         if (Math.abs(adjustedTime - currentTime.value) > 0.05) {
@@ -259,6 +276,40 @@ export const createPlayerPlayback = ({
     sessionStartTime = null;
   };
 
+  const stopAfterPlaybackError = (message: string) => {
+    flushPlaySession();
+    isPlaying.value = false;
+    isSongLoaded.value = false;
+    isSeeking = false;
+    latestSeekRequestId += 1;
+    stopPlaybackRuntime();
+    onPlaybackError?.(`播放失败：${message}`);
+  };
+
+  const handlePlaybackError = (payload: PlaybackErrorPayload) => {
+    if (!currentSong.value || payload.playbackId <= 0) return;
+    if (payload.playbackId === currentPlaybackId.value) {
+      if (failedPlaybackId === payload.playbackId) return;
+      failedPlaybackId = payload.playbackId;
+      stopAfterPlaybackError(payload.message);
+    } else if (pendingPlayRequest === playRequestId) {
+      // The audio worker may fail before playAudio's IPC response delivers its
+      // ID. Retain the event until that response lets us reject stale attempts.
+      pendingPlaybackErrors.set(payload.playbackId, payload);
+    }
+  };
+
+  const handlePlaybackFinished = (payload: PlaybackFinishedPayload) => {
+    if (!currentSong.value || payload.playbackId <= 0) return;
+    if (payload.playbackId === currentPlaybackId.value) {
+      if (!isPlaying.value || finishedPlaybackId === payload.playbackId) return;
+      finishedPlaybackId = payload.playbackId;
+      handleAutoNext();
+    } else if (pendingPlayRequest === playRequestId) {
+      pendingPlaybackFinished.add(payload.playbackId);
+    }
+  };
+
   const playSong = async (song: Song, options: PlaySongOptions = {}) => {
     const requestId = ++playRequestId;
     const resolvedSong = resolveSongForPlayback
@@ -271,6 +322,13 @@ export const createPlayerPlayback = ({
     const previousSong = currentSong.value;
 
     currentPlaybackId.value = 0;
+    pendingPlayRequest = null;
+    pendingPlaybackErrors.clear();
+    pendingPlaybackFinished.clear();
+    failedPlaybackId = null;
+    finishedPlaybackId = null;
+    isSeeking = false;
+    latestSeekRequestId += 1;
     flushPlaySession();
     onBeforePlay?.(song, options);
 
@@ -365,6 +423,7 @@ export const createPlayerPlayback = ({
     const startOffsetMs = cueStartOffset + Math.round(resumeTime * 1000);
 
     try {
+      pendingPlayRequest = requestId;
       const pId = await playbackApi.playAudio({
         path: audioFilePath,
         title: getSmtcTitle(song),
@@ -384,7 +443,20 @@ export const createPlayerPlayback = ({
       if (requestId !== playRequestId || currentSong.value?.path !== song.path) return;
 
       currentPlaybackId.value = pId;
+      pendingPlayRequest = null;
+      const pendingError = pendingPlaybackErrors.get(pId);
+      const pendingFinished = pendingPlaybackFinished.has(pId);
+      pendingPlaybackErrors.clear();
+      pendingPlaybackFinished.clear();
+      if (pendingError) {
+        handlePlaybackError(pendingError);
+        return;
+      }
       isSongLoaded.value = true;
+      if (pendingFinished) {
+        handlePlaybackFinished({ playbackId: pId });
+        return;
+      }
       sessionStartTime = Date.now();
       loadLyrics();
       startPlaybackRuntime();
@@ -406,13 +478,13 @@ export const createPlayerPlayback = ({
           }
         })
         .catch(() => {});
-    } catch {
+    } catch (error) {
       if (requestId !== playRequestId || currentSong.value?.path !== song.path) return;
 
-      isPlaying.value = false;
-      isSongLoaded.value = false;
-      sessionStartTime = null;
-      stopPlaybackRuntime();
+      pendingPlayRequest = null;
+      pendingPlaybackErrors.clear();
+      pendingPlaybackFinished.clear();
+      stopAfterPlaybackError(String(error));
     }
   };
 
@@ -423,8 +495,8 @@ export const createPlayerPlayback = ({
     }
 
     isPlaying.value = false;
-    await playbackApi.pauseAudio();
     stopPlaybackRuntime();
+    await playbackApi.pauseAudio();
   };
 
   const togglePlay = async () => {
@@ -447,8 +519,12 @@ export const createPlayerPlayback = ({
         startTime: currentTime.value,
         preserveQueue: true,
       });
+      return;
     } else {
+      const requestId = playRequestId;
+      const playbackId = currentPlaybackId.value;
       await playbackApi.resumeAudio();
+      if (requestId !== playRequestId || playbackId !== currentPlaybackId.value || !isSongLoaded.value) return;
       sessionStartTime = Date.now();
     }
 
@@ -458,6 +534,7 @@ export const createPlayerPlayback = ({
 
   const seekTo = async (newTime: number) => {
     if (!currentSong.value) return;
+    finishedPlaybackId = null;
 
     if (isPlaying.value && sessionStartTime) {
       accumulatedTime += (Date.now() - sessionStartTime) / 1000;
@@ -469,6 +546,7 @@ export const createPlayerPlayback = ({
     const trackDuration = currentSong.value.duration;
     const targetTime = Math.max(0, Math.min(newTime, trackDuration));
     const requestId = ++latestSeekRequestId;
+    const playbackRequestId = playRequestId;
     reanchorPlaybackClock(targetTime);
 
     try {
@@ -478,24 +556,31 @@ export const createPlayerPlayback = ({
         isPlaying: isPlaying.value,
         requestId,
       });
+      if (requestId !== latestSeekRequestId || playbackRequestId !== playRequestId) return;
       reanchorPlaybackClock(targetTime);
       if (isPlaying.value) {
         startPlaybackRuntime();
       }
     } catch (error) {
-      isSeeking = false;
-      if (isPlaying.value) {
-        startPlaybackRuntime();
+      if (requestId === latestSeekRequestId && playbackRequestId === playRequestId) {
+        isSeeking = false;
+        if (isPlaying.value) {
+          startPlaybackRuntime();
+        }
       }
       throw error;
     }
   };
 
   const playAt = async (time: number) => {
+    const playbackRequestId = playRequestId;
+    const seekRequestId = latestSeekRequestId + 1;
+    const isCurrentRequest = () =>
+      playbackRequestId === playRequestId && seekRequestId === latestSeekRequestId;
     await seekTo(time);
-    if (!isPlaying.value) {
+    if (isCurrentRequest() && !isPlaying.value) {
       setTimeout(async () => {
-        if (!isPlaying.value) {
+        if (isCurrentRequest() && !isPlaying.value) {
           await togglePlay();
         }
       }, 150);
@@ -527,6 +612,9 @@ export const createPlayerPlayback = ({
 
   const dispose = () => {
     stopPlaybackRuntime();
+    pendingPlayRequest = null;
+    pendingPlaybackErrors.clear();
+    pendingPlaybackFinished.clear();
     stopPowerModeWatcher();
   };
 
@@ -546,6 +634,8 @@ export const createPlayerPlayback = ({
     handleSeek,
     stepSeek,
     handleSeekCompleted,
+    handlePlaybackError,
+    handlePlaybackFinished,
     stopPlaybackRuntime,
     dispose,
   };

@@ -112,6 +112,10 @@ pub async fn play_audio(
         .cue_start_offset_ms
         .store(cue_offset_ms, Ordering::Relaxed);
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
+    // Keep the initial SMTC update ordered before the worker's error update.
+    // A decoder can fail as soon as Play is sent; it must not have its Stopped
+    // state overwritten by the Playing initialization below.
+    let mut controls_guard = state.controls.lock().ok();
     tx.send(AudioCommand::Play {
         source,
         output_mode: selected_output_mode,
@@ -123,7 +127,7 @@ pub async fn play_audio(
     })
     .map_err(|e| e.to_string())?;
 
-    if let Ok(mut controls) = state.controls.lock() {
+    if let Some(controls) = controls_guard.as_mut() {
         if let Some(mc) = controls.as_mut() {
             let _ = mc.set_metadata(MediaMetadata {
                 title: Some(&title),

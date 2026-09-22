@@ -143,7 +143,6 @@ impl Drop for WasapiExclusivePlayback {
 
 struct ExclusiveSource {
     source: Box<dyn Source<Item = f32> + Send>,
-    progress: Arc<SharedProgress>,
     visualizer: Arc<SharedVisualizer>,
     channels: u16,
     channel_sum: f32,
@@ -198,7 +197,7 @@ impl ExclusiveSource {
         progress.visualizer.reset();
 
         let (normalized, normalizer_handle) = crate::player::loudness::VolumeNormalizer::new(
-            prefetch_source,
+            prefetch_source.with_progress(progress.samples_played.clone()),
             volume_balance_gain,
             100, // ramp 100ms
         );
@@ -210,7 +209,6 @@ impl ExclusiveSource {
             Self {
                 source: Box::new(clip_source),
                 visualizer: progress.visualizer.clone(),
-                progress,
                 channels,
                 channel_sum: 0.0,
                 channel_samples: 0,
@@ -235,7 +233,6 @@ impl ExclusiveSource {
             for _ in 0..self.channels {
                 let sample = match self.source.next() {
                     Some(sample) => {
-                        self.progress.samples_played.fetch_add(1, Ordering::Relaxed);
                         if self.channel_samples == 0 {
                             self.visualizer_enabled_for_frame = self.visualizer.is_enabled();
                         }
@@ -528,6 +525,48 @@ fn run_exclusive_playback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicU64;
+
+    #[test]
+    fn exclusive_output_counts_media_only_once_and_excludes_underrun_silence() {
+        let (producer, prefetch, eof) = crate::player::decoder_thread::test_prefetch_source();
+        // Preserve an existing seek/CUE offset while the output is starved.
+        let samples_played = Arc::new(AtomicU64::new(88_200));
+        let visualizer = Arc::new(SharedVisualizer::new());
+        let (source, normalizer_handle) = crate::player::loudness::VolumeNormalizer::new(
+            prefetch.with_progress(samples_played.clone()),
+            1.0,
+            100,
+        );
+        let mut source = ExclusiveSource {
+            source: Box::new(source),
+            visualizer,
+            channels: 2,
+            channel_sum: 0.0,
+            channel_samples: 0,
+            visualizer_enabled_for_frame: false,
+            normalizer_handle,
+        };
+        let mut output = Vec::new();
+
+        assert!(!source.read_frames_into(3, ExclusiveSampleFormat::Float32, &mut output));
+        assert_eq!(output, vec![0; 3 * 2 * 4]);
+        assert_eq!(samples_played.load(Ordering::Relaxed), 88_200);
+
+        // The last frame is real, silent PCM and must still advance the clock.
+        assert_eq!(producer.push_slice(&[0.25, -0.5, 0.0, 0.0]), 4);
+        eof.store(true, Ordering::Release);
+        assert!(!source.read_frames_into(2, ExclusiveSampleFormat::Float32, &mut output));
+        let samples: Vec<f32> = output
+            .chunks_exact(4)
+            .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect();
+        assert_eq!(samples, vec![0.25, -0.5, 0.0, 0.0]);
+        assert_eq!(samples_played.load(Ordering::Relaxed), 88_204);
+
+        assert!(source.read_frames_into(1, ExclusiveSampleFormat::Float32, &mut output));
+        assert_eq!(samples_played.load(Ordering::Relaxed), 88_204);
+    }
 
     #[test]
     fn int32_valid24_samples_are_left_aligned_in_32_bit_container() {

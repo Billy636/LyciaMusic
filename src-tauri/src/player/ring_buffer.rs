@@ -150,6 +150,7 @@ impl<T: Copy + Default + Send + 'static> SpscConsumer<T> {
         self.available_read() == 0
     }
 
+    #[cfg(test)]
     #[inline]
     pub fn pop(&self) -> Option<T> {
         let tail = self.ring.tail.0.load(Ordering::Relaxed);

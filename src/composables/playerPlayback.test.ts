@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
 const loadCoverMock = vi.fn().mockResolvedValue('');
@@ -68,6 +68,8 @@ describe('player playback domain', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    vi.mocked(playbackApi.playAudio).mockResolvedValue(1);
+    vi.mocked(playbackApi.getPlaybackProgress).mockResolvedValue(0);
     loadCoverMock.mockResolvedValue('');
     loadCoverPathMock.mockResolvedValue('');
     loadFullCoverPathMock.mockResolvedValue('');
@@ -86,6 +88,287 @@ describe('player playback domain', () => {
       windowMinimized: false,
       miniMode: false,
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('stops a failed playback attempt and ignores an in-flight progress response', async () => {
+    vi.useFakeTimers();
+    const playbackStore = usePlaybackStore();
+    const onPlaybackError = vi.fn();
+    const handleAutoNext = vi.fn();
+    let resolveProgress!: (time: number) => void;
+    vi.mocked(playbackApi.playAudio).mockResolvedValueOnce(42);
+    vi.mocked(playbackApi.getPlaybackProgress).mockReturnValueOnce(new Promise(resolve => {
+      resolveProgress = resolve;
+    }));
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(),
+      loadLyrics: vi.fn(),
+      handleAutoNext,
+      onPlaybackError,
+    });
+    await playerPlayback.playSong(makeSong());
+    await vi.advanceTimersByTimeAsync(1000);
+
+    playerPlayback.handlePlaybackError({ playbackId: 41, message: 'old track' });
+    expect(playbackStore.isPlaying).toBe(true);
+    playerPlayback.handlePlaybackError({ playbackId: 42, message: 'invalid audio' });
+    const failedAt = playbackStore.currentTime;
+    expect(playbackStore.isPlaying).toBe(false);
+    expect(playbackStore.isSongLoaded).toBe(false);
+    expect(onPlaybackError).toHaveBeenCalledWith('播放失败：invalid audio');
+    expect(vi.getTimerCount()).toBe(0);
+
+    resolveProgress(99);
+    await Promise.resolve();
+    expect(playbackStore.currentTime).toBe(failedAt);
+    playerPlayback.handlePlaybackError({ playbackId: 42, message: 'duplicate' });
+    expect(onPlaybackError).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(200_000);
+    expect(handleAutoNext).not.toHaveBeenCalled();
+    playerPlayback.dispose();
+  });
+
+  it('retains an error received before playAudio returns its playback ID', async () => {
+    vi.useFakeTimers();
+    const playbackStore = usePlaybackStore();
+    const onPlaybackError = vi.fn();
+    const loadLyrics = vi.fn();
+    let resolvePlay!: (id: number) => void;
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise(resolve => {
+      resolvePlay = resolve;
+    }));
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(), loadLyrics, handleAutoNext: vi.fn(), onPlaybackError,
+    });
+    const playing = playerPlayback.playSong(makeSong());
+    playerPlayback.handlePlaybackError({ playbackId: 41, message: 'old track' });
+    playerPlayback.handlePlaybackError({ playbackId: 42, message: 'decode failed' });
+    resolvePlay(42);
+    await playing;
+
+    expect(playbackStore.currentPlaybackId).toBe(42);
+    expect(playbackStore.isPlaying).toBe(false);
+    expect(playbackStore.isSongLoaded).toBe(false);
+    expect(loadLyrics).not.toHaveBeenCalled();
+    expect(onPlaybackError).toHaveBeenCalledExactlyOnceWith('播放失败：decode failed');
+    expect(vi.getTimerCount()).toBe(0);
+    playerPlayback.dispose();
+  });
+
+  it('ignores a buffered error belonging to the previous playback attempt', async () => {
+    const playbackStore = usePlaybackStore();
+    const onPlaybackError = vi.fn();
+    let resolvePlay!: (id: number) => void;
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise(resolve => {
+      resolvePlay = resolve;
+    }));
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(), loadLyrics: vi.fn(), handleAutoNext: vi.fn(), onPlaybackError,
+    });
+    const playing = playerPlayback.playSong(makeSong());
+    playerPlayback.handlePlaybackError({ playbackId: 41, message: 'old track' });
+    resolvePlay(42);
+    await playing;
+
+    expect(playbackStore.isPlaying).toBe(true);
+    expect(playbackStore.isSongLoaded).toBe(true);
+    expect(onPlaybackError).not.toHaveBeenCalled();
+    playerPlayback.dispose();
+  });
+
+  it('does not restart a failed unloaded song after togglePlay awaits its request', async () => {
+    vi.useFakeTimers();
+    const playbackStore = usePlaybackStore();
+    playbackStore.currentSong = makeSong();
+    let resolvePlay!: (id: number) => void;
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise(resolve => {
+      resolvePlay = resolve;
+    }));
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(), loadLyrics: vi.fn(), handleAutoNext: vi.fn(),
+    });
+    const toggling = playerPlayback.togglePlay();
+    playerPlayback.handlePlaybackError({ playbackId: 42, message: 'decode failed' });
+    resolvePlay(42);
+    await toggling;
+
+    expect(playbackStore.isPlaying).toBe(false);
+    expect(playbackStore.isSongLoaded).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    playerPlayback.dispose();
+  });
+
+  it('does not restart seek timers or apply stale seek completion after a playback error', async () => {
+    vi.useFakeTimers();
+    const playbackStore = usePlaybackStore();
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(), loadLyrics: vi.fn(), handleAutoNext: vi.fn(),
+    });
+    vi.mocked(playbackApi.playAudio).mockResolvedValueOnce(42);
+    await playerPlayback.playSong(makeSong());
+    let resolveSeek!: () => void;
+    vi.mocked(playbackApi.seekAudio).mockReturnValueOnce(new Promise(resolve => {
+      resolveSeek = resolve;
+    }));
+    const seeking = playerPlayback.seekTo(50);
+    const seekCalls = vi.mocked(playbackApi.seekAudio).mock.calls;
+    const seekRequestId = seekCalls[seekCalls.length - 1][0].requestId;
+    playerPlayback.handlePlaybackError({ playbackId: 42, message: 'seek failed' });
+    resolveSeek();
+    await seeking;
+    playerPlayback.handleSeekCompleted({ request_id: seekRequestId, time: 99 });
+
+    expect(playbackStore.isPlaying).toBe(false);
+    expect(playbackStore.isSongLoaded).toBe(false);
+    expect(playbackStore.currentTime).toBe(50);
+    expect(vi.getTimerCount()).toBe(0);
+    playerPlayback.dispose();
+  });
+
+  it('does not apply an old progress response after switching songs', async () => {
+    vi.useFakeTimers();
+    const playbackStore = usePlaybackStore();
+    let resolveProgress!: (time: number) => void;
+    vi.mocked(playbackApi.getPlaybackProgress).mockReturnValueOnce(new Promise(resolve => {
+      resolveProgress = resolve;
+    }));
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(), loadLyrics: vi.fn(), handleAutoNext: vi.fn(),
+    });
+    await playerPlayback.playSong(makeSong({ path: '/old.flac' }));
+    await vi.advanceTimersByTimeAsync(1000);
+    await playerPlayback.playSong(makeSong({ path: '/new.flac' }), { startTime: 25 });
+    resolveProgress(99);
+    await Promise.resolve();
+
+    expect(playbackStore.currentTime).toBe(25);
+    expect(playbackStore.isPlaying).toBe(true);
+    playerPlayback.dispose();
+  });
+
+  it.each(['before seek acknowledgment', 'during the delayed resume'])('does not retry playAt after an error %s', async (timing) => {
+    vi.useFakeTimers();
+    const playbackStore = usePlaybackStore();
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(), loadLyrics: vi.fn(), handleAutoNext: vi.fn(),
+    });
+    vi.mocked(playbackApi.playAudio).mockResolvedValueOnce(42);
+    await playerPlayback.playSong(makeSong());
+    await playerPlayback.pauseSong();
+    let resolveSeek!: () => void;
+    vi.mocked(playbackApi.seekAudio).mockReturnValueOnce(new Promise(resolve => {
+      resolveSeek = resolve;
+    }));
+    const playingAt = playerPlayback.playAt(50);
+    if (timing === 'before seek acknowledgment') {
+      playerPlayback.handlePlaybackError({ playbackId: 42, message: 'seek failed' });
+    }
+    resolveSeek();
+    await playingAt;
+    if (timing === 'during the delayed resume') {
+      playerPlayback.handlePlaybackError({ playbackId: 42, message: 'seek failed' });
+    }
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(playbackStore.isPlaying).toBe(false);
+    expect(playbackStore.isSongLoaded).toBe(false);
+    expect(playbackApi.playAudio).toHaveBeenCalledTimes(1);
+    expect(playbackApi.resumeAudio).not.toHaveBeenCalled();
+    playerPlayback.dispose();
+  });
+
+  it.each([
+    ['a near-end decoder stall', 0.8],
+    ['metadata shorter than the decoded audio', 3],
+  ])('waits for backend EOF during %s', async (_label, backendProgress) => {
+    vi.useFakeTimers();
+    const playbackStore = usePlaybackStore();
+    const handleAutoNext = vi.fn();
+    vi.mocked(playbackApi.getPlaybackProgress).mockResolvedValue(backendProgress);
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(), loadLyrics: vi.fn(), handleAutoNext,
+    });
+    await playerPlayback.playSong(makeSong({ duration: 1 }), { startTime: 0.8 });
+    await vi.advanceTimersByTimeAsync(2500);
+
+    expect(playbackStore.isPlaying).toBe(true);
+    expect(handleAutoNext).not.toHaveBeenCalled();
+    expect(playbackApi.getPlaybackProgress).toHaveBeenCalledTimes(2);
+    playerPlayback.dispose();
+  });
+
+  it('advances only for a matching EOF while a song is playing', async () => {
+    const playbackStore = usePlaybackStore();
+    const handleAutoNext = vi.fn();
+    vi.mocked(playbackApi.playAudio).mockResolvedValueOnce(42);
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(), loadLyrics: vi.fn(), handleAutoNext,
+    });
+    const song = makeSong();
+    await playerPlayback.playSong(song);
+    playerPlayback.handlePlaybackFinished({ playbackId: 41 });
+    playbackStore.isPlaying = false;
+    playerPlayback.handlePlaybackFinished({ playbackId: 42 });
+    playbackStore.isPlaying = true;
+    playbackStore.currentSong = null;
+    playerPlayback.handlePlaybackFinished({ playbackId: 42 });
+    expect(handleAutoNext).not.toHaveBeenCalled();
+
+    playbackStore.currentSong = song;
+    playerPlayback.handlePlaybackFinished({ playbackId: 42 });
+    playerPlayback.handlePlaybackFinished({ playbackId: 42 });
+    expect(handleAutoNext).toHaveBeenCalledTimes(1);
+    playerPlayback.dispose();
+  });
+
+  it.each([
+    ['the current attempt', 42, 1],
+    ['a stale attempt', 41, 0],
+  ])('retains early EOF for %s until the playback ID is known', async (_label, eventId, expectedAdvances) => {
+    const playbackStore = usePlaybackStore();
+    const handleAutoNext = vi.fn();
+    let resolvePlay!: (id: number) => void;
+    vi.mocked(playbackApi.playAudio).mockReturnValueOnce(new Promise(resolve => {
+      resolvePlay = resolve;
+    }));
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(), loadLyrics: vi.fn(), handleAutoNext,
+    });
+    const playing = playerPlayback.playSong(makeSong({ duration: 0.01 }));
+    playerPlayback.handlePlaybackFinished({ playbackId: eventId });
+    expect(handleAutoNext).not.toHaveBeenCalled();
+    resolvePlay(42);
+    await playing;
+
+    expect(playbackStore.currentPlaybackId).toBe(42);
+    expect(handleAutoNext).toHaveBeenCalledTimes(expectedAdvances);
+    playerPlayback.dispose();
+  });
+
+  it('accepts another real EOF after seeking and resuming the same playback ID', async () => {
+    const playbackStore = usePlaybackStore();
+    const handleAutoNext = vi.fn();
+    vi.mocked(playbackApi.playAudio).mockResolvedValueOnce(42);
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(), loadLyrics: vi.fn(), handleAutoNext,
+    });
+    await playerPlayback.playSong(makeSong());
+    playerPlayback.handlePlaybackFinished({ playbackId: 42 });
+    expect(handleAutoNext).toHaveBeenCalledTimes(1);
+    await playerPlayback.pauseSong();
+    await playerPlayback.seekTo(0);
+    await playerPlayback.togglePlay();
+    expect(playbackStore.currentPlaybackId).toBe(42);
+
+    playerPlayback.handlePlaybackFinished({ playbackId: 42 });
+    playerPlayback.handlePlaybackFinished({ playbackId: 42 });
+    expect(handleAutoNext).toHaveBeenCalledTimes(2);
+    playerPlayback.dispose();
   });
 
   it('rebuilds the queue from the display song list order when playback starts', async () => {
