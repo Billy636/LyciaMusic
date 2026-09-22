@@ -429,6 +429,22 @@ describe('settings store: preset CRUD operations', () => {
       expect(store.settings.audio.equalizer.currentPresetId).toBeNull();
     });
 
+    it('preserves the current sound when deleting the active preset', () => {
+      const store = useSettingsStore();
+      store.patchSettings({ audio: { equalizer: {
+        enabled: true,
+        preamp: -3.5,
+        gains: [4, 3, 2, 1.5, -1, -1.5, 0, 1.5, 2.5, 3.5],
+      } } });
+      const preset = store.saveEqualizerPreset('当前音效');
+      const before = JSON.parse(JSON.stringify(store.settings.audio.equalizer));
+
+      store.deleteEqualizerPreset(preset.id);
+
+      expect(store.settings.audio.equalizer).toEqual({ ...before, currentPresetId: null });
+      expect(store.userPresets).toHaveLength(0);
+    });
+
     it('does not clear currentPresetId when deleting a different preset', () => {
       const store = useSettingsStore();
 
@@ -1027,8 +1043,31 @@ describe('EqualizerPanel source code verification', () => {
     expect(source).toContain('settingsStore.loadEqualizerPreset');
   });
 
-  it('handleDeletePresetById delegates to settingsStore.deleteEqualizerPreset', () => {
-    expect(source).toContain('settingsStore.deleteEqualizerPreset');
+  it('opens an in-app confirmation without immediately deleting or loading a preset', () => {
+    const requestHandler = source.slice(source.indexOf('const handleDeletePresetById'), source.indexOf('const confirmDeletePreset'));
+    expect(requestHandler).toContain('presetToDelete.value = { id: preset.id, name: preset.name }');
+    expect(requestHandler).not.toContain('deleteEqualizerPreset(');
+    expect(requestHandler).not.toContain('loadEqualizerPreset(');
+    expect(source).not.toMatch(/\bconfirm\(/);
+    expect(source).toContain('<ModernModal');
+    expect(source).toContain('confirm-text="删除"');
+    expect(source).toContain('@cancel="presetToDelete = null"');
+    expect(source).toContain('@confirm="confirmDeletePreset"');
+  });
+
+  it('consumes the captured deletion target once and restores focus after deletion', () => {
+    const confirmHandler = source.slice(source.indexOf('const confirmDeletePreset'), source.indexOf('const isBuiltInPresetActive'));
+    expect(confirmHandler).toContain('if (!presetToDelete.value) return');
+    expect(confirmHandler).toContain('const presetId = presetToDelete.value.id');
+    expect(confirmHandler.indexOf('presetToDelete.value = null')).toBeLessThan(confirmHandler.indexOf('settingsStore.deleteEqualizerPreset(presetId)'));
+    expect(confirmHandler).toContain('await nextTick()');
+    expect(confirmHandler).toContain("querySelector<HTMLButtonElement>('button')?.focus()");
+  });
+
+  it('makes the deletion affordance visible to keyboard users and names its target', () => {
+    expect(source).toContain('group-focus-within:opacity-100');
+    expect(source).toContain(':aria-label="`删除预设“${preset.name}”`"');
+    expect(source).toContain('@click.stop="handleDeletePresetById(preset.id)"');
   });
 
   it('handleSavePreset delegates to settingsStore.saveEqualizerPreset', () => {

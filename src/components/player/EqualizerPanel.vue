@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch, onScopeDispose } from 'vue';
+import { computed, nextTick, ref, watch, onScopeDispose } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useSettingsStore } from '../../features/settings/store';
 import { RefreshCw, Plus } from 'lucide-vue-next';
 import type { EqualizerSettings } from '../../types';
 import { playbackApi } from '../../services/tauri/playbackApi';
+import ModernModal from '../common/ModernModal.vue';
 
 // 支持嵌入模式配置，默认 false
 withDefaults(defineProps<{
@@ -54,6 +55,8 @@ watch(
 // 预设管理相关状态
 const showSaveDialog = ref(false);
 const showEditDialog = ref(false);
+const presetToDelete = ref<{ id: string; name: string } | null>(null);
+const presetList = ref<HTMLElement | null>(null);
 const newPresetName = ref('');
 const editPresetName = ref('');
 const editPresetId = ref('');
@@ -88,12 +91,20 @@ const openEditDialogForPreset = (preset: { id: string; name: string }) => {
 };
 
 
-// 通过ID删除特定预设
+// 先记录删除目标，确认前不改变预设或当前音效。
 const handleDeletePresetById = (presetId: string) => {
   const preset = settingsStore.userPresets.find(p => p.id === presetId);
-  if (preset && confirm(`确定要删除预设 "${preset.name}" 吗？`)) {
-    settingsStore.deleteEqualizerPreset(presetId);
-  }
+  if (preset) presetToDelete.value = { id: preset.id, name: preset.name };
+};
+
+const confirmDeletePreset = async () => {
+  if (!presetToDelete.value) return;
+  const presetId = presetToDelete.value.id;
+  presetToDelete.value = null;
+  settingsStore.deleteEqualizerPreset(presetId);
+  await nextTick();
+  // 原删除按钮已移除，将焦点留在预设区域，方便继续操作。
+  presetList.value?.querySelector<HTMLButtonElement>('button')?.focus();
 };
 
 // 判断特定的内置预设是否处于激活高亮状态
@@ -324,7 +335,7 @@ onScopeDispose(() => {
     </div>
 
     <!-- 预设选择区：合并内置预设与用户自定义预设，实现自然流式折行，空间不足时自动折行且不超过边界 -->
-    <div class="mb-5 flex flex-wrap gap-1.5">
+    <div ref="presetList" class="mb-5 flex flex-wrap gap-1.5">
       <!-- 内置预设 -->
       <button
         v-for="preset in PRESETS"
@@ -358,8 +369,9 @@ onScopeDispose(() => {
         <!-- 删除圆形叉叉按钮 -->
         <button
           @click.stop="handleDeletePresetById(preset.id)"
-          class="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[#EC4141] hover:bg-[#d63636] text-white text-[9px] font-bold shadow-sm transition-all duration-150 cursor-pointer"
-          title="删除预设"
+          class="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 flex items-center justify-center w-5 h-5 rounded-full bg-[#EC4141] hover:bg-[#d63636] text-white text-xs font-bold shadow-sm transition-all duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EC4141] focus-visible:ring-offset-2"
+          :title="`删除预设“${preset.name}”`"
+          :aria-label="`删除预设“${preset.name}”`"
         >
           ×
         </button>
@@ -476,6 +488,17 @@ onScopeDispose(() => {
       </button>
     </div>
   </div>
+
+  <ModernModal
+    :visible="presetToDelete !== null"
+    title="删除预设"
+    :content="`确定删除预设“${presetToDelete?.name ?? ''}”吗？删除后无法撤销，当前均衡器音效保持不变。`"
+    type="danger"
+    confirm-text="删除"
+    cancel-text="取消"
+    @confirm="confirmDeletePreset"
+    @cancel="presetToDelete = null"
+  />
   
   <!-- 保存预设对话框 -->
   <div v-if="showSaveDialog" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm" @click.self="showSaveDialog = false">
