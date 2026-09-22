@@ -20,6 +20,7 @@ const { searchIndexBuilding, searchIndexProgress } = useLibrarySearchIndex();
 const rotation = ref(0); // For settings icon animation
 const lastNonSettingsRoute = ref(route.path === '/settings' ? '/' : route.fullPath);
 const isSettingsRoute = computed(() => route.path === '/settings');
+const isPlaylistLibraryRoute = computed(() => route.path === '/playlists');
 const themeToggleTitle = computed(() => (isDarkTheme.value ? '切换浅色' : '切换深色'));
 const searchDraft = ref(searchQuery.value);
 const isSearchDraftDirty = computed(() => searchDraft.value !== searchQuery.value);
@@ -175,7 +176,7 @@ const goBack = () => { router.back(); };
         </svg>
       </button>
 
-      <div class="group relative bg-white/5 dark:bg-white/5 hover:bg-white/10 dark:hover:bg-white/10 focus-within:bg-white/20 dark:focus-within:bg-white/10 focus-within:ring-2 focus-within:ring-[#EC4141]/20 pl-2 pr-3 py-1.5 rounded-full text-sm flex items-center transition-all w-60 ml-2 border border-black/10 dark:border-white/20">
+      <div v-if="!isPlaylistLibraryRoute" class="group relative bg-white/5 dark:bg-white/5 hover:bg-white/10 dark:hover:bg-white/10 focus-within:bg-white/20 dark:focus-within:bg-white/10 focus-within:ring-2 focus-within:ring-[#EC4141]/20 pl-2 pr-3 py-1.5 rounded-full text-sm flex items-center transition-all w-60 ml-2 border border-black/10 dark:border-white/20">
         <button
           type="button"
           class="p-1 mr-1 rounded-full text-gray-900 dark:text-gray-100 group-focus-within:text-[#EC4141] hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"

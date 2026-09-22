@@ -6,6 +6,7 @@ const Favorites = () => import('../views/Favorites.vue');
 const Recent = () => import('../views/Recent.vue');
 const Artists = () => import('../views/Artists.vue');
 const Albums = () => import('../views/Albums.vue');
+const Playlists = () => import('../views/Playlists.vue');
 const Settings = () => import('../views/Settings.vue');
 
 const routes: Array<RouteRecordRaw> = [
@@ -14,6 +15,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: '/recent', name: 'Recent', component: Recent },
   { path: '/artists', name: 'Artists', component: Artists },
   { path: '/albums', name: 'Albums', component: Albums },
+  { path: '/playlists', name: 'Playlists', component: Playlists },
   { path: '/settings', name: 'Settings', component: Settings },
 ];
 

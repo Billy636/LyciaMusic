@@ -24,6 +24,7 @@ defineEmits<{
   (event: 'openAll'): void;
   (event: 'openArtists'): void;
   (event: 'openAlbums'): void;
+  (event: 'openPlaylists'): void;
   (event: 'openFavorites'): void;
   (event: 'openRecent'): void;
   (event: 'openFolder'): void;
@@ -89,6 +90,22 @@ const hoverClasses = 'bg-black/5 dark:bg-white/5 text-black dark:text-white tran
         <span>专辑</span>
       </li>
     </template>
+
+    <li
+      data-nav="playlists"
+      role="button"
+      tabindex="0"
+      :aria-current="props.currentPath === '/playlists' ? 'page' : undefined"
+      @click="$emit('openPlaylists')"
+      @keydown.enter.prevent="$emit('openPlaylists')"
+      @keydown.space.prevent="$emit('openPlaylists')"
+      @mouseenter="handleItemEnter('playlists')"
+      @mouseleave="handleItemLeave()"
+      :class="[baseNavClasses, props.currentPath === '/playlists' ? activeNavClasses : idleClasses, hoveredItem === 'playlists' && props.currentPath !== '/playlists' ? hoverClasses : '']"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h14M4 10h14M4 15h7m5 3V8l5-1v9m-5 2c0 1.1-1.1 2-2.5 2S11 19.1 11 18s1.1-2 2.5-2 2.5.9 2.5 2zm5-2c0 1.1-1.1 2-2.5 2S16 17.1 16 16s1.1-2 2.5-2 2.5.9 2.5 2z" /></svg>
+      <span>歌单</span>
+    </li>
 
     <template v-if="props.sidebar.showFavorites">
       <li

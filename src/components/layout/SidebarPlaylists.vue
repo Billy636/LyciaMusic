@@ -13,6 +13,9 @@ interface DragState {
 interface Props {
   isOpen: boolean;
   playlists: Playlist[];
+  totalCount: number;
+  pinnedIds: string[];
+  activeId?: string;
   selectedPlaylistIds: Set<string>;
   playlistCoverCacheVersion: number;
   getPlaylistCover: (playlistId: string) => string | undefined;
@@ -26,6 +29,7 @@ const props = defineProps<Props>();
 const emit = defineEmits<{
   (event: 'update:isOpen', value: boolean): void;
   (event: 'createPlaylist'): void;
+  (event: 'openAll'): void;
   (event: 'pointerDown', nativeEvent: PointerEvent, index: number, playlist: Playlist): void;
   (event: 'itemPointerMove', nativeEvent: PointerEvent, playlistId: string): void;
   (event: 'playlistClick', nativeEvent: MouseEvent, id: string): void;
@@ -47,16 +51,20 @@ const getPlaylistCover = (playlistId: string) => {
 <template>
   <div class="mt-6">
     <div class="px-4 pr-3 py-2 flex items-center justify-between group">
-      <div class="flex items-center gap-1 cursor-pointer text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors" @click.stop="isOpenModel = !isOpenModel">
+      <button type="button" :aria-expanded="isOpen" aria-controls="sidebar-playlist-shortcuts" class="flex items-center gap-1 cursor-pointer text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors" @click.stop="isOpenModel = !isOpenModel">
         <svg xmlns="http://www.w3.org/2000/svg" :class="['h-3 w-3 transition-transform duration-200', isOpen ? 'rotate-90' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
-        <span class="text-xs font-bold tracking-wide">我的歌单</span>
-        <span class="text-xs text-gray-500 dark:text-gray-400 font-normal ml-0.5">{{ playlists.length }}</span>
-      </div>
-      <button @click.stop="$emit('createPlaylist')" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded p-0.5 transition-colors" title="新建歌单"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></button>
+        <span class="text-xs font-bold tracking-wide">快捷歌单</span>
+      </button>
+      <button type="button" @click.stop="$emit('createPlaylist')" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded p-0.5 transition-colors" title="新建歌单" aria-label="新建歌单"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></button>
     </div>
 
     <Transition name="playlist-list">
-      <ul v-show="isOpen" class="space-y-0.5 mt-1 overflow-hidden">
+      <div v-show="isOpen" id="sidebar-playlist-shortcuts" class="mt-1 overflow-hidden">
+      <div v-if="playlists.length === 0" class="px-4 py-3 text-xs leading-5 text-gray-500 dark:text-gray-400">
+        还没有歌单，点击 + 创建。<br />
+        置顶的歌单会优先显示在这里。
+      </div>
+      <ul v-else class="space-y-0.5">
         <TransitionGroup name="playlist-item">
           <li
             v-for="(list, index) in playlists"
@@ -67,9 +75,10 @@ const getPlaylistCover = (playlistId: string) => {
             @contextmenu="$emit('playlistContextMenu', $event, list)"
             :data-playlist-id="list.id"
             :data-playlist-name="list.name"
+            :aria-current="activeId === list.id ? 'page' : undefined"
             class="playlist-drop-target px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-all duration-300 group relative border-t-2 border-transparent border-b-2 select-none active:scale-[0.98] [touch-action:none]"
             :class="[
-              selectedPlaylistIds.has(list.id) ? 'bg-black/10 dark:bg-white/10 text-black dark:text-white font-medium shadow-sm translate-x-1' : 'hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-300 hover:translate-x-1',
+              selectedPlaylistIds.has(list.id) || activeId === list.id ? 'bg-black/10 dark:bg-white/10 text-black dark:text-white font-medium shadow-sm translate-x-1' : 'hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-300 hover:translate-x-1',
               (dragState.active && dragState.type === 'playlist' && dragState.data?.id === list.id) ? 'opacity-50 bg-gray-100 dark:bg-white/5' : '',
               (dragState.active && dragState.targetPlaylist?.id === list.id && dragState.type === 'song') ? '!bg-red-500/10 !ring-2 !ring-[#EC4141] ring-inset' : '',
               (dragState.type === 'playlist' && dragOverId === list.id && dragPosition === 'top') ? '!border-t-[#EC4141]' : '',
@@ -77,16 +86,23 @@ const getPlaylistCover = (playlistId: string) => {
             ]"
           >
             <div class="w-9 h-9 rounded bg-gray-200/50 border border-gray-100/50 shrink-0 overflow-hidden mr-3 flex items-center justify-center transition-transform duration-300 group-hover:scale-110">
-              <img v-if="getPlaylistCover(list.id)" :src="getPlaylistCover(list.id)" class="w-full h-full object-cover" alt="Cover" />
+              <img v-if="getPlaylistCover(list.id)" :src="getPlaylistCover(list.id)" class="w-full h-full object-cover" :alt="`${list.name}封面`" draggable="false" />
               <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400 dark:text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
             </div>
             <div class="flex-1 min-w-0 flex flex-col justify-center">
-              <span class="text-xs line-clamp-2 break-all leading-tight">{{ list.name }}</span>
+              <span class="text-xs line-clamp-2 break-all leading-tight" :title="list.name">{{ list.name }}</span>
+              <span class="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">{{ list.songPaths.length }} 首</span>
             </div>
+            <svg v-if="pinnedIds.includes(list.id)" xmlns="http://www.w3.org/2000/svg" class="ml-1 h-3 w-3 shrink-0 text-[#EC4141]/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" role="img" aria-label="已置顶"><title>已置顶</title><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 9V4l1-1V2H7v1l1 1v5l-2 3v1h12v-1l-2-3M12 13v9" /></svg>
           </li>
         </TransitionGroup>
       </ul>
+      </div>
     </Transition>
+    <button type="button" class="mx-2 mt-1 flex w-[calc(100%-1rem)] items-center justify-between rounded-md px-3 py-2 text-xs text-gray-500 transition-colors hover:bg-black/5 hover:text-[#EC4141] dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-[#ff8b8b]" @click.stop="$emit('openAll')">
+      <span>查看全部 <span class="tabular-nums">({{ totalCount }})</span></span>
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 5 7 7-7 7" /></svg>
+    </button>
   </div>
 </template>
 
