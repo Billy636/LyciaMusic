@@ -18,7 +18,6 @@ interface UseHomeArtistAlbumsOptions {
   librarySongs: Ref<Song[]>;
   albumSortMode: Ref<'count' | 'name' | 'artist' | 'custom'>;
   albumCustomOrder: Ref<string[]>;
-  preloadCovers: (paths: string[]) => void;
 }
 
 const songHasArtistName = (song: Song, artistName: string) =>
@@ -34,7 +33,6 @@ export function useHomeArtistAlbums({
   librarySongs,
   albumSortMode,
   albumCustomOrder,
-  preloadCovers,
 }: UseHomeArtistAlbumsOptions) {
   const artistAlbumList = ref<ArtistAlbumItem[]>([]);
   let requestId = 0;
@@ -133,14 +131,6 @@ export function useHomeArtistAlbums({
       artistAlbumList.value = sortAlbums(artistAlbumList.value);
     },
     { deep: true },
-  );
-
-  watch(
-    artistAlbumList,
-    albums => {
-      preloadCovers(albums.map(album => album.firstSongPath).filter(Boolean));
-    },
-    { immediate: true },
   );
 
   return {

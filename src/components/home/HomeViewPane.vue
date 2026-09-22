@@ -33,8 +33,6 @@ interface Props {
   localFilterCondition: string;
   selectedAlbumSong: Song | null;
   artistAlbumList: ArtistAlbumItem[];
-  coverCache: Map<string, string>;
-  loadingSet: Set<string>;
   selectedPaths: Set<string>;
   setSongTableRef?: (instance: any | null) => void;
 }
@@ -144,8 +142,6 @@ const songTableMemoryScopeKey = computed(() =>
         :selectedCount="selectedCount"
         :selectedAlbumSong="selectedAlbumSong"
         :artistAlbumList="artistAlbumList"
-        :coverCache="coverCache"
-        :loadingSet="loadingSet"
         :selectedPaths="selectedPaths"
         :setSongTableRef="setSongTableRef"
         @update:isBatchMode="$emit('update:isBatchMode', $event)"

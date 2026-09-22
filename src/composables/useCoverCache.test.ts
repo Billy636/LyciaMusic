@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { isReadonly, watch } from 'vue';
 
 const coreMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -58,6 +59,117 @@ describe('cover cache', () => {
     await expect(request).resolves.toBe('');
     expect(coverCache.getFullCoverUrl(oldPath)).toBe('');
   });
+
+  it('publishes a readonly reset version after old state is cleared', async () => {
+    const path = '/music/pending.flac';
+    const oldCover = createDeferred<string>();
+    const newCover = createDeferred<string>();
+    coreMocks.invoke
+      .mockReturnValueOnce(oldCover.promise)
+      .mockReturnValueOnce(newCover.promise);
+
+    const { useCoverCache } = await import('./useCoverCache');
+    const coverCache = useCoverCache();
+    coverCache.primeCoverPath('/music/cached.flac', '/covers/cached.jpg');
+    const oldRequest = coverCache.loadCover(path);
+    let newRequest: Promise<string | undefined> | undefined;
+    const stop = watch(coverCache.coverCacheResetVersion, () => {
+      expect(coverCache.coverCache.size).toBe(0);
+      expect(coverCache.fullCoverCache.size).toBe(0);
+      expect(coverCache.loadingSet.size).toBe(0);
+      newRequest = coverCache.loadCover(path);
+    }, { flush: 'sync' });
+
+    expect(isReadonly(coverCache.coverCacheResetVersion)).toBe(true);
+    expect(coverCache.coverCacheResetVersion.value).toBe(0);
+    coverCache.clearCoverCaches();
+    stop();
+
+    expect(coverCache.coverCacheResetVersion.value).toBe(1);
+    expect(coreMocks.invoke).toHaveBeenCalledTimes(2);
+    oldCover.resolve('/covers/old.jpg');
+    await expect(oldRequest).resolves.toBe('');
+    expect(coverCache.isCoverLoading(path)).toBe(true);
+    newCover.resolve('/covers/new.jpg');
+    await expect(newRequest).resolves.toBe('asset:///covers/new.jpg');
+    expect(coverCache.peekCoverUrl(path)).toBe('asset:///covers/new.jpg');
+  });
+
+  it.each(['old-first', 'new-first'] as const)(
+    'keeps a replacement thumbnail request valid after reset (%s)',
+    async completionOrder => {
+      const path = '/music/album.flac';
+      const oldCover = createDeferred<string>();
+      const newCover = createDeferred<string>();
+      coreMocks.invoke
+        .mockReturnValueOnce(oldCover.promise)
+        .mockReturnValueOnce(newCover.promise);
+
+      const { useCoverCache } = await import('./useCoverCache');
+      const coverCache = useCoverCache();
+      const oldRequest = coverCache.loadCover(path);
+      coverCache.clearCoverCaches();
+      const newRequest = coverCache.loadCover(path);
+      expect(coreMocks.invoke).toHaveBeenCalledTimes(2);
+
+      if (completionOrder === 'old-first') {
+        oldCover.resolve('/covers/old.jpg');
+        await expect(oldRequest).resolves.toBe('');
+        expect(coverCache.isCoverLoading(path)).toBe(true);
+        const joinedRequest = coverCache.loadCover(path);
+        expect(coreMocks.invoke).toHaveBeenCalledTimes(2);
+        newCover.resolve('/covers/new.jpg');
+        await expect(joinedRequest).resolves.toBe('asset:///covers/new.jpg');
+      } else {
+        newCover.resolve('/covers/new.jpg');
+        await expect(newRequest).resolves.toBe('asset:///covers/new.jpg');
+        oldCover.resolve('/covers/old.jpg');
+        await expect(oldRequest).resolves.toBe('');
+      }
+
+      await expect(newRequest).resolves.toBe('asset:///covers/new.jpg');
+      expect(coverCache.peekCoverUrl(path)).toBe('asset:///covers/new.jpg');
+      expect(coverCache.isCoverLoading(path)).toBe(false);
+    },
+  );
+
+  it.each(['old-first', 'new-first'] as const)(
+    'keeps a replacement full cover valid after retention invalidation (%s)',
+    async completionOrder => {
+      const path = '/music/album.flac';
+      const oldCover = createDeferred<string>();
+      const newCover = createDeferred<string>();
+      coreMocks.invoke
+        .mockReturnValueOnce(oldCover.promise)
+        .mockReturnValueOnce(newCover.promise);
+
+      const { useCoverCache } = await import('./useCoverCache');
+      const coverCache = useCoverCache();
+      const oldRequest = coverCache.loadFullCover(path);
+      coverCache.retainFullCoverPaths([]);
+      const newRequest = coverCache.loadFullCover(path);
+      expect(coreMocks.invoke).toHaveBeenCalledTimes(2);
+
+      if (completionOrder === 'old-first') {
+        oldCover.resolve('/covers/old-full.jpg');
+        await expect(oldRequest).resolves.toBe('');
+        expect(coverCache.isCoverLoading(path, 'full')).toBe(true);
+        const joinedRequest = coverCache.loadFullCover(path);
+        expect(coreMocks.invoke).toHaveBeenCalledTimes(2);
+        newCover.resolve('/covers/new-full.jpg');
+        await expect(joinedRequest).resolves.toBe('asset:///covers/new-full.jpg');
+      } else {
+        newCover.resolve('/covers/new-full.jpg');
+        await expect(newRequest).resolves.toBe('asset:///covers/new-full.jpg');
+        oldCover.resolve('/covers/old-full.jpg');
+        await expect(oldRequest).resolves.toBe('');
+      }
+
+      await expect(newRequest).resolves.toBe('asset:///covers/new-full.jpg');
+      expect(coverCache.getFullCoverUrl(path)).toBe('asset:///covers/new-full.jpg');
+      expect(coverCache.isCoverLoading(path, 'full')).toBe(false);
+    },
+  );
 
   it('runs background full cover preloads one at a time', async () => {
     const firstCover = createDeferred<string>();

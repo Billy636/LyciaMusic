@@ -30,8 +30,6 @@ interface Props {
   selectedCount: number;
   selectedAlbumSong: Song | null;
   artistAlbumList: ArtistAlbumItem[];
-  coverCache: Map<string, string>;
-  loadingSet: Set<string>;
   selectedPaths: Set<string>;
   setSongTableRef?: (instance: any | null) => void;
 }
@@ -126,8 +124,6 @@ const handleTableDragStart = (...args: any[]) => {
         <ArtistAlbumGrid
           v-else-if="localViewMode === 'artist' && artistActiveTab === 'albums'"
           :albums="artistAlbumList"
-          :coverCache="coverCache"
-          :loadingSet="loadingSet"
           @openAlbum="$emit('artistAlbumClick', $event)"
         />
 

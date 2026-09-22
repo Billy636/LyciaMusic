@@ -1,7 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'Artists' });
 
-import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { useRoute, useRouter } from 'vue-router';
 import { artistHeaderCache, artistViewportCoverSnapshotCache } from '../caches/imageCaches';
@@ -9,6 +9,7 @@ import { dragSession } from '../composables/dragState';
 import { useCoverCache } from '../composables/useCoverCache';
 import { useHomeNavigation } from '../composables/useHomeNavigation';
 import { useListScrollMemory } from '../composables/useListScrollMemory';
+import { useVisibleCoverUrls } from '../composables/useVisibleCoverUrls';
 import SortModeIcon from '../components/common/SortModeIcon.vue';
 import { useLibraryBrowse } from '../features/library/useLibraryBrowse';
 import type { ArtistListItem } from '../features/library/playerLibraryViewShared';
@@ -20,17 +21,15 @@ const router = useRouter();
 const route = useRoute();
 const { openHomeArtist } = useHomeNavigation(router);
 const isSearchActive = computed(() => searchQuery.value.trim().length > 0);
-const { coverCache, loadCover, touchCoverPaths, isCoverLoading, preloadPriorityCovers } = useCoverCache();
+const { preloadPriorityCovers } = useCoverCache();
 
 const showSortMenu = ref(false);
 const dragOverName = ref<string | null>(null);
 const containerRef = ref<HTMLElement | null>(null);
 const containerScrollTop = ref(0);
 const containerHeight = ref(720);
-const displayedCoverUrls = reactive(new Map<string, string>());
 let coverObserver: IntersectionObserver | null = null;
 let containerResizeObserver: ResizeObserver | null = null;
-let visibleCoverPaths = new Set<string>();
 const VIEWPORT_SNAPSHOT_KEY = 'artists-current';
 const VIEWPORT_SNAPSHOT_LIMIT = 72;
 const ARTIST_GRID_GAP_Y = 16;
@@ -97,14 +96,6 @@ const handleContainerScroll = (event: Event) => {
   containerScrollTop.value = (event.target as HTMLElement).scrollTop;
 };
 
-const getDisplayedCoverUrl = (path: string | undefined) => {
-  if (!path) {
-    return '';
-  }
-
-  return displayedCoverUrls.get(path) ?? coverCache.get(path) ?? '';
-};
-
 const getArtistAvatarUrl = (artist: ArtistListItem) => {
   if (artist.avatarPath) {
     return convertFileSrc(artist.avatarPath);
@@ -125,11 +116,13 @@ const restoreViewportCoverSnapshot = () => {
     return;
   }
 
-  displayedCoverUrls.clear();
+  const visiblePaths = new Set(visibleArtistCoverPaths.value);
   snapshot
-    .filter(entry => !!entry.path && !!entry.url)
+    .filter(entry => !!entry.path && !!entry.url && visiblePaths.has(entry.path))
     .forEach((entry) => {
-      displayedCoverUrls.set(entry.path, entry.url);
+      if (!displayedCoverUrls.has(entry.path)) {
+        displayedCoverUrls.set(entry.path, entry.url);
+      }
     });
   preloadPriorityCovers(snapshot.map(entry => entry.path));
 };
@@ -176,42 +169,6 @@ const saveViewportCoverSnapshot = () => {
   }
 
   artistViewportCoverSnapshotCache.delete(VIEWPORT_SNAPSHOT_KEY);
-};
-
-restoreViewportCoverSnapshot();
-
-const syncVisibleCoverUrls = (paths: string[]) => {
-  const nextVisiblePaths = new Set(paths.filter(Boolean));
-  visibleCoverPaths = nextVisiblePaths;
-
-  for (const path of Array.from(displayedCoverUrls.keys())) {
-    if (!nextVisiblePaths.has(path)) {
-      displayedCoverUrls.delete(path);
-    }
-  }
-
-  const nextPaths = Array.from(nextVisiblePaths);
-  touchCoverPaths(nextPaths);
-
-  nextPaths.forEach((path) => {
-    const cachedUrl = coverCache.get(path);
-    if (cachedUrl) {
-      displayedCoverUrls.set(path, cachedUrl);
-      return;
-    }
-
-    if (displayedCoverUrls.has(path)) {
-      return;
-    }
-
-    void loadCover(path).then((coverUrl) => {
-      if (!coverUrl || !visibleCoverPaths.has(path)) {
-        return;
-      }
-
-      displayedCoverUrls.set(path, coverUrl);
-    });
-  });
 };
 
 const artistSections = computed(() => {
@@ -408,6 +365,10 @@ const visibleArtistCoverPaths = computed(() => {
     .filter((path): path is string => !!path);
 });
 
+const { displayedCoverUrls, getDisplayedCoverUrl, isCoverLoading } = useVisibleCoverUrls(visibleArtistCoverPaths);
+
+restoreViewportCoverSnapshot();
+
 const initCoverObserver = async () => {
   await nextTick();
 
@@ -453,9 +414,7 @@ useListScrollMemory(scrollMemoryKey, containerRef);
 
 watch(
   [visibleArtistCoverPaths, artistSortMode],
-  ([paths]) => {
-    syncVisibleCoverUrls(paths);
-    preloadPriorityCovers(paths);
+  () => {
     void initCoverObserver();
   },
   { immediate: true, flush: 'post' },
@@ -590,8 +549,6 @@ onUnmounted(() => {
     coverObserver.disconnect();
     coverObserver = null;
   }
-  displayedCoverUrls.clear();
-  visibleCoverPaths = new Set<string>();
 });
 </script>
 

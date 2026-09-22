@@ -3,7 +3,6 @@ import { useRoute, useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import type { Song } from '../types';
 
-import { useCoverCache } from './useCoverCache';
 import { useHomeArtistAlbums } from './useHomeArtistAlbums';
 import { useHomeBatchActions } from './useHomeBatchActions';
 import { useHomeFolderManagement } from './useHomeFolderManagement';
@@ -74,8 +73,6 @@ export function useHomePageModel() {
     removeFromHistory,
     playlists,
   } = useLibraryCollections();
-  const { coverCache, loadingSet, preloadCovers } = useCoverCache();
-
   const isManagementMode = ref(false);
   const songTableRef = ref<any>(null);
   const setSongTableRef = (instance: any | null) => {
@@ -243,7 +240,6 @@ export function useHomePageModel() {
     librarySongs,
     albumSortMode,
     albumCustomOrder,
-    preloadCovers,
   });
 
   const handlePlayAll = async () => {
@@ -334,8 +330,6 @@ export function useHomePageModel() {
     localFilterCondition,
     selectedAlbumSong,
     artistAlbumList,
-    coverCache,
-    loadingSet,
     songTableRef,
     setSongTableRef,
     handlePlayAll,

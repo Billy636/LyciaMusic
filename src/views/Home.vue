@@ -16,8 +16,6 @@
       :localFilterCondition="localFilterCondition"
       :selectedAlbumSong="selectedAlbumSong"
       :artistAlbumList="artistAlbumList"
-      :coverCache="coverCache"
-      :loadingSet="loadingSet"
       :selectedPaths="selectedPaths"
       :setSongTableRef="setSongTableRef"
       @update:isBatchMode="isBatchMode = $event"
@@ -139,8 +137,6 @@ const {
   localFilterCondition,
   selectedAlbumSong,
   artistAlbumList,
-  coverCache,
-  loadingSet,
   setSongTableRef,
   handlePlayAll,
   handleBatchPlay,

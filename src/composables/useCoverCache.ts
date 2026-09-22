@@ -1,4 +1,4 @@
-import { reactive } from 'vue';
+import { reactive, readonly, shallowRef } from 'vue';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { MemoryCache } from '../utils/MemoryCache';
 
@@ -24,6 +24,9 @@ const thumbnailCacheExpiry = new Map<string, number>();
 const fullCoverCacheExpiry = new Map<string, number>();
 const loadingSet = reactive(new Set<string>());
 const inFlightRequests = new Map<string, Promise<string>>();
+const requestTokens = new Map<string, symbol>();
+const coverCacheResetVersion = shallowRef(0);
+const readonlyCoverCacheResetVersion = readonly(coverCacheResetVersion);
 const recentFailureCache = new MemoryCache<string, true>({
   maxEntries: 256,
   ttlMs: FAILURE_RETRY_MS,
@@ -42,7 +45,6 @@ const cacheEpochs: Record<CoverKind, number> = {
   thumbnail: 0,
   full: 0,
 };
-const invalidatedRequestKeys = new Set<string>();
 
 const getCacheForKind = (kind: CoverKind) =>
   kind === 'full' ? fullCoverCache : thumbnailCache;
@@ -284,13 +286,17 @@ const loadCoverInternal = (path: string, kind: CoverKind): Promise<string> => {
     return existingRequest;
   }
   const requestEpoch = getCacheEpoch(kind);
+  const requestToken = Symbol(requestKey);
+  requestTokens.set(requestKey, requestToken);
+  const isCurrentRequest = () => requestEpoch === getCacheEpoch(kind)
+    && requestTokens.get(requestKey) === requestToken;
 
   const request = (async () => {
     loadingSet.add(requestKey);
     try {
       const command = kind === 'full' ? 'get_song_cover' : 'get_song_cover_thumbnail';
       const coverPath = await invoke<string>(command, { path });
-      if (requestEpoch !== getCacheEpoch(kind) || invalidatedRequestKeys.has(requestKey)) {
+      if (!isCurrentRequest()) {
         return '';
       }
       const finalUrl = coverPath ? convertFileSrc(coverPath) : '';
@@ -300,19 +306,26 @@ const loadCoverInternal = (path: string, kind: CoverKind): Promise<string> => {
       }
       return finalUrl;
     } catch {
-      if (requestEpoch !== getCacheEpoch(kind) || invalidatedRequestKeys.has(requestKey)) {
+      if (!isCurrentRequest()) {
         return '';
       }
       recentFailureCache.set(requestKey, true);
       return '';
     } finally {
-      loadingSet.delete(requestKey);
-      inFlightRequests.delete(requestKey);
-      invalidatedRequestKeys.delete(requestKey);
+      // A reset or retention change may already have started a newer request
+      // for this path. Only the owner can release that request's shared state.
+      if (requestTokens.get(requestKey) === requestToken) {
+        requestTokens.delete(requestKey);
+        loadingSet.delete(requestKey);
+        inFlightRequests.delete(requestKey);
+      }
     }
   })();
 
-  inFlightRequests.set(requestKey, request);
+  // invoke can throw synchronously; do not register an already-finished request.
+  if (requestTokens.get(requestKey) === requestToken) {
+    inFlightRequests.set(requestKey, request);
+  }
   return request;
 };
 
@@ -669,7 +682,7 @@ export function useCoverCache() {
         continue;
       }
 
-      invalidatedRequestKeys.add(requestKey);
+      requestTokens.delete(requestKey);
       inFlightRequests.delete(requestKey);
       loadingSet.delete(requestKey);
     }
@@ -714,7 +727,7 @@ export function useCoverCache() {
     loadingSet.clear();
     inFlightRequests.clear();
     recentFailureCache.clear();
-    invalidatedRequestKeys.clear();
+    requestTokens.clear();
     priorityPreloadQueue.length = 0;
     backgroundPreloadQueue.length = 0;
     backgroundFullPreloadQueue.length = 0;
@@ -726,11 +739,15 @@ export function useCoverCache() {
       clearTimeout(cachePruneTimer);
       cachePruneTimer = null;
     }
+    // Notify visible consumers only after every old request/queue is cleared,
+    // so a synchronous reset watcher can safely start fresh requests.
+    coverCacheResetVersion.value += 1;
   };
 
   return {
     coverCache: thumbnailCache,
     fullCoverCache,
+    coverCacheResetVersion: readonlyCoverCacheResetVersion,
     loadingSet,
     peekCoverUrl,
     peekCoverPath,
