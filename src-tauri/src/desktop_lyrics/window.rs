@@ -293,11 +293,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPAR
             let _ = SetWindowPos(
                 hwnd,
                 None,
-                rect.left,
-                rect.top,
+                0,
+                0,
                 rect.right - rect.left,
                 rect.bottom - rect.top,
-                SWP_NOACTIVATE | SWP_NOZORDER,
+                // Accept the new DPI size without letting the suggested monitor
+                // rectangle move an intentionally off-screen window back inside.
+                SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER,
             );
             event(WindowEvent::Bounds);
             LRESULT(0)
@@ -383,7 +385,19 @@ unsafe fn get_bounds(hwnd: HWND) -> WinResult<Bounds> {
     })
 }
 
-unsafe fn clamp_bounds(mut bounds: Bounds, center: bool, snap: bool, scale: f32) -> Bounds {
+fn constrain_bounds_size(mut bounds: Bounds, scale: f32) -> Bounds {
+    // Rendering needs bounded, non-zero dimensions, but desktop lyrics are not
+    // confined to a monitor or its work area. Never normalize the user's x/y.
+    bounds.width = bounds
+        .width
+        .clamp((520. * scale) as i32, (1440. * scale) as i32);
+    bounds.height = bounds
+        .height
+        .clamp((160. * scale) as i32, (1000. * scale) as i32);
+    bounds
+}
+
+unsafe fn center_bounds_horizontally(mut bounds: Bounds) -> Bounds {
     let rect = RECT {
         left: bounds.x,
         top: bounds.y,
@@ -399,41 +413,14 @@ unsafe fn clamp_bounds(mut bounds: Bounds, center: bool, snap: bool, scale: f32)
         return bounds;
     }
     let area = info.rcWork;
-    let margin = (12. * scale) as i32;
-    let max_width = (area.right - area.left - 2 * margin).max(1);
-    let max_height = (area.bottom - area.top - 2 * margin).max(1);
-    bounds.width = bounds.width.clamp(
-        ((520. * scale) as i32).min(max_width),
-        ((1440. * scale) as i32).min(max_width),
-    );
-    bounds.height = bounds
-        .height
-        .clamp(((160. * scale) as i32).min(max_height), max_height);
-    let min_x = area.left + margin;
-    let max_x = area.right - margin - bounds.width;
-    let min_y = area.top + margin;
-    let max_y = area.bottom - margin - bounds.height;
-    bounds.x = bounds.x.clamp(min_x, max_x);
-    bounds.y = bounds.y.clamp(min_y, max_y);
-    if snap {
-        let threshold = (24. * scale) as i32;
-        if (bounds.x - min_x).abs() <= threshold {
-            bounds.x = min_x;
-        }
-        if (bounds.x - max_x).abs() <= threshold {
-            bounds.x = max_x;
-        }
-        if (bounds.y - min_y).abs() <= threshold {
-            bounds.y = min_y;
-        }
-        if (bounds.y - max_y).abs() <= threshold {
-            bounds.y = max_y;
-        }
-    }
-    if center {
-        bounds.x = area.left + (area.right - area.left - bounds.width) / 2;
-    }
+    bounds.x = area.left + (area.right - area.left - bounds.width) / 2;
     bounds
+}
+
+fn horizontal_center_requested(previous: Option<(bool, bool)>, center: bool) -> bool {
+    // Initial settings, topmost changes, dragging and display changes are not
+    // explicit requests to discard a saved/manually chosen horizontal position.
+    previous.is_some_and(|(_, was_centered)| !was_centered && center)
 }
 
 unsafe fn position(hwnd: HWND, bounds: Bounds) -> WinResult<()> {
@@ -446,6 +433,14 @@ unsafe fn position(hwnd: HWND, bounds: Bounds) -> WinResult<()> {
         bounds.height,
         SWP_NOACTIVATE | SWP_NOZORDER,
     )
+}
+
+unsafe fn finish_bounds_change(hwnd: HWND, bounds: Bounds, scale: f32) -> WinResult<Bounds> {
+    let fitted = constrain_bounds_size(bounds, scale);
+    if fitted != bounds {
+        position(hwnd, fitted)?;
+    }
+    Ok(fitted)
 }
 
 unsafe fn run(
@@ -475,12 +470,12 @@ unsafe fn run(
         width: (900. * scale) as i32,
         height: (280. * scale) as i32,
     };
-    let initial = clamp_bounds(
-        bounds.unwrap_or(defaults),
-        bounds.is_none() || state.settings.center_horizontally,
-        false,
-        scale,
-    );
+    let initial = constrain_bounds_size(bounds.unwrap_or(defaults), scale);
+    let initial = if bounds.is_none() {
+        center_bounds_horizontally(initial)
+    } else {
+        initial
+    };
     let hwnd = CreateWindowExW(
         WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         class,
@@ -613,9 +608,7 @@ unsafe fn run(
                     );
                 }
                 WindowEvent::Bounds | WindowEvent::DisplayChanged => {
-                    let fitted =
-                        clamp_bounds(bounds, state.settings.center_horizontally, true, scale);
-                    position(hwnd, fitted)?;
+                    let fitted = finish_bounds_change(hwnd, bounds, scale)?;
                     bounds = fitted;
                     let _ = app.emit_to("main", "desktop-lyrics:bounds", fitted);
                     reveal_until = Instant::now() + Duration::from_millis(1200);
@@ -629,8 +622,8 @@ unsafe fn run(
         );
         let flags_changed = previous_flags != Some(flags);
         if flags_changed {
-            if state.settings.center_horizontally {
-                bounds = clamp_bounds(bounds, true, false, scale);
+            if horizontal_center_requested(previous_flags, state.settings.center_horizontally) {
+                bounds = center_bounds_horizontally(bounds);
                 position(hwnd, bounds)?;
                 let _ = app.emit_to("main", "desktop-lyrics:bounds", bounds);
             }
@@ -769,6 +762,183 @@ unsafe fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn free_positions_are_preserved_when_normalizing_saved_or_finished_bounds() {
+        for (x, y) in [
+            (400, 1000), // Overlaps the taskbar on a typical 1080p screen.
+            (-240, -100),
+            (5000, 3000), // Completely outside the desktop.
+            (8, 8),       // Close to an edge must not snap.
+            (i32::MIN, i32::MAX),
+        ] {
+            let bounds = Bounds {
+                x,
+                y,
+                width: 900,
+                height: 280,
+            };
+            assert_eq!(constrain_bounds_size(bounds, 1.), bounds);
+        }
+    }
+
+    #[test]
+    fn size_limits_do_not_reposition_offscreen_lyrics() {
+        assert_eq!(
+            constrain_bounds_size(
+                Bounds {
+                    x: -600,
+                    y: 4000,
+                    width: 1,
+                    height: 10000
+                },
+                1.
+            ),
+            Bounds {
+                x: -600,
+                y: 4000,
+                width: 520,
+                height: 1000
+            },
+        );
+        assert_eq!(
+            constrain_bounds_size(
+                Bounds {
+                    x: 4000,
+                    y: -600,
+                    width: 4000,
+                    height: 1
+                },
+                2.
+            ),
+            Bounds {
+                x: 4000,
+                y: -600,
+                width: 2880,
+                height: 320
+            },
+        );
+    }
+
+    #[test]
+    fn dragging_can_cross_all_screen_edges_without_a_position_limit() {
+        let drag = Drag {
+            origin: POINT { x: 200, y: 200 },
+            bounds: Bounds {
+                x: 100,
+                y: 100,
+                width: 900,
+                height: 280,
+            },
+            hit: HTCAPTION,
+        };
+        for cursor in [POINT { x: -1000, y: -500 }, POINT { x: 5000, y: 3000 }] {
+            let bounds = drag_bounds(drag, cursor, 1.);
+            assert_eq!(bounds.x, cursor.x - 100);
+            assert_eq!(bounds.y, cursor.y - 100);
+            assert_eq!(constrain_bounds_size(bounds, 1.), bounds);
+        }
+    }
+
+    #[test]
+    fn only_explicitly_enabling_horizontal_center_requests_repositioning() {
+        assert!(!horizontal_center_requested(None, true));
+        assert!(!horizontal_center_requested(None, false));
+        assert!(!horizontal_center_requested(Some((false, true)), true));
+        assert!(!horizontal_center_requested(Some((true, true)), true));
+        assert!(!horizontal_center_requested(Some((true, true)), false));
+        assert!(horizontal_center_requested(Some((false, false)), true));
+    }
+
+    #[test]
+    fn real_hwnd_keeps_taskbar_and_offscreen_positions_after_bounds_and_dpi_events() {
+        unsafe {
+            let module = GetModuleHandleW(None).unwrap();
+            let class = w!("LyciaNativeLyricsFreePositionTest");
+            let wc = WNDCLASSW {
+                lpfnWndProc: Some(wndproc),
+                hInstance: module.into(),
+                lpszClassName: class,
+                ..Default::default()
+            };
+            assert_ne!(RegisterClassW(&wc), 0);
+            HIT.with(|state| state.set(HitState::default()));
+            let window = NativeWindow(
+                CreateWindowExW(
+                    WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                    class,
+                    w!("Hidden lyric free-position test"),
+                    WS_POPUP | WS_THICKFRAME,
+                    100,
+                    100,
+                    900,
+                    280,
+                    None,
+                    None,
+                    Some(module.into()),
+                    None,
+                )
+                .unwrap(),
+            );
+            let hwnd = window.0;
+            let anchor = RECT {
+                left: 100,
+                top: 100,
+                right: 1000,
+                bottom: 380,
+            };
+            let monitor = MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST);
+            let mut info = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            assert!(GetMonitorInfoW(monitor, &mut info).as_bool());
+            for (x, y) in [
+                (info.rcWork.left + 20, info.rcWork.bottom - 40),
+                (info.rcMonitor.left - 400, info.rcMonitor.top - 180),
+                (info.rcMonitor.right + 100, info.rcMonitor.bottom + 100),
+            ] {
+                let requested = Bounds {
+                    x,
+                    y,
+                    width: 900,
+                    height: 280,
+                };
+                position(hwnd, requested).unwrap();
+                for message in [WM_EXITSIZEMOVE, WM_DISPLAYCHANGE] {
+                    SendMessageW(hwnd, message, None, None);
+                    finish_bounds_change(hwnd, get_bounds(hwnd).unwrap(), 1.).unwrap();
+                    assert_eq!(get_bounds(hwnd).unwrap(), requested);
+                }
+            }
+            let before_dpi = get_bounds(hwnd).unwrap();
+            let suggested = RECT {
+                left: info.rcWork.left,
+                top: info.rcWork.top,
+                right: info.rcWork.left + 1000,
+                bottom: info.rcWork.top + 360,
+            };
+            SendMessageW(
+                hwnd,
+                WM_DPICHANGED,
+                Some(WPARAM(144 | (144 << 16))),
+                Some(LPARAM((&suggested as *const RECT) as isize)),
+            );
+            let after_dpi = finish_bounds_change(hwnd, get_bounds(hwnd).unwrap(), 1.).unwrap();
+            assert_eq!((after_dpi.x, after_dpi.y), (before_dpi.x, before_dpi.y));
+            assert_eq!((after_dpi.width, after_dpi.height), (1000, 360));
+            let centered = center_bounds_horizontally(after_dpi);
+            assert_eq!(centered.y, after_dpi.y);
+            assert_eq!(
+                (centered.width, centered.height),
+                (after_dpi.width, after_dpi.height)
+            );
+            EVENTS.with(|events| events.borrow_mut().clear());
+            drop(window);
+            UnregisterClassW(class, Some(module.into())).unwrap();
+        }
+    }
+
     #[test]
     fn locked_lyrics_reveal_unlock_button_without_capturing_body_clicks() {
         // Cursor is over the lyric text, well below the invisible toolbar hotspot.

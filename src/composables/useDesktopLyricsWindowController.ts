@@ -62,11 +62,11 @@ export function useDesktopLyricsWindowController(options: {
 
   const appWindow = getCurrentWindow();
   let isApplyingCenterPosition = false;
-  let centerPositionFallbackTimer: ReturnType<typeof setTimeout> | null = null;
-  let centerPositionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let hasReceivedState = false;
 
   async function forceCenterHorizontally() {
     if (isApplyingCenterPosition) return;
+    isApplyingCenterPosition = true;
     try {
       let monitor = await currentMonitor();
       if (!monitor) {
@@ -83,25 +83,7 @@ export function useDesktopLyricsWindowController(options: {
       const targetX = workArea.position.x + Math.round((workArea.size.width - size.width) / 2);
 
       if (Math.abs(position.x - targetX) > 1) {
-        isApplyingCenterPosition = true;
-        if (centerPositionFallbackTimer) {
-          clearTimeout(centerPositionFallbackTimer);
-        }
-        centerPositionFallbackTimer = setTimeout(() => {
-          isApplyingCenterPosition = false;
-          centerPositionFallbackTimer = null;
-        }, 300);
-
-        try {
-          await appWindow.setPosition(new PhysicalPosition(targetX, position.y));
-        } catch (err) {
-          console.warn('Failed to call setPosition:', err);
-          isApplyingCenterPosition = false;
-          if (centerPositionFallbackTimer) {
-            clearTimeout(centerPositionFallbackTimer);
-            centerPositionFallbackTimer = null;
-          }
-        }
+        await appWindow.setPosition(new PhysicalPosition(targetX, position.y));
 
         await emitWindowBounds({
           x: targetX,
@@ -112,11 +94,8 @@ export function useDesktopLyricsWindowController(options: {
       }
     } catch (error) {
       console.warn('Failed to force center horizontally:', error);
+    } finally {
       isApplyingCenterPosition = false;
-      if (centerPositionFallbackTimer) {
-        clearTimeout(centerPositionFallbackTimer);
-        centerPositionFallbackTimer = null;
-      }
     }
   }
   const isSystemHidden = ref(false);
@@ -417,6 +396,7 @@ export function useDesktopLyricsWindowController(options: {
 
     unlistenState = await appWindow.listen<DesktopLyricsStatePayload>(DESKTOP_LYRICS_STATE_EVENT, (event) => {
       handlePayload(event.payload);
+      hasReceivedState = true;
     });
 
     unlistenPlayback = await appWindow.listen<DesktopLyricsPlaybackPayload>(DESKTOP_LYRICS_PLAYBACK_EVENT, (event) => {
@@ -437,38 +417,10 @@ export function useDesktopLyricsWindowController(options: {
 
     unlistenMoved = await appWindow.onMoved(async ({ payload }) => {
       revealDragShadow();
-
-      if (isApplyingCenterPosition) {
-        isApplyingCenterPosition = false;
-        if (centerPositionFallbackTimer) {
-          clearTimeout(centerPositionFallbackTimer);
-          centerPositionFallbackTimer = null;
-        }
-        const size = await appWindow.outerSize();
-        await emitWindowBounds({
-          x: payload.x,
-          y: payload.y,
-          width: size.width,
-          height: size.height,
-        });
-        return;
-      }
-
       const size = await appWindow.outerSize();
-      let x = payload.x;
-
-      if (settings.value.centerHorizontally) {
-        if (centerPositionDebounceTimer) {
-          clearTimeout(centerPositionDebounceTimer);
-        }
-        centerPositionDebounceTimer = setTimeout(async () => {
-          centerPositionDebounceTimer = null;
-          await forceCenterHorizontally();
-        }, 300);
-      }
 
       await emitWindowBounds({
-        x,
+        x: payload.x,
         y: payload.y,
         width: size.width,
         height: size.height,
@@ -477,38 +429,10 @@ export function useDesktopLyricsWindowController(options: {
 
     unlistenResized = await appWindow.onResized(async ({ payload }) => {
       holdVisibleForResize();
-
-      if (isApplyingCenterPosition) {
-        isApplyingCenterPosition = false;
-        if (centerPositionFallbackTimer) {
-          clearTimeout(centerPositionFallbackTimer);
-          centerPositionFallbackTimer = null;
-        }
-        const position = await appWindow.outerPosition();
-        await emitWindowBounds({
-          x: position.x,
-          y: position.y,
-          width: payload.width,
-          height: payload.height,
-        });
-        return;
-      }
-
       const position = await appWindow.outerPosition();
-      let x = position.x;
-
-      if (settings.value.centerHorizontally) {
-        if (centerPositionDebounceTimer) {
-          clearTimeout(centerPositionDebounceTimer);
-        }
-        centerPositionDebounceTimer = setTimeout(async () => {
-          centerPositionDebounceTimer = null;
-          await forceCenterHorizontally();
-        }, 300);
-      }
 
       await emitWindowBounds({
-        x,
+        x: position.x,
         y: position.y,
         width: payload.width,
         height: payload.height,
@@ -537,16 +461,6 @@ export function useDesktopLyricsWindowController(options: {
     unlistenMoved?.();
     unlistenResized?.();
     void windowApi.stopTopmostGuard();
-
-    if (centerPositionFallbackTimer) {
-      clearTimeout(centerPositionFallbackTimer);
-      centerPositionFallbackTimer = null;
-    }
-
-    if (centerPositionDebounceTimer) {
-      clearTimeout(centerPositionDebounceTimer);
-      centerPositionDebounceTimer = null;
-    }
 
     if (dragShadowTimer) {
       clearTimeout(dragShadowTimer);
@@ -594,11 +508,14 @@ export function useDesktopLyricsWindowController(options: {
 
   watch(
     () => settings.value.centerHorizontally,
-    (enabled) => {
-      if (enabled) {
+    (enabled, previous) => {
+      // Restoring a saved setting is not a new request to reposition the window.
+      // Center once when explicitly enabled; later drags and resizes stay put.
+      if (hasReceivedState && enabled && previous === false) {
         void forceCenterHorizontally();
       }
     },
+    { flush: 'sync' },
   );
 
   return {

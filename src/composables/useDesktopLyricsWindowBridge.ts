@@ -1,7 +1,7 @@
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { PhysicalPosition, PhysicalSize } from '@tauri-apps/api/dpi';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { availableMonitors, getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { onMounted, onUnmounted, watch, toRaw } from 'vue';
 import { storeToRefs } from 'pinia';
 
@@ -32,14 +32,14 @@ import {
   DESKTOP_LYRICS_WINDOW_DEFAULT_HEIGHT,
   DESKTOP_LYRICS_WINDOW_DEFAULT_WIDTH,
   DESKTOP_LYRICS_WINDOW_LABEL,
+  DESKTOP_LYRICS_WINDOW_MAX_HEIGHT,
+  DESKTOP_LYRICS_WINDOW_MAX_WIDTH,
   DESKTOP_LYRICS_WINDOW_MIN_HEIGHT,
   DESKTOP_LYRICS_WINDOW_MIN_WIDTH,
   restoreDesktopLyricsBounds,
-  resolveDesktopLyricsWorkArea,
   type DesktopLyricsAction,
   type DesktopLyricsPlaybackPayload,
   type DesktopLyricsStatePayload,
-  type DesktopLyricsWorkArea,
   type DesktopLyricsWindowBounds,
 } from '../features/desktopLyrics/shared';
 
@@ -144,30 +144,7 @@ function readDesktopLyricsBounds(): DesktopLyricsWindowBounds | null {
 
   try {
     const parsed = JSON.parse(stored) as Partial<DesktopLyricsWindowBounds>;
-    if (!Number.isFinite(parsed.x) || !Number.isFinite(parsed.y)) {
-      return null;
-    }
-
-    return {
-      x: Math.round(parsed.x as number),
-      y: Math.round(parsed.y as number),
-      width: Math.max(
-        DESKTOP_LYRICS_WINDOW_MIN_WIDTH,
-        Math.round(
-          Number.isFinite(parsed.width)
-            ? (parsed.width as number)
-            : DESKTOP_LYRICS_WINDOW_DEFAULT_WIDTH,
-        ),
-      ),
-      height: Math.max(
-        DESKTOP_LYRICS_WINDOW_MIN_HEIGHT,
-        Math.round(
-          Number.isFinite(parsed.height)
-            ? (parsed.height as number)
-            : DESKTOP_LYRICS_WINDOW_DEFAULT_HEIGHT,
-        ),
-      ),
-    };
+    return restoreDesktopLyricsBounds(parsed);
   } catch {
     return null;
   }
@@ -189,35 +166,6 @@ export function clearDesktopLyricsStoredBounds() {
   localStorage.removeItem(DESKTOP_LYRICS_BOUNDS_KEY);
 }
 
-async function resolveDesktopLyricsBounds(centerHorizontally: boolean) {
-  const bounds = readDesktopLyricsBounds();
-  if (!bounds) return null;
-
-  try {
-    const workAreas: DesktopLyricsWorkArea[] = (await availableMonitors()).map((monitor) => ({
-      x: monitor.workArea.position.x,
-      y: monitor.workArea.position.y,
-      width: monitor.workArea.size.width,
-      height: monitor.workArea.size.height,
-    }));
-
-    if (workAreas.length === 0) {
-      return bounds;
-    }
-
-    const restored = restoreDesktopLyricsBounds(bounds, workAreas);
-    if (restored && centerHorizontally) {
-      const workArea = resolveDesktopLyricsWorkArea(workAreas, restored);
-      if (workArea) {
-        restored.x = workArea.x + Math.round((workArea.width - restored.width) / 2);
-      }
-    }
-    return restored;
-  } catch {
-    return bounds;
-  }
-}
-
 async function getDesktopLyricsWindow() {
   return WebviewWindow.getByLabel(DESKTOP_LYRICS_WINDOW_LABEL);
 }
@@ -236,6 +184,8 @@ export function createDesktopLyricsWindowOptions({
     height: DESKTOP_LYRICS_WINDOW_DEFAULT_HEIGHT,
     minWidth: DESKTOP_LYRICS_WINDOW_MIN_WIDTH,
     minHeight: DESKTOP_LYRICS_WINDOW_MIN_HEIGHT,
+    maxWidth: DESKTOP_LYRICS_WINDOW_MAX_WIDTH,
+    maxHeight: DESKTOP_LYRICS_WINDOW_MAX_HEIGHT,
     visible: false,
     decorations: false,
     transparent: true,
@@ -248,13 +198,13 @@ export function createDesktopLyricsWindowOptions({
   };
 }
 
-async function ensureDesktopLyricsWindow(alwaysOnTop: boolean, centerHorizontally: boolean) {
+async function ensureDesktopLyricsWindow(alwaysOnTop: boolean) {
   const existing = await getDesktopLyricsWindow();
   if (existing) return existing;
 
   if (!desktopLyricsWindowPromise) {
     desktopLyricsReadyGate.reset();
-    const bounds = await resolveDesktopLyricsBounds(centerHorizontally);
+    const bounds = readDesktopLyricsBounds();
     const windowInstance = new WebviewWindow(DESKTOP_LYRICS_WINDOW_LABEL, createDesktopLyricsWindowOptions({
       alwaysOnTop,
       hasStoredBounds: !!bounds,
@@ -461,9 +411,7 @@ export function useDesktopLyricsWindowBridge() {
 
   const openDesktopLyricsWindow = async () => {
     if (useNativeRenderer) {
-      await nativeDesktopLyrics.open(createStatePayload(), await resolveDesktopLyricsBounds(
-        desktopLyricsSettings.centerHorizontally,
-      ));
+      await nativeDesktopLyrics.open(createStatePayload(), readDesktopLyricsBounds());
       nativeWindowOpen = true;
       // Settings/playback may have changed during native initialization.
       await emitStateToDesktopLyrics(true);
@@ -472,7 +420,6 @@ export function useDesktopLyricsWindowBridge() {
     }
     const targetWindow = await ensureDesktopLyricsWindow(
       desktopLyricsSettings.isAlwaysOnTop,
-      desktopLyricsSettings.centerHorizontally,
     );
     await desktopLyricsReadyGate.wait();
     await syncWindowFlags();

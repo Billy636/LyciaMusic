@@ -957,7 +957,8 @@ onUnmounted(() => {
           @click="desktopLyricsSettings.centerHorizontally = !desktopLyricsSettings.centerHorizontally"
         >
           <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">桌面歌词自动居中</div>
+              <div class="text-sm font-medium text-gray-800 dark:text-gray-200">桌面歌词水平居中</div>
+              <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">启用时居中，拖动后保留新位置</div>
           </div>
           <span class="desktop-switch" :class="desktopLyricsSettings.centerHorizontally ? 'desktop-switch--on' : ''">
             <span class="desktop-switch-thumb" :class="desktopLyricsSettings.centerHorizontally ? 'translate-x-5' : ''" />

@@ -9,6 +9,7 @@ import {
   useDesktopLyricsWindowBridge,
 } from './useDesktopLyricsWindowBridge';
 import source from './useDesktopLyricsWindowBridge.ts?raw';
+import { DESKTOP_LYRICS_BOUNDS_KEY } from '../features/desktopLyrics/shared';
 
 declare const require: <T = unknown>(id: string) => T;
 
@@ -54,6 +55,7 @@ const mocks = vi.hoisted(() => {
       playerOffsetY: 0,
       playerAlignment: 'center',
       playerFontPreset: 'system',
+      centerHorizontally: false,
     },
   };
   const lyricsSettings = {
@@ -69,7 +71,7 @@ const mocks = vi.hoisted(() => {
     show: vi.fn().mockRejectedValue('window not found'),
     destroy: vi.fn().mockResolvedValue(undefined),
   };
-  const WebviewWindow = vi.fn(() => targetWindow) as ReturnType<typeof vi.fn> & {
+  const WebviewWindow = vi.fn(function () { return targetWindow; }) as ReturnType<typeof vi.fn> & {
     getByLabel: ReturnType<typeof vi.fn>;
   };
   WebviewWindow.getByLabel = vi.fn().mockResolvedValue(null);
@@ -178,6 +180,7 @@ describe('desktop lyrics window bridge', () => {
   beforeEach(() => {
     mocks.showDesktopLyrics.value = false;
     mocks.settings.showDesktopLyrics = false;
+    mocks.desktopLyricsSettings.centerHorizontally = false;
     mocks.patchSettings.mockClear();
     mocks.showToast.mockClear();
     mocks.usesNative.mockReturnValue(false);
@@ -197,6 +200,7 @@ describe('desktop lyrics window bridge', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('creates the desktop lyrics window without stealing main window focus', () => {
@@ -209,6 +213,10 @@ describe('desktop lyrics window bridge', () => {
       focus: false,
       focusable: true,
       visible: false,
+      minWidth: 520,
+      minHeight: 160,
+      maxWidth: 1440,
+      maxHeight: 1000,
     });
   });
 
@@ -242,12 +250,13 @@ describe('desktop lyrics window bridge', () => {
   });
 
   it('rolls back desktop lyrics visibility when opening the window fails', async () => {
+    vi.useFakeTimers();
     const scope = effectScope();
     scope.run(() => useDesktopLyricsWindowBridge());
 
     mocks.showDesktopLyrics.value = true;
     await nextTick();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.advanceTimersByTimeAsync(1200);
     await nextTick();
 
     expect(mocks.showDesktopLyrics.value).toBe(false);
@@ -282,6 +291,55 @@ describe('desktop lyrics window bridge', () => {
     expect(mocks.native.close).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(800);
     expect(mocks.native.playback).toHaveBeenCalledTimes(1);
+    scope.stop();
+  });
+
+  it('reopens native lyrics at saved off-screen coordinates even when centering was enabled', async () => {
+    vi.useFakeTimers();
+    mocks.usesNative.mockReturnValue(true);
+    mocks.desktopLyricsSettings.centerHorizontally = true;
+    const bounds = { x: -4500, y: 2400, width: 1800, height: 560 };
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => key === DESKTOP_LYRICS_BOUNDS_KEY ? JSON.stringify(bounds) : null),
+    });
+    const scope = effectScope();
+    scope.run(() => useDesktopLyricsWindowBridge());
+
+    mocks.showDesktopLyrics.value = true;
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.native.open).toHaveBeenCalledWith(expect.anything(), bounds);
+
+    mocks.showDesktopLyrics.value = false;
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(0);
+    mocks.showDesktopLyrics.value = true;
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.native.open).toHaveBeenLastCalledWith(expect.anything(), bounds);
+    mocks.showDesktopLyrics.value = false;
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(0);
+    scope.stop();
+  });
+
+  it('restores the fallback WebView at saved off-screen coordinates without monitor correction', async () => {
+    vi.useFakeTimers();
+    mocks.desktopLyricsSettings.centerHorizontally = true;
+    const bounds = { x: 5000, y: -2000, width: 900, height: 280 };
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn((key: string) => key === DESKTOP_LYRICS_BOUNDS_KEY ? JSON.stringify(bounds) : null),
+    });
+    mocks.targetWindow.setPosition.mockClear();
+    const scope = effectScope();
+    scope.run(() => useDesktopLyricsWindowBridge());
+    mocks.showDesktopLyrics.value = true;
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.showToast).not.toHaveBeenCalled();
+    expect(mocks.targetWindow.setPosition).toHaveBeenCalledWith(expect.objectContaining({ x: 5000, y: -2000 }));
+    expect(mocks.WebviewWindow).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ center: false }));
+    await vi.advanceTimersByTimeAsync(1200);
     scope.stop();
   });
 
