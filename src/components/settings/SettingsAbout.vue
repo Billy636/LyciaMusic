@@ -6,7 +6,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import ModernModal from '../common/ModernModal.vue';
 import SponsorModal from './SponsorModal.vue';
-import { compareVersions, fetchLatestRelease, fetchOfficialLatestRelease } from '../../utils/update';
+import { checkForUpdates } from '../../composables/useUpdateCheck';
 
 const REPO_OWNER = 'Billy636';
 const REPO_NAME = 'LyciaMusic';
@@ -100,20 +100,8 @@ async function handleCheckUpdate() {
   isCheckingUpdate.value = true;
 
   try {
-    if (!appVersion.value) {
-      await loadAppVersion();
-    }
-
-    let latestRelease;
-
-    try {
-      latestRelease = await fetchLatestRelease(REPO_OWNER, REPO_NAME);
-    } catch (githubError) {
-      console.warn('Failed to fetch GitHub latest release:', githubError);
-      latestRelease = await fetchOfficialLatestRelease();
-    }
-
-    const comparison = compareVersions(latestRelease.version, appVersion.value);
+    const { currentVersion, release: latestRelease, comparison } = await checkForUpdates();
+    appVersion.value = currentVersion;
     const publishedDate = formatPublishedDate(latestRelease.publishedAt);
     const latestSourceText = latestRelease.source === 'official' ? '官网' : 'GitHub';
 

@@ -6,6 +6,7 @@ import { onMounted, onUnmounted } from 'vue';
 import { useImportedLyricsFonts } from '../../composables/useImportedLyricsFonts';
 import { useSettings } from '../../features/settings/useSettings';
 import MainShell from '../layout/MainShell.vue';
+import StartupUpdateNotice from '../overlays/StartupUpdateNotice.vue';
 
 const appWindow = getCurrentWindow();
 const { settings } = useSettings();
@@ -30,4 +31,5 @@ onUnmounted(() => {
 
 <template>
   <MainShell />
+  <StartupUpdateNotice />
 </template>

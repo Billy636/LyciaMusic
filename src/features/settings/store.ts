@@ -153,6 +153,7 @@ export const defaultAppSettings: AppSettings = {
   gpuAcceleration: true,
   writeArtistAvatarToTags: false,
   autoScanLibraryOnStartup: false,
+  autoCheckUpdatesOnStartup: true,
 };
 
 export const createDefaultThemeSettings = (): ThemeSettings => ({

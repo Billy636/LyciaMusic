@@ -478,6 +478,7 @@ export interface AppSettings {
   gpuAcceleration: boolean;
   writeArtistAvatarToTags: boolean;
   autoScanLibraryOnStartup: boolean;
+  autoCheckUpdatesOnStartup: boolean;
 }
 
 export interface SaveArtistAvatarResponse {
