@@ -6,7 +6,8 @@ use super::search::{
     build_song_search_predicate, load_matching_song_paths, search_index_is_complete,
 };
 use super::sorting::{
-    artist_song_sort_key, register_song_sorting, ArtistSongSortMetadata, ARTIST_SONG_ORDER,
+    artist_alphabet_index_key, artist_song_sort_key, register_song_sorting, ArtistSongSortMetadata,
+    ARTIST_SONG_ORDER,
 };
 use super::types::{
     AlbumCatalogItem, ArtistCatalogItem, FolderNode, LibraryFolder, LibrarySong, LibrarySongLabel,
@@ -435,6 +436,74 @@ pub async fn get_library_songs_by_paths(
     tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|error| error.to_string())?;
         load_library_songs_by_paths(&conn, &paths)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn load_library_song_artist_index_keys(
+    conn: &rusqlite::Connection,
+    paths: &[String],
+) -> Result<Vec<String>, String> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut keys = Vec::with_capacity(paths.len());
+    // Request-local reuse avoids converting the same artist for every track,
+    // without retaining an unbounded artist cache after the index is returned.
+    let mut artist_keys = HashMap::<String, &'static str>::new();
+    for chunk in paths.chunks(LIBRARY_SONG_BATCH_MAX_SIZE) {
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut statement = conn
+            .prepare(&format!(
+                "SELECT path, artist FROM songs WHERE path IN ({placeholders})"
+            ))
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut keys_by_path = HashMap::with_capacity(chunk.len());
+        for row in rows {
+            let (path, artist) = row.map_err(|error| error.to_string())?;
+            let key = *artist_keys
+                .entry(artist)
+                .or_insert_with_key(|artist| artist_alphabet_index_key(artist));
+            keys_by_path.insert(path, key);
+        }
+
+        // IN queries need not preserve order and collapse duplicate paths. Rebuild
+        // the aligned response, leaving an empty key for rows that no longer exist.
+        keys.extend(chunk.iter().map(|path| {
+            keys_by_path
+                .get(path)
+                .copied()
+                .unwrap_or_default()
+                .to_string()
+        }));
+    }
+    Ok(keys)
+}
+
+#[tauri::command]
+pub async fn get_library_song_artist_index_keys(
+    paths: Vec<String>,
+    db_state: State<'_, DbState>,
+) -> Result<Vec<String>, String> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let db_conn = db_state.conn.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        load_library_song_artist_index_keys(&conn, &paths)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -1611,6 +1680,84 @@ pub async fn get_folder_children(
 mod tests {
     use super::*;
     use rusqlite::Connection;
+
+    #[test]
+    fn artist_index_keys_accept_empty_paths_without_querying_a_song_table() {
+        let conn = Connection::open_in_memory().expect("open database without schema");
+        assert!(load_library_song_artist_index_keys(&conn, &[])
+            .expect("empty input needs no query")
+            .is_empty());
+    }
+
+    #[test]
+    fn artist_index_keys_are_compact_aligned_and_preserve_missing_and_duplicate_paths() {
+        let conn = Connection::open_in_memory().expect("open database");
+        // Deliberately omit every other Song column: alphabet indexing must only
+        // project path and artist, never materialize full song metadata.
+        conn.execute("CREATE TABLE songs (path TEXT PRIMARY KEY, artist TEXT)", [])
+            .expect("create compact song schema");
+        for (path, artist) in [
+            ("/zhou", Some("周杰伦")),
+            ("/chen", Some("陈奕迅")),
+            ("/english", Some("《Ａdele》")),
+            ("/number", Some("１０cc")),
+            ("/symbol", Some("🙂Artist")),
+            ("/unknown", None),
+            ("/blank", Some("\t\u{3000}")),
+            ("/wrappers", Some("【】")),
+        ] {
+            conn.execute(
+                "INSERT INTO songs (path, artist) VALUES (?1, ?2)",
+                rusqlite::params![path, artist],
+            )
+            .expect("insert artist metadata");
+        }
+        let paths = [
+            "/zhou", "/english", "/missing", "/number", "/unknown", "/chen", "/symbol", "/zhou",
+            "/blank", "/wrappers",
+        ]
+        .map(str::to_string);
+
+        assert_eq!(
+            load_library_song_artist_index_keys(&conn, &paths).expect("load index keys"),
+            ["Z", "A", "", "0", "U", "C", "#", "Z", "U", "#"],
+        );
+    }
+
+    #[test]
+    fn artist_index_keys_chunk_large_requests_without_changing_alignment() {
+        let conn = Connection::open_in_memory().expect("open database");
+        conn.execute("CREATE TABLE songs (path TEXT PRIMARY KEY, artist TEXT)", [])
+            .expect("create compact song schema");
+        let count = LIBRARY_SONG_BATCH_MAX_SIZE * 2 + 1;
+        let mut paths = Vec::with_capacity(count + 2);
+        let mut expected = Vec::with_capacity(count + 2);
+        for index in 0..count {
+            let path = format!("/music/{index}.flac");
+            let (artist, key) = if index % 2 == 0 {
+                ("周杰伦", "Z")
+            } else {
+                ("Adele", "A")
+            };
+            conn.execute(
+                "INSERT INTO songs (path, artist) VALUES (?1, ?2)",
+                rusqlite::params![path, artist],
+            )
+            .expect("insert song");
+            paths.push(path);
+            expected.push(key.to_string());
+        }
+        paths.reverse();
+        expected.reverse();
+        paths.insert(LIBRARY_SONG_BATCH_MAX_SIZE, "/missing".to_string());
+        expected.insert(LIBRARY_SONG_BATCH_MAX_SIZE, String::new());
+        paths.push(paths[0].clone());
+        expected.push(expected[0].clone());
+
+        let keys = load_library_song_artist_index_keys(&conn, &paths).expect("load all chunks");
+        assert_eq!(keys.len(), paths.len());
+        assert_eq!(keys, expected);
+    }
 
     fn create_minimal_schema(conn: &Connection) {
         conn.execute(

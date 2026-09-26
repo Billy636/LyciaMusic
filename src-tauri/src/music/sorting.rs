@@ -70,6 +70,17 @@ pub(crate) fn artist_song_sort_key(metadata: ArtistSongSortMetadata<'_>) -> Arti
     }
 }
 
+/// Use the exact group from the artist sort key, including its Unknown fallback,
+/// so the frontend index cannot disagree with the backend's pinyin ordering.
+pub(crate) fn artist_alphabet_index_key(artist: &str) -> &'static str {
+    const KEYS: [&str; 28] = [
+        "0", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R",
+        "S", "T", "U", "V", "W", "X", "Y", "Z", "#",
+    ];
+    let artist = normalized_text(artist).unwrap_or_else(|| "unknown".to_string());
+    KEYS[AlphabetSortKey::new(&artist).group as usize]
+}
+
 fn normalized_text(value: &str) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.to_lowercase())
@@ -322,6 +333,31 @@ mod tests {
             title: "Song",
             disc_number: Some("1"),
             track_number: Some("1"),
+        }
+    }
+
+    #[test]
+    fn artist_index_keys_use_the_same_groups_as_artist_sorting() {
+        for (artist, expected) in [
+            ("周杰伦", "Z"),
+            ("陈奕迅", "C"),
+            ("《Ａdele》", "A"),
+            ("１０cc", "0"),
+            ("🙂Artist", "#"),
+            ("【】", "#"),
+            ("", "U"),
+            ("\t\u{3000}", "U"),
+        ] {
+            assert_eq!(artist_alphabet_index_key(artist), expected);
+            let group = artist_song_sort_key(song("path", artist, "Album"))
+                .artist
+                .group;
+            let expected_group = match expected {
+                "0" => 0,
+                "#" => 27,
+                key => key.as_bytes()[0] - b'A' + 1,
+            };
+            assert_eq!(group, expected_group, "artist: {artist}");
         }
     }
 

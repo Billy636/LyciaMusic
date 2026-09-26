@@ -398,6 +398,7 @@ export interface TauriCommandMap {
     response: SearchIndexStatus;
   };
   get_library_songs_by_paths: { payload: { paths: string[] }; response: LibrarySong[] };
+  get_library_song_artist_index_keys: { payload: { paths: string[] }; response: string[] };
   get_library_song_paths_cached: { payload: undefined; response: string[] };
   get_library_song_labels_for_all_view: {
     payload: { query?: string; artistFilter?: string; albumFilter?: string };

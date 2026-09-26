@@ -17,17 +17,20 @@ import {
 } from '../utils/alphabetIndex';
 import { isProfilingEnabled } from '../utils/profiling';
 import { getCachedLibrarySongTitleLabel } from './useLibraryAllSongPathCache';
+import { useSongArtistIndexKeys } from './useSongArtistIndexKeys';
 
 const ROW_HEIGHT = 72;
 const INDEX_PROXIMITY_PX = 72;
 const INDEX_AUTO_HIDE_MS = 500;
 const SCROLL_TO_TOP_VIEW_MODES = new Set(['all', 'playlist', 'artist', 'album']);
+const ARTIST_INDEX_VIEW_MODES = new Set(['all', 'folder', 'playlist', 'artist', 'album', 'favorites', 'recent']);
+const ARTIST_INDEX_ROUTES = new Set(['/', '/favorites', '/recent']);
 
 type StringRef = Ref<string> | ComputedRef<string>;
 
 interface UseSongTableAlphabetIndexOptions {
   songs: Ref<Song[]>;
-  songPaths?: Ref<string[]>;
+  songPaths?: Ref<string[] | undefined>;
   scrollTop: Ref<number>;
   containerHeight: Ref<number>;
   containerRef: Ref<HTMLElement | null>;
@@ -36,6 +39,9 @@ interface UseSongTableAlphabetIndexOptions {
   currentViewMode: Ref<string>;
   localSortMode: Ref<string>;
   folderSortMode: Ref<string>;
+  playlistSortMode?: Ref<string>;
+  albumDetailSortMode?: Ref<string>;
+  libraryDataVersion?: Ref<number>;
   activeRootPath: Ref<string | null>;
   currentFolderFilter: Ref<string>;
   folderTree: Ref<FolderNode[]>;
@@ -54,6 +60,9 @@ export function useSongTableAlphabetIndex({
   currentViewMode,
   localSortMode,
   folderSortMode,
+  playlistSortMode = ref(''),
+  albumDetailSortMode = ref(''),
+  libraryDataVersion,
   activeRootPath,
   currentFolderFilter,
   folderTree,
@@ -68,11 +77,22 @@ export function useSongTableAlphabetIndex({
   const isIndexBarVisible = ref(false);
   let hideIndexBarTimer: ReturnType<typeof setTimeout> | null = null;
   let firstSongIndexProfileCount = 0;
-  const effectivePaths = computed(() => songPaths?.value?.length
-    ? songPaths.value
-    : songs.value.map(song => song.path));
+  const effectivePaths = computed(() => songPaths?.value ?? songs.value.map(song => song.path));
+  const songsByPath = computed(() => new Map(songs.value.map(song => [song.path, song])));
+  const isArtistIndex = computed(() => {
+    if (!ARTIST_INDEX_VIEW_MODES.has(currentViewMode.value)) return false;
+    const sortMode = currentViewMode.value === 'folder' ? folderSortMode.value
+      : currentViewMode.value === 'playlist' ? playlistSortMode.value
+        : currentViewMode.value === 'album' ? albumDetailSortMode.value
+          : localSortMode.value;
+    return sortMode === 'artist';
+  });
 
   const indexLabelGetter = computed<((song: Song) => string) | null>(() => {
+    if (isArtistIndex.value) {
+      return song => song.artist.trim() || 'Unknown';
+    }
+
     if (currentViewMode.value === 'all' && localSortMode.value === 'title') {
       return (song: Song) => song.title || song.name;
     }
@@ -86,13 +106,22 @@ export function useSongTableAlphabetIndex({
     return null;
   });
 
-  const showAlphabetIndex = computed(() =>
-    routePath.value === '/' && !!indexLabelGetter.value && effectivePaths.value.length > 0,
+  const isIndexAvailable = computed(() =>
+    (routePath.value === '/' || (isArtistIndex.value && ARTIST_INDEX_ROUTES.has(routePath.value)))
+    && !!indexLabelGetter.value && effectivePaths.value.length > 0,
   );
+  const { artistIndexKeys } = useSongArtistIndexKeys({
+    paths: effectivePaths,
+    enabled: computed(() => isIndexAvailable.value && isArtistIndex.value),
+    libraryDataVersion,
+  });
+  const showAlphabetIndex = computed(() => isIndexAvailable.value
+    && (!isArtistIndex.value || artistIndexKeys.value !== null));
 
-  const getPathIndexLabel = (path: string, index: number) => {
-    const song = songs.value[index];
-    if (song?.path === path && indexLabelGetter.value) {
+  const getPathIndexLabel = (path: string) => {
+    // Materialized metadata is a sparse window, not an array aligned with paths.
+    const song = songsByPath.value.get(path);
+    if (song && indexLabelGetter.value) {
       return indexLabelGetter.value(song);
     }
     if (currentViewMode.value === 'all' && localSortMode.value === 'title') {
@@ -101,11 +130,18 @@ export function useSongTableAlphabetIndex({
     return path.split(/[/\\]/).pop() || path;
   };
 
+  const getPathIndexKey = (path: string, index: number): AlphabetIndexKey | null => {
+    // Reuse the backend's actual artist-sort group even for unloaded songs;
+    // a file name or missing metadata must never be guessed as an artist key.
+    if (isArtistIndex.value) return artistIndexKeys.value?.[index] ?? null;
+    return getAlphabetIndexKey(getPathIndexLabel(path));
+  };
+
   const firstSongIndexByKey = computed(() => {
     const profileStart = isProfilingEnabled() ? performance.now() : 0;
     const keyMap = new Map<AlphabetIndexKey, number>();
 
-    if (!indexLabelGetter.value) {
+    if (!indexLabelGetter.value || (isArtistIndex.value && artistIndexKeys.value === null)) {
       if (isProfilingEnabled()) {
         firstSongIndexProfileCount += 1;
         if (firstSongIndexProfileCount <= 3) {
@@ -118,8 +154,8 @@ export function useSongTableAlphabetIndex({
     }
 
     effectivePaths.value.forEach((path, index) => {
-      const key = getAlphabetIndexKey(getPathIndexLabel(path, index));
-      if (!keyMap.has(key)) {
+      const key = getPathIndexKey(path, index);
+      if (key !== null && !keyMap.has(key)) {
         keyMap.set(key, index);
       }
     });
@@ -147,7 +183,7 @@ export function useSongTableAlphabetIndex({
       Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT)),
     );
 
-    return getAlphabetIndexKey(getPathIndexLabel(effectivePaths.value[visibleIndex], visibleIndex));
+    return getPathIndexKey(effectivePaths.value[visibleIndex], visibleIndex);
   });
 
   const currentSongIndex = computed(() => {
@@ -460,6 +496,7 @@ export function useSongTableAlphabetIndex({
       if (visible) {
         revealIndexBarTemporarily();
       } else {
+        stopIndexDrag();
         isIndexBarVisible.value = false;
         hoverIndexKey.value = null;
       }

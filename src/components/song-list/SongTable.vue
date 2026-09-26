@@ -27,7 +27,7 @@ import { isProfilingEnabled } from '../../utils/profiling';
 
 const { settings } = useSettings();
 const libraryStore = useLibraryStore();
-const { libraryScanProgress, lastLibraryScanError } = storeToRefs(libraryStore);
+const { libraryScanProgress, lastLibraryScanError, libraryDataVersion } = storeToRefs(libraryStore);
 const { currentSong, isPlaying, formatDuration } = usePlaybackController();
 
 const props = defineProps<{
@@ -49,6 +49,8 @@ const {
   currentViewMode,
   localSortMode,
   folderSortMode,
+  playlistSortMode,
+  albumDetailSortMode,
   activeRootPath,
   currentFolderFilter,
 } = usePlayerViewState();
@@ -491,7 +493,7 @@ const {
   scrollToTop,
 } = useSongTableAlphabetIndex({
   songs: computed(() => props.songs),
-  songPaths: computed(() => props.songPaths ?? []),
+  songPaths: computed(() => props.songPaths),
   scrollTop,
   containerHeight,
   containerRef,
@@ -500,6 +502,9 @@ const {
   currentViewMode,
   localSortMode,
   folderSortMode,
+  playlistSortMode,
+  albumDetailSortMode,
+  libraryDataVersion,
   activeRootPath,
   currentFolderFilter,
   folderTree,

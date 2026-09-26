@@ -14,6 +14,7 @@ describe('Tauri app command permissions', () => {
       'get_library_song_page',
       'get_library_song_path_page_for_all_view',
       'get_library_songs_by_paths',
+      'get_library_song_artist_index_keys',
       'get_library_song_labels_for_all_view',
       'get_search_index_status',
       'get_search_index_batch',
@@ -29,6 +30,12 @@ describe('Tauri app command permissions', () => {
 
   it('allows the native immersive fullscreen transition', () => {
     expect(permissionFile).toContain('"set_immersive_fullscreen"');
+  });
+
+  it('registers the compact artist alphabet index command', () => {
+    const backend = readFileSync(new URL('../../../src-tauri/src/lib.rs', import.meta.url), 'utf8') as string;
+    const handlers = backend.match(/tauri::generate_handler!\[([\s\S]*?)\]/)?.[1] ?? '';
+    expect(handlers).toContain('get_library_song_artist_index_keys,');
   });
 
   it('allows on-demand audio visualizer sampling control', () => {

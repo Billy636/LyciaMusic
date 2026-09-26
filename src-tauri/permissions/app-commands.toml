@@ -59,6 +59,7 @@ commands.allow = [
   "get_library_song_page",
   "get_library_song_path_page_for_all_view",
   "get_library_songs_by_paths",
+  "get_library_song_artist_index_keys",
   "get_library_song_labels_for_all_view",
   "get_search_index_status",
   "get_search_index_batch",
