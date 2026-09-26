@@ -12,6 +12,7 @@ import {
 } from './store';
 import { toolboxApi } from '../../services/tauri/toolboxApi';
 import { libraryApi } from '../../services/tauri/libraryApi';
+import { ensureLddcPath, getSavedLddcPath, selectLddcPath } from '../../composables/lddc';
 import type { ToolboxPreviewItem } from '../../services/tauri/contracts';
 
 vi.mock('../../services/tauri/toolboxApi', () => ({
@@ -26,6 +27,12 @@ vi.mock('../../services/tauri/libraryApi', () => ({
   libraryApi: {
     refreshFolderSongs: vi.fn(),
   },
+}));
+
+vi.mock('../../composables/lddc', () => ({
+  ensureLddcPath: vi.fn(),
+  getSavedLddcPath: vi.fn(),
+  selectLddcPath: vi.fn(),
 }));
 
 const createPreviewItem = (overrides: Partial<ToolboxPreviewItem>): ToolboxPreviewItem => ({
@@ -44,6 +51,10 @@ const createPreviewItem = (overrides: Partial<ToolboxPreviewItem>): ToolboxPrevi
 const mockedPreview = vi.mocked(toolboxApi.preview);
 const mockedApplyRename = vi.mocked(toolboxApi.applyRename);
 const mockedRefreshFolderSongs = vi.mocked(libraryApi.refreshFolderSongs);
+const mockedLaunchProgram = vi.mocked(toolboxApi.launchProgram);
+const mockedEnsureLddcPath = vi.mocked(ensureLddcPath);
+const mockedGetSavedLddcPath = vi.mocked(getSavedLddcPath);
+const mockedSelectLddcPath = vi.mocked(selectLddcPath);
 
 describe('toolbox selection helpers', () => {
   it('defaults selection to changing non-conflicting rows only', () => {
@@ -122,6 +133,126 @@ describe('toolbox selection helpers', () => {
       replace_underscore: false,
       collapse_spaces: false,
     });
+  });
+});
+
+describe('LDDC shortcut', () => {
+  const programPath = 'C:\\tools\\LDDC\\LDDC.exe';
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.resetAllMocks();
+    mockedGetSavedLddcPath.mockReturnValue(null);
+    mockedEnsureLddcPath.mockResolvedValue(programPath);
+    mockedLaunchProgram.mockResolvedValue(undefined);
+  });
+
+  it('restores the saved program configuration', () => {
+    mockedGetSavedLddcPath.mockReturnValue(programPath);
+    const store = useToolboxStore();
+
+    expect(store.lddcPath).toBe(programPath);
+    expect(store.lddcConfigured).toBe(true);
+    expect(mockedEnsureLddcPath).not.toHaveBeenCalled();
+  });
+
+  it.each(['', 'C:\\music'])('launches with empty arguments regardless of target %j', async (target) => {
+    const store = useToolboxStore();
+    store.targetPath = target;
+    mockedGetSavedLddcPath.mockReturnValue(programPath);
+
+    expect(await store.launchLddc()).toBe(true);
+    expect(mockedLaunchProgram).toHaveBeenCalledExactlyOnceWith(programPath, []);
+    expect(store.lddcConfigured).toBe(true);
+    expect(store.lddcPath).toBe(programPath);
+    expect(store.isLddcBusy).toBe(false);
+    expect(store.lddcError).toBe('');
+    expect(mockedPreview).not.toHaveBeenCalled();
+  });
+
+  it('does not launch when selection is cancelled and clears a stale configured indicator', async () => {
+    mockedGetSavedLddcPath.mockReturnValue(programPath);
+    const store = useToolboxStore();
+    mockedGetSavedLddcPath.mockReturnValue(null);
+    mockedEnsureLddcPath.mockResolvedValue(null);
+
+    expect(await store.launchLddc()).toBe(false);
+    expect(mockedLaunchProgram).not.toHaveBeenCalled();
+    expect(store.lddcConfigured).toBe(false);
+    expect(store.isLddcBusy).toBe(false);
+    expect(store.lddcError).toBe('');
+  });
+
+  it('prevents duplicate launch or reconfiguration while the picker is pending', async () => {
+    let resolvePath!: (path: string | null) => void;
+    mockedEnsureLddcPath.mockImplementation(() => new Promise((resolve) => { resolvePath = resolve; }));
+    const store = useToolboxStore();
+
+    const firstLaunch = store.launchLddc();
+    expect(store.isLddcBusy).toBe(true);
+    expect(await store.launchLddc()).toBe(false);
+    expect(await store.changeLddcPath()).toBe(false);
+    expect(mockedEnsureLddcPath).toHaveBeenCalledTimes(1);
+    expect(mockedSelectLddcPath).not.toHaveBeenCalled();
+
+    resolvePath(programPath);
+    expect(await firstLaunch).toBe(true);
+    expect(mockedLaunchProgram).toHaveBeenCalledTimes(1);
+    expect(store.isLddcBusy).toBe(false);
+  });
+
+  it('reports a launch failure and allows retrying', async () => {
+    const store = useToolboxStore();
+    mockedLaunchProgram.mockRejectedValueOnce(new Error('无法启动程序'));
+
+    expect(await store.launchLddc()).toBe(false);
+    expect(store.lddcError).toBe('无法启动程序');
+    expect(store.isLddcBusy).toBe(false);
+
+    expect(await store.launchLddc()).toBe(true);
+    expect(store.lddcError).toBe('');
+  });
+
+  it('handles path validation and dialog exceptions without launching', async () => {
+    const store = useToolboxStore();
+    mockedEnsureLddcPath.mockRejectedValueOnce('无法检查程序路径');
+
+    expect(await store.launchLddc()).toBe(false);
+    expect(store.lddcError).toBe('无法检查程序路径');
+    expect(store.isLddcBusy).toBe(false);
+    expect(mockedLaunchProgram).not.toHaveBeenCalled();
+  });
+
+  it('updates the selected program without launching it', async () => {
+    const store = useToolboxStore();
+    mockedSelectLddcPath.mockResolvedValue(programPath);
+    mockedGetSavedLddcPath.mockReturnValue(programPath);
+
+    expect(await store.changeLddcPath()).toBe(true);
+    expect(store.lddcPath).toBe(programPath);
+    expect(store.lddcConfigured).toBe(true);
+    expect(store.isLddcBusy).toBe(false);
+    expect(mockedLaunchProgram).not.toHaveBeenCalled();
+  });
+
+  it('keeps the existing program when reconfiguration is cancelled', async () => {
+    mockedGetSavedLddcPath.mockReturnValue(programPath);
+    mockedSelectLddcPath.mockResolvedValue(null);
+    const store = useToolboxStore();
+
+    expect(await store.changeLddcPath()).toBe(false);
+    expect(store.lddcPath).toBe(programPath);
+    expect(store.lddcConfigured).toBe(true);
+    expect(store.lddcError).toBe('');
+  });
+
+  it('reports reconfiguration errors and releases the busy state', async () => {
+    const store = useToolboxStore();
+    mockedSelectLddcPath.mockRejectedValue(new Error('无法打开选择框'));
+
+    expect(await store.changeLddcPath()).toBe(false);
+    expect(store.lddcError).toBe('无法打开选择框');
+    expect(store.isLddcBusy).toBe(false);
   });
 });
 

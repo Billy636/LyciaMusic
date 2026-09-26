@@ -25,6 +25,26 @@ describe('SettingsToolbox workbench structure', () => {
     expect(actionBarSource).not.toContain('修正标签');
   });
 
+  it('places a launch-only LDDC row after MusicTag without changing the flat workbench', () => {
+    expect(settingsToolboxSource).toContain('LDDC 获取歌词');
+    expect(settingsToolboxSource.indexOf('LDDC 获取歌词')).toBeGreaterThan(
+      settingsToolboxSource.indexOf('MusicTag 获取标签'),
+    );
+    expect(settingsToolboxSource).toContain('仅打开软件，歌曲或文件夹需在 LDDC 中选择');
+    expect(settingsToolboxSource).toContain("'打开 LDDC'");
+    expect(settingsToolboxSource).not.toContain('LDDC_PATH_KEY');
+  });
+
+  it('allows opening LDDC without a target folder and guards repeated clicks', () => {
+    const launchButton = settingsToolboxSource.match(/<button\b[^>]*@click="launchLddc"[^>]*>/)?.[0];
+    expect(launchButton).toBeDefined();
+    expect(launchButton).toContain(':disabled="store.isLddcBusy"');
+    expect(launchButton).not.toContain('hasTarget');
+    expect(settingsToolboxSource).toContain('@click="changeLddcPath"');
+    expect(settingsToolboxSource).toContain('更换 LDDC 程序');
+    expect(settingsToolboxSource).toContain('store.lddcError');
+  });
+
   it('restores the previous session when the tab is revisited', () => {
     expect(settingsToolboxSource).toContain('if (store.hasTarget)');
     expect(settingsToolboxSource).toContain('store.refreshPreview()');

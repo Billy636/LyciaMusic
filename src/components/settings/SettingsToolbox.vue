@@ -46,6 +46,22 @@ const launchMusicTag = async () => {
   }
 };
 
+const launchLddc = async () => {
+  if (await store.launchLddc()) {
+    toast.showToast('LDDC 已启动，请在软件中选择歌曲或文件夹并匹配歌词', 'success');
+  } else if (store.lddcError) {
+    toast.showToast(`打开 LDDC 失败: ${store.lddcError}`, 'error');
+  }
+};
+
+const changeLddcPath = async () => {
+  if (await store.changeLddcPath()) {
+    toast.showToast('LDDC 程序路径已更新', 'success');
+  } else if (store.lddcError) {
+    toast.showToast(`选择 LDDC 失败: ${store.lddcError}`, 'error');
+  }
+};
+
 const handleApply = async () => {
   const result = await store.applySelected(settingsStore.settings.libraryMinDurationSeconds);
 
@@ -84,7 +100,7 @@ const handleReset = () => {
       </p>
     </section>
 
-    <!-- 顶部配置：目标文件夹 + MusicTag -->
+    <!-- 顶部配置：目标文件夹 + 外部工具 -->
     <section class="mx-5">
       <div
         class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-white/40 py-4 dark:border-white/5"
@@ -147,6 +163,45 @@ const handleReset = () => {
               : '用 MusicTag 获取标签'
           }}
         </button>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 py-4">
+        <div class="min-w-0">
+          <h3 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">
+            <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
+            LDDC 获取歌词
+          </h3>
+          <p class="mt-1 pl-3 text-xs leading-6 text-gray-400 dark:text-white/50">
+            使用外部软件 LDDC 搜索和匹配歌词，需自行下载。仅打开软件，歌曲或文件夹需在 LDDC 中选择。
+          </p>
+        </div>
+        <div class="flex items-center gap-3">
+          <button
+            v-if="store.lddcConfigured"
+            type="button"
+            class="text-xs text-gray-400 transition hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:text-white/50 dark:hover:text-[#EC4141]"
+            :disabled="store.isLddcBusy"
+            :title="store.lddcPath"
+            aria-label="更换 LDDC 程序"
+            @click="changeLddcPath"
+          >
+            更换程序
+          </button>
+          <button
+            type="button"
+            class="flex items-center gap-2 rounded-lg border border-gray-200/80 bg-white/45 px-4 py-2 text-xs text-gray-600 transition hover:border-[#EC4141] hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-gray-300"
+            :disabled="store.isLddcBusy"
+            :aria-busy="store.isLddcBusy"
+            title="仅打开 LDDC，不会传入当前歌曲或文件夹"
+            @click="launchLddc"
+          >
+            <span
+              class="h-1.5 w-1.5 rounded-full"
+              :class="store.lddcConfigured ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-white/30'"
+            ></span>
+            {{ store.isLddcBusy ? '请稍候…' : '打开 LDDC' }}
+          </button>
+        </div>
       </div>
     </section>
 

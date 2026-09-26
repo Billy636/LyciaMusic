@@ -2,6 +2,7 @@ import { computed, ref, watch } from 'vue';
 import { defineStore } from 'pinia';
 
 import { ensureMusicTagPath, getSavedMusicTagPath } from '../../composables/musicTag';
+import { ensureLddcPath, getSavedLddcPath, selectLddcPath } from '../../composables/lddc';
 import { localStore } from '../../services/storage/localStore';
 import { libraryApi } from '../../services/tauri/libraryApi';
 import type { RenameApplyResult, ToolboxPreviewItem } from '../../services/tauri/contracts';
@@ -121,6 +122,10 @@ export const useToolboxStore = defineStore('toolbox', () => {
   const autoRefresh = ref(persisted.autoRefresh);
   const resolveConflicts = ref(persisted.resolveConflicts);
   const musicTagConfigured = ref(Boolean(getSavedMusicTagPath()));
+  const lddcPath = ref(getSavedLddcPath() ?? '');
+  const lddcConfigured = computed(() => lddcPath.value.length > 0);
+  const isLddcBusy = ref(false);
+  const lddcError = ref('');
 
   const previewItems = ref<ToolboxPreviewItem[]>([]);
   const selectedPaths = ref<Set<string>>(new Set());
@@ -338,6 +343,45 @@ export const useToolboxStore = defineStore('toolbox', () => {
     }
   }
 
+  /** LDDC 仅作为快捷入口，不传递工作台的目录或选中文件。 */
+  async function launchLddc(): Promise<boolean> {
+    if (isLddcBusy.value) return false;
+
+    isLddcBusy.value = true;
+    lddcError.value = '';
+    try {
+      const path = await ensureLddcPath();
+      if (!path) return false;
+
+      await toolboxApi.launchProgram(path, []);
+      return true;
+    } catch (error) {
+      console.error('Failed to launch LDDC:', error);
+      lddcError.value = error instanceof Error ? error.message : String(error);
+      return false;
+    } finally {
+      lddcPath.value = getSavedLddcPath() ?? '';
+      isLddcBusy.value = false;
+    }
+  }
+
+  async function changeLddcPath(): Promise<boolean> {
+    if (isLddcBusy.value) return false;
+
+    isLddcBusy.value = true;
+    lddcError.value = '';
+    try {
+      return Boolean(await selectLddcPath());
+    } catch (error) {
+      console.error('Failed to select LDDC:', error);
+      lddcError.value = error instanceof Error ? error.message : String(error);
+      return false;
+    } finally {
+      lddcPath.value = getSavedLddcPath() ?? '';
+      isLddcBusy.value = false;
+    }
+  }
+
   /** 处理另一个文件夹：清空会话状态，保留偏好 */
   function resetWorkbench() {
     targetPath.value = '';
@@ -356,6 +400,10 @@ export const useToolboxStore = defineStore('toolbox', () => {
     autoRefresh,
     resolveConflicts,
     musicTagConfigured,
+    lddcPath,
+    lddcConfigured,
+    isLddcBusy,
+    lddcError,
     previewItems,
     selectedPaths,
     isScanning,
@@ -384,6 +432,8 @@ export const useToolboxStore = defineStore('toolbox', () => {
     applySelected,
     refreshLibrary,
     launchMusicTagForTarget,
+    launchLddc,
+    changeLddcPath,
     resetWorkbench,
   };
 });
