@@ -10,6 +10,8 @@ import { useToast } from '../../composables/toast';
 import { windowApi } from '../../services/tauri/windowApi';
 import type { SongDetail } from '../../types';
 import LyricsView from './LyricsView.vue';
+import LyricsAppearancePanel from './LyricsAppearancePanel.vue';
+import { readLyricsAppearanceDraft } from './useLyricsAppearanceDraft';
 import PlayerDetailBackground from './PlayerDetailBackground.vue';
 import PlayerDetailLeft from './PlayerDetailLeft.vue';
 import QueueList from './QueueList.vue';
@@ -19,13 +21,18 @@ import { hideMainWindowToTray } from '../../composables/renderingPower';
 const {
   showPlayerDetail,
   showQueue,
+  showPlaylist,
   currentSong,
   closePlayerDetail,
 } = usePlaybackController();
 
 const { settings } = useSettings();
 
-const { parsedLyrics } = useLyrics();
+const { parsedLyrics, lyricsStatus, lyricsSettings, showLyricsPlayerSettingsPanel } = useLyrics();
+const lyricsAppearancePreview = ref(readLyricsAppearanceDraft(lyricsSettings));
+const hasLyricsPresentation = computed(() => lyricsStatus.value === 'loading'
+  || lyricsStatus.value === 'error'
+  || (lyricsStatus.value === 'ready' && parsedLyrics.value.length > 0));
 const { staggerPhase } = useSharedTransition();
 const { loadSongDetail, clearSongDetailCache } = useSongDetailCache();
 const { showToast } = useToast();
@@ -264,6 +271,9 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
   if (!showPlayerDetail.value) return;
 
   if (event.key === 'Escape') {
+    // The drawers own Escape (including their teleported submenus). Do not
+    // collapse the page or leave immersive mode underneath an open drawer.
+    if (showLyricsPlayerSettingsPanel.value || showPlaylist.value) return;
     if (isTypingTarget(event.target)) return;
     if (isModalOrMenuOpen()) return;
 
@@ -396,6 +406,10 @@ const metaInfo = computed(() => {
       isImmersiveCursorHidden ? 'immersive-cursor-hidden' : '',
     ]"
   >
+    <LyricsAppearancePanel
+      v-if="showPlayerDetail"
+      @preview="lyricsAppearancePreview = $event"
+    />
     <div class="relative flex h-[100vh] w-full flex-col pt-[calc(100vh-100%)]">
       <div
         class="absolute inset-0 transition-all duration-600 ease-[cubic-bezier(0.22,1,0.36,1)]"
@@ -506,7 +520,11 @@ const metaInfo = computed(() => {
               class="h-full rounded-2xl border border-white/5 bg-black/10 p-4 shadow-xl backdrop-blur-sm"
             />
 
-            <LyricsView v-else-if="showPlayerDetail && parsedLyrics.length > 0" class="h-full" />
+            <LyricsView
+              v-else-if="showPlayerDetail && hasLyricsPresentation"
+              :appearance-preview="lyricsAppearancePreview"
+              class="h-full"
+            />
 
             <transition v-else name="song-switch-meta" mode="out-in">
               <div

@@ -15,7 +15,7 @@ commands.allow = [
   "clear_cover_cache",
   "prepare_custom_background_image",
   "get_song_lyrics",
-  "get_song_lyrics_payload",
+  "get_song_lyrics_source",
   "get_song_lyrics_for_edit",
   "save_song_lyrics",
   "save_song_info",

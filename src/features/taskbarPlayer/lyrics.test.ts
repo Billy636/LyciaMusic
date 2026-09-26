@@ -13,6 +13,12 @@ function line(time: number, text: string, extra: Partial<LyricLine> = {}): Lyric
 }
 
 describe('resolveTaskbarLyricLine', () => {
+  it('does not let an ended same-time voice or empty row hide an ongoing foreground', () => {
+    const lines = [line(1, 'long main', { endTime: 8 }), line(1, 'short voice', { endTime: 2 }), line(1, '')];
+    expect(resolveTaskbarLyricLine(lines, 3)).toBe(lines[0]);
+    expect(resolveTaskbarLyricLine([...lines, line(4, '')], 4)).toBeNull();
+  });
+
   it('previews the first foreground line, switches at its exact start, and holds the last line', () => {
     const lines = [line(2, 'first'), line(6, 'second')];
 

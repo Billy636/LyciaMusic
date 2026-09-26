@@ -1,4 +1,5 @@
 import type { LyricLine, LyricWord } from '../../composables/lyrics/types';
+import { findDisplayLyricIndex } from '../../composables/lyrics/selection';
 
 interface TaskbarPlaybackClockPayload {
   playbackTime: number;
@@ -8,25 +9,8 @@ interface TaskbarPlaybackClockPayload {
 
 /** Select a single foreground line without changing the shared lyric document. */
 export function resolveTaskbarLyricLine(lines: LyricLine[], time: number): LyricLine | null {
-  const timedLines = lines.filter((line) => Number.isFinite(line.time));
-  const foregroundLines = timedLines.filter((line) => !line.isBG);
-  const candidates = foregroundLines.length > 0 ? foregroundLines : timedLines;
-  const targetTime = Number.isFinite(time) ? time : 0;
-  let activeLine: LyricLine | null = null;
-  let firstMeaningfulLine: LyricLine | null = null;
-
-  for (const line of candidates) {
-    if (line.text.trim() && (!firstMeaningfulLine || line.time < firstMeaningfulLine.time)) {
-      firstMeaningfulLine = line;
-    }
-    if (line.time <= targetTime && (!activeLine || line.time >= activeLine.time)) {
-      activeLine = line;
-    }
-  }
-
-  // A timed blank is an intentional interlude, not permission to keep the old line.
-  if (activeLine) return activeLine.text.trim() ? activeLine : null;
-  return firstMeaningfulLine;
+  const line = lines[findDisplayLyricIndex(lines, time, true)];
+  return line?.text.trim() ? line : null;
 }
 
 /** Actual word timing is optional: ordinary LRC lines remain plain text. */

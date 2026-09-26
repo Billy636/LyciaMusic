@@ -544,6 +544,27 @@ describe('player playback domain', () => {
     vi.unstubAllGlobals();
   });
 
+  it('publishes clock corrections separately from explicit small seeks', async () => {
+    vi.useFakeTimers();
+    const playbackStore = usePlaybackStore();
+    const playerPlayback = createPlayerPlayback({
+      addToHistory: vi.fn(), loadLyrics: vi.fn(), handleAutoNext: vi.fn(),
+    });
+    vi.mocked(playbackApi.getPlaybackProgress).mockResolvedValue(0.8);
+    await playerPlayback.playSong(makeSong());
+    const initialClockRevision = playbackStore.clockRevision;
+    const initialSeekRevision = playbackStore.seekRevision;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(playbackStore.clockRevision).toBe(initialClockRevision);
+    expect(playbackStore.seekRevision).toBe(initialSeekRevision);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(playbackStore.clockRevision).toBeGreaterThan(initialClockRevision);
+    expect(playbackStore.seekRevision).toBe(initialSeekRevision);
+    await playerPlayback.seekTo(playbackStore.currentTime + 0.1);
+    expect(playbackStore.seekRevision).toBe(initialSeekRevision + 1);
+    playerPlayback.dispose();
+  });
+
   it('keeps cue track time relative when the backend confirms an absolute seek position', async () => {
     const playbackStore = usePlaybackStore();
     const song = makeSong({

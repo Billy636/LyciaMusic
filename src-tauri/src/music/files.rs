@@ -1,6 +1,5 @@
 // music/files.rs - 文件操作命令
 
-use super::lyrics::{build_structured_lyrics_payload, StructuredLyricsPayload};
 use super::scanner::{apply_scan_changes, parse_song_from_file};
 use super::tags::{
     extract_detail_metadata, extract_embedded_lyrics, extract_embedded_lyrics_match,
@@ -42,8 +41,12 @@ pub struct BatchMoveMusicFilesResult {
     moved_paths: Vec<MovedMusicFilePath>,
 }
 
-fn read_sidecar_lrc(path_obj: &Path) -> Option<String> {
-    read_sidecar_lrc_with_path(path_obj).map(|(content, _)| content)
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SongLyricsSource {
+    pub raw_lyrics: String,
+    pub source_format: Option<String>,
+    pub source_path: Option<String>,
 }
 
 fn read_sidecar_lrc_with_path(path_obj: &Path) -> Option<(String, PathBuf)> {
@@ -327,26 +330,55 @@ fn sync_moved_song_paths(
     tx.commit().map_err(|e| e.to_string())
 }
 
-fn read_song_lyrics_raw(path: &str) -> String {
+fn read_local_song_lyrics_source(path: &str) -> SongLyricsSource {
     let path_obj = Path::new(path);
-    if let Some(content) = read_sidecar_lrc(path_obj) {
-        return content;
+    if let Some((raw_lyrics, source_path)) = read_sidecar_lrc_with_path(path_obj) {
+        return SongLyricsSource {
+            raw_lyrics,
+            source_format: source_path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(str::to_ascii_lowercase),
+            source_path: Some(normalize_path(&source_path.to_string_lossy())),
+        };
     }
 
     if let Ok(tagged_file) = read_tagged_file_from_path(path_obj) {
-        if let Some(lyrics) = extract_embedded_lyrics(&tagged_file) {
-            return lyrics;
+        if let Some(raw_lyrics) = extract_embedded_lyrics(&tagged_file) {
+            return SongLyricsSource {
+                raw_lyrics,
+                // The audio extension does not identify its embedded lyric format.
+                source_format: None,
+                source_path: Some(normalize_path(path)),
+            };
         }
     }
 
-    String::new()
+    SongLyricsSource::default()
 }
 
-async fn read_remote_song_lyrics_raw(path: &str, db_state: &DbState) -> String {
+fn remote_sidecar_lyrics_source(
+    raw_lyrics: String,
+    source_id: &str,
+    lrc_path: &str,
+) -> SongLyricsSource {
+    SongLyricsSource {
+        raw_lyrics,
+        source_format: Some("lrc".to_string()),
+        // Use the app's credential-free identifier, never the authenticated WebDAV URL.
+        source_path: Some(format!(
+            "remote://{}/{}",
+            source_id,
+            lrc_path.trim_start_matches('/')
+        )),
+    }
+}
+
+async fn read_remote_song_lyrics_source(path: &str, db_state: &DbState) -> SongLyricsSource {
     let lookup_and_cache = {
         let conn = match db_state.conn.lock() {
             Ok(conn) => conn,
-            Err(_) => return String::new(),
+            Err(_) => return SongLyricsSource::default(),
         };
         let lookup = get_source_for_remote_uri(&conn, path).ok();
         let cache_path = lookup
@@ -359,47 +391,52 @@ async fn read_remote_song_lyrics_raw(path: &str, db_state: &DbState) -> String {
     };
     let (lookup, cache_path) = lookup_and_cache;
     if let Some(cache_path) = cache_path.filter(|path| Path::new(path).is_file()) {
-        let lyrics = read_song_lyrics_raw(&cache_path);
-        if !lyrics.trim().is_empty() {
-            return lyrics;
+        let lyrics_source = read_local_song_lyrics_source(&cache_path);
+        if !lyrics_source.raw_lyrics.trim().is_empty() {
+            return lyrics_source;
         }
     }
 
     let Some((source, remote_path, _etag, _stored_remote_uri)) = lookup else {
-        return String::new();
+        return SongLyricsSource::default();
     };
     let Some(lrc_path) = remote_sidecar_lrc_path(&remote_path) else {
-        return String::new();
+        return SongLyricsSource::default();
     };
 
     webdav::read_text_file(&source, &lrc_path)
         .await
         .ok()
         .flatten()
+        .map(|raw_lyrics| remote_sidecar_lyrics_source(raw_lyrics, &source.id, &lrc_path))
         .unwrap_or_default()
 }
 
-async fn read_song_lyrics_raw_for_path(path: &str, db_state: &DbState) -> String {
+async fn read_song_lyrics_source_for_path(path: &str, db_state: &DbState) -> SongLyricsSource {
     if is_remote_uri(path) {
-        read_remote_song_lyrics_raw(path, db_state).await
+        read_remote_song_lyrics_source(path, db_state).await
     } else {
-        read_song_lyrics_raw(path)
+        read_local_song_lyrics_source(path)
     }
+}
+
+async fn read_song_lyrics_raw_for_path(path: &str, db_state: &DbState) -> String {
+    read_song_lyrics_source_for_path(path, db_state)
+        .await
+        .raw_lyrics
+}
+
+#[tauri::command]
+pub async fn get_song_lyrics_source(
+    path: String,
+    db_state: State<'_, DbState>,
+) -> Result<SongLyricsSource, String> {
+    Ok(read_song_lyrics_source_for_path(&path, &db_state).await)
 }
 
 #[tauri::command]
 pub async fn get_song_lyrics(path: String, db_state: State<'_, DbState>) -> Result<String, String> {
     Ok(read_song_lyrics_raw_for_path(&path, &db_state).await)
-}
-
-#[tauri::command]
-pub async fn get_song_lyrics_payload(
-    path: String,
-    db_state: State<'_, DbState>,
-) -> Result<StructuredLyricsPayload, String> {
-    Ok(build_structured_lyrics_payload(
-        read_song_lyrics_raw_for_path(&path, &db_state).await,
-    ))
 }
 
 #[tauri::command]
@@ -817,11 +854,81 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
+    fn lyrics_source_command_is_registered_and_allowed() {
+        let app_entrypoint = include_str!("../lib.rs");
+        let command_permissions = include_str!("../../permissions/app-commands.toml");
+
+        assert!(app_entrypoint.contains("\n            get_song_lyrics_source,"));
+        assert!(command_permissions.contains("\"get_song_lyrics_source\""));
+    }
+
+    #[test]
     fn remote_sidecar_lrc_path_uses_remote_song_parent_and_stem() {
         assert_eq!(
             remote_sidecar_lrc_path("/Artist/Album/Demo.flac").as_deref(),
             Some("/Artist/Album/Demo.lrc")
         );
+    }
+
+    #[test]
+    fn remote_sidecar_lyrics_source_serializes_only_credential_free_metadata() {
+        let source = remote_sidecar_lyrics_source(
+            "[00:01.00]remote lyric".to_string(),
+            "source-id",
+            "/Artist/Album/Demo.lrc",
+        );
+
+        assert_eq!(
+            serde_json::to_value(source).unwrap(),
+            serde_json::json!({
+                "rawLyrics": "[00:01.00]remote lyric",
+                "sourceFormat": "lrc",
+                "sourcePath": "remote://source-id/Artist/Album/Demo.lrc",
+            })
+        );
+    }
+
+    #[test]
+    fn missing_local_lyrics_source_has_no_format_or_path() {
+        let path = std::env::temp_dir()
+            .join(format!("lycia_missing_lyrics_{}", Uuid::new_v4()))
+            .join("Demo.flac");
+
+        let source = read_local_song_lyrics_source(path.to_str().unwrap());
+
+        assert_eq!(
+            serde_json::to_value(source).unwrap(),
+            serde_json::json!({
+                "rawLyrics": "",
+                "sourceFormat": null,
+                "sourcePath": null,
+            })
+        );
+    }
+
+    #[test]
+    fn local_lyrics_source_preserves_raw_text_and_format_hints_without_parsing() {
+        let dir = std::env::temp_dir().join(format!("lycia_lyrics_source_{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let raw_lyrics = "\u{feff} unparsed lyric content\r\n";
+
+        for extension in ["yrc", "qrc", "lys", "lrc", "txt"] {
+            let audio = dir.join(format!("Demo-{extension}.flac"));
+            let sidecar = audio.with_extension(extension.to_ascii_uppercase());
+            fs::write(&audio, b"not real audio").unwrap();
+            fs::write(&sidecar, raw_lyrics).unwrap();
+
+            let source = read_local_song_lyrics_source(audio.to_str().unwrap());
+
+            assert_eq!(source.raw_lyrics, raw_lyrics);
+            assert_eq!(source.source_format.as_deref(), Some(extension));
+            assert_eq!(
+                source.source_path,
+                Some(normalize_path(&sidecar.to_string_lossy()))
+            );
+        }
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -845,6 +952,14 @@ mod tests {
         assert!(path
             .file_name()
             .is_some_and(|name| name.eq_ignore_ascii_case(ttml.file_name().unwrap())));
+
+        let source = read_local_song_lyrics_source(audio.to_str().unwrap());
+        assert_eq!(source.raw_lyrics, "<tt></tt>");
+        assert_eq!(source.source_format.as_deref(), Some("ttml"));
+        assert_eq!(
+            source.source_path,
+            Some(normalize_path(&ttml.to_string_lossy()))
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -870,11 +985,23 @@ mod tests {
         audio_bytes.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x64]);
         audio_bytes.extend(std::iter::repeat(0).take(413));
         fs::write(&audio, audio_bytes).unwrap();
+
+        let embedded_source = read_local_song_lyrics_source(audio.to_str().unwrap());
+        assert_eq!(embedded_source.raw_lyrics, "[00:01.00]embedded lyric");
+        assert_eq!(embedded_source.source_format, None);
+        assert_eq!(
+            embedded_source.source_path,
+            Some(normalize_path(&audio.to_string_lossy()))
+        );
+
         fs::write(&lrc, "[00:01.00]sidecar lyric").unwrap();
 
+        let source = read_local_song_lyrics_source(audio.to_str().unwrap());
+        assert_eq!(source.raw_lyrics, "[00:01.00]sidecar lyric");
+        assert_eq!(source.source_format.as_deref(), Some("lrc"));
         assert_eq!(
-            read_song_lyrics_raw(audio.to_str().unwrap()),
-            "[00:01.00]sidecar lyric"
+            source.source_path,
+            Some(normalize_path(&lrc.to_string_lossy()))
         );
 
         let editable = get_song_lyrics_for_edit(audio.to_string_lossy().into_owned())
@@ -953,10 +1080,21 @@ mod tests {
             conn: Arc::new(Mutex::new(conn)),
         };
 
-        let lyrics =
-            read_remote_song_lyrics_raw("remote://source/Artist/Album/Demo.flac", &db_state).await;
+        let source =
+            read_remote_song_lyrics_source("remote://source/Artist/Album/Demo.flac", &db_state)
+                .await;
 
-        assert_eq!(lyrics, "[00:01.00]cached lyric");
+        assert_eq!(source.raw_lyrics, "[00:01.00]cached lyric");
+        assert_eq!(source.source_format.as_deref(), Some("lrc"));
+        assert_eq!(
+            source.source_path,
+            Some(normalize_path(&cached_lrc.to_string_lossy()))
+        );
+        assert_eq!(
+            read_song_lyrics_raw_for_path("remote://source/Artist/Album/Demo.flac", &db_state)
+                .await,
+            source.raw_lyrics
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

@@ -49,6 +49,7 @@ import type {
   LyricLine,
   LyricWord,
 } from './lyrics/types';
+import { findDisplayLyricIndex, foregroundLyricLines } from './lyrics/selection';
 import type { ImportedLyricsFont } from '../types';
 import {
   DESKTOP_LYRICS_ACTION_EVENT,
@@ -100,6 +101,7 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
   const isPlaying = ref(false);
   const audioDelay = ref(0);
   const parsedLyrics = ref<LyricLine[]>([]);
+  const displayLyrics = computed(() => foregroundLyricLines(parsedLyrics.value));
   const lyricsStatus = ref<LyricsStatus>('idle');
   const fallbackText = ref('Instrumental / No lyrics');
   const themeColors = ref<string[]>([]);
@@ -312,24 +314,6 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     return palette.slice(0, 4);
   }
 
-  function findLyricIndexByTime(lines: LyricLine[], targetTime: number): number {
-    let left = 0;
-    let right = lines.length - 1;
-    let answer = -1;
-
-    while (left <= right) {
-      const mid = (left + right) >> 1;
-      if (lines[mid].time <= targetTime) {
-        answer = mid;
-        left = mid + 1;
-      } else {
-        right = mid - 1;
-      }
-    }
-
-    return answer;
-  }
-
   function hasCompleteWordRomaji(words: LyricWord[]): boolean {
     if (words.length === 0) return false;
     const relevantWords = words.filter((word) => word.text.trim().length > 0 && word.end > word.start);
@@ -352,7 +336,7 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     const parsedEnd = Number.isFinite(line.endTime) && line.endTime > start
       ? line.endTime
       : start + DEFAULT_PSEUDO_WORD_DURATION_SECONDS;
-    const nextStart = parsedLyrics.value[lineIndex + 1]?.time;
+    const nextStart = displayLyrics.value[lineIndex + 1]?.time;
     const visibleBoundary = typeof nextStart === 'number' && Number.isFinite(nextStart) && nextStart > start
       ? nextStart
       : songDuration.value;
@@ -553,44 +537,46 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     } as Record<string, string>;
   });
   const activeLyricIndex = computed(() => {
-    if (parsedLyrics.value.length === 0) return -1;
-    return findLyricIndexByTime(parsedLyrics.value, syncedCurrentTime.value);
+    if (displayLyrics.value.length === 0) return -1;
+    return findDisplayLyricIndex(displayLyrics.value, syncedCurrentTime.value, true);
   });
   const activeLyricLine = computed<LyricLine | null>(() => {
-    if (parsedLyrics.value.length === 0) {
+    if (displayLyrics.value.length === 0) {
       return null;
     }
 
     if (activeLyricIndex.value >= 0) {
-      return parsedLyrics.value[activeLyricIndex.value] ?? null;
+      return displayLyrics.value[activeLyricIndex.value] ?? null;
     }
 
-    return parsedLyrics.value[0] ?? null;
+    return displayLyrics.value[0] ?? null;
   });
   watch(
-    [activeLyricIndex, parsedLyrics, () => settings.value.showDoubleLine],
+    [activeLyricIndex, displayLyrics, () => settings.value.showDoubleLine],
     () => {
-      if (parsedLyrics.value.length === 0) {
+      if (displayLyrics.value.length === 0) {
         doubleLinePageStartIndex.value = -1;
         return;
       }
 
       const currentIndex = activeLyricIndex.value >= 0 ? activeLyricIndex.value : 0;
-      if (!settings.value.showDoubleLine) {
+      if (!settings.value.showDoubleLine || !displayLyrics.value[currentIndex]?.text.trim()) {
         doubleLinePageStartIndex.value = currentIndex;
         return;
       }
 
       const pageStartIndex = doubleLinePageStartIndex.value;
       const pageEndIndex = pageStartIndex + 1;
-      if (pageStartIndex < 0 || currentIndex < pageStartIndex || currentIndex > pageEndIndex) {
+      if (pageStartIndex < 0 || !displayLyrics.value[pageStartIndex]?.text.trim()
+        || currentIndex < pageStartIndex || currentIndex > pageEndIndex) {
         doubleLinePageStartIndex.value = currentIndex;
       }
     },
     { immediate: true },
   );
   const visiblePairStartIndex = computed(() => {
-    if (parsedLyrics.value.length === 0) return -1;
+    if (displayLyrics.value.length === 0) return -1;
+    if (!activeLyricLine.value?.text.trim()) return Math.max(0, activeLyricIndex.value);
     if (!settings.value.showDoubleLine) {
       return activeLyricIndex.value >= 0 ? activeLyricIndex.value : 0;
     }
@@ -605,22 +591,22 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
       return `${line.time}:${line.text}:${line.translation}:${line.romaji}`;
     }
 
-    const firstLine = parsedLyrics.value[visiblePairStartIndex.value];
-    const secondLine = parsedLyrics.value[visiblePairStartIndex.value + 1];
+    const firstLine = displayLyrics.value[visiblePairStartIndex.value];
+    const secondLine = displayLyrics.value[visiblePairStartIndex.value + 1];
     return [
       firstLine ? `${firstLine.time}:${firstLine.text}:${firstLine.translation}:${firstLine.romaji}` : '',
       secondLine ? `${secondLine.time}:${secondLine.text}:${secondLine.translation}:${secondLine.romaji}` : '',
     ].join('|');
   });
   const visibleLyricLines = computed<DesktopLyricDisplayLine[]>(() => {
-    if (parsedLyrics.value.length === 0 || visiblePairStartIndex.value < 0) return [];
+    if (displayLyrics.value.length === 0 || visiblePairStartIndex.value < 0) return [];
 
-    const lineCount = settings.value.showDoubleLine ? 2 : 1;
+    const lineCount = settings.value.showDoubleLine && activeLyricLine.value?.text.trim() ? 2 : 1;
     const lines: DesktopLyricDisplayLine[] = [];
 
     for (let offset = 0; offset < lineCount; offset += 1) {
       const lineIndex = visiblePairStartIndex.value + offset;
-      const line = parsedLyrics.value[lineIndex];
+      const line = displayLyrics.value[lineIndex];
       if (!line) continue;
 
       const words = getMainDisplayWords(line, lineIndex);

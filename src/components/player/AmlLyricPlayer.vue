@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { LyricLine as AmlLyricLine, LyricLineMouseEvent } from '@applemusic-like-lyrics/core';
-import { PatchedLyricPlayer } from '../../lib/amll/PatchedLyricPlayer';
-import { syncAmlLyricSeekLayout } from './amllSeekLayout';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { DomLyricPlayer, type LyricLine, type LyricLineMouseEvent } from '@applemusic-like-lyrics/core';
+
+import { clampPlayerLineGap } from '../../composables/lyrics/constants';
+import { AmlLyricPlayerRuntime } from './amlLyricPlayerRuntime';
 
 const props = withDefaults(defineProps<{
   disabled?: boolean;
@@ -14,10 +15,12 @@ const props = withDefaults(defineProps<{
   enableBlur?: boolean;
   enableScale?: boolean;
   hidePassedLines?: boolean;
-  lyricLines?: AmlLyricLine[];
+  lyricLines?: LyricLine[];
   currentTime?: number;
   timeSyncKey?: string | number;
+  seekKey?: string | number;
   wordFadeWidth?: number;
+  fontScale?: number;
   lineGap?: number;
   layoutVersion?: string | number;
 }>(), {
@@ -33,8 +36,8 @@ const props = withDefaults(defineProps<{
   lyricLines: () => [],
   currentTime: 0,
   timeSyncKey: '',
+  seekKey: '',
   wordFadeWidth: 0.5,
-  lineGap: 1,
   layoutVersion: 0,
 });
 
@@ -43,93 +46,15 @@ const emit = defineEmits<{
 }>();
 
 const wrapperRef = ref<HTMLDivElement | null>(null);
-const LOCAL_CLOCK_SYNC_DRIFT_MS = 350;
-
-let player: PatchedLyricPlayer | null = null;
-let resizeObserver: ResizeObserver | null = null;
-let frameId = 0;
-let recoveryFrameId = 0;
-let queueRecoveryMaxAttempts = 0;
-let queueRecoveryAttempts = 0;
-let queueRecoveryReason = '';
-let pendingLowPowerRecoveryReason = '';
-let localCurrentTime = Math.trunc(props.currentTime);
-let anchorCurrentTime = Math.trunc(props.currentTime);
-let anchorFrameTime = 0;
-let lastAppliedCurrentTime = Number.NaN;
-
-function getFrameNow() {
-  return typeof performance !== 'undefined' ? performance.now() : 0;
-}
-
-function applyCurrentTime(timeMs: number) {
-  localCurrentTime = Math.max(0, Math.trunc(timeMs));
-  if (!player || localCurrentTime === lastAppliedCurrentTime) return;
-
-  player.setCurrentTime(localCurrentTime);
-  lastAppliedCurrentTime = localCurrentTime;
-}
-
-function resetLocalClock(timeMs = props.currentTime, frameTime = getFrameNow()) {
-  anchorCurrentTime = Math.max(0, Math.trunc(timeMs));
-  anchorFrameTime = frameTime;
-  applyCurrentTime(anchorCurrentTime);
-}
-
-function resolveLocalCurrentTime(frameTime: number) {
-  if (!props.playing) {
-    return anchorCurrentTime;
-  }
-
-  return anchorCurrentTime + Math.max(0, frameTime - anchorFrameTime);
-}
-
-function syncExternalCurrentTime(force: boolean) {
-  const nextTime = Math.max(0, Math.trunc(props.currentTime));
-  const drift = Math.abs(nextTime - localCurrentTime);
-  if (!force && props.playing && drift <= LOCAL_CLOCK_SYNC_DRIFT_MS) return;
-
-  resetLocalClock(nextTime);
-}
-
-function stopAnimationLoop() {
-  if (frameId !== 0) {
-    cancelAnimationFrame(frameId);
-    frameId = 0;
-  }
-}
-
-function startAnimationLoop() {
-  stopAnimationLoop();
-
-  if (props.disabled || props.lowPower) {
-    return;
-  }
-
-  let lastTime = -1;
-  const onFrame = (time: number) => {
-    if (!player || props.disabled || props.lowPower) {
-      frameId = 0;
-      return;
-    }
-
-    if (lastTime === -1) {
-      lastTime = time;
-      resetLocalClock(localCurrentTime, time);
-    }
-
-    applyCurrentTime(resolveLocalCurrentTime(time));
-    player.update(time - lastTime);
-    lastTime = time;
-    frameId = requestAnimationFrame(onFrame);
-  };
-
-  frameId = requestAnimationFrame(onFrame);
-}
+const wrapperStyle = computed(() => props.lineGap === undefined
+  ? undefined
+  : { '--lyrics-line-gap': String(clampPlayerLineGap(props.lineGap)) });
+let player: DomLyricPlayer | null = null;
+let runtime: AmlLyricPlayerRuntime | null = null;
+let fontRefreshRevision = 0;
 
 function applyPlayerProps() {
   if (!player) return;
-
   player.setAlignAnchor(props.alignAnchor);
   player.setAlignPosition(props.alignPosition);
   player.setEnableSpring(props.enableSpring);
@@ -137,213 +62,97 @@ function applyPlayerProps() {
   player.setEnableScale(props.enableScale);
   player.setHidePassedLines(props.hidePassedLines);
   player.setWordFadeWidth(props.wordFadeWidth);
-  player.setLineGap(props.lineGap);
-  player.setPlaybackPaused(!props.playing);
-}
-
-function attachPlayer(nextPlayer: PatchedLyricPlayer) {
-  const wrapper = wrapperRef.value;
-  if (!wrapper) return;
-
-  const playerElement = nextPlayer.getElement();
-  playerElement.style.width = '100%';
-  playerElement.style.height = '100%';
-  wrapper.appendChild(playerElement);
-  nextPlayer.addEventListener('line-click', handleLineClick as EventListener);
-  player = nextPlayer;
-  applyPlayerProps();
-  player.setLyricLines(props.lyricLines, Math.trunc(props.currentTime));
-  resetLocalClock(props.currentTime);
-}
-
-function detachPlayer() {
-  if (!player) return;
-
-  player.removeEventListener('line-click', handleLineClick as EventListener);
-  player.dispose();
-  player = null;
-}
-
-function queueRecovery(reason: string, options: { maxAttempts?: number } = {}) {
-  if (!player) return;
-
-  if (props.lowPower) {
-    pendingLowPowerRecoveryReason = reason;
-    return;
-  }
-
-  const maxAttempts = options.maxAttempts ?? 12;
-  queueRecoveryReason = reason;
-  queueRecoveryMaxAttempts = Math.max(queueRecoveryMaxAttempts, maxAttempts);
-
-  if (recoveryFrameId !== 0) return;
-
-  queueRecoveryAttempts = 0;
-  const runRecovery = () => {
-    if (!player) {
-      recoveryFrameId = 0;
-      queueRecoveryMaxAttempts = 0;
-      queueRecoveryAttempts = 0;
-      return;
-    }
-
-    player.recoverLayout(`${queueRecoveryReason}:${queueRecoveryAttempts}`);
-    if (queueRecoveryAttempts < queueRecoveryMaxAttempts) {
-      queueRecoveryAttempts += 1;
-      recoveryFrameId = requestAnimationFrame(runRecovery);
-    } else {
-      recoveryFrameId = 0;
-      queueRecoveryMaxAttempts = 0;
-      queueRecoveryAttempts = 0;
-    }
-  };
-
-  recoveryFrameId = requestAnimationFrame(runRecovery);
 }
 
 function handleLineClick(event: Event) {
+  // Preserve the public line object, including parser-provided source timing.
   emit('line-click', event as LyricLineMouseEvent);
 }
 
-function syncSeekLayout(timeMs: number, lineIndex?: number) {
-  if (!player) return;
-
-  syncAmlLyricSeekLayout(player, timeMs, lineIndex);
+function syncSeekLayout(timeMs: number, _lineIndex?: number) {
+  // Kept source-compatible with callers from the old wrapper. AMLL's optimized
+  // groups own their indexes; the original media time is the stable seek target.
+  runtime?.seek(timeMs);
 }
 
-defineExpose({
-  syncSeekLayout,
-});
+async function refreshAfterFontsReady() {
+  const revision = ++fontRefreshRevision;
+  await nextTick();
+  await document.fonts?.ready;
+  if (revision === fontRefreshRevision) runtime?.refreshLayout();
+}
+
+defineExpose({ syncSeekLayout });
 
 onMounted(() => {
   const wrapper = wrapperRef.value;
   if (!wrapper) return;
 
-  attachPlayer(new PatchedLyricPlayer());
-  startAnimationLoop();
-  queueRecovery('mounted');
+  player = new DomLyricPlayer();
+  const element = player.getElement();
+  element.style.width = '100%';
+  element.style.height = '100%';
+  wrapper.appendChild(element);
+  player.addEventListener('line-click', handleLineClick);
+  applyPlayerProps();
 
-  resizeObserver = new ResizeObserver(() => {
-    queueRecovery('resize');
+  runtime = new AmlLyricPlayerRuntime(player, {
+    currentTime: props.currentTime,
+    playing: props.playing,
+    disabled: props.disabled,
+    lowPower: props.lowPower,
   });
-  resizeObserver.observe(wrapper);
+  runtime.setLyricLines(props.lyricLines, props.currentTime);
+  runtime.start();
+  if (document.fonts?.status === 'loading') void refreshAfterFontsReady();
 });
 
 onBeforeUnmount(() => {
-  stopAnimationLoop();
-
-  if (recoveryFrameId !== 0) {
-    cancelAnimationFrame(recoveryFrameId);
-    recoveryFrameId = 0;
-    queueRecoveryMaxAttempts = 0;
-    queueRecoveryAttempts = 0;
-  }
-  pendingLowPowerRecoveryReason = '';
-
-  resizeObserver?.disconnect();
-  resizeObserver = null;
-
-  if (player) {
-    detachPlayer();
-  }
+  fontRefreshRevision += 1;
+  player?.removeEventListener('line-click', handleLineClick);
+  runtime?.dispose();
+  runtime = null;
+  player = null;
 });
 
-watch(() => props.disabled, (disabled) => {
-  if (disabled) {
-    stopAnimationLoop();
-    return;
-  }
-
-  startAnimationLoop();
-  queueRecovery('disabled-toggle');
-});
-
-watch(() => props.lowPower, (lowPower) => {
-  if (lowPower) {
-    stopAnimationLoop();
-    if (recoveryFrameId !== 0) {
-      cancelAnimationFrame(recoveryFrameId);
-      recoveryFrameId = 0;
-      queueRecoveryMaxAttempts = 0;
-      queueRecoveryAttempts = 0;
-    }
-    return;
-  }
-
-  syncExternalCurrentTime(true);
-  startAnimationLoop();
-  queueRecovery(pendingLowPowerRecoveryReason || 'low-power-toggle');
-  pendingLowPowerRecoveryReason = '';
+watch(() => [props.disabled, props.lowPower] as const, ([disabled, lowPower]) => {
+  runtime?.setRenderingState({ disabled, lowPower }, props.currentTime);
 });
 
 watch(() => props.playing, (playing) => {
-  if (!player) return;
-
-  syncExternalCurrentTime(true);
-  player.setPlaybackPaused(!playing);
+  runtime?.setPlaying(playing, props.currentTime);
 });
 
-watch(() => props.alignAnchor, (value) => {
-  player?.setAlignAnchor(value);
-  queueRecovery('align-anchor');
+watch(() => [
+  props.alignAnchor,
+  props.alignPosition,
+  props.enableSpring,
+  props.enableBlur,
+  props.enableScale,
+  props.hidePassedLines,
+  props.wordFadeWidth,
+], applyPlayerProps);
+
+watch(() => props.lyricLines, (lines) => {
+  runtime?.setLyricLines(lines, props.currentTime);
 });
 
-watch(() => props.alignPosition, (value) => {
-  player?.setAlignPosition(value);
-  queueRecovery('align-position');
+watch(() => [props.currentTime, props.timeSyncKey, props.seekKey] as const, (
+  [timeMs, syncKey, seekKey],
+  [, previousSyncKey, previousSeekKey],
+) => {
+  if (seekKey !== previousSeekKey) runtime?.seek(timeMs);
+  else runtime?.syncCurrentTime(timeMs, syncKey !== previousSyncKey);
 });
 
-watch(() => props.enableSpring, (value) => {
-  player?.setEnableSpring(value);
-  queueRecovery('spring');
-});
-
-watch(() => props.enableBlur, (value) => {
-  player?.setEnableBlur(value);
-  queueRecovery('blur');
-});
-
-watch(() => props.enableScale, (value) => {
-  player?.setEnableScale(value);
-  queueRecovery('scale');
-});
-
-watch(() => props.hidePassedLines, (value) => {
-  player?.setHidePassedLines(value);
-  queueRecovery('hide-passed');
-});
-
-watch(() => props.wordFadeWidth, (value) => {
-  player?.setWordFadeWidth(value);
-  queueRecovery('fade-width');
-});
-
-watch(() => props.lineGap, (value) => {
-  player?.setLineGap(value);
-  queueRecovery('line-gap', { maxAttempts: 0 });
-});
-
-watch(() => props.layoutVersion, () => {
-  queueRecovery('layout-version');
-});
-
-watch(() => props.lyricLines, (value) => {
-  if (!player) return;
-
-  player.setLyricLines(value, Math.trunc(props.currentTime));
-  syncExternalCurrentTime(true);
-  queueRecovery('lyrics');
-}, { deep: false });
-
-watch(() => props.currentTime, () => {
-  syncExternalCurrentTime(false);
-});
-
-watch(() => props.timeSyncKey, () => {
-  syncExternalCurrentTime(true);
-});
+// AMLL observes normal container/line size changes itself. Font replacement is
+// the only explicit reconstruction here; no internal layout or recovery loop.
+watch(() => props.layoutVersion, () => { void refreshAfterFontsReady(); });
+// The font-size CSS variable lives on the parent view. Refresh the official
+// metrics after Vue has applied that style, without reconstructing lyric rows.
+watch(() => props.fontScale, () => { runtime?.refreshMeasurements(); }, { flush: 'post' });
 </script>
 
 <template>
-  <div ref="wrapperRef" class="w-full h-full min-h-0 min-w-0" />
+  <div ref="wrapperRef" class="w-full h-full min-h-0 min-w-0" :style="wrapperStyle" />
 </template>

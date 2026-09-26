@@ -91,6 +91,12 @@ export interface RenameApplyResult {
 
 export type LyricsStorageSource = 'embedded' | 'sidecar' | 'empty';
 
+export interface SongLyricsSource {
+  rawLyrics: string;
+  sourceFormat: 'ttml' | 'yrc' | 'qrc' | 'lys' | 'lrc' | 'txt' | null;
+  sourcePath: string | null;
+}
+
 export interface SongLyricsForEdit {
   lyrics: string;
   source: LyricsStorageSource;
@@ -347,6 +353,7 @@ export interface TauriCommandMap {
     response: PreparedCustomBackgroundImage;
   };
   get_song_lyrics: { payload: { path: string }; response: string };
+  get_song_lyrics_source: { payload: { path: string }; response: SongLyricsSource };
   get_song_lyrics_for_edit: { payload: { path: string }; response: SongLyricsForEdit };
   save_song_lyrics: {
     payload: {

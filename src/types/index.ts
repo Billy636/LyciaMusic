@@ -337,6 +337,13 @@ export type DesktopLyricsPlayerAlignment = LyricsPlayerAlignment | 'split-corner
 export type LyricsColorScheme = 'auto' | 'default' | 'pink' | 'blue' | 'green' | 'white' | 'custom';
 export type LyricsFontPreset = string;
 export type LyricsPlayerRenderMode = 'amll' | 'light';
+export type LyricsReadingOrder =
+  | 'main-translation-roman'
+  | 'main-roman-translation'
+  | 'roman-main-translation'
+  | 'roman-translation-main'
+  | 'translation-main-roman'
+  | 'translation-roman-main';
 
 export interface ImportedLyricsFont {
   id: string;
@@ -350,6 +357,8 @@ export interface ImportedLyricsFont {
 export interface LyricsSettings {
   showTranslation: boolean;
   showRomaji: boolean;
+  readingOrder: LyricsReadingOrder;
+  readingOrderOverrides: Record<string, LyricsReadingOrder>;
   playerRenderMode: LyricsPlayerRenderMode;
   playerFontScale: number;
   playerLineGap: number;

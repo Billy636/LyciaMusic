@@ -3,10 +3,31 @@ import { describe, expect, it } from 'vitest';
 import source from './PlayerDetail.vue?raw';
 
 describe('PlayerDetail hidden runtime boundaries', () => {
+  it('lets side drawers handle Escape before closing the page or immersive mode', () => {
+    const drawerGuard = source.indexOf('if (showLyricsPlayerSettingsPanel.value || showPlaylist.value) return');
+    const escapeAction = source.indexOf('const action = resolvePlayerDetailEscapeAction(');
+    expect(drawerGuard).toBeGreaterThan(-1);
+    expect(drawerGuard).toBeLessThan(escapeAction);
+  });
+
   it('keeps the lyrics view reliable while unmounting it with the closed detail page', () => {
     expect(source).toContain("import LyricsView from './LyricsView.vue'");
     expect(source).not.toContain("defineAsyncComponent(() => import('./LyricsView.vue'))");
-    expect(source).toContain('v-else-if="showPlayerDetail && parsedLyrics.length > 0"');
+    expect(source).toContain('v-else-if="showPlayerDetail && hasLyricsPresentation"');
+    expect(source).toContain("lyricsStatus.value === 'loading'");
+    expect(source).toContain("lyricsStatus.value === 'error'");
+  });
+
+  it('mounts the style panel independently of playback, lyric availability, and the embedded queue', () => {
+    const panel = source.match(/<LyricsAppearancePanel\b[\s\S]*?\/>/)?.[0] ?? '';
+    expect(panel).toContain('v-if="showPlayerDetail"');
+    expect(panel).toContain('@preview="lyricsAppearancePreview = $event"');
+    expect(panel).not.toMatch(/isPlaying|hasLyricsPresentation|parsedLyrics|lyricsStatus|showQueue|available/);
+    expect(panel).not.toContain('v-else');
+
+    const lyrics = source.match(/<LyricsView\b[\s\S]*?\/>/)?.[0] ?? '';
+    expect(lyrics).toContain(':appearance-preview="lyricsAppearancePreview"');
+    expect(source).toContain("import LyricsAppearancePanel from './LyricsAppearancePanel.vue'");
   });
 
   it('uses the native immersive transition instead of fullscreening a maximized window directly', () => {

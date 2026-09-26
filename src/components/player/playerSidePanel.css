@@ -1,0 +1,146 @@
+/* Shared player drawers: mirrored edges, one glass surface and one motion. */
+.player-side-panel {
+  position: fixed;
+  top: 84px;
+  bottom: 96px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.85);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 14px;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.36);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+
+.player-side-panel--left {
+  left: 0;
+  border-left: 0;
+  border-radius: 0 24px 24px 0;
+  --player-side-panel-enter-x: -100%;
+}
+
+.player-side-panel--right {
+  right: 0;
+  border-right: 0;
+  border-radius: 24px 0 0 24px;
+  --player-side-panel-enter-x: 100%;
+}
+
+/* Outside the artwork-backed player, keep white text legible on light pages. */
+.player-side-panel--solid-backdrop {
+  background: rgba(24, 24, 27, 0.85);
+}
+
+.player-side-panel__header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.player-side-panel__eyebrow {
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.player-side-panel__title {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.player-side-panel__icon-button,
+.player-side-panel__action {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.player-side-panel__icon-button {
+  width: 32px;
+  height: 32px;
+}
+
+.player-side-panel__action {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.player-side-panel__icon-button:hover,
+.player-side-panel__action:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.player-side-panel button:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+.player-side-panel__scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+.player-side-panel__scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.player-side-panel__scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.player-side-panel__scroll::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.player-side-panel__scroll:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.player-side-panel-enter-active,
+.player-side-panel-leave-active {
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease;
+  will-change: transform, opacity;
+}
+
+.player-side-panel-enter-from,
+.player-side-panel-leave-to {
+  transform: translate3d(var(--player-side-panel-enter-x), 0, 0);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-side-panel-enter-active,
+  .player-side-panel-leave-active {
+    transition: none;
+  }
+}

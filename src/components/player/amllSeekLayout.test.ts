@@ -3,36 +3,30 @@ import { describe, expect, it, vi } from 'vitest';
 import { getPlaybackSeekSecondsForAmlLine, syncAmlLyricSeekLayout } from './amllSeekLayout';
 
 describe('syncAmlLyricSeekLayout', () => {
-  it('resets manual scroll and seeks AMLL layout synchronously', () => {
+  it('seeks using official APIs, leaving group selection and layout to AMLL', () => {
     const calls: string[] = [];
     const player = {
       resetScroll: vi.fn(() => calls.push('resetScroll')),
-      suspendScrollForSeek: vi.fn(() => calls.push('suspendScrollForSeek')),
       setCurrentTime: vi.fn((_time: number, _isSeek?: boolean) => calls.push('setCurrentTime')),
-      alignScrollToSeekTarget: vi.fn((_lineIndex?: number) => calls.push('alignScrollToSeekTarget')),
-      calcLayout: vi.fn((_sync?: boolean) => {
-        calls.push('calcLayout');
-        return Promise.resolve();
-      }),
       update: vi.fn((_delta?: number) => calls.push('update')),
     };
 
-    syncAmlLyricSeekLayout(player, 12345.9, 7);
+    syncAmlLyricSeekLayout(player, 12345.9);
 
-    expect(player.suspendScrollForSeek).toHaveBeenCalledOnce();
     expect(player.resetScroll).toHaveBeenCalledOnce();
     expect(player.setCurrentTime).toHaveBeenCalledWith(12345, true);
-    expect(player.alignScrollToSeekTarget).toHaveBeenCalledWith(7);
-    expect(player.calcLayout).toHaveBeenCalledWith(true);
     expect(player.update).toHaveBeenCalledWith(0);
     expect(calls).toEqual([
-      'suspendScrollForSeek',
       'resetScroll',
       'setCurrentTime',
-      'alignScrollToSeekTarget',
-      'calcLayout',
       'update',
     ]);
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -20])('normalizes invalid seek time %s', (time) => {
+    const player = { resetScroll: vi.fn(), setCurrentTime: vi.fn(), update: vi.fn() };
+    syncAmlLyricSeekLayout(player, time);
+    expect(player.setCurrentTime).toHaveBeenCalledWith(0, true);
   });
 });
 

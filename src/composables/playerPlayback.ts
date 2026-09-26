@@ -207,6 +207,7 @@ export const createPlayerPlayback = ({
     playbackAnchorTime = performance.now();
     playbackStartOffset = time;
     currentTime.value = time;
+    playbackStore.clockRevision += 1;
   };
 
   const startPlaybackRuntime = () => {
@@ -548,6 +549,7 @@ export const createPlayerPlayback = ({
     const requestId = ++latestSeekRequestId;
     const playbackRequestId = playRequestId;
     reanchorPlaybackClock(targetTime);
+    playbackStore.seekRevision += 1;
 
     try {
       const offsetSec = (currentSong.value.cue_start_offset || 0) / 1000;

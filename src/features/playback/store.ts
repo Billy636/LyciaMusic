@@ -12,6 +12,9 @@ export const usePlaybackStore = defineStore('playback', () => {
   const isPlaying = ref(false);
   const volume = ref(100);
   const currentTime = ref(0);
+  // Clock corrections and deliberate seeks are distinct from ordinary progress ticks.
+  const clockRevision = ref(0);
+  const seekRevision = ref(0);
   const playMode = ref(0);
   const isSongLoaded = ref(false);
   const currentPlaybackId = ref(0);
@@ -118,6 +121,8 @@ export const usePlaybackStore = defineStore('playback', () => {
   const resetPlaybackState = () => {
     isPlaying.value = false;
     currentTime.value = 0;
+    clockRevision.value += 1;
+    seekRevision.value += 1;
     isSongLoaded.value = false;
     playQueuePaths.value = [];
     tempQueuePaths.value = [];
@@ -156,6 +161,8 @@ export const usePlaybackStore = defineStore('playback', () => {
     isPlaying,
     volume,
     currentTime,
+    clockRevision,
+    seekRevision,
     playMode,
     isSongLoaded,
     currentPlaybackId,

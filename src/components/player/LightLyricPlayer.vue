@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import type { LyricLine } from '../../composables/lyrics';
+import { createLightPlaybackClock } from './lightPlaybackClock';
 import {
   LIGHT_LYRIC_PROGRESS_FRAME_MS,
   findLightLyricIndexByTime,
@@ -14,6 +15,8 @@ import {
 const props = withDefaults(defineProps<{
   lyricLines?: LyricLine[];
   currentTime?: number;
+  timeSyncKey?: string | number;
+  seekKey?: string | number;
   playing?: boolean;
   showTranslation?: boolean;
   showRomaji?: boolean;
@@ -24,6 +27,8 @@ const props = withDefaults(defineProps<{
 }>(), {
   lyricLines: () => [],
   currentTime: 0,
+  timeSyncKey: '',
+  seekKey: '',
   playing: true,
   showTranslation: true,
   showRomaji: false,
@@ -36,8 +41,6 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'line-click', line: LyricLine): void;
 }>();
-
-const EXTERNAL_SYNC_DRIFT_SECONDS = 0.35;
 
 // 平滑滚动所需要的状态和 DOM 引用
 const playerRef = ref<HTMLDivElement | null>(null);
@@ -72,8 +75,7 @@ const stackStyle = computed(() => {
 const progressTime = ref(props.currentTime);
 let progressFrameId = 0;
 let lastFrameTime = 0;
-let anchorPlaybackTime = props.currentTime;
-let anchorFrameTime = 0;
+const playbackClock = createLightPlaybackClock(props.currentTime);
 
 const activeLineIndex = computed(() => findLightLyricIndexByTime(props.lyricLines, progressTime.value));
 const activeLine = computed(() => props.lyricLines[activeLineIndex.value]);
@@ -149,12 +151,6 @@ const firstRealLyricIndex = computed(() => {
   return lines.length;
 });
 
-function resetProgressAnchor() {
-  progressTime.value = props.currentTime;
-  anchorPlaybackTime = props.currentTime;
-  anchorFrameTime = typeof performance !== 'undefined' ? performance.now() : 0;
-}
-
 function stopProgressLoop() {
   if (progressFrameId !== 0) {
     cancelAnimationFrame(progressFrameId);
@@ -171,8 +167,7 @@ function startProgressLoop() {
   stopProgressLoop();
   if (!shouldRunProgressLoop()) return;
 
-  anchorPlaybackTime = progressTime.value;
-  anchorFrameTime = performance.now();
+  playbackClock.reanchor(progressTime.value);
   lastFrameTime = 0;
 
   const tick = (frameTime: number) => {
@@ -182,7 +177,7 @@ function startProgressLoop() {
     }
 
     if (lastFrameTime === 0 || frameTime - lastFrameTime >= LIGHT_LYRIC_PROGRESS_FRAME_MS) {
-      progressTime.value = anchorPlaybackTime + Math.max(0, frameTime - anchorFrameTime) / 1000;
+      progressTime.value = playbackClock.current(true, frameTime);
       lastFrameTime = frameTime;
     }
 
@@ -193,10 +188,8 @@ function startProgressLoop() {
 }
 
 function syncExternalPlaybackTime(force = false) {
-  const drift = Math.abs(props.currentTime - progressTime.value);
-  if (!force && props.playing && drift <= EXTERNAL_SYNC_DRIFT_SECONDS) return;
-
-  resetProgressAnchor();
+  if (!playbackClock.sync(props.currentTime, props.playing, force, progressFrameId !== 0)) return;
+  progressTime.value = playbackClock.current(false);
   startProgressLoop();
 }
 
@@ -299,6 +292,21 @@ watch(activeLineIndex, () => {
 
 watch(() => props.currentTime, () => {
   syncExternalPlaybackTime();
+});
+
+watch(() => props.timeSyncKey, () => {
+  syncExternalPlaybackTime(true);
+  if (!isUserInteracting.value) scrollToActiveLine(false);
+});
+
+watch(() => props.seekKey, () => {
+  isUserInteracting.value = false;
+  if (autoScrollTimeout) {
+    clearTimeout(autoScrollTimeout);
+    autoScrollTimeout = null;
+  }
+  syncExternalPlaybackTime(true);
+  scrollToActiveLine(false);
 });
 
 watch(() => props.playing, () => {

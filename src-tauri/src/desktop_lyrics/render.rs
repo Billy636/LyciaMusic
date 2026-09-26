@@ -549,8 +549,11 @@ impl Renderer {
         };
         let mut y = 0.;
         let mut row_ranges = Vec::new();
-        let count = if s.show_double_line { 2 } else { 1 };
-        for index in page..(page + count).min(state.parsed_lyrics.len()) {
+        for (visible_row, index) in
+            visible_line_indices(&state.parsed_lyrics, page, active, s.show_double_line)
+                .into_iter()
+                .enumerate()
+        {
             let line_start = self.texts.len();
             let line_top = y;
             let line = &state.parsed_lyrics[index];
@@ -623,7 +626,7 @@ impl Renderer {
             let main_top = y;
             let main_width;
             let alignment = if s.player_alignment == "split-corners" {
-                if index == page {
+                if visible_row == 0 {
                     "left"
                 } else {
                     "right"
@@ -1281,6 +1284,7 @@ mod tests {
                 },
                 parsed_lyrics: vec![
                     Line {
+                        is_bg: false,
                         time: 0.,
                         end_time: 20.,
                         text: words.iter().map(|w| w.text.as_str()).collect(),

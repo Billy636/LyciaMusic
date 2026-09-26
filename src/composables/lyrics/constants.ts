@@ -8,6 +8,11 @@ import type {
   LyricsPlayerRenderMode,
   LyricsSettings,
 } from '../../types';
+import {
+  DEFAULT_LYRICS_READING_ORDER,
+  normalizeLyricsReadingOrder,
+  normalizeLyricsReadingOrderOverrides,
+} from './readingOrder';
 
 export const LEGACY_LYRICS_SETTINGS_KEY = 'lyrics_settings';
 export const LEGACY_DESKTOP_LYRICS_SETTINGS_KEY = 'desktop_lyrics_settings';
@@ -105,6 +110,8 @@ export const LYRICS_FONT_OPTIONS = [
 export const defaultLyricsSettings: LyricsSettings = {
   showTranslation: true,
   showRomaji: false,
+  readingOrder: DEFAULT_LYRICS_READING_ORDER,
+  readingOrderOverrides: {},
   playerRenderMode: DEFAULT_PLAYER_RENDER_MODE,
   playerFontScale: DEFAULT_PLAYER_FONT_SCALE,
   playerLineGap: DEFAULT_PLAYER_LINE_GAP,
@@ -147,7 +154,10 @@ export const defaultDesktopLyricsSettings: DesktopLyricsSettings = {
 };
 
 export function createDefaultLyricsSettings(): LyricsSettings {
-  return { ...defaultLyricsSettings };
+  return {
+    ...defaultLyricsSettings,
+    readingOrderOverrides: { ...defaultLyricsSettings.readingOrderOverrides },
+  };
 }
 
 export function createDefaultDesktopLyricsSettings(): DesktopLyricsSettings {
@@ -300,6 +310,8 @@ export function normalizeLyricsSettingsPatch(patch: Partial<LyricsSettings>): Ly
     showRomaji: typeof patch.showRomaji === 'boolean'
       ? patch.showRomaji
       : defaultLyricsSettings.showRomaji,
+    readingOrder: normalizeLyricsReadingOrder(patch.readingOrder),
+    readingOrderOverrides: normalizeLyricsReadingOrderOverrides(patch.readingOrderOverrides),
     playerRenderMode: normalizeLyricsPlayerRenderMode(patch.playerRenderMode),
     playerFontScale: clampPlayerFontScale(patch.playerFontScale ?? DEFAULT_PLAYER_FONT_SCALE),
     playerLineGap: clampPlayerLineGap(patch.playerLineGap ?? DEFAULT_PLAYER_LINE_GAP),

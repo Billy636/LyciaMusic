@@ -73,21 +73,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "amll-lyric"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60f82022452bc292f29f7485ba2deb48e382d4e096839ca488f11d5a6b2b06f2"
-dependencies = [
- "miniz_oxide",
- "nom 8.0.0",
- "quick-xml 0.38.4",
- "serde",
- "serde-wasm-bindgen",
- "thiserror 2.0.17",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2686,7 +2671,6 @@ dependencies = [
 name = "lycia_music"
 version = "1.4.0"
 dependencies = [
- "amll-lyric",
  "base64 0.22.1",
  "cpal",
  "encoding_rs",
@@ -4497,17 +4481,6 @@ dependencies = [
  "serde",
  "serde_core",
  "typeid",
-]
-
-[[package]]
-name = "serde-wasm-bindgen"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
-dependencies = [
- "js-sys",
- "serde",
- "wasm-bindgen",
 ]
 
 [[package]]

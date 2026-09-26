@@ -20,6 +20,8 @@ pub struct Line {
     pub text: String,
     pub translation: String,
     pub romaji: String,
+    #[serde(rename = "isBG")]
+    pub is_bg: bool,
     pub words: Vec<Word>,
 }
 
@@ -184,9 +186,85 @@ impl Clock {
 }
 
 pub fn active_index(lines: &[Line], time: f64) -> usize {
+    let candidates = foreground_indices(lines);
+    let target = if time.is_finite() { time } else { 0. };
+    let mut latest: Option<usize> = None;
+    let mut singing: Option<usize> = None;
+    let mut first: Option<usize> = None;
+    let mut blank_time = f64::NEG_INFINITY;
+    for &index in &candidates {
+        let line = &lines[index];
+        let meaningful = !line.text.trim().is_empty();
+        if meaningful && first.is_none_or(|previous| line.time < lines[previous].time) {
+            first = Some(index);
+        }
+        if line.time > target {
+            continue;
+        }
+        if !meaningful {
+            blank_time = blank_time.max(line.time);
+        }
+        if latest.is_none_or(|previous| {
+            line.time > lines[previous].time
+                || (line.time == lines[previous].time
+                    && (meaningful || lines[previous].text.trim().is_empty()))
+        }) {
+            latest = Some(index);
+        }
+        if meaningful
+            && line.end_time.is_finite()
+            && line.end_time > target
+            && singing.is_none_or(|previous| line.time >= lines[previous].time)
+        {
+            singing = Some(index);
+        }
+    }
+    singing
+        .filter(|&index| lines[index].time >= blank_time)
+        .or(latest)
+        .or(first)
+        .or_else(|| candidates.first().copied())
+        .unwrap_or(0)
+}
+
+fn foreground_indices(lines: &[Line]) -> Vec<usize> {
+    let has_foreground = lines
+        .iter()
+        .any(|line| line.time.is_finite() && !line.is_bg && !line.text.trim().is_empty());
     lines
-        .partition_point(|line| line.time <= time)
-        .saturating_sub(1)
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.time.is_finite() && (!has_foreground || !line.is_bg))
+        .map(|(index, _)| index)
+        .collect()
+}
+
+pub fn visible_line_indices(
+    lines: &[Line],
+    page: usize,
+    active: usize,
+    double: bool,
+) -> Vec<usize> {
+    let Some(active_line) = lines.get(active) else {
+        return vec![];
+    };
+    // An explicit interlude must also clear the previous row of a two-line page.
+    if active_line.text.trim().is_empty() {
+        return vec![active];
+    }
+    let start = if lines
+        .get(page)
+        .is_none_or(|line| line.text.trim().is_empty())
+    {
+        active
+    } else {
+        page
+    };
+    foreground_indices(lines)
+        .into_iter()
+        .filter(|&index| index >= start)
+        .take(if double { 2 } else { 1 })
+        .collect()
 }
 
 pub fn page_start(previous: Option<usize>, active: usize, double: bool) -> usize {
@@ -207,10 +285,10 @@ pub fn line_end(state: &Snapshot, index: usize) -> f64 {
     } else {
         line.time + 3.
     };
-    let boundary = state
-        .parsed_lyrics
-        .get(index + 1)
-        .map(|l| l.time)
+    let boundary = foreground_indices(&state.parsed_lyrics)
+        .into_iter()
+        .find(|&candidate| candidate > index && state.parsed_lyrics[candidate].time > line.time)
+        .map(|candidate| state.parsed_lyrics[candidate].time)
         .or_else(|| state.song.as_ref().map(|s| s.duration));
     boundary
         .filter(|t| *t > line.time)
@@ -331,6 +409,83 @@ pub fn css_rgb(value: &str) -> Option<[f32; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn holds_phrases_but_clears_both_rows_at_explicit_blank_cues() {
+        let lines = vec![
+            Line {
+                time: 1.,
+                end_time: 2.,
+                text: "One".into(),
+                ..Line::default()
+            },
+            Line {
+                time: 4.,
+                end_time: 8.,
+                ..Line::default()
+            },
+            Line {
+                time: 8.,
+                end_time: 9.,
+                text: "Two".into(),
+                ..Line::default()
+            },
+        ];
+        assert_eq!(active_index(&lines, 0.), 0);
+        assert_eq!(active_index(&lines, 3.), 0);
+        assert_eq!(active_index(&lines, 4.), 1);
+        assert_eq!(visible_line_indices(&lines, 0, 1, true), vec![1]);
+        assert_eq!(visible_line_indices(&lines, 1, 2, true), vec![2]);
+        assert_eq!(active_index(&lines, 100.), 2);
+    }
+
+    #[test]
+    fn background_and_ended_overlaps_do_not_replace_the_ongoing_foreground() {
+        let lines = vec![
+            Line {
+                time: 0.,
+                end_time: 10.,
+                text: "BG".into(),
+                is_bg: true,
+                ..Line::default()
+            },
+            Line {
+                time: 1.,
+                end_time: 8.,
+                text: "Main".into(),
+                ..Line::default()
+            },
+            Line {
+                time: 1.,
+                end_time: 2.,
+                text: "Short voice".into(),
+                ..Line::default()
+            },
+            Line {
+                time: 1.,
+                end_time: 2.,
+                ..Line::default()
+            },
+            Line {
+                time: 3.,
+                end_time: 10.,
+                text: "BG".into(),
+                is_bg: true,
+                ..Line::default()
+            },
+            Line {
+                time: 9.,
+                end_time: 12.,
+                text: "Next".into(),
+                ..Line::default()
+            },
+        ];
+        assert_eq!(active_index(&lines, 0.), 1);
+        assert_eq!(active_index(&lines, 4.), 1);
+        assert_eq!(visible_line_indices(&lines, 0, 1, true), vec![1, 2]);
+        assert_eq!(active_index(&lines[..1], 1.), 0);
+    }
+
     #[test]
     fn cover_palette_hsl_and_custom_hex_colors() {
         assert_eq!(css_rgb("hsl(0, 100%, 50%)"), Some([1., 0., 0.]));
@@ -401,9 +556,10 @@ mod tests {
     }
     #[test]
     fn snapshot_uses_existing_frontend_wire_format() {
-        let snapshot: Snapshot = serde_json::from_value(serde_json::json!({ "playbackTime": 12., "isPlaying": true, "audioDelay": 0.2, "settings": {"isLocked":true,"showDoubleLine":true}, "parsedLyrics":[{"time":2.,"endTime":5.,"text":"歌词"}] })).unwrap();
+        let snapshot: Snapshot = serde_json::from_value(serde_json::json!({ "playbackTime": 12., "isPlaying": true, "audioDelay": 0.2, "settings": {"isLocked":true,"showDoubleLine":true}, "parsedLyrics":[{"time":2.,"endTime":5.,"text":"歌词","isBG":true}] })).unwrap();
         assert_eq!(snapshot.playback.playback_time, 12.);
         assert!(snapshot.settings.is_locked && snapshot.settings.show_double_line);
         assert_eq!(snapshot.parsed_lyrics[0].end_time, 5.);
+        assert!(snapshot.parsed_lyrics[0].is_bg);
     }
 }
