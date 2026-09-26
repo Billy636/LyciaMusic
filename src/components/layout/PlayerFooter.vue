@@ -33,6 +33,13 @@ const handleOpenDetail = () => {
   togglePlayerDetail();
 };
 
+const handleSongInfoClick = (event: MouseEvent) => {
+  if (!currentSong.value || showPlayerDetail.value) return;
+  // Keep the cover/favorite actions and their window-level click handling intact.
+  if (event.target instanceof Element && event.target.closest('button, [data-footer-cover]')) return;
+  togglePlayerDetail();
+};
+
 const { showDesktopLyrics, showLyricsPlayerSettingsPanel } = useLyrics();
 
 // --- Context Menu State ---
@@ -423,7 +430,13 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <div class="flex items-center w-1/3 min-w-[200px]" @contextmenu="handleContextMenu">
+    <div
+      data-player-song-info
+      class="flex h-full items-center flex-1 min-w-[200px] pr-2"
+      :class="currentSong && !showPlayerDetail ? 'cursor-pointer' : 'cursor-default'"
+      @click="handleSongInfoClick"
+      @contextmenu="handleContextMenu"
+    >
       <div 
         ref="footerCoverRef"
         data-footer-cover
@@ -442,7 +455,7 @@ onUnmounted(() => {
           :class="showPlayerDetail ? 'opacity-0 translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0 text-gray-800 dark:text-white'"
         >
           <div class="flex items-center">
-            <div class="text-sm font-bold tracking-wide truncate pr-2 cursor-default">
+            <div class="text-sm font-bold tracking-wide truncate pr-2">
               {{ currentSong ? (currentSong.title || currentSong.name.replace(/\.[^/.]+$/, "")) : '听我想听的音乐' }}
             </div>
             <button 
@@ -461,7 +474,7 @@ onUnmounted(() => {
               </svg>
             </button>
           </div>
-          <div class="text-[11px] font-medium mt-0.5 cursor-default truncate text-gray-500 dark:text-gray-400">
+          <div class="text-[11px] font-medium mt-0.5 truncate text-gray-500 dark:text-gray-400">
             {{ isCurrentRemoteDownloadActive ? remoteDownloadText : (currentSong ? currentSong.artist : 'My Music') }}
           </div>
         </div>
@@ -479,7 +492,7 @@ onUnmounted(() => {
     </div>
 
     <div 
-      class="flex items-center justify-center flex-1 gap-6 transition-opacity duration-700"
+      class="flex items-center justify-center shrink-0 gap-6 transition-opacity duration-700"
       :class="{ 'opacity-0 pointer-events-none': isIdle }"
     >
       <button
@@ -537,7 +550,7 @@ onUnmounted(() => {
     </div>
 
     <div 
-      class="flex items-center justify-end w-1/3 min-w-[150px] gap-2 pr-2 transition-opacity duration-700"
+      class="flex items-center justify-end flex-1 min-w-[150px] gap-2 pr-2 transition-opacity duration-700"
       :class="{ 'opacity-0 pointer-events-none': isIdle }"
     > 
       <div 
