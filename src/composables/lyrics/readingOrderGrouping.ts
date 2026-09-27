@@ -35,6 +35,38 @@ function textOf(line: NativeAmlLyricLine): string {
   return line.words.map((word) => word.word).join('');
 }
 
+function assignRoles(group: IndexedEntry[], readingOrder?: LyricsReadingOrder) {
+  const assigned = new Map<LyricsReadingRole, IndexedEntry>();
+  let conflict = group.some(({ entry }) => entry.roleConflict);
+  for (const item of group) {
+    if (!item.entry.role) continue;
+    if (assigned.has(item.entry.role)) conflict = true;
+    assigned.set(item.entry.role, item);
+  }
+
+  const unmarked = group.filter(({ entry }) => !entry.role);
+  const hasVocalIdentity = group.some(({ entry }) => entry.protectedVocal || entry.line.isDuet);
+  if (readingOrder !== undefined && !hasVocalIdentity) {
+    const count = group.length as 1 | 2 | 3;
+    const roles = new Set(assigned.keys());
+    if (roles.size < count) roles.add('main');
+    for (const role of getLyricsReadingRoles(readingOrder, count)) {
+      if (roles.size < count) roles.add(role);
+    }
+    // Explicit labels take precedence, including a labelled romanization in
+    // a two-line group. Only *unlabelled* pairs unconditionally omit roman.
+    const remaining = getLyricsReadingRoles(readingOrder, 3)
+      .filter((role) => roles.has(role) && !assigned.has(role));
+    unmarked.forEach((item, index) => {
+      if (remaining[index]) assigned.set(remaining[index], item);
+    });
+  } else if (!assigned.has('main') && unmarked.length === 1) {
+    // Without a convention, only a unique main hosts labelled auxiliaries.
+    assigned.set('main', unmarked[0]);
+  }
+  return { assigned, conflict, unmarked };
+}
+
 /**
  * Interpret exact-time lyric groups using an explicit user convention, never a
  * language heuristic. Input order and every supplied timestamp are immutable.
@@ -47,53 +79,32 @@ export function groupLyricsByReadingOrder(
   const issues: string[] = [];
   const groups = new Map<number, IndexedEntry[]>();
   entries.forEach((entry, index) => {
-    // Background vocals and clear records retain their original identities and
-    // positions; neither occupies a main/translation/romanization slot.
-    if (entry.line.isBG || !textOf(entry.line).trim()) return;
+    // A background vocal can itself have translation/romanization rows.
+    // Only clear records are unconditionally excluded from language groups.
+    if (!textOf(entry.line).trim()) return;
     const time = entry.sourceTime ?? entry.line.startTime;
     const group = groups.get(time) ?? [];
     group.push({ entry, index });
     groups.set(time, group);
   });
 
-  for (const group of groups.values()) {
+  for (const candidates of groups.values()) {
+    // Include background rows only when the declared order/labels identify a
+    // background vocal as the original. Otherwise keep them independent of
+    // the foreground language slots, never consume a backing vocal as a gloss.
+    const backgroundRoles = candidates.length <= 3
+      ? assignRoles(candidates, readingOrder) : undefined;
+    const group = !backgroundRoles?.conflict && backgroundRoles?.assigned.get('main')?.entry.line.isBG
+      ? candidates : candidates.filter(({ entry }) => !entry.line.isBG);
+    if (!group.length) continue;
     if (group.length > 3) {
       issues.push('同时间歌词超过三行，已保留原内容。');
       continue;
     }
-    const assigned = new Map<LyricsReadingRole, IndexedEntry>();
-    let conflict = group.some(({ entry }) => entry.roleConflict);
-    for (const item of group) {
-      if (!item.entry.role) continue;
-      if (assigned.has(item.entry.role)) conflict = true;
-      assigned.set(item.entry.role, item);
-    }
+    const { assigned, conflict, unmarked } = assignRoles(group, readingOrder);
     if (conflict) {
       issues.push('歌词角色标记冲突，已保留原内容。');
       continue;
-    }
-
-    const unmarked = group.filter(({ entry }) => !entry.role);
-    const hasVocalIdentity = group.some(({ entry }) => entry.protectedVocal || entry.line.isDuet);
-    if (readingOrder !== undefined && !hasVocalIdentity) {
-      const count = group.length as 1 | 2 | 3;
-      const roles = new Set(assigned.keys());
-      if (roles.size < count) roles.add('main');
-      for (const role of getLyricsReadingRoles(readingOrder, count)) {
-        if (roles.size < count) roles.add(role);
-      }
-      // Explicit labels take precedence, including a labelled romanization in
-      // a two-line group. Only *unlabelled* pairs unconditionally omit roman.
-      const remaining = getLyricsReadingRoles(readingOrder, 3)
-        .filter((role) => roles.has(role) && !assigned.has(role));
-      unmarked.forEach((item, index) => {
-        if (remaining[index]) assigned.set(remaining[index], item);
-      });
-    } else if (!assigned.has('main') && unmarked.length === 1) {
-      // With no user convention (or with explicit vocal identities), retain
-      // unmarked rows. A unique remaining main still hosts explicitly labelled
-      // auxiliaries, as it did before manual reading order was introduced.
-      assigned.set('main', unmarked[0]);
     }
 
     const main = assigned.get('main');
