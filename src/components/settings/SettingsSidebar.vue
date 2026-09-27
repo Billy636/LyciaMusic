@@ -14,20 +14,20 @@ const { settings } = useSettings();
       </h2>
       <div class="flex flex-col rounded-xl overflow-hidden">
         
-        <!-- Local Music (Locked/Checked) -->
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 opacity-70 cursor-not-allowed">
+        <!-- Local Music -->
+        <div 
+          @click="settings.sidebar.showLocalMusic = !settings.sidebar.showLocalMusic"
+          class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors cursor-pointer"
+        >
           <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center text-gray-500 shrink-0">
+            <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showLocalMusic ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
             </div>
-            <div>
-              <div class="text-sm font-medium text-gray-800 dark:text-gray-200">本地音乐</div>
-              <div class="text-xs text-gray-600 dark:text-white/60 mt-0.5">核心功能 (不可隐藏)</div>
-            </div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">本地音乐</div>
           </div>
-          <div class="relative inline-flex h-6 w-11 items-center rounded-full bg-[#EC4141] opacity-50">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white translate-x-6 shadow-sm" />
-          </div>
+          <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.sidebar.showLocalMusic ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showLocalMusic ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
         </div>
 
         <!-- Artists -->
