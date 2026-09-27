@@ -24,6 +24,7 @@ import {
   type ShortcutSettingsPatch,
 } from './shortcuts';
 import { playerStorage } from '../../services/storage/playerStorage';
+import { normalizeFooterSettings } from './footer';
 
 const createUserPresetId = (): string =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -301,6 +302,7 @@ export const mergeAppSettings = (
     // Ignore removed legacy fields that may still exist in persisted settings.
     ...base,
     ...rest,
+    ...(patch.footer || base.footer ? { footer: normalizeFooterSettings(patch.footer ?? base.footer) } : {}),
     libraryMinDurationSeconds: normalizeLibraryMinDurationSeconds(
       libraryMinDurationSeconds ?? base.libraryMinDurationSeconds,
     ),

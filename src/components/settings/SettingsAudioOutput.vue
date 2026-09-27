@@ -2,8 +2,10 @@
 import { CircleAlert } from 'lucide-vue-next';
 import { useSettings } from '../../features/settings/useSettings';
 import EqualizerPanel from '../player/EqualizerPanel.vue';
+import { useSettingsNavigationStore } from '../../features/settings/navigation';
 
 const { settings, patchSettings } = useSettings();
+const navigation = useSettingsNavigationStore();
 
 const volumeBalanceTip = '音量平衡会读取歌曲内置 ReplayGain 标签，在切歌时自动平衡音量。默认完全按标签播放，不改变歌曲内部动态。不存在标签时则无变化。';
 
@@ -21,15 +23,6 @@ const toggleEqualizer = () => {
   });
 };
 
-// 规范更新：在播放栏显示均衡器按钮
-const toggleShowEqualizerInFooter = () => {
-  patchSettings({
-    audio: {
-      ...settings.value.audio, // 展开以保护其他 audio 状态不受非深合并影响
-      showEqualizerInFooter: !settings.value.audio.showEqualizerInFooter,
-    },
-  });
-};
 </script>
 
 <template>
@@ -136,27 +129,23 @@ const toggleShowEqualizerInFooter = () => {
         均衡器 (EQ)
       </h2>
       <div class="flex flex-col rounded-xl bg-white/20 dark:bg-black/10 border border-gray-200/40 dark:border-gray-800/40">
-        <!-- 固定均衡器到播放栏开关行 -->
+        <!-- 底栏入口显示统一由个性化设置管理 -->
         <div 
           class="desktop-setting-row rounded-t-xl border-b border-gray-200/20 dark:border-gray-800/20"
         >
           <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">在播放栏显示均衡器按钮</div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">底栏快捷入口</div>
             <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              开启后，在主界面底部的播放控制栏将显示均衡器快捷按钮。
+              均衡器按钮的显示与位置已统一在“个性化 → 播放底栏”中管理，不影响音效是否启用。
             </div>
           </div>
           <div class="flex items-center gap-3">
             <button
               type="button"
-              class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none"
-              :class="settings.audio.showEqualizerInFooter ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'"
-              @click="toggleShowEqualizerInFooter"
+              class="shrink-0 rounded-lg px-3 py-2 text-sm text-[#EC4141] hover:bg-[#EC4141]/5"
+              @click="navigation.openPersonalizationPage('footer')"
             >
-              <span
-                class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm"
-                :class="settings.audio.showEqualizerInFooter ? 'translate-x-6' : 'translate-x-1'"
-              />
+              管理播放底栏
             </button>
           </div>
         </div>

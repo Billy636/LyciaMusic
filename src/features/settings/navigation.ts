@@ -11,7 +11,7 @@ export type SettingsSection =
   | 'shortcuts'
   | 'about';
 
-export type PersonalizationPage = 'theme' | 'sidebar' | 'desktopLyrics';
+export type PersonalizationPage = 'theme' | 'sidebar' | 'footer' | 'desktopLyrics';
 
 export const SETTINGS_SECTION_LABELS = {
   general: '常规',
@@ -27,6 +27,7 @@ export const SETTINGS_SECTION_LABELS = {
 export const PERSONALIZATION_PAGE_LABELS = {
   theme: '外观',
   sidebar: '侧边栏管理',
+  footer: '播放底栏',
   desktopLyrics: '桌面歌词',
 } satisfies Record<PersonalizationPage, string>;
 

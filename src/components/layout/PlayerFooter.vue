@@ -1,700 +1,476 @@
 <script setup lang="ts">
-import { AudioLines, Eye, EyeOff, SlidersHorizontal } from 'lucide-vue-next';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { X } from 'lucide-vue-next';
 import { useLibraryCollections } from '../../features/collections/useLibraryCollections';
 import { useLyrics } from '../../composables/lyrics';
 import { usePlaybackController } from '../../features/playback/usePlaybackController';
-import AudioVisualizer from '../player/AudioVisualizer.vue';
-import SongHighlightMarkers from '../player/SongHighlightMarkers.vue';
-import FooterContextMenu from "../overlays/FooterContextMenu.vue";
-import EqualizerPanel from '../player/EqualizerPanel.vue';
-import { useSettings } from '../../features/settings/useSettings';
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
-import type { RemoteDownloadProgress } from '../../types';
+import { useFooterSettings } from '../../features/settings/useFooterSettings';
+import { effectiveFooterLayout, footerAction } from '../../features/settings/footer';
+import { resolveFreeFooterLayout } from '../../features/settings/freeFooterLayout';
+import { footerCoverVisible } from './footerPresentation';
 import { useSongHighlights } from '../../features/highlights/useSongHighlights';
 import { useToast } from '../../composables/toast';
-import {
-  FOOTER_PROGRESS_HIDDEN_KEY,
-  getProgressVisualState,
-  readStoredProgressHidden
-} from './playerFooterProgress';
+import type { RemoteDownloadProgress } from '../../types';
+import type { FooterMovableId, FooterScene } from '../../types/footer';
+import FooterActionButton from './FooterActionButton.vue';
+import AudioVisualizer from '../player/AudioVisualizer.vue';
+import SongHighlightMarkers from '../player/SongHighlightMarkers.vue';
+import FooterContextMenu from '../overlays/FooterContextMenu.vue';
+import EqualizerPanel from '../player/EqualizerPanel.vue';
 
-const { 
-  currentSong,
-  isPlaying, volume, currentTime, playMode, showPlaylist, showPlayerDetail,
+const {
+  currentSong, currentCover, isPlaying, volume, currentTime, playMode, showPlaylist, showPlayerDetail,
   togglePlay, nextSong, prevSong, handleVolume, handleVolumeWheel, toggleMute, toggleMode, togglePlaylist,
-  togglePlayerDetail, seekTo, formatDuration
+  togglePlayerDetail, seekTo, formatDuration,
 } = usePlaybackController();
 const { isFavorite, toggleFavorite } = useLibraryCollections();
+const { showDesktopLyrics, showLyricsPlayerSettingsPanel } = useLyrics();
 const { addMarker, formatMarkerTime, errorMessage } = useSongHighlights();
 const { showToast } = useToast();
+const { footer, setBehavior, toggleProgress } = useFooterSettings();
+const route = useRoute();
+const footerRef = ref<HTMLElement | null>(null);
+const footerWidth = ref(window.innerWidth);
+const scene = computed<FooterScene>(() => showPlayerDetail.value ? 'detail' : 'main');
+const behavior = computed(() => footer.value.behavior[scene.value]);
+const groups = computed(() => resolveFreeFooterLayout(footer.value, scene.value, footerWidth.value));
+const hasCover = computed(() => behavior.value.info === 'cover' || behavior.value.info === 'song' || behavior.value.info === 'both');
+// Retain the outgoing song metadata while it slides out of the time-only view.
+const songInfoMode = computed<'song' | 'both'>(previous =>
+  behavior.value.info === 'song' || behavior.value.info === 'both' ? behavior.value.info : previous ?? 'song');
+const isProgressHidden = computed(() => behavior.value.progress === 'hidden');
+const isPinned = computed(() => !behavior.value.autoHide);
+const isVisualizerEnabled = computed(() => behavior.value.visualizer);
 
-const handleOpenDetail = () => {
-  togglePlayerDetail();
-};
-
+const showContextMenu = ref(false);
+const contextMenuX = ref(0), contextMenuY = ref(0);
+const showProgressContextMenu = ref(false);
+const progressContextMenuX = ref(0), progressContextMenuY = ref(0), progressContextTimeMs = ref(0);
+const handleOpenDetail = () => togglePlayerDetail();
 const handleSongInfoClick = (event: MouseEvent) => {
   if (!currentSong.value) return;
-  // Keep the cover/favorite actions and their window-level click handling intact.
   if (event.target instanceof Element && event.target.closest('button, [data-footer-cover]')) return;
   togglePlayerDetail();
 };
-
-const { showDesktopLyrics, showLyricsPlayerSettingsPanel } = useLyrics();
-
-// --- Context Menu State ---
-const showContextMenu = ref(false);
-const contextMenuX = ref(0);
-const contextMenuY = ref(0);
-const showProgressContextMenu = ref(false);
-const progressContextMenuX = ref(0);
-const progressContextMenuY = ref(0);
-const progressContextTimeMs = ref(0);
-
-const handleContextMenu = (e: MouseEvent) => {
+const handleContextMenu = (event: MouseEvent) => {
   if (!currentSong.value) return;
-  e.preventDefault();
-  contextMenuX.value = e.clientX;
-  contextMenuY.value = e.clientY;
+  event.preventDefault();
+  contextMenuX.value = Math.max(8, Math.min(event.clientX, window.innerWidth - 230));
+  contextMenuY.value = event.clientY;
   showContextMenu.value = true;
 };
-
-const handleProgressContextMenu = (e: MouseEvent) => {
-  if (!currentSong.value || !progressBarRef.value || currentSong.value.duration <= 0) return;
-  e.preventDefault();
+const handleProgressContextMenu = (event: MouseEvent) => {
+  if (isProgressHidden.value || !currentSong.value || !progressBarRef.value || currentSong.value.duration <= 0) return;
+  event.preventDefault();
   const rect = progressBarRef.value.getBoundingClientRect();
-  const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
   progressContextTimeMs.value = Math.round(ratio * currentSong.value.duration * 1000);
-  progressContextMenuX.value = e.clientX;
-  progressContextMenuY.value = e.clientY;
+  progressContextMenuX.value = Math.max(8, Math.min(event.clientX, window.innerWidth - 230));
+  progressContextMenuY.value = Math.max(8, Math.min(event.clientY, window.innerHeight - 56));
   showContextMenu.value = false;
   showProgressContextMenu.value = true;
 };
-
 const addProgressHighlight = async () => {
   showProgressContextMenu.value = false;
-  try {
-    await addMarker(progressContextTimeMs.value, true);
-  } catch (error) {
-    showToast(errorMessage(error), 'error');
-  }
+  try { await addMarker(progressContextTimeMs.value, true); }
+  catch (error) { showToast(errorMessage(error), 'error'); }
 };
 
-const toggleLyrics = () => { showDesktopLyrics.value = !showDesktopLyrics.value; };
-const toggleLyricsPlayerSettings = () => {
-  showLyricsPlayerSettingsPanel.value = !showLyricsPlayerSettingsPanel.value;
-};
-const isVisualizerEnabled = ref(localStorage.getItem('footer_visualizer_enabled') !== 'false');
-const isProgressHidden = ref(readStoredProgressHidden(localStorage));
-const remoteDownloadProgress = ref<RemoteDownloadProgress | null>(null);
-let unlistenRemoteDownload: UnlistenFn | null = null;
-
-const toggleVisualizer = () => {
-  isVisualizerEnabled.value = !isVisualizerEnabled.value;
-  localStorage.setItem('footer_visualizer_enabled', isVisualizerEnabled.value.toString());
-};
-
-const toggleProgressVisibility = () => {
-  isProgressHidden.value = !isProgressHidden.value;
-  localStorage.setItem(FOOTER_PROGRESS_HIDDEN_KEY, isProgressHidden.value.toString());
-};
-
-// 不再使用单独的模糊样式 -> 全透明
-
-// --- 进度条拖拽逻辑 ---
 const isDraggingProgress = ref(false);
-const progressBarRef = ref<HTMLElement | null>(null);
-const dragTime = ref(0); 
-
-const displayProgress = computed(() => {
-  if (!currentSong.value || currentSong.value.duration <= 0) return 0;
-  const time = isDraggingProgress.value ? dragTime.value : currentTime.value;
-  return Math.max(0, Math.min(100, (time / currentSong.value.duration) * 100));
-});
-
-const progressFillClass = computed(() => (
-  showPlayerDetail.value
-    ? 'bg-zinc-300/30'
-    : 'bg-zinc-300/30'
-));
-
-const progressTrackClass = computed(() => (
-  showPlayerDetail.value
-    ? 'bg-transparent'
-    : 'bg-transparent'
-));
-
-const progressThumbClass = computed(() => (
-  showPlayerDetail.value
-    ? 'border-white/45 bg-white'
-    : 'border-black/10 dark:border-white/20 bg-white'
-));
-
-const progressVisualState = computed(() => getProgressVisualState(isProgressHidden.value, isDraggingProgress.value));
-
-const startProgressDrag = (e: PointerEvent) => { 
-  if (!currentSong.value || currentSong.value.duration <= 0) return;
-  if (e.pointerType === 'mouse' && e.button !== 0) return;
-  e.preventDefault();
-  (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
-  isDraggingProgress.value = true; 
-  updateProgressFromEvent(e); 
-};
-
-const stopProgressDrag = async (commit = true) => { 
-  if (isDraggingProgress.value) { 
-    const targetTime = dragTime.value;
-    isDraggingProgress.value = false; 
-    if (commit) {
-      await seekTo(targetTime);
-    }
-  } 
-};
-
-const updateProgressFromEvent = (e: PointerEvent) => {
-  if (!progressBarRef.value || !currentSong.value || currentSong.value.duration <= 0) return;
-  const rect = progressBarRef.value.getBoundingClientRect();
-  const offsetX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-  dragTime.value = (offsetX / rect.width) * currentSong.value.duration;
-};
-
-// 计算总时长与当前时间
-const currentTimeStr = computed(() => formatDuration(isDraggingProgress.value ? dragTime.value : currentTime.value));
-const totalTimeStr = computed(() => currentSong.value ? formatDuration(currentSong.value.duration) : '0:00');
-const isCurrentRemoteDownloadActive = computed(() => {
-  const progress = remoteDownloadProgress.value;
-  return !!progress
-    && !progress.done
-    && !!currentSong.value
-    && progress.uri === currentSong.value.path;
-});
-const remoteDownloadText = computed(() => {
-  const progress = remoteDownloadProgress.value;
-  if (!progress || progress.percent === null) return '正在加载远程歌曲';
-  return `正在加载远程歌曲 ${Math.round(progress.percent)}%`;
-});
-
-// --- 音量拖拽逻辑 ---
 const isDraggingVolume = ref(false);
 const volumeBarRef = ref<HTMLElement | null>(null);
-
-const updateVolume = (clientY: number) => {
-  if (!volumeBarRef.value) return;
-  const rect = volumeBarRef.value.getBoundingClientRect();
-  const height = rect.height;
-  const distance = rect.bottom - clientY;
-  const percent = Math.max(0, Math.min(1, distance / height));
-  const newVol = Math.round(percent * 100);
-  handleVolume({ target: { value: newVol.toString() } } as any);
+let volumePointerId: number | null = null;
+const progressBarRef = ref<HTMLElement | null>(null);
+const dragTime = ref(0);
+const displayProgress = computed(() => {
+  if (!currentSong.value || currentSong.value.duration <= 0) return 0;
+  return Math.max(0, Math.min(100, (isDraggingProgress.value ? dragTime.value : currentTime.value) / currentSong.value.duration * 100));
+});
+const currentTimeStr = computed(() => formatDuration(isDraggingProgress.value ? dragTime.value : currentTime.value));
+const totalTimeStr = computed(() => currentSong.value ? formatDuration(currentSong.value.duration) : '0:00');
+const updateProgressFromEvent = (event: PointerEvent) => {
+  if (!progressBarRef.value || !currentSong.value || currentSong.value.duration <= 0) return;
+  const rect = progressBarRef.value.getBoundingClientRect();
+  if (rect.width <= 0) return;
+  dragTime.value = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * currentSong.value.duration;
 };
-
-const startDrag = (e: PointerEvent) => {
-  if (e.pointerType === 'mouse' && e.button !== 0) return;
-  e.preventDefault();
-  (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
+const startProgressDrag = (event: PointerEvent) => {
+  if (isProgressHidden.value || !currentSong.value || currentSong.value.duration <= 0) return;
+  if (event.pointerType === 'mouse' && event.button !== 0) return;
+  event.preventDefault();
+  (event.currentTarget as HTMLElement)?.setPointerCapture?.(event.pointerId);
+  isDraggingProgress.value = true;
+  updateProgressFromEvent(event);
+};
+const stopProgressDrag = async (commit = true) => {
+  if (!isDraggingProgress.value) return;
+  const time = dragTime.value;
+  isDraggingProgress.value = false;
+  if (commit) {
+    try { await seekTo(time); }
+    catch { showToast('调整播放进度失败，请重试', 'error'); }
+  }
+};
+const onGlobalPointerMove = (event: PointerEvent) => {
+  if (isDraggingVolume.value && event.pointerId === volumePointerId) {
+    event.preventDefault(); updateVolumeFromPointer(event.clientY);
+  }
+  if (isDraggingProgress.value) { event.preventDefault(); updateProgressFromEvent(event); }
+};
+const onGlobalPointerUp = () => { finishVolumeDrag(); void stopProgressDrag(); };
+const onGlobalPointerCancel = () => { finishVolumeDrag(); void stopProgressDrag(false); };
+const setVolumePercent = (value: number) => {
+  const percent = Math.max(0, Math.min(100, Math.round(value)));
+  void handleVolume({ target: { value: String(percent) } } as unknown as Event)
+    .catch(() => showToast('调整音量失败，请重试', 'error'));
+};
+const updateVolumeFromPointer = (clientY: number) => {
+  const rect = volumeBarRef.value?.getBoundingClientRect();
+  if (!rect || rect.height <= 0) return;
+  setVolumePercent((rect.bottom - clientY) / rect.height * 100);
+};
+const startVolumeDrag = (event: PointerEvent) => {
+  if (event.button !== 0 || !event.isPrimary) return;
+  event.preventDefault(); clearVolumeTimer();
+  volumePointerId = event.pointerId;
   isDraggingVolume.value = true;
-  updateVolume(e.clientY);
+  volumeBarRef.value?.setPointerCapture(event.pointerId);
+  updateVolumeFromPointer(event.clientY);
 };
-
-const onGlobalPointerMove = (e: PointerEvent) => {
-  if (isDraggingVolume.value) { e.preventDefault(); updateVolume(e.clientY); }
-  if (isDraggingProgress.value) { e.preventDefault(); updateProgressFromEvent(e); }
+const cancelVolumeDrag = () => {
+  const pointerId = volumePointerId;
+  volumePointerId = null; isDraggingVolume.value = false;
+  if (pointerId !== null && volumeBarRef.value?.hasPointerCapture(pointerId)) {
+    volumeBarRef.value.releasePointerCapture(pointerId);
+  }
 };
-
-const onGlobalPointerEnd = (commitProgress = true) => {
-  isDraggingVolume.value = false;
-  stopProgressDrag(commitProgress);
+const finishVolumeDrag = () => {
+  if (!isDraggingVolume.value) return;
+  cancelVolumeDrag();
+  if (!popupRef.value?.matches(':hover')) volumeLeave();
 };
-
-const onGlobalPointerUp = () => onGlobalPointerEnd(true);
-const onGlobalPointerCancel = () => onGlobalPointerEnd(false);
-
-// --- 音量滑块显示逻辑 ---
-const showVolumeSlider = ref(false);
-let volumeTimer: any = null;
-
-const handleVolumeEnter = () => {
-  if (volumeTimer) clearTimeout(volumeTimer);
-  showVolumeSlider.value = true;
-  handleFooterMouseEnter(); // Also stop idle timer
+const adjustVolumeFromKeyboard = (event: KeyboardEvent) => {
+  const offsets: Record<string, number> = { ArrowUp: 5, ArrowRight: 5, ArrowDown: -5, ArrowLeft: -5, PageUp: 10, PageDown: -10 };
+  if (event.key !== 'Home' && event.key !== 'End' && offsets[event.key] === undefined) return;
+  event.preventDefault(); event.stopPropagation();
+  setVolumePercent(event.key === 'Home' ? 0 : event.key === 'End' ? 100 : volume.value + offsets[event.key]);
 };
+const seekWithKeyboard = (event: KeyboardEvent) => {
+  if (!currentSong.value || isProgressHidden.value) return;
+  const offsets: Record<string, number> = { ArrowLeft: -5, ArrowRight: 5, ArrowDown: -5, ArrowUp: 5 };
+  const duration = currentSong.value.duration;
+  if (event.key !== 'Home' && event.key !== 'End' && offsets[event.key] === undefined) return;
+  event.preventDefault(); event.stopPropagation();
+  const time = event.key === 'Home' ? 0 : event.key === 'End' ? duration : currentTime.value + offsets[event.key];
+  void seekTo(Math.max(0, Math.min(duration, time))).catch(() => showToast('调整播放进度失败，请重试', 'error'));
+};
+watch([scene, isProgressHidden, () => currentSong.value?.path], () => { void stopProgressDrag(false); showProgressContextMenu.value = false; });
 
-const handleVolumeLeave = () => {
+const remoteDownloadProgress = ref<RemoteDownloadProgress | null>(null);
+const isCurrentRemoteDownloadActive = computed(() => !!remoteDownloadProgress.value && !remoteDownloadProgress.value.done
+  && remoteDownloadProgress.value.uri === currentSong.value?.path);
+const remoteDownloadText = computed(() => remoteDownloadProgress.value?.percent == null
+  ? '正在加载远程歌曲' : `正在加载远程歌曲 ${Math.round(remoteDownloadProgress.value.percent)}%`);
+
+type Popup = 'more' | 'equalizer' | 'volume';
+const popup = ref<Popup | null>(null);
+const popupRef = ref<HTMLElement | null>(null);
+const moreAnchor = () => footerRef.value?.querySelector<HTMLButtonElement>('[data-footer-action="more"]') ?? footerRef.value;
+const popupLeft = ref(0), popupBottom = ref(88);
+let popupAnchor: HTMLElement | null = null;
+let suppressVolumeFocus = false;
+let volumeTimer: ReturnType<typeof setTimeout> | undefined;
+const clearVolumeTimer = () => { if (volumeTimer) clearTimeout(volumeTimer); volumeTimer = undefined; };
+const positionPopup = (kind: Popup, anchor: HTMLElement) => {
+  const rect = anchor.getBoundingClientRect();
+  const width = kind === 'equalizer' ? 600 : kind === 'volume' ? 36 : 232;
+  popupLeft.value = Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 12));
+  popupBottom.value = kind === 'volume'
+    ? Math.max(12, window.innerHeight - rect.top)
+    : Math.max(12, window.innerHeight - (footerRef.value?.getBoundingClientRect().top ?? rect.top) + 8);
+};
+const openPopup = async (kind: Popup, anchor: HTMLElement, focus = false) => {
+  clearVolumeTimer();
+  if (kind !== 'volume') cancelVolumeDrag();
+  popupAnchor = popupRef.value?.contains(anchor) ? moreAnchor() : anchor;
+  positionPopup(kind, popupAnchor ?? anchor);
+  popup.value = kind;
+  if (focus) {
+    await nextTick();
+    if (popup.value === kind) popupRef.value?.querySelector<HTMLElement>('input, button, [role="slider"]')?.focus();
+  }
+};
+const closePopup = (restoreFocus = false) => {
+  clearVolumeTimer(); cancelVolumeDrag(); popup.value = null;
+  if (restoreFocus && popupAnchor?.isConnected) {
+    suppressVolumeFocus = true;
+    popupAnchor.focus();
+    void nextTick(() => { suppressVolumeFocus = false; });
+  }
+};
+const volumeEnter = (id: FooterMovableId, event: MouseEvent | FocusEvent) => {
+  if (suppressVolumeFocus || id !== 'volume' || popup.value && popup.value !== 'volume') return;
+  void openPopup('volume', event.currentTarget as HTMLElement);
+};
+const volumeLeave = () => {
+  clearVolumeTimer();
   volumeTimer = setTimeout(() => {
-    if (!isDraggingVolume.value) {
-      showVolumeSlider.value = false;
-      // If we left the volume slider, check if we should start footer idle timer
-      startIdleTimer();
-    }
+    if (popup.value === 'volume' && !isDraggingVolume.value && !popupRef.value?.contains(document.activeElement)) closePopup();
   }, 300);
 };
-
-// --- EQ Panel State ---
-const showEqPanel = ref(false);
-const eqButtonRef = ref<HTMLElement | null>(null);
-const eqPanelRef = ref<HTMLElement | null>(null);
-
-const { settings } = useSettings();
-
-watch(
-  () => settings.value.audio.showEqualizerInFooter,
-  (show) => {
-    if (show === false) {
-      showEqPanel.value = false;
-    }
-  }
-);
-
-const toggleEqPanel = (e: MouseEvent) => {
-  e.stopPropagation();
-  showEqPanel.value = !showEqPanel.value;
+const actionLabel = (id: FooterMovableId) => {
+  if (id === 'play') return isPlaying.value ? '暂停' : '播放';
+  if (id === 'pin') return isPinned.value ? '取消固定当前底栏' : '固定当前底栏';
+  if (id === 'progress') return isProgressHidden.value ? '显示当前进度条' : '隐藏当前进度条';
+  if (id === 'visualizer') return isVisualizerEnabled.value ? '关闭音频频谱' : '开启音频频谱';
+  if (id === 'favorite') return currentSong.value && isFavorite(currentSong.value) ? '取消收藏' : '收藏';
+  if (id === 'mode') return ['列表循环', '单曲循环', '随机播放'][playMode.value];
+  return footerAction(id).label;
 };
-
-const handleWindowClick = (e: MouseEvent) => {
-  showProgressContextMenu.value = false;
-  if (showEqPanel.value && eqPanelRef.value && eqButtonRef.value) {
-    const target = e.target as HTMLElement;
-    if (!eqPanelRef.value.contains(target) && !eqButtonRef.value.contains(target)) {
-      showEqPanel.value = false;
-    }
+const actionActive = (id: FooterMovableId) => ({
+  favorite: !!currentSong.value && isFavorite(currentSong.value), mode: false, queue: showPlaylist.value,
+  volume: volume.value === 0, desktopLyrics: showDesktopLyrics.value, equalizer: popup.value === 'equalizer',
+  pin: isPinned.value, progress: !isProgressHidden.value, lyricsStyle: showLyricsPlayerSettingsPanel.value, visualizer: isVisualizerEnabled.value,
+  more: popup.value === 'more', previous: false, play: false, next: false,
+})[id];
+const actionWheel = (id: FooterMovableId, event: WheelEvent) => {
+  if (id !== 'volume') return;
+  event.preventDefault(); event.stopPropagation();
+  void handleVolumeWheel(event).catch(() => showToast('调整音量失败，请重试', 'error'));
+};
+const activateAction = async (id: FooterMovableId, event: MouseEvent, fromMenu = false) => {
+  showContextMenu.value = false; showProgressContextMenu.value = false;
+  const anchor = event.currentTarget as HTMLElement;
+  if (id === 'more') {
+    if (popup.value === 'more') closePopup(); else await openPopup('more', anchor, true);
+    return;
+  }
+  if (id === 'equalizer') {
+    if (popup.value === 'equalizer') closePopup(); else await openPopup('equalizer', anchor, true);
+    return;
+  }
+  if (id === 'volume') {
+    if (fromMenu) await openPopup('volume', anchor, true);
+    else toggleMute();
+    return;
+  }
+  closePopup();
+  switch (id) {
+    case 'previous': await prevSong(); break;
+    case 'play': await togglePlay(); break;
+    case 'next': await nextSong(); break;
+    case 'favorite': if (currentSong.value) await toggleFavorite(currentSong.value); break;
+    case 'mode': toggleMode(); break;
+    case 'queue': togglePlaylist(); break;
+    case 'desktopLyrics': showDesktopLyrics.value = !showDesktopLyrics.value; break;
+    case 'lyricsStyle': showLyricsPlayerSettingsPanel.value = !showLyricsPlayerSettingsPanel.value; break;
+    case 'pin': setBehavior(scene.value, { autoHide: !behavior.value.autoHide }); break;
+    case 'progress': toggleProgress(scene.value); break;
+    case 'visualizer': setBehavior(scene.value, { visualizer: !behavior.value.visualizer }); break;
   }
 };
-
-// --- Idle State for Auto-Hide (Decoupled Main vs Lyric Detail) ---
-const isPinnedMain = ref(
-  localStorage.getItem('footer_pinned_main') !== null
-    ? localStorage.getItem('footer_pinned_main') === 'true'
-    : (localStorage.getItem('footer_pinned') !== null ? localStorage.getItem('footer_pinned') === 'true' : true)
-);
-
-const isPinnedDetail = ref(
-  localStorage.getItem('footer_pinned_detail') !== null
-    ? localStorage.getItem('footer_pinned_detail') === 'true'
-    : false
-);
-
-const isPinned = computed(() => (
-  showPlayerDetail.value ? isPinnedDetail.value : isPinnedMain.value
-));
+const handleOutsidePointer = (event: PointerEvent) => {
+  const target = event.target as HTMLElement;
+  if (popupRef.value?.contains(target) || target.closest('[data-footer-action]')) return;
+  if (target.closest('[role="alertdialog"]') || target.closest('[role="dialog"]')) return;
+  closePopup(); showProgressContextMenu.value = false;
+};
+const handlePopupKeydown = (event: KeyboardEvent) => {
+  if (!popup.value || event.key !== 'Escape') return;
+  if (document.querySelector('[role="alertdialog"], [role="dialog"][aria-modal="true"]')) return;
+  event.preventDefault(); event.stopImmediatePropagation(); closePopup(true);
+};
+const openFooterContextMenu = (event: MouseEvent) => {
+  // Song information and the seek bar retain their dedicated context menus.
+  if (event.defaultPrevented || !footerRef.value) return;
+  event.preventDefault(); event.stopPropagation();
+  showContextMenu.value = false; showProgressContextMenu.value = false;
+  void openPopup('more', footerRef.value, true);
+  popupLeft.value = Math.max(12, Math.min(event.clientX, window.innerWidth - 244));
+};
+const openFooterMenuFromKeyboard = (event: KeyboardEvent) => {
+  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+  event.preventDefault(); event.stopPropagation();
+  showContextMenu.value = false; showProgressContextMenu.value = false;
+  if (event.target instanceof HTMLElement) void openPopup('more', event.target, true);
+};
+// Unrelated audio patches also replace AppSettings; do not close the EQ while
+// its sliders are committing audio settings. Only layout changes dismiss it.
+watch([
+  scene,
+  () => JSON.stringify(footer.value.placement),
+  () => JSON.stringify(effectiveFooterLayout(footer.value, scene.value)),
+  () => JSON.stringify(footer.value.spacing[footer.value.linked ? 'main' : scene.value]),
+], () => closePopup());
 
 const isIdle = ref(false);
-let idleTimer: any = null;
-
-const togglePin = () => {
-  if (showPlayerDetail.value) {
-    isPinnedDetail.value = !isPinnedDetail.value;
-    localStorage.setItem('footer_pinned_detail', isPinnedDetail.value.toString());
-  } else {
-    isPinnedMain.value = !isPinnedMain.value;
-    localStorage.setItem('footer_pinned_main', isPinnedMain.value.toString());
-    localStorage.setItem('footer_pinned', isPinnedMain.value.toString());
-  }
-
-  if (!isPinned.value) {
-    startIdleTimer();
-  } else {
-    isIdle.value = false;
-    if (idleTimer) clearTimeout(idleTimer);
-  }
-};
-
-watch(showPlayerDetail, () => {
-  if (isPinned.value) {
-    isIdle.value = false;
-    if (idleTimer) clearTimeout(idleTimer);
-  } else {
-    startIdleTimer();
-  }
-});
-
+const pointerInside = ref(false);
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
+const clearIdleTimer = () => { if (idleTimer) clearTimeout(idleTimer); idleTimer = undefined; };
+const mustStayVisible = () => !behavior.value.autoHide || route.path === '/settings' || pointerInside.value
+  || popup.value !== null || showContextMenu.value || showProgressContextMenu.value || isDraggingProgress.value
+  || showPlaylist.value || showLyricsPlayerSettingsPanel.value || !!footerRef.value?.querySelector(':focus-visible');
 const startIdleTimer = () => {
-  if (idleTimer) clearTimeout(idleTimer);
-  // Do not hide if context menu, dragging, or volume slider is active
-  if (showContextMenu.value || isDraggingProgress.value || isDraggingVolume.value || showVolumeSlider.value || isPinned.value) return;
-  
-  idleTimer = setTimeout(() => {
-    isIdle.value = true;
-  }, 2000);
+  clearIdleTimer(); isIdle.value = false;
+  if (mustStayVisible()) return;
+  idleTimer = setTimeout(() => { if (!mustStayVisible()) isIdle.value = true; }, 2000);
 };
+const handleFooterMouseEnter = () => { pointerInside.value = true; clearIdleTimer(); isIdle.value = false; };
+const handleFooterMouseLeave = () => { pointerInside.value = false; startIdleTimer(); };
+const handleFooterFocusOut = () => { void nextTick(startIdleTimer); };
+watch([scene, () => behavior.value.autoHide, () => route.path, popup, showContextMenu, showProgressContextMenu, isDraggingProgress, showPlaylist, showLyricsPlayerSettingsPanel], startIdleTimer);
+watch([hasCover, isIdle, scene], () => {
+  footerCoverVisible.value = scene.value === 'main' && hasCover.value && !isIdle.value;
+}, { immediate: true });
 
-const handleFooterMouseEnter = () => {
-  isIdle.value = false;
-  if (idleTimer) clearTimeout(idleTimer);
-};
-
-const handleFooterMouseMove = () => {
-  if (isIdle.value) isIdle.value = false;
-  if (idleTimer) clearTimeout(idleTimer);
-};
-
-const handleFooterMouseLeave = () => {
+let resizeObserver: ResizeObserver | undefined;
+let unlistenRemoteDownload: UnlistenFn | undefined;
+let disposed = false;
+const onWindowResize = () => { closePopup(); showProgressContextMenu.value = false; };
+onMounted(async () => {
+  resizeObserver = new ResizeObserver(entries => { footerWidth.value = entries[0].borderBoxSize?.[0]?.inlineSize ?? entries[0].contentRect.width; });
+  if (footerRef.value) resizeObserver.observe(footerRef.value);
+  window.addEventListener('pointermove', onGlobalPointerMove);
+  window.addEventListener('pointerup', onGlobalPointerUp);
+  window.addEventListener('pointercancel', onGlobalPointerCancel);
+  window.addEventListener('pointerdown', handleOutsidePointer);
+  window.addEventListener('keydown', handlePopupKeydown, true);
+  window.addEventListener('resize', onWindowResize);
   startIdleTimer();
-};
-
-onMounted(async () => { 
-  window.addEventListener('pointermove', onGlobalPointerMove); 
-  window.addEventListener('pointerup', onGlobalPointerUp); 
-  window.addEventListener('pointercancel', onGlobalPointerCancel); 
-  window.addEventListener('click', handleWindowClick); 
-  startIdleTimer(); // Start initial idle timer
-  unlistenRemoteDownload = await listen<RemoteDownloadProgress>('remote-download-progress', event => {
-    remoteDownloadProgress.value = event.payload;
-  });
+  try {
+    const unlisten = await listen<RemoteDownloadProgress>('remote-download-progress', event => { remoteDownloadProgress.value = event.payload; });
+    if (disposed) unlisten(); else unlistenRemoteDownload = unlisten;
+  } catch (error) { console.error('Failed to subscribe to download progress', error); }
 });
-onUnmounted(() => { 
-  window.removeEventListener('pointermove', onGlobalPointerMove); 
-  window.removeEventListener('pointerup', onGlobalPointerUp); 
-  window.removeEventListener('pointercancel', onGlobalPointerCancel); 
-  window.removeEventListener('click', handleWindowClick); 
-  if (idleTimer) clearTimeout(idleTimer);
-  unlistenRemoteDownload?.();
-  unlistenRemoteDownload = null;
+onUnmounted(() => {
+  disposed = true; clearIdleTimer(); clearVolumeTimer(); cancelVolumeDrag(); resizeObserver?.disconnect(); unlistenRemoteDownload?.();
+  footerCoverVisible.value = true;
+  window.removeEventListener('pointermove', onGlobalPointerMove);
+  window.removeEventListener('pointerup', onGlobalPointerUp);
+  window.removeEventListener('pointercancel', onGlobalPointerCancel);
+  window.removeEventListener('pointerdown', handleOutsidePointer);
+  window.removeEventListener('keydown', handlePopupKeydown, true);
+  window.removeEventListener('resize', onWindowResize);
 });
 </script>
 
 <template>
-  <footer 
-    class="h-20 flex items-center justify-between px-4 z-[60] relative select-none bg-transparent"
-    @mouseenter="handleFooterMouseEnter"
-    @mousemove="handleFooterMouseMove"
-    @mouseleave="handleFooterMouseLeave"
-  >
-    
-    <div
-      v-if="showPlayerDetail && currentSong && isVisualizerEnabled"
-      class="pointer-events-none absolute left-5 right-5 top-[-76px] h-16 z-40 transition-opacity duration-500 [mask-image:linear-gradient(90deg,transparent,black_1.5%,black_98.5%,transparent)]"
-      :class="isIdle ? 'opacity-25' : 'opacity-100'"
-    >
-      <AudioVisualizer
-        :active="showPlayerDetail && isVisualizerEnabled"
-        :is-playing="isPlaying"
-        :song-path="currentSong.path"
-      />
+  <footer ref="footerRef" class="player-footer relative z-[60] h-20 select-none bg-transparent" :tabindex="isIdle ? 0 : -1" aria-label="播放底栏"
+    :class="showPlayerDetail ? 'text-white' : 'text-gray-800 dark:text-white'"
+    @mouseenter="handleFooterMouseEnter" @mousemove="handleFooterMouseEnter" @mouseleave="handleFooterMouseLeave"
+    @focusin="isIdle = false; clearIdleTimer()" @focusout="handleFooterFocusOut" @contextmenu="openFooterContextMenu" @keydown="openFooterMenuFromKeyboard">
+    <div v-if="showPlayerDetail && currentSong && isVisualizerEnabled" class="pointer-events-none absolute inset-x-5 -top-[76px] z-40 h-16 transition-opacity duration-300" :class="isIdle ? 'opacity-25' : 'opacity-100'">
+      <AudioVisualizer :active="showPlayerDetail && isVisualizerEnabled" :is-playing="isPlaying" :song-path="currentSong.path" />
     </div>
-
-    <div 
-      ref="progressBarRef"
-      data-player-progress
-      class="absolute top-[-10px] left-0 w-full h-[22px] cursor-pointer group/progress z-50 [touch-action:none]"
-      @pointerdown="startProgressDrag"
-      @contextmenu="handleProgressContextMenu"
-    >
-      <div class="absolute inset-y-0 left-0 right-0 flex items-center">
-        <div
-          class="relative w-full rounded-full transition-[height] duration-200"
-          :class="isDraggingProgress ? 'h-[5px]' : 'h-[2px] group-hover/progress:h-[5px]'"
-        >
-          <div class="absolute inset-0 rounded-full transition-colors duration-200" :class="progressTrackClass"></div>
-          <div
-            class="absolute inset-y-0 left-0 rounded-full transition-[background-color,opacity] duration-200 overflow-visible"
-            :class="[progressFillClass, progressVisualState.trackClass]"
-            :style="{ width: displayProgress + '%' }"
-          >
-            <!-- 白色滑块圆球 (Thumb) -->
-            <div
-              class="absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 translate-x-1/2 rounded-full transition-all duration-150 z-40 border shadow-[0_2.5px_6px_rgba(0,0,0,0.15)]"
-              :class="[progressThumbClass, isDraggingProgress && !isProgressHidden ? 'opacity-100 scale-100' : progressVisualState.thumbClass]"
-            ></div>
-
-            <!-- 拖拽时间提示气泡的外层定位容器 (与白色滑块平级) -->
-            <div 
-              class="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-0 h-0 overflow-visible pointer-events-none z-50"
-            >
-              <!-- 内层负责 Vue transition 精致动画，物理定位通过 left-[-42px] 与 transform 解耦 -->
-              <transition name="fade-scale">
-                <div
-                  v-if="isDraggingProgress && !isProgressHidden"
-                  class="absolute bottom-4 left-[-42px] w-[84px] px-2 py-0.5 rounded-md bg-zinc-900/95 text-white text-[10px] font-semibold font-mono tracking-wider whitespace-nowrap shadow-lg border border-white/10 backdrop-blur-sm pointer-events-none select-none flex items-center justify-center text-center"
-                >
-                  {{ currentTimeStr }}/{{ totalTimeStr }}
-                  <!-- 气泡下方的微型三角指针 -->
-                  <div class="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-x-4 border-t-4 border-x-transparent border-t-zinc-900/95"></div>
-                </div>
-              </transition>
+    <div v-if="!isProgressHidden" ref="progressBarRef" data-player-progress role="slider" tabindex="0" aria-label="播放进度"
+      :aria-valuemin="0" :aria-valuemax="currentSong?.duration || 0" :aria-valuenow="isDraggingProgress ? dragTime : currentTime" :aria-valuetext="`${currentTimeStr} / ${totalTimeStr}`"
+      class="footer-progress absolute -top-[10px] left-0 z-50 h-[22px] w-full cursor-pointer touch-none"
+      :class="{ 'hover-only': behavior.progress === 'hover', dragging: isDraggingProgress }"
+      @pointerdown="startProgressDrag" @contextmenu="handleProgressContextMenu" @keydown="seekWithKeyboard">
+      <div class="progress-track absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full">
+        <div class="progress-fill absolute inset-y-0 left-0 rounded-full bg-zinc-300/30" :style="{ width: `${displayProgress}%` }">
+          <div class="progress-thumb absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 translate-x-1/2 rounded-full border border-black/10 bg-white shadow-sm"></div>
+          <div v-if="isDraggingProgress" class="absolute bottom-4 right-0 translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900/95 px-2 py-1 text-[11px] tabular-nums text-white">{{ currentTimeStr }} / {{ totalTimeStr }}</div>
+        </div>
+      </div>
+      <SongHighlightMarkers :hidden="false" />
+    </div>
+    <div class="footer-content h-full" :class="{ 'is-idle': isIdle }" :inert="isIdle || undefined">
+      <div class="footer-info-area" :style="{ width: `${groups.infoWidth}px` }">
+        <div v-if="behavior.info !== 'none'" data-player-song-info class="flex h-full min-w-0 flex-1 items-center"
+          :class="{ 'cursor-pointer': currentSong }" @click="handleSongInfoClick" @contextmenu="handleContextMenu">
+          <!-- Keep the 48px cover anchor and 12px gap so text can slide into their space. -->
+          <button type="button" data-footer-cover title="切换播放页" class="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg"
+            :class="{ 'opacity-0 pointer-events-none': !hasCover }" :inert="!hasCover || undefined" :aria-hidden="!hasCover" @click.stop="handleOpenDetail">
+            <!-- The shared animated cover occupies this anchor on the main page. -->
+            <img v-if="showPlayerDetail && currentCover && hasCover" :src="currentCover" class="h-full w-full object-cover" alt="" draggable="false" />
+          </button>
+          <div v-if="behavior.info !== 'cover'" class="footer-info-text relative ml-3 h-10 min-w-0 flex-1"
+            :class="{ 'is-time-only': !hasCover }">
+            <div class="footer-info-state footer-info-song absolute inset-0 flex flex-col justify-center"
+              :class="{ 'is-hidden': !hasCover }" :aria-hidden="!hasCover">
+              <div class="truncate text-sm font-semibold">{{ currentSong ? currentSong.title || currentSong.name.replace(/\.[^/.]+$/, '') : '听我想听的音乐' }}</div>
+              <div class="truncate text-xs" :class="[showPlayerDetail ? 'text-white/60' : 'text-gray-500 dark:text-gray-400', { 'tabular-nums': songInfoMode === 'both' }]">{{ isCurrentRemoteDownloadActive ? remoteDownloadText : songInfoMode === 'song' ? currentSong?.artist || 'My Music' : `${currentTimeStr} / ${totalTimeStr}` }}</div>
+            </div>
+            <div class="footer-info-state footer-info-time absolute inset-0 flex flex-col justify-center"
+              :class="[showPlayerDetail ? 'text-white/90' : 'text-gray-500 dark:text-gray-400', { 'is-hidden': hasCover }]" :aria-hidden="hasCover">
+              <div class="truncate text-[12px] font-semibold tabular-nums tracking-wide">
+                <template v-if="isCurrentRemoteDownloadActive">{{ remoteDownloadText }}</template>
+                <template v-else>{{ currentTimeStr }} <span class="mx-1 opacity-50">/</span> {{ totalTimeStr }}</template>
+              </div>
             </div>
           </div>
         </div>
       </div>
-      <SongHighlightMarkers :hidden="isProgressHidden" />
+      <FooterActionButton v-for="item in groups.bar" :id="item.id" :key="item.id" class="footer-free-button"
+        :class="{ 'play-button': item.id === 'play' }" :style="{ left: `${item.x}px`, width: `${item.width}px`, height: `${item.width}px` }"
+        :label="actionLabel(item.id)" :active="actionActive(item.id)" :playing="isPlaying"
+        :expanded="item.id === 'more' ? popup === 'more' : undefined" :disabled="item.id === 'favorite' && !currentSong"
+        :play-mode="playMode" :volume="volume" :progress-hidden="isProgressHidden" :pinned="isPinned"
+        @activate="activateAction(item.id, $event)" @enter="volumeEnter(item.id, $event)" @leave="item.id === 'volume' && volumeLeave()" @wheel="actionWheel(item.id, $event)" />
     </div>
-
-    <div
-      v-if="showProgressContextMenu"
-      class="fixed z-[9999] min-w-[210px] overflow-hidden rounded-lg border border-black/10 bg-white/95 py-1 text-sm text-gray-800 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-[#252525]/95 dark:text-white"
-      :style="{ left: `${progressContextMenuX}px`, top: `${progressContextMenuY}px` }"
-      @click.stop
-      @contextmenu.prevent
-    >
-      <button class="block w-full px-3 py-2 text-left hover:bg-black/5 dark:hover:bg-white/10" @click="addProgressHighlight">
-        在 {{ formatMarkerTime(progressContextTimeMs) }} 添加高潮点
-      </button>
-    </div>
-
-    <div
-      data-player-song-info
-      class="flex h-full items-center flex-1 min-w-[200px] pr-2"
-      :class="currentSong && !showPlayerDetail ? 'cursor-pointer' : 'cursor-default'"
-      @click="handleSongInfoClick"
-      @contextmenu="handleContextMenu"
-    >
-      <div 
-        ref="footerCoverRef"
-        data-footer-cover
-        @click="handleOpenDetail"
-        class="group relative w-12 h-12 rounded-lg flex-shrink-0 cursor-pointer active:scale-95 z-10"
-      >
-      </div>
-
-      <div 
-        class="ml-3 flex-1 relative h-10 transition-transform duration-400"
-        :class="showPlayerDetail ? '-translate-x-[60px]' : 'translate-x-[0px]'"
-      >
-        <!-- State A: Default View (Title & Artist) -->
-        <div 
-          class="absolute inset-0 flex flex-col justify-center transition-all duration-400"
-          :class="showPlayerDetail ? 'opacity-0 translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0 text-gray-800 dark:text-white'"
-        >
-          <div class="flex items-center">
-            <div class="text-sm font-bold tracking-wide truncate pr-2">
-              {{ currentSong ? (currentSong.title || currentSong.name.replace(/\.[^/.]+$/, "")) : '听我想听的音乐' }}
-            </div>
-            <button 
-               v-if="currentSong" 
-               @click="toggleFavorite(currentSong)"
-               class="focus:outline-none transition-transform active:scale-95"
-               :title="isFavorite(currentSong) ? '取消收藏' : '添加到收藏'"
-            >
-              <svg v-if="isFavorite(currentSong)" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-[#EC4141]" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd" />
-              </svg>
-              <svg v-else xmlns="http://www.w3.org/2000/svg" 
-                class="h-4 w-4 text-gray-400 dark:text-white/40 hover:text-gray-600 dark:hover:text-white transition-colors" 
-                fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-              </svg>
-            </button>
-          </div>
-          <div class="text-[11px] font-medium mt-0.5 truncate text-gray-500 dark:text-gray-400">
-            {{ isCurrentRemoteDownloadActive ? remoteDownloadText : (currentSong ? currentSong.artist : 'My Music') }}
-          </div>
-        </div>
-
-        <!-- State B: Player Detail View (Progress) -->
-        <div 
-          class="absolute inset-0 flex flex-col justify-center transition-all duration-400"
-          :class="showPlayerDetail ? 'opacity-100 translate-y-0 text-white/90' : 'opacity-0 -translate-y-4 pointer-events-none'"
-        >
-          <div class="text-[12px] font-semibold tabular-nums cursor-default tracking-wide">
-            {{ currentTimeStr }} <span class="opacity-50 mx-1">/</span> {{ totalTimeStr }}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div 
-      class="flex items-center justify-center shrink-0 gap-6 transition-opacity duration-700"
-      :class="{ 'opacity-0 pointer-events-none': isIdle }"
-    >
-      <button
-        v-if="showPlayerDetail"
-        @mousedown.stop
-        @click.stop="toggleLyricsPlayerSettings"
-        class="flex items-center justify-center text-base font-semibold tracking-[0.02em] transition-colors"
-        :class="showLyricsPlayerSettingsPanel
-          ? 'text-white'
-          : 'text-white/60 hover:text-white'"
-        title="歌词样式"
-      >
-        A
-      </button>
-
-      <button @click="toggleMode" class="transition-colors" 
-        :class="showPlayerDetail ? 'text-white/80 hover:text-white' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white'"
-        :title="['列表循环', '单曲循环', '随机播放'][playMode]">
-        <svg v-if="playMode === 0" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-        <svg v-else-if="playMode === 1" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /><text x="12" y="16" font-family="sans-serif" font-size="10" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">1</text></svg>
-        <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" /></svg>
-      </button>
-
-      <button @click="prevSong" 
-        class="transition-colors hover:scale-110 transform duration-200"
-        :class="showPlayerDetail ? 'text-white/80 hover:text-white' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white'"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6V6zm3.5 6l8.5 6V6l-8.5 6z" /></svg>
-      </button>
-
-      <button @click="togglePlay" 
-        class="flex items-center justify-center transition-all active:scale-95 shrink-0 w-11 h-11 rounded-full border"
-        :class="showPlayerDetail 
-          ? 'text-white bg-white/10 hover:bg-white/20 border-white/5' 
-          : 'text-gray-800 dark:text-white bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 border-black/5 dark:border-white/5'"
-      >
-        <svg v-if="isPlaying" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-        <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 fill-current" viewBox="0 0 24 24"><path d="M8.3 5v14l11-7z" /></svg>
-      </button>
-
-      <button @click="nextSong" 
-        class="transition-colors hover:scale-110 transform duration-200"
-        :class="showPlayerDetail ? 'text-white/80 hover:text-white' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white'"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg>
-      </button>
-
-      <button
-        type="button"
-        data-queue-trigger="true"
-        @mousedown.stop
-        @click.stop="togglePlaylist"
-        class="transition-colors hover:scale-110 transform duration-200"
-        :class="showPlaylist ? 'text-[#EC4141]' : (showPlayerDetail ? 'text-white/80 hover:text-white' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white')"
-        title="播放队列"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
-      </button>
-    </div>
-
-    <div 
-      class="flex items-center justify-end flex-1 min-w-[150px] gap-2 pr-2 transition-opacity duration-700"
-      :class="{ 'opacity-0 pointer-events-none': isIdle }"
-    > 
-      <div 
-        class="relative flex items-center justify-center h-full z-[70]"
-        @mouseenter="handleVolumeEnter"
-        @mouseleave="handleVolumeLeave"
-        @wheel.prevent.stop="handleVolumeWheel"
-      >
-        <!-- 音量滑块弹窗 -->
-        <div 
-          v-if="showVolumeSlider || isDraggingVolume"
-          class="absolute bottom-full left-1/2 -translate-x-1/2 pb-3 z-[70]"
-        >
-          <!-- 透明桥接层：防止鼠标从图标移动到滑块时断触 -->
-          <div class="absolute top-full left-0 w-full h-4"></div>
-          
-          <div class="w-9 h-32 backdrop-blur-md shadow-2xl rounded-2xl border flex flex-col items-center justify-between py-3 transition-colors"
-            :class="showPlayerDetail ? 'bg-[#1c1c1c]/80 border-white/10' : 'bg-white/90 dark:bg-zinc-900/85 border-gray-100 dark:border-white/10'"
-          >
-            <div class="text-[10px] font-bold select-none transition-colors"
-              :class="showPlayerDetail ? 'text-white/60' : 'text-gray-500 dark:text-white/60'"
-            >{{ volume }}%</div>
-            <div ref="volumeBarRef" class="relative flex-1 w-1.5 rounded-full cursor-pointer my-1 transition-colors [touch-action:none]" 
-                 :class="showPlayerDetail ? 'bg-white/15' : 'bg-gray-200 dark:bg-white/15'"
-                 @pointerdown="startDrag">
-               <div class="absolute bottom-0 w-full bg-[#EC4141] rounded-full" :style="{ height: volume + '%' }"></div>
-               <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-white rounded-full shadow-sm cursor-grab active:cursor-grabbing" :style="{ bottom: `calc(${volume}% - 7px)` }"></div>
+    <Teleport to="body">
+      <div v-if="popup" ref="popupRef" class="footer-popup fixed z-[9500]"
+        :class="popup === 'volume' ? 'pb-3' : 'overflow-auto rounded-xl border border-black/10 bg-white p-1 text-gray-800 shadow-2xl dark:border-white/10 dark:bg-zinc-900 dark:text-gray-100'"
+        :style="{ left: `${popupLeft}px`, bottom: `${popupBottom}px`, maxHeight: popup === 'volume' ? undefined : `calc(100vh - ${popupBottom + 12}px)`, width: popup === 'equalizer' ? 'min(600px, calc(100vw - 24px))' : popup === 'volume' ? '36px' : '232px' }"
+        :aria-label="popup === 'equalizer' ? '均衡器' : popup === 'volume' ? '音量' : '更多底栏操作'"
+        @pointerdown.stop @mouseenter="clearVolumeTimer" @mouseleave="popup === 'volume' && volumeLeave()" @wheel="popup === 'volume' && actionWheel('volume', $event)">
+        <template v-if="popup === 'more'">
+          <FooterActionButton v-for="item in groups.more" :id="item.id" :key="item.id" menu :playing="isPlaying" :label="actionLabel(item.id)" :active="actionActive(item.id)" :expanded="item.id === 'more' ? popup === 'more' : undefined" :disabled="item.id === 'favorite' && !currentSong" :play-mode="playMode" :volume="volume" :progress-hidden="isProgressHidden" :pinned="isPinned" @activate="activateAction(item.id, $event, true)" />
+          <p v-if="!groups.more.length" class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">暂无更多操作</p>
+        </template>
+        <template v-else-if="popup === 'volume'">
+          <!-- Keep the original narrow vertical volume popup and hover bridge. -->
+          <div class="absolute top-full left-0 h-4 w-full"></div>
+          <div class="flex h-32 w-9 flex-col items-center justify-between rounded-2xl border py-3 shadow-2xl backdrop-blur-md transition-colors"
+            :class="showPlayerDetail ? 'bg-[#1c1c1c]/80 border-white/10' : 'bg-white/90 dark:bg-zinc-900/85 border-gray-100 dark:border-white/10'">
+            <div class="select-none text-[10px] font-bold transition-colors"
+              :class="showPlayerDetail ? 'text-white/60' : 'text-gray-500 dark:text-white/60'">{{ volume }}%</div>
+            <div ref="volumeBarRef" role="slider" tabindex="0" aria-label="音量" aria-orientation="vertical" :aria-valuemin="0" :aria-valuemax="100" :aria-valuenow="volume" :aria-valuetext="`${volume}%`"
+              class="relative my-1 w-1.5 flex-1 cursor-pointer touch-none rounded-full transition-colors"
+              :class="showPlayerDetail ? 'bg-white/15' : 'bg-gray-200 dark:bg-white/15'"
+              @pointerdown="startVolumeDrag" @lostpointercapture="finishVolumeDrag" @keydown="adjustVolumeFromKeyboard" @blur="volumeLeave">
+              <div class="absolute bottom-0 w-full rounded-full bg-[#EC4141]" :style="{ height: `${volume}%` }"></div>
+              <div class="absolute bottom-0 left-1/2 h-3.5 w-3.5 -translate-x-1/2 cursor-grab rounded-full bg-white shadow-sm active:cursor-grabbing" :style="{ bottom: `calc(${volume}% - 7px)` }"></div>
             </div>
           </div>
-        </div>
-        <button @click="toggleMute" 
-          class="transition-colors flex items-center justify-center shrink-0 w-8 h-8 rounded-full"
-          :class="showPlayerDetail ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'"
-          title="音量"
-        > 
-          <!-- 静音 -->
-          <svg v-if="volume === 0" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
-          <!-- 弱音量 -->
-          <svg v-else-if="volume > 0 && volume < 30" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon></svg>
-          <!-- 中音量 -->
-          <svg v-else-if="volume >= 30 && volume < 70" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
-          <!-- 大音量 -->
-          <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
-        </button>
+        </template>
+        <template v-else>
+          <div class="flex items-center justify-between px-3 py-1 text-xs"><span>均衡器</span><button type="button" title="关闭均衡器面板" class="p-1" @click="closePopup(true)"><X class="h-4 w-4" /></button></div>
+          <div class="p-3"><EqualizerPanel embedded /></div>
+        </template>
       </div>
-
-      <button
-        v-if="showPlayerDetail"
-        @click="toggleProgressVisibility"
-        :class="['transition-colors w-8 h-8 flex items-center justify-center rounded-full', isProgressHidden ? 'text-[#EC4141] bg-[#EC4141]/10' : 'text-white/60 hover:text-white hover:bg-white/10']"
-        :title="isProgressHidden ? '显示进度条' : '隐藏进度条'"
-      >
-        <EyeOff v-if="isProgressHidden" class="h-4 w-4" :stroke-width="2.2" />
-        <Eye v-else class="h-4 w-4" :stroke-width="2.2" />
-      </button>
-
-      <button
-        v-if="showPlayerDetail"
-        @click="toggleVisualizer"
-        :class="['transition-colors w-8 h-8 flex items-center justify-center rounded-full', isVisualizerEnabled ? 'text-[#EC4141] bg-[#EC4141]/10' : 'text-white/60 hover:text-white hover:bg-white/10']"
-        :title="isVisualizerEnabled ? '关闭可视化' : '开启可视化'"
-      >
-        <AudioLines class="h-4 w-4" :stroke-width="2.2" />
-      </button>
-      
-      <button 
-        @click="toggleLyrics"
-        :class="['text-[14px] font-bold transition-colors w-8 h-8 flex items-center justify-center rounded-full', showDesktopLyrics ? 'text-[#EC4141] bg-[#EC4141]/10' : (showPlayerDetail ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10')]"
-        title="桌面歌词"
-      >
-        词
-      </button>
-
-      <!-- 均衡器按钮与弹出面板 -->
-      <div v-if="settings.audio.showEqualizerInFooter !== false" class="relative flex items-center justify-center h-full z-[70]">
-        <button 
-          ref="eqButtonRef"
-          @click="toggleEqPanel"
-          :class="['transition-colors w-8 h-8 flex items-center justify-center rounded-full', showEqPanel ? 'text-[#EC4141] bg-[#EC4141]/10' : (showPlayerDetail ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10')]"
-          title="均衡器 (EQ)"
-        >
-          <SlidersHorizontal class="h-4 w-4" :stroke-width="2.2" />
-        </button>
-
-        <transition name="fade-scale">
-          <div 
-            v-if="showEqPanel"
-            ref="eqPanelRef"
-            class="absolute bottom-full right-[-10px] pb-4.5 z-[80] filter drop-shadow-[0_8px_20px_rgba(0,0,0,0.15)]"
-          >
-            <!-- 极富流动感、平滑贝塞尔圆弧的气泡指引尾巴 -->
-            <svg width="32" height="10" viewBox="0 0 32 10" class="absolute bottom-[9px] right-[10px] text-[#FFFFFF] dark:text-[#1E1E1E] fill-current z-[81] overflow-visible">
-              <path d="M0,0 C8,0 12,8 16,10 C20,8 24,0 32,0 Z" />
-              <path d="M0,0 C8,0 12,8 16,10 C20,8 24,0 32,0" fill="none" class="stroke-gray-100 dark:stroke-gray-800" stroke-width="1" />
-            </svg>
-            
-            <EqualizerPanel />
-          </div>
-        </transition>
+      <div v-if="showProgressContextMenu" class="fixed z-[9999] min-w-[210px] rounded-lg border border-black/10 bg-white py-1 text-sm text-gray-800 shadow-xl dark:border-white/10 dark:bg-zinc-900 dark:text-white"
+        :style="{ left: `${progressContextMenuX}px`, top: `${progressContextMenuY}px` }" @pointerdown.stop @contextmenu.prevent>
+        <button type="button" class="block w-full px-3 py-2 text-left hover:bg-black/5 dark:hover:bg-white/5" @click="addProgressHighlight">在 {{ formatMarkerTime(progressContextTimeMs) }} 添加高潮点</button>
       </div>
-
-      <button @click="togglePin"
-        class="transition-colors w-8 h-8 flex items-center justify-center rounded-full"
-        :class="showPlayerDetail ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'"
-        :title="isPinned ? (showPlayerDetail ? '取消固定歌词页底部栏 (当前已常驻)' : '取消固定底部栏 (当前已常驻)') : (showPlayerDetail ? '固定歌词页底部栏 (当前离开后消失)' : '固定底部栏 (当前离开后消失)')"
-      >
-        <!-- 已固定：完整图钉 -->
-        <svg v-if="isPinned" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
-        <!-- 未固定：带取消斜线的图钉 -->
-        <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 2 20 20"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-.82"/><path d="M12 17v5"/><path d="M15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0-1.16.37"/></svg>
-      </button>
-    </div>
-        <FooterContextMenu 
-
-          :visible="showContextMenu" 
-
-          :x="contextMenuX" 
-
-          :y="contextMenuY" 
-
-          :song="currentSong"
-
-          @close="showContextMenu = false"
-
-        />
-
-      </footer>
-
-    </template>
+    </Teleport>
+    <FooterContextMenu :visible="showContextMenu" :x="contextMenuX" :y="contextMenuY" :song="currentSong" @close="showContextMenu = false" />
+  </footer>
+</template>
 
 <style scoped>
-/* 拖拽气泡进入与离开的动画过渡 */
-.fade-scale-enter-active,
-.fade-scale-leave-active {
-  transition: opacity 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.fade-scale-enter-from,
-.fade-scale-leave-to {
-  opacity: 0;
-  transform: translateY(6px) scale(0.85);
+.footer-content { position: relative; transition: opacity 240ms ease; }
+.footer-info-area { position: absolute; top: 0; left: 16px; height: 100%; min-width: 0; }
+.footer-free-button { position: absolute; top: 50%; transform: translate(-50%, -50%); }
+.footer-content.is-idle { opacity: 0; pointer-events: none; }
+.footer-info-text { transition: transform 400ms cubic-bezier(0.4, 0, 0.2, 1); }
+.footer-info-text.is-time-only { transform: translateX(-60px); }
+.footer-info-state { transition: opacity 400ms cubic-bezier(0.4, 0, 0.2, 1), transform 400ms cubic-bezier(0.4, 0, 0.2, 1); }
+.footer-info-state.is-hidden { opacity: 0; pointer-events: none; }
+.footer-info-song.is-hidden { transform: translateY(16px); }
+.footer-info-time.is-hidden { transform: translateY(-16px); }
+.play-button { border-radius: 50%; background: color-mix(in srgb, currentColor 7%, transparent); border: 1px solid color-mix(in srgb, currentColor 4%, transparent); }
+.play-button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+.progress-track { transition: height 150ms ease, opacity 150ms ease; }
+.progress-thumb { opacity: 0; transition: opacity 150ms ease; }
+.footer-progress:hover .progress-track, .footer-progress:focus-visible .progress-track, .footer-progress.dragging .progress-track { height: 5px; }
+.footer-progress:hover .progress-thumb, .footer-progress:focus-visible .progress-thumb, .footer-progress.dragging .progress-thumb { opacity: 1; }
+.footer-progress.hover-only:not(:hover):not(:focus-visible):not(.dragging) { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .footer-content, .progress-track, .progress-thumb { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .footer-info-text, .footer-info-state { transition: none; }
 }
 </style>

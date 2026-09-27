@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { Captions, ChevronRight, PaintRoller, PanelLeft } from 'lucide-vue-next';
+import { Captions, ChevronRight, PaintRoller, PanelLeft, PanelBottom } from 'lucide-vue-next';
+import { useRoute } from 'vue-router';
 import {
   PERSONALIZATION_PAGE_LABELS,
   SETTINGS_SECTION_LABELS,
@@ -19,6 +20,7 @@ import SettingsSidebar from "../components/settings/SettingsSidebar.vue";
 import SettingsTheme from "../components/settings/SettingsTheme.vue";
 import SettingsToolbox from "../components/settings/SettingsToolbox.vue";
 import SettingsAudioOutput from "../components/settings/SettingsAudioOutput.vue";
+import SettingsFooter from '../components/settings/SettingsFooter.vue';
 
 const navigation = useSettingsNavigationStore();
 const { activeSection, personalizationPage } = storeToRefs(navigation);
@@ -30,6 +32,10 @@ let isSidebarNavigation = false;
 
 // Navigation belongs to this visit, not to the user's persisted preferences.
 navigation.resetNavigation();
+const route = useRoute();
+watch(() => route.query.personalization, page => {
+  if (page === 'footer') navigation.openPersonalizationPage('footer');
+}, { immediate: true });
 onBeforeUnmount(navigation.resetNavigation);
 
 const tabs = [
@@ -46,6 +52,7 @@ const tabs = [
 const personalizationPages = [
   { id: 'theme', name: PERSONALIZATION_PAGE_LABELS.theme, icon: PaintRoller },
   { id: 'sidebar', name: PERSONALIZATION_PAGE_LABELS.sidebar, icon: PanelLeft },
+  { id: 'footer', name: PERSONALIZATION_PAGE_LABELS.footer, icon: PanelBottom },
   { id: 'desktopLyrics', name: PERSONALIZATION_PAGE_LABELS.desktopLyrics, icon: Captions },
 ] satisfies { id: PersonalizationPage; name: string; icon: typeof PaintRoller }[];
 
@@ -148,6 +155,7 @@ watch([activeSection, personalizationPage], ([section, page], [previousSection, 
               </div>
               <SettingsTheme v-else-if="personalizationPage === 'theme'" />
               <SettingsSidebar v-else-if="personalizationPage === 'sidebar'" />
+              <SettingsFooter v-else-if="personalizationPage === 'footer'" />
               <SettingsDesktopLyrics v-else-if="personalizationPage === 'desktopLyrics'" />
             </div>
           </Transition>

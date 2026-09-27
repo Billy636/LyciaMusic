@@ -5,6 +5,7 @@ import { useCoverCache } from '../../composables/useCoverCache';
 import { usePlaybackController } from '../../features/playback/usePlaybackController';
 import { usePlaybackStore } from '../../features/playback/store';
 import FooterContextMenu from "../overlays/FooterContextMenu.vue";
+import { footerCoverVisible } from '../layout/footerPresentation';
 
 const props = defineProps<{
   isExpanded?: boolean;
@@ -173,7 +174,7 @@ defineExpose({ detailCoverRef });
           ? `0 30px 60px -12px rgba(0,0,0,0.6), 0 18px 36px -18px rgba(0,0,0,0.7), 0 0 80px -20px ${dominantColors[0]}44` 
           : (props.isExpanded ? `0 10px 20px -5px rgba(0,0,0,0.4)` : 'none'),
         transform: props.isExpanded ? (isPlaying ? 'scale(1)' : 'scale(1)') : 'scale(1)',
-        opacity: 1,
+        opacity: props.isExpanded || footerCoverVisible ? 1 : 0,
       }"
     >
       <!-- Main Cover Container -->

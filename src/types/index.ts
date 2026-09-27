@@ -428,7 +428,7 @@ export interface AudioSettings {
     preventClipping: boolean;
   };
   equalizer: EqualizerSettings;
-  showEqualizerInFooter: boolean; // 运行态必选属性
+  showEqualizerInFooter: boolean; // 旧版兼容字段：仅用于迁移底栏按钮显示偏好。
 }
 
 export type ShortcutActionId =
@@ -464,6 +464,8 @@ export interface ShortcutSettings {
 }
 
 export interface AppSettings {
+  // Optional only for legacy settings; initialized by the footer settings domain.
+  footer?: import('./footer').FooterSettings;
   closeToTray: boolean;
   showDesktopLyrics: boolean;
   showQualityBadges: boolean;
