@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute } from 'vue-router';
 
@@ -12,7 +12,8 @@ import TitleBar from './TitleBar.vue';
 import PlayerFooter from './PlayerFooter.vue';
 import GlobalBackground from './GlobalBackground.vue';
 
-const PlayQueueSidebar = defineAsyncComponent(() => import('../player/PlayQueueSidebar.vue'));
+const loadPlayQueue = () => import('../player/PlayQueueSidebar.vue');
+const PlayQueueSidebar = defineAsyncComponent(loadPlayQueue);
 const PlayerDetail = defineAsyncComponent(() => import('../player/PlayerDetail.vue'));
 const AddToPlaylistModal = defineAsyncComponent(() => import('../overlays/AddToPlaylistModal.vue'));
 const Toast = defineAsyncComponent(() => import('../common/Toast.vue'));
@@ -91,7 +92,29 @@ watch(showPlaylist, (visible) => {
   );
 });
 
+let cancelQueuePrefetch: (() => void) | null = null;
+
+onMounted(() => {
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (typeof idleWindow.requestIdleCallback === 'function') {
+    const idleId = idleWindow.requestIdleCallback(() => {
+      void loadPlayQueue();
+    }, { timeout: 4_000 });
+    cancelQueuePrefetch = () => idleWindow.cancelIdleCallback?.(idleId);
+    return;
+  }
+
+  const timer = globalThis.setTimeout(() => {
+    void loadPlayQueue();
+  }, 4_000);
+  cancelQueuePrefetch = () => globalThis.clearTimeout(timer);
+});
+
 onBeforeUnmount(() => {
+  cancelQueuePrefetch?.();
   if (playQueueLeaveTimer !== null) window.clearTimeout(playQueueLeaveTimer);
 });
 

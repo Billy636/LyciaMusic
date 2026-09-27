@@ -132,19 +132,32 @@ const updateContainerHeight = () => {
   ensureVisibleQueue();
 };
 
+const queuePanelRef = ref<HTMLElement | null>(null);
+
 const handleQueueKeydown = (event: KeyboardEvent) => {
   if (event.key !== 'Escape' || event.defaultPrevented || !showPlaylist.value || showClearModal.value) return;
   event.preventDefault();
+  event.stopPropagation();
+  togglePlaylist();
+};
+
+const handleClickOutside = (event: MouseEvent) => {
+  const target = event.target as Node | null;
+  if (!target || !showPlaylist.value || showClearModal.value) return;
+  if (queuePanelRef.value?.contains(target)) return;
+  if ((target as Element).closest?.('.modern-modal-overlay, [role="dialog"], [data-queue-trigger="true"]')) return;
   togglePlaylist();
 };
 
 onMounted(() => {
   window.addEventListener('resize', updateContainerHeight);
   window.addEventListener('keydown', handleQueueKeydown);
+  window.addEventListener('mousedown', handleClickOutside);
 });
 onUnmounted(() => {
   window.removeEventListener('resize', updateContainerHeight);
   window.removeEventListener('keydown', handleQueueKeydown);
+  window.removeEventListener('mousedown', handleClickOutside);
 });
 
 watch(
@@ -158,20 +171,18 @@ watch(
 
 <template>
   <Teleport to="body">
-    <transition name="fade">
-      <div v-if="showPlaylist" class="fixed inset-x-0 top-0 bottom-24 z-[90] bg-black/15" aria-hidden="true" @click="togglePlaylist"></div>
-    </transition>
-
-    <transition name="player-side-panel">
-      <div
+    <transition name="player-side-panel" appear>
+      <aside
         v-if="showPlaylist"
-        class="player-side-panel player-side-panel--right"
+        ref="queuePanelRef"
+        class="player-side-panel player-side-panel--right pointer-events-auto"
         :class="{ 'player-side-panel--solid-backdrop': !showPlayerDetail }"
         role="dialog"
         aria-modal="false"
         aria-labelledby="play-queue-sidebar-title"
         data-shortcut-capture="true"
         @click.stop
+        @mousedown.stop
       >
         <header class="player-side-panel__header">
           <div class="min-w-0">
@@ -262,7 +273,7 @@ watch(
           </div>
           <div :style="{ height: `${virtualQueue.paddingBottom}px` }"></div>
         </div>
-      </div>
+      </aside>
     </transition>
 
     <ModernModal
@@ -277,15 +288,6 @@ watch(
 </template>
 
 <style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
 
 @keyframes music-bar {
   0%, 100% { height: 4px; }

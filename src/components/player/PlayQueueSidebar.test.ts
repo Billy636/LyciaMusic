@@ -6,8 +6,8 @@ import source from './PlayQueueSidebar.vue?raw';
 describe('PlayQueueSidebar shared player panel', () => {
   it('uses the shared right-drawer geometry and transition without the old card sizing', () => {
     expect(source).toContain("import './playerSidePanel.css'");
-    expect(source).toContain('class="player-side-panel player-side-panel--right"');
-    expect(source).toContain('<transition name="player-side-panel">');
+    expect(source).toContain('class="player-side-panel player-side-panel--right pointer-events-auto"');
+    expect(source).toContain('<transition name="player-side-panel" appear>');
     expect(source).toContain("'player-side-panel--solid-backdrop': !showPlayerDetail");
     expect(source).not.toContain('slide-right');
     expect(source).not.toContain('w-[340px]');
@@ -26,11 +26,14 @@ describe('PlayQueueSidebar shared player panel', () => {
     expect(source).toContain('aria-labelledby="play-queue-sidebar-title"');
   });
 
-  it('dims the click-to-close backdrop without blurring the page or covering the footer', () => {
-    expect(source).toContain('class="fixed inset-x-0 top-0 bottom-24 z-[90] bg-black/15" aria-hidden="true" @click="togglePlaylist"');
-    expect(source).toContain('@click.stop');
+  it('aligns with the left drawer without an obscuring backdrop mask, using click-outside and shared panel surface', () => {
+    expect(source).not.toContain('bg-black/15');
     expect(source).not.toContain('backdrop-blur');
     expect(source).not.toContain('fixed inset-0');
+    expect(source).toContain('@click.stop');
+    expect(source).toContain('@mousedown.stop');
+    expect(source).toContain("window.addEventListener('mousedown', handleClickOutside);");
+    expect(source).toContain("window.removeEventListener('mousedown', handleClickOutside);");
   });
 
   it('uses translucent white queue rows and secondary text instead of opaque light cards', () => {
@@ -75,7 +78,7 @@ describe('PlayQueueSidebar shared player panel', () => {
   it('handles Escape in the bubble phase only when the queue owns it, leaving confirmation first', () => {
     expect(source).toContain('data-shortcut-capture="true"');
     expect(source).toContain("if (event.key !== 'Escape' || event.defaultPrevented || !showPlaylist.value || showClearModal.value) return;");
-    expect(source).toContain('event.preventDefault();\n  togglePlaylist();');
+    expect(source).toContain('event.preventDefault();\n  event.stopPropagation();\n  togglePlaylist();');
     expect(source).toContain("window.addEventListener('keydown', handleQueueKeydown);");
     expect(source).toContain("window.removeEventListener('keydown', handleQueueKeydown);");
     expect(source).not.toContain("addEventListener('keydown', handleQueueKeydown, true)");

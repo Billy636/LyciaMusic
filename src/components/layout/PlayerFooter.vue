@@ -540,7 +540,11 @@ onUnmounted(() => {
         <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg>
       </button>
 
-      <button @click="togglePlaylist" 
+      <button
+        type="button"
+        data-queue-trigger="true"
+        @mousedown.stop
+        @click.stop="togglePlaylist"
         class="transition-colors hover:scale-110 transform duration-200"
         :class="showPlaylist ? 'text-[#EC4141]' : (showPlayerDetail ? 'text-white/80 hover:text-white' : 'text-gray-700 dark:text-white/80 hover:text-black dark:hover:text-white')"
         title="播放队列"
