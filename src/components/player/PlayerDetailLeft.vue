@@ -8,6 +8,7 @@ import FooterContextMenu from "../overlays/FooterContextMenu.vue";
 
 const props = defineProps<{
   isExpanded?: boolean;
+  isResizingWindow?: boolean;
 }>();
 
 const {
@@ -167,6 +168,7 @@ defineExpose({ detailCoverRef });
       class="absolute aspect-square transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] z-50 will-change-transform pointer-events-auto"
       :class="props.isExpanded ? 'top-[45%] left-[calc(75px+18%)] -translate-x-1/2 -translate-y-1/2 w-[clamp(220px,45vh,580px)] rounded-2xl' : 'top-[calc(100vh-64px)] left-[16px] translate-x-0 translate-y-0 w-12 rounded-lg pointer-events-none'"
       :style="{ 
+        transitionDuration: props.isResizingWindow && props.isExpanded ? '0ms' : undefined,
         boxShadow: props.isExpanded && isPlaying
           ? `0 30px 60px -12px rgba(0,0,0,0.6), 0 18px 36px -18px rgba(0,0,0,0.7), 0 0 80px -20px ${dominantColors[0]}44` 
           : (props.isExpanded ? `0 10px 20px -5px rgba(0,0,0,0.4)` : 'none'),

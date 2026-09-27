@@ -14,6 +14,7 @@ import LyricsAppearancePanel from './LyricsAppearancePanel.vue';
 import { readLyricsAppearanceDraft } from './useLyricsAppearanceDraft';
 import PlayerDetailBackground from './PlayerDetailBackground.vue';
 import PlayerDetailLeft from './PlayerDetailLeft.vue';
+import ImmersiveTransitionOverlay from './ImmersiveTransitionOverlay.vue';
 import QueueList from './QueueList.vue';
 import { resolvePlayerDetailEscapeAction } from './playerDetailKeyboard';
 import { hideMainWindowToTray } from '../../composables/renderingPower';
@@ -52,11 +53,22 @@ const appWindow = getCurrentWindow();
 const isFullscreen = ref(false);
 const wasMaximizedBeforeFullscreen = ref(false);
 const isFullscreenTransitioning = ref(false);
+const immersiveTransition = ref<InstanceType<typeof ImmersiveTransitionOverlay> | null>(null);
 let unlistenResize: (() => void) | null = null;
 let pendingFullscreenTransitions = 0;
+let fullscreenTransitionVersion = 0;
 let fullscreenTransitionQueue = Promise.resolve();
 
+const withImmersiveTransition = async (operation: () => Promise<void>) => {
+  if (showPlayerDetail.value && immersiveTransition.value) {
+    await immersiveTransition.value.play(operation);
+  } else {
+    await operation();
+  }
+};
+
 const enqueueFullscreenTransition = (operation: () => Promise<void>) => {
+  fullscreenTransitionVersion += 1;
   pendingFullscreenTransitions += 1;
   isFullscreenTransitioning.value = true;
 
@@ -70,16 +82,21 @@ const enqueueFullscreenTransition = (operation: () => Promise<void>) => {
 };
 
 const toggleFullscreen = async () => {
+  if (isFullscreenTransitioning.value) return;
   try {
     await enqueueFullscreenTransition(async () => {
       const currentFullscreen = await appWindow.isFullscreen();
-      const state = await windowApi.setImmersiveFullscreen(
-        !currentFullscreen,
-        currentFullscreen && wasMaximizedBeforeFullscreen.value,
-      );
+      await withImmersiveTransition(async () => {
+        // Closing the details during the lead-in must not enter fullscreen.
+        if (!currentFullscreen && !showPlayerDetail.value) return;
+        const state = await windowApi.setImmersiveFullscreen(
+          !currentFullscreen,
+          currentFullscreen && wasMaximizedBeforeFullscreen.value,
+        );
 
-      isFullscreen.value = state.isFullscreen;
-      wasMaximizedBeforeFullscreen.value = state.wasMaximizedBeforeFullscreen;
+        isFullscreen.value = state.isFullscreen;
+        wasMaximizedBeforeFullscreen.value = state.wasMaximizedBeforeFullscreen;
+      });
       showTopChrome();
       scheduleTopChromeHide();
     });
@@ -99,12 +116,14 @@ const exitImmersiveFullscreen = async () => {
         return;
       }
 
-      const state = await windowApi.setImmersiveFullscreen(
-        false,
-        wasMaximizedBeforeFullscreen.value,
-      );
-      isFullscreen.value = state.isFullscreen;
-      wasMaximizedBeforeFullscreen.value = false;
+      await withImmersiveTransition(async () => {
+        const state = await windowApi.setImmersiveFullscreen(
+          false,
+          wasMaximizedBeforeFullscreen.value,
+        );
+        isFullscreen.value = state.isFullscreen;
+        wasMaximizedBeforeFullscreen.value = false;
+      });
     });
   } catch (error) {
     console.error('Failed to exit fullscreen:', error);
@@ -115,6 +134,7 @@ const exitImmersiveFullscreen = async () => {
 
 const minimize = () => appWindow.minimize();
 const toggleMaximize = async () => {
+  if (isFullscreenTransitioning.value) return;
   const isMaximized = await appWindow.isMaximized();
   if (isMaximized) {
     await appWindow.unmaximize();
@@ -319,7 +339,14 @@ onMounted(async () => {
 
   // Listen to window resize to synchronize fullscreen state changes
   const unlisten = await appWindow.listen('tauri://resize', async () => {
-    isFullscreen.value = await appWindow.isFullscreen();
+    // The native operation owns the state during its intermediate restore and
+    // resize events. Do not let a delayed query overwrite its final result.
+    if (isFullscreenTransitioning.value) return;
+    const version = fullscreenTransitionVersion;
+    const fullscreen = await appWindow.isFullscreen();
+    if (!isFullscreenTransitioning.value && version === fullscreenTransitionVersion) {
+      isFullscreen.value = fullscreen;
+    }
   });
   unlistenResize = unlisten;
 
@@ -399,6 +426,7 @@ const metaInfo = computed(() => {
 </script>
 
 <template>
+  <ImmersiveTransitionOverlay ref="immersiveTransition" :active="showPlayerDetail" />
   <div
     class="fixed inset-x-0 bottom-0 z-[50] flex h-[100vh] flex-col overflow-visible font-sans select-none text-white"
     :class="[
@@ -505,7 +533,7 @@ const metaInfo = computed(() => {
         </div>
       </div>
 
-      <PlayerDetailLeft :isExpanded="showPlayerDetail" />
+      <PlayerDetailLeft :isExpanded="showPlayerDetail" :isResizingWindow="isFullscreenTransitioning" />
 
       <div class="relative z-50 flex min-h-0 flex-1 pl-8 pr-0 pb-22">
         <div class="pointer-events-none h-full w-[40%] min-w-[300px]"></div>
