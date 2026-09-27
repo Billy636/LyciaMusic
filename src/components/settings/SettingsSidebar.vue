@@ -10,7 +10,7 @@ const { settings } = useSettings();
     <section v-if="settings.sidebar" class="space-y-3">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
         <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
-        侧边栏管理
+        导航项目
       </h2>
       <div class="flex flex-col rounded-xl overflow-hidden">
         

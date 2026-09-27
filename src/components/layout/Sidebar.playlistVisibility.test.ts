@@ -10,6 +10,19 @@ import titleBarSource from './TitleBar.vue?raw';
 import settingsSidebarSource from '../settings/SettingsSidebar.vue?raw';
 
 describe('sidebar playlist visibility', () => {
+  it('passes the last music path to sidebar navigation while visiting settings', () => {
+    expect(sidebarSource).toContain('useSidebarNavigationPath');
+    expect(sidebarSource).toContain('useSidebarNavigationPath(() => route.path)');
+    expect(sidebarSource).toContain(':currentPath="sidebarNavigationPath"');
+    expect(sidebarSource).not.toContain(':currentPath="route.path"');
+  });
+
+  it('preserves shortcut selection during settings but still watches music playlist queries', () => {
+    expect(sidebarSource).toContain('const activePlaylistId = ref<string>();');
+    expect(sidebarSource).toContain('watch([() => route.path, () => route.query.view, () => route.query.filter]');
+    expect(sidebarSource).toMatch(/if \(path !== sidebarNavigationPath\.value\) return;\s*activePlaylistId\.value = path === '\/' && view === 'playlist' && typeof filter === 'string'/);
+  });
+
   it('guards only the shortcut section with the existing sidebar setting', () => {
     expect(sidebarSource).toContain('v-if="settings.sidebar.showPlaylists"');
     expect(settingsSidebarSource).toContain('settings.sidebar.showPlaylists = !settings.sidebar.showPlaylists');
@@ -48,7 +61,7 @@ describe('sidebar playlist visibility', () => {
 
   it('leaves the playlist library search to its page while retaining title bar controls', () => {
     expect(titleBarSource).toContain("const isPlaylistLibraryRoute = computed(() => route.path === '/playlists')");
-    expect(titleBarSource).toContain('v-if="!isPlaylistLibraryRoute"');
+    expect(titleBarSource).toContain('v-if="!isSettingsRoute && !isPlaylistLibraryRoute"');
     expect(titleBarSource).toContain('@click="goBack"');
     expect(titleBarSource).toContain('@click.stop="toggleThemeMode"');
     expect(titleBarSource).toContain('@click.stop="minimize"');

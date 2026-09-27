@@ -6,24 +6,39 @@ import { usePlayerViewState } from '../../composables/usePlayerViewState';
 import { useThemeSettings } from '../../composables/useThemeSettings';
 import { getCurrentWindow } from '@tauri-apps/api/window'; 
 import { useSettings } from '../../features/settings/useSettings';
+import { useSettingsNavigationStore } from '../../features/settings/navigation';
 import { hideMainWindowToTray } from '../../composables/renderingPower';
 import { useLibrarySearchIndex } from '../../composables/useLibrarySearchIndex';
+import AppBrand from './AppBrand.vue';
 
+const props = defineProps({
+  settingsLayout: { type: Boolean, default: undefined },
+});
 const router = useRouter();
 const route = useRoute();
 const { searchQuery, setSearch, isMiniMode, currentViewMode } = usePlayerViewState();
 const appWindow = getCurrentWindow();
 const TITLE_BAR_CONTROL_SELECTOR = 'button, a, input, select, textarea, [role="button"]';
 const { settings } = useSettings();
+const settingsNavigation = useSettingsNavigationStore();
 const { isDarkTheme, toggleThemeMode } = useThemeSettings();
 const { searchIndexBuilding, searchIndexProgress } = useLibrarySearchIndex();
 const rotation = ref(0); // For settings icon animation
 const lastNonSettingsRoute = ref(route.path === '/settings' ? '/' : route.fullPath);
 const isSettingsRoute = computed(() => route.path === '/settings');
+const isSettingsLayout = computed(() => props.settingsLayout ?? isSettingsRoute.value);
+const settingsPageTitle = ref(settingsNavigation.pageTitle);
+const settingsBackTitle = computed(() => settingsNavigation.canGoBack ? '返回个性化' : '返回音乐页面');
 const isPlaylistLibraryRoute = computed(() => route.path === '/playlists');
 const themeToggleTitle = computed(() => (isDarkTheme.value ? '切换浅色' : '切换深色'));
 const searchDraft = ref(searchQuery.value);
 const isSearchDraftDirty = computed(() => searchDraft.value !== searchQuery.value);
+
+// Settings resets its navigation on unmount; keep the outgoing label until
+// the shell has finished the leave animation and switches its header layout.
+watch([isSettingsRoute, () => settingsNavigation.pageTitle], ([inSettings, title]) => {
+  if (inSettings) settingsPageTitle.value = title;
+}, { immediate: true, flush: 'sync' });
 
 // 搜索框提示文字随页面切换：歌曲/艺术家/专辑三种搜索模式
 const searchPlaceholder = computed(() => {
@@ -40,11 +55,23 @@ const rotateSettings = () => {
   rotation.value += 180;
 };
 
+const leaveSettingsPage = async () => {
+  await router.push(lastNonSettingsRoute.value || '/');
+};
+
+const handleSettingsBack = async () => {
+  if (settingsNavigation.canGoBack) {
+    settingsNavigation.backToPersonalization();
+    return;
+  }
+  await leaveSettingsPage();
+};
+
 const toggleSettingsPage = async () => {
   rotateSettings();
 
   if (isSettingsRoute.value) {
-    await router.push(lastNonSettingsRoute.value || '/');
+    await leaveSettingsPage();
     return;
   }
 
@@ -161,12 +188,46 @@ const goBack = () => { router.back(); };
 <template>
   <div 
     data-window-drag-handle
-    class="h-16 flex items-center justify-between px-6  select-none shrink-0 relative z-[60]"
+    class="h-16 flex items-center justify-between select-none shrink-0 relative z-[60]"
+    :class="isSettingsLayout ? 'pr-6' : 'px-6'"
     @pointerdown="handleTitleBarPointerDown"
     @dblclick="handleTitleBarDoubleClick"
   >
-    <div class="flex items-center gap-4 relative z-10">
-      <button 
+    <div
+      v-if="isSettingsLayout"
+      data-settings-brand
+      class="relative z-10 flex h-full shrink-0 items-center px-6"
+      :style="{ width: 'var(--app-sidebar-width)' }"
+    >
+      <AppBrand />
+    </div>
+
+    <div
+      v-if="isSettingsLayout"
+      data-settings-page-header
+      class="relative z-10 flex min-w-0 flex-1 items-center gap-3 px-6"
+    >
+      <button
+        data-settings-back
+        type="button"
+        class="w-8 h-8 shrink-0 rounded-full bg-white/5 dark:bg-white/5 hover:bg-white/20 dark:hover:bg-white/20 flex items-center justify-center text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white transition-colors focus:outline-none cursor-pointer border border-black/10 dark:border-white/10"
+        :title="settingsBackTitle"
+        :aria-label="settingsBackTitle"
+        @click="handleSettingsBack"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 -ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
+      <h1
+        id="settings-page-heading"
+        class="min-w-0 truncate text-base font-semibold text-gray-900 dark:text-gray-100"
+      >{{ settingsPageTitle }}</h1>
+    </div>
+
+    <div v-else class="flex items-center gap-4 relative z-10">
+      <button
+        type="button"
         @click="goBack" 
         class="w-8 h-8 rounded-full bg-white/5 dark:bg-white/5 hover:bg-white/20 dark:hover:bg-white/20 flex items-center justify-center text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white transition-colors focus:outline-none cursor-pointer border border-black/10 dark:border-white/10"
         title="后退"
@@ -176,7 +237,7 @@ const goBack = () => { router.back(); };
         </svg>
       </button>
 
-      <div v-if="!isPlaylistLibraryRoute" class="group relative bg-white/5 dark:bg-white/5 hover:bg-white/10 dark:hover:bg-white/10 focus-within:bg-white/20 dark:focus-within:bg-white/10 focus-within:ring-2 focus-within:ring-[#EC4141]/20 pl-2 pr-3 py-1.5 rounded-full text-sm flex items-center transition-all w-60 ml-2 border border-black/10 dark:border-white/20">
+      <div v-if="!isSettingsRoute && !isPlaylistLibraryRoute" class="group relative bg-white/5 dark:bg-white/5 hover:bg-white/10 dark:hover:bg-white/10 focus-within:bg-white/20 dark:focus-within:bg-white/10 focus-within:ring-2 focus-within:ring-[#EC4141]/20 pl-2 pr-3 py-1.5 rounded-full text-sm flex items-center transition-all w-60 ml-2 border border-black/10 dark:border-white/20">
         <button
           type="button"
           class="p-1 mr-1 rounded-full text-gray-900 dark:text-gray-100 group-focus-within:text-[#EC4141] hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
@@ -209,7 +270,7 @@ const goBack = () => { router.back(); };
       </div>
     </div>
 
-    <div class="flex items-center gap-2 relative z-10">
+    <div class="relative z-10 flex shrink-0 items-center gap-2">
       <button
         type="button"
         class="rounded-md p-2 transition-all duration-300 ease-out cursor-pointer"
@@ -218,7 +279,8 @@ const goBack = () => { router.back(); };
           : 'text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'"
         :aria-pressed="isSettingsRoute"
         @click.stop="toggleSettingsPage"
-        title="设置"
+        :title="isSettingsRoute ? '返回音乐页面' : '设置'"
+        :aria-label="isSettingsRoute ? '返回音乐页面' : '设置'"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"

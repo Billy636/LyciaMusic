@@ -1,8 +1,3 @@
-<script lang="ts">
-// MainShell 按路由折叠侧边栏时以此为 max-width 上界，保证展开状态下不裁剪内容
-export const SIDEBAR_MAX_WIDTH = 360;
-</script>
-
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -13,6 +8,7 @@ import ModernModal from '../common/ModernModal.vue';
 import PlaylistContextMenu from '../overlays/PlaylistContextMenu.vue';
 import { useCoverCache } from '../../composables/useCoverCache';
 import { useHomeNavigation } from '../../composables/useHomeNavigation';
+import { useSidebarNavigationPath } from '../../composables/useSidebarNavigationPath';
 import { useLibraryCollections } from '../../features/collections/useLibraryCollections';
 import { usePlaylistLibraryStore } from '../../features/collections/playlistLibrary';
 import { usePlaybackController } from '../../features/playback/usePlaybackController';
@@ -24,6 +20,7 @@ import { useSidebarPlaylistContextMenu } from '../../composables/useSidebarPlayl
 import { useSidebarPlaylistCovers } from '../../composables/useSidebarPlaylistCovers';
 import { useSidebarPlaylistDragDrop } from '../../composables/useSidebarPlaylistDragDrop';
 import { useSidebarPlaylistSelection } from '../../composables/useSidebarPlaylistSelection';
+import { SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, useUiStore } from '../../shared/stores/ui';
 import SidebarBrand from './SidebarBrand.vue';
 import SidebarNavigation from './SidebarNavigation.vue';
 import SidebarPlaylists from './SidebarPlaylists.vue';
@@ -49,6 +46,7 @@ const {
 const { shortcutPlaylists, pinnedIds } = storeToRefs(usePlaylistLibraryStore());
 
 const route = useRoute();
+const sidebarNavigationPath = useSidebarNavigationPath(() => route.path);
 const router = useRouter();
 const {
   openHomeAll,
@@ -65,31 +63,32 @@ const { preloadCovers, loadCover } = useCoverCache();
 
 const isPlaylistOpen = ref(true);
 const showCreateModal = ref(false);
-const activePlaylistId = computed(() =>
-  route.path === '/' && route.query.view === 'playlist' && typeof route.query.filter === 'string'
-    ? route.query.filter
-    : undefined,
-);
+const activePlaylistId = ref<string>();
+watch([() => route.path, () => route.query.view, () => route.query.filter], ([path, view, filter]) => {
+  // Settings must not clear shortcut highlighting while the music sidebar leaves.
+  if (path !== sidebarNavigationPath.value) return;
+  activePlaylistId.value = path === '/' && view === 'playlist' && typeof filter === 'string'
+    ? filter
+    : undefined;
+}, { immediate: true });
 const visibleShortcutPlaylists = computed(() =>
   settings.value.sidebar.showPlaylists && isPlaylistOpen.value ? shortcutPlaylists.value : [],
 );
 
-const SIDEBAR_MIN_WIDTH = 192;
 const SIDEBAR_KEYBOARD_STEP = 16;
-const sidebarWidth = ref(SIDEBAR_MIN_WIDTH);
+const uiStore = useUiStore();
+const { sidebarWidth } = storeToRefs(uiStore);
+const { setSidebarWidth } = uiStore;
 const isResizing = ref(false);
 let resizeStartX = 0;
 let resizeStartWidth = SIDEBAR_MIN_WIDTH;
-
-const clampSidebarWidth = (width: number) =>
-  Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, width));
 
 const handleSidebarResize = (event: PointerEvent) => {
   if (!isResizing.value) {
     return;
   }
 
-  sidebarWidth.value = clampSidebarWidth(
+  setSidebarWidth(
     resizeStartWidth + event.clientX - resizeStartX,
   );
 };
@@ -124,7 +123,7 @@ const startSidebarResize = (event: PointerEvent) => {
 };
 
 const resizeSidebarBy = (delta: number) => {
-  sidebarWidth.value = clampSidebarWidth(sidebarWidth.value + delta);
+  setSidebarWidth(sidebarWidth.value + delta);
 };
 
 onBeforeUnmount(stopSidebarResize);
@@ -284,7 +283,7 @@ const handleOpenStatisticsView = () => {
       <SidebarNavigation
         :sidebar="settings.sidebar"
         :currentViewMode="currentViewMode"
-        :currentPath="route.path"
+        :currentPath="sidebarNavigationPath"
         :isDragActive="dragSession.active"
         @openAll="handleOpenAllView"
         @openArtists="handleOpenArtistsView"

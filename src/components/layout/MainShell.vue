@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
+import { defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute } from 'vue-router';
 
 import { useAppShell } from '../../composables/useAppShell';
 import { useDesktopLyricsWindowBridge } from '../../composables/useDesktopLyricsWindowBridge';
-import { useUiStore } from '../../shared/stores/ui';
-import Sidebar, { SIDEBAR_MAX_WIDTH } from './Sidebar.vue';
+import { usePageTransition, usePageTransitionLayout } from '../../composables/usePageTransition';
+import { SIDEBAR_MAX_WIDTH, useUiStore } from '../../shared/stores/ui';
+import Sidebar from './Sidebar.vue';
 import TitleBar from './TitleBar.vue';
 import PlayerFooter from './PlayerFooter.vue';
 import GlobalBackground from './GlobalBackground.vue';
@@ -18,9 +19,6 @@ const Toast = defineAsyncComponent(() => import('../common/Toast.vue'));
 const SongInfoModal = defineAsyncComponent(() => import('../overlays/SongInfoModal.vue'));
 
 const route = useRoute();
-// 设置页整页呈现：音乐侧边栏折叠让位，仅保留标题栏与播放条
-const isSettingsRoute = computed(() => route.path.startsWith('/settings'));
-
 const {
   isMiniMode,
   isExternalDragActive,
@@ -42,10 +40,17 @@ const {
 import { useSongInfoDialog } from '../../composables/useSongInfoDialog';
 const { isSongInfoVisible, currentSongInfo, closeSongInfo } = useSongInfoDialog();
 const {
+  sidebarWidth,
   showPlaylist,
   skipNextPageTransition,
   startupCompositionMaskVisible,
 } = storeToRefs(useUiStore());
+const pageTransitionName = usePageTransition(() => route.path, skipNextPageTransition);
+const { isSettingsLayout, commitPageLayout } = usePageTransitionLayout(
+  () => route.path,
+  skipNextPageTransition,
+  isMiniMode,
+);
 
 const PLAY_QUEUE_LEAVE_MS = 300;
 const isPlayQueueMounted = ref(showPlaylist.value);
@@ -96,6 +101,7 @@ useDesktopLyricsWindowBridge();
 <template>
   <div
     class="flex flex-col h-screen w-full text-gray-800 dark:text-gray-200 relative overflow-hidden font-sans"
+    :style="{ '--app-sidebar-width': `${sidebarWidth}px` }"
   >
     <transition name="window-restore">
       <GlobalBackground v-if="!isMiniMode" />
@@ -187,28 +193,28 @@ useDesktopLyricsWindowBridge();
       :style="{ backdropFilter: mainBlurStyle }"
     >
       <div
-        class="h-full shrink-0 overflow-hidden transition-[max-width,visibility] duration-200 ease-out"
-        :class="isSettingsRoute ? 'invisible' : ''"
-        :style="{ maxWidth: isSettingsRoute ? '0px' : `${SIDEBAR_MAX_WIDTH}px` }"
-        :aria-hidden="isSettingsRoute"
+        class="h-full shrink-0 overflow-hidden"
+        :class="isSettingsLayout ? 'invisible' : ''"
+        :style="{ maxWidth: isSettingsLayout ? '0px' : `${SIDEBAR_MAX_WIDTH}px` }"
+        :aria-hidden="isSettingsLayout"
       >
         <Sidebar />
       </div>
 
       <div class="flex-1 flex flex-col min-w-0">
-        <TitleBar />
+        <TitleBar :settings-layout="isSettingsLayout" />
         <main class="flex-1 overflow-hidden relative min-h-0">
           <router-view v-slot="{ Component, route }">
-            <transition :name="skipNextPageTransition ? '' : 'page-fade'" mode="out-in">
-              <component
-                v-if="!route.meta.keepAlive"
-                :is="Component"
-                :key="route.path"
-              />
-              <KeepAlive v-else include="Home">
+            <transition
+              :name="pageTransitionName"
+              mode="out-in"
+              @after-leave="commitPageLayout"
+              @before-enter="commitPageLayout"
+            >
+              <KeepAlive include="Home">
                 <component
                   :is="Component"
-                  :key="String(route.name ?? route.path)"
+                  :key="route.meta.keepAlive ? String(route.name ?? route.path) : route.path"
                 />
               </KeepAlive>
             </transition>
@@ -265,6 +271,50 @@ useDesktopLyricsWindowBridge();
 .page-fade-leave-to {
   opacity: 0;
   transform: translateY(-10px);
+}
+
+/* Animate route content only: the brand, title bar and playback controls stay
+   anchored. Returning retraces the entry direction (120ms out + 220ms in). */
+.settings-forward-enter-active,
+.settings-back-enter-active {
+  will-change: opacity, transform;
+  transition: opacity 0.22s ease-out, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.settings-forward-leave-active,
+.settings-back-leave-active {
+  pointer-events: none;
+  will-change: opacity, transform;
+  transition: opacity 0.12s ease-in, transform 0.12s ease-in;
+}
+
+.settings-forward-enter-from,
+.settings-back-leave-to {
+  opacity: 0;
+  transform: translate3d(18px, 0, 0);
+}
+
+.settings-forward-leave-to,
+.settings-back-enter-from {
+  opacity: 0;
+  transform: translate3d(-18px, 0, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-forward-enter-active,
+  .settings-forward-leave-active,
+  .settings-back-enter-active,
+  .settings-back-leave-active {
+    transition: none;
+    will-change: auto;
+  }
+
+  .settings-forward-enter-from,
+  .settings-forward-leave-to,
+  .settings-back-enter-from,
+  .settings-back-leave-to {
+    transform: none;
+  }
 }
 
 .footer-slide-enter-active,

@@ -47,14 +47,15 @@ function handleItemLeave() {
   }, 150);
 }
 
-const baseNavClasses = 'px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-all duration-100 text-sm font-medium active:scale-[0.97]';
+// Animate interaction feedback, not font metrics or the item's layout width.
+const baseNavClasses = 'px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-[color,background-color,box-shadow,translate,scale] duration-100 text-sm font-medium active:scale-[0.97]';
 const activeNavClasses = 'bg-black/10 dark:bg-white/10 text-black dark:text-white font-semibold shadow-sm translate-x-1';
 const idleClasses = 'text-gray-800 dark:text-gray-200';
 const hoverClasses = 'bg-black/5 dark:bg-white/5 text-black dark:text-white translate-x-1';
 </script>
 
 <template>
-  <ul class="space-y-1 transition-all duration-200" :class="{ 'opacity-30 grayscale pointer-events-none': isDragActive }">
+  <ul class="space-y-1 transition-[opacity,filter] duration-200" :class="{ 'opacity-30 grayscale pointer-events-none': isDragActive }">
     <template v-if="props.sidebar.showLocalMusic">
       <li
         @click="$emit('openAll')"
