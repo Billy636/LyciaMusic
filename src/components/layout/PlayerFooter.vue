@@ -446,12 +446,12 @@ onUnmounted(() => {
       </div>
 
       <div 
-        class="ml-3 overflow-hidden flex-1 relative h-10 transition-transform duration-500" 
+        class="ml-3 flex-1 relative h-10 transition-transform duration-400"
         :class="showPlayerDetail ? '-translate-x-[60px]' : 'translate-x-[0px]'"
       >
         <!-- State A: Default View (Title & Artist) -->
         <div 
-          class="absolute inset-0 flex flex-col justify-center transition-all duration-500"
+          class="absolute inset-0 flex flex-col justify-center transition-all duration-400"
           :class="showPlayerDetail ? 'opacity-0 translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0 text-gray-800 dark:text-white'"
         >
           <div class="flex items-center">
@@ -481,7 +481,7 @@ onUnmounted(() => {
 
         <!-- State B: Player Detail View (Progress) -->
         <div 
-          class="absolute inset-0 flex flex-col justify-center transition-all duration-500"
+          class="absolute inset-0 flex flex-col justify-center transition-all duration-400"
           :class="showPlayerDetail ? 'opacity-100 translate-y-0 text-white/90' : 'opacity-0 -translate-y-4 pointer-events-none'"
         >
           <div class="text-[12px] font-semibold tabular-nums cursor-default tracking-wide">
