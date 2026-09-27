@@ -34,7 +34,7 @@ const handleOpenDetail = () => {
 };
 
 const handleSongInfoClick = (event: MouseEvent) => {
-  if (!currentSong.value || showPlayerDetail.value) return;
+  if (!currentSong.value) return;
   // Keep the cover/favorite actions and their window-level click handling intact.
   if (event.target instanceof Element && event.target.closest('button, [data-footer-cover]')) return;
   togglePlayerDetail();
