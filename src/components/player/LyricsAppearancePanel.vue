@@ -715,7 +715,7 @@ onUnmounted(() => {
                 class="shrink-0 text-white/45 transition-transform duration-200"
                 :class="isFontPresetMenuOpen && fontPresetMenuMode === 'system' ? 'rotate-180 text-white/70' : ''"
               >
-                <path d="m6 9 6 6 6-6"/>
+                <path d="m9 6 6 6-6 6"/>
               </svg>
             </button>
 
@@ -743,7 +743,7 @@ onUnmounted(() => {
                 class="shrink-0 text-white/45 transition-transform duration-200"
                 :class="isFontPresetMenuOpen && fontPresetMenuMode === 'custom' ? 'rotate-180 text-white/70' : ''"
               >
-                <path d="m6 9 6 6 6-6"/>
+                <path d="m9 6 6 6-6 6"/>
               </svg>
             </button>
           </div>
