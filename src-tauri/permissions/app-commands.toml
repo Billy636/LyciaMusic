@@ -92,6 +92,7 @@ commands.allow = [
   "create_folder",
   "delete_folder",
   "move_file_to_folder",
+  "move_folder_to_folder",
   "get_folder_first_song",
   "get_library_stats",
   "add_to_history",
