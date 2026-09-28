@@ -3,6 +3,7 @@ import { ref } from 'vue';
 
 interface SidebarSettings {
   showLocalMusic: boolean;
+  showPlaylistLibrary?: boolean;
   showArtists: boolean;
   showAlbums: boolean;
   showFavorites: boolean;
@@ -93,6 +94,7 @@ const hoverClasses = 'bg-black/5 dark:bg-white/5 text-black dark:text-white tran
     </template>
 
     <li
+      v-if="props.sidebar.showPlaylistLibrary !== false"
       data-nav="playlists"
       role="button"
       tabindex="0"

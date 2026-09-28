@@ -323,6 +323,7 @@ export interface ThemeSettings {
 
 export interface SidebarSettings {
   showLocalMusic: boolean;
+  showPlaylistLibrary: boolean;
   showArtists: boolean;
   showAlbums: boolean;
   showFavorites: boolean;

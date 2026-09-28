@@ -62,6 +62,27 @@ const { settings } = useSettings();
           </button>
         </div>
 
+        <!-- Playlist library navigation (independent of playlist shortcuts). -->
+        <div
+          @click="settings.sidebar.showPlaylistLibrary = !settings.sidebar.showPlaylistLibrary"
+          class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors cursor-pointer"
+        >
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showPlaylistLibrary ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h14M4 10h14M4 15h7m5 3V8l5-1v9m-5 2c0 1.1-1.1 2-2.5 2S11 19.1 11 18s1.1-2 2.5-2 2.5.9 2.5 2zm5-2c0 1.1-1.1 2-2.5 2S16 17.1 16 16s1.1-2 2.5-2 2.5.9 2.5 2z" /></svg>
+            </div>
+            <div>
+              <div class="text-sm font-medium text-gray-800 dark:text-gray-200">歌单</div>
+              <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">显示歌单管理页面的导航入口</div>
+            </div>
+          </div>
+          <button type="button" role="switch" aria-label="显示歌单导航入口" :aria-checked="settings.sidebar.showPlaylistLibrary"
+            class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#EC4141]"
+            :class="settings.sidebar.showPlaylistLibrary ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showPlaylistLibrary ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
+        </div>
+
         <!-- Favorites -->
         <div 
               @click="settings.sidebar.showFavorites = !settings.sidebar.showFavorites"
@@ -135,7 +156,10 @@ const { settings } = useSettings();
               <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showPlaylists ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 10l12-3M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" /></svg>
             </div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">我的歌单</div>
+            <div>
+              <div class="text-sm font-medium text-gray-800 dark:text-gray-200">歌单快捷列表</div>
+              <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">显示侧边栏下方的歌单快捷入口</div>
+            </div>
           </div>
               <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.sidebar.showPlaylists ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
                 <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showPlaylists ? 'translate-x-6' : 'translate-x-1'" />
