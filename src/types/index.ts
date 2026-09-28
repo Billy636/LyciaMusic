@@ -472,6 +472,7 @@ export interface AppSettings {
   showSongComments: boolean;
   enableScrollToTopButton: boolean;
   libraryMinDurationSeconds: number;
+  folderIncludeSubfolders: boolean;
   // Deprecated compat field. Retained only for legacy config deserialization.
   linkFoldersToLibrary: boolean;
   lyricsSyncOffset: number;

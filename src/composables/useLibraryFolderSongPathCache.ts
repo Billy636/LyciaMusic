@@ -21,23 +21,26 @@ const makeCacheKey = (
   folderPath: string,
   query: string,
   sortMode: BackendFolderSortMode,
-) => `${sortMode}\u0001${folderPath}\u0001${query}`;
+  includeSubfolders: boolean,
+) => `${sortMode}\u0001${folderPath}\u0001${query}\u0001${includeSubfolders}`;
 
 export function useLibraryFolderSongPathCache() {
   const loadFolderViewSongPaths = async ({
     folderPath,
     query = '',
     sortMode,
+    includeSubfolders = false,
   }: {
     folderPath: string;
     query?: string;
     sortMode: BackendFolderSortMode;
+    includeSubfolders?: boolean;
   }) => {
     if (!folderPath) {
       return [];
     }
 
-    const cacheKey = makeCacheKey(folderPath, query, sortMode);
+    const cacheKey = makeCacheKey(folderPath, query, sortMode, includeSubfolders);
     activateLibrarySongPathCacheEntry(FOLDER_VIEW_PATH_CACHE_NAMESPACE, cacheKey);
     const cached = getLibrarySongPathCacheEntry(FOLDER_VIEW_PATH_CACHE_NAMESPACE, cacheKey);
     if (cached) {
@@ -53,6 +56,7 @@ export function useLibraryFolderSongPathCache() {
       folderPath,
       query,
       sortMode,
+      includeSubfolders,
     })
       .then((paths) => {
         setLibrarySongPathCacheEntry(

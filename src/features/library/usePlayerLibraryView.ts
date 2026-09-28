@@ -8,6 +8,7 @@ import { useLibraryCatalogSelectors } from './useLibraryCatalogSelectors';
 import { useLibraryCollectionSelectors } from './useLibraryCollectionSelectors';
 import { useLibraryCurrentViewSongs } from './useLibraryCurrentViewSongs';
 import { useLibraryFolderSelectors } from './useLibraryFolderSelectors';
+import { useFolderSongScope } from './useFolderSongScope';
 import { isProfilingEnabled } from '../../utils/profiling';
 export type { AlbumListItem, ArtistListItem } from './playerLibraryViewShared';
 
@@ -76,7 +77,9 @@ const createPlayerLibraryView = () => {
     albumCustomOrder,
   });
 
+  const { includeSubfolders } = useFolderSongScope();
   const folderSelectors = useLibraryFolderSelectors({
+    includeSubfolders,
     watchedFolders,
     sourceSongPaths,
     songLookup,

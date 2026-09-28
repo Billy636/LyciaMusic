@@ -135,6 +135,7 @@ export const defaultAppSettings: AppSettings = {
   showSongComments: true,
   enableScrollToTopButton: true,
   libraryMinDurationSeconds: 0,
+  folderIncludeSubfolders: false,
   // Deprecated compat field. Main folder-source behavior no longer depends on it.
   linkFoldersToLibrary: false,
   lyricsSyncOffset: 0,
@@ -306,6 +307,8 @@ export const mergeAppSettings = (
     libraryMinDurationSeconds: normalizeLibraryMinDurationSeconds(
       libraryMinDurationSeconds ?? base.libraryMinDurationSeconds,
     ),
+    folderIncludeSubfolders: typeof patch.folderIncludeSubfolders === 'boolean'
+      ? patch.folderIncludeSubfolders : base.folderIncludeSubfolders,
     lyrics: mergeLyricsSettings(base.lyrics, patch.lyrics ?? {}),
     desktopLyrics: mergeDesktopLyricsSettings(base.desktopLyrics, patch.desktopLyrics ?? {}),
     audio: mergeAudioSettings(base.audio ?? createDefaultAudioSettings(), patch.audio ?? {}),

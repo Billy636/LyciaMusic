@@ -271,6 +271,7 @@ export interface TauriCommandMap {
   get_library_song_paths_for_folder_view: {
     payload: {
       folderPath: string;
+      includeSubfolders?: boolean;
       query?: string;
       sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'track_number';
       offset?: number;

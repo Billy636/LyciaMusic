@@ -42,6 +42,29 @@
         </label>
       </div>
 
+      <div class="folder-scope-setting">
+        <div class="folder-scope-copy">
+          <div id="folder-scope-label" class="folder-scope-title">包含子文件夹歌曲</div>
+          <div id="folder-scope-description" class="folder-scope-desc">浏览文件夹时，同时显示其所有子文件夹中的歌曲。顶部根目录不受影响。</div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-labelledby="folder-scope-label"
+          aria-describedby="folder-scope-description"
+          :aria-checked="settings.folderIncludeSubfolders"
+          @click="settings.folderIncludeSubfolders = !settings.folderIncludeSubfolders"
+          class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#EC4141]"
+          :class="settings.folderIncludeSubfolders ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'"
+        >
+          <span
+            aria-hidden="true"
+            class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm"
+            :class="settings.folderIncludeSubfolders ? 'translate-x-6' : 'translate-x-1'"
+          />
+        </button>
+      </div>
+
       <div v-if="libraryFolders.length > 0" class="library-list">
         <div v-for="folder in libraryFolders" :key="folder.path" class="library-item">
           <div class="folder-icon">
@@ -248,7 +271,8 @@ const confirmRemove = async () => {
   margin-bottom: 16px;
 }
 
-.short-audio-filter {
+.short-audio-filter,
+.folder-scope-setting {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -260,18 +284,21 @@ const confirmRemove = async () => {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.short-audio-copy {
+.short-audio-copy,
+.folder-scope-copy {
   min-width: 0;
 }
 
-.short-audio-title {
+.short-audio-title,
+.folder-scope-title {
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 3px;
 }
 
-.short-audio-desc {
+.short-audio-desc,
+.folder-scope-desc {
   font-size: 0.78rem;
   color: var(--text-secondary);
   line-height: 1.4;

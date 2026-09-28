@@ -5,6 +5,7 @@ import { usePlayer } from '../../composables/player';
 import { useToast } from '../../composables/toast';
 import { dragSession } from '../../composables/dragState';
 import { useLibraryFolderSongPathCache } from '../../composables/useLibraryFolderSongPathCache';
+import { useFolderSongScope } from '../../features/library/useFolderSongScope';
 import { useListScrollMemory } from '../../composables/useListScrollMemory';
 import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver';
 import type { FolderNode } from '../../types';
@@ -44,6 +45,7 @@ const {
 
 const toast = useToast();
 const { loadFolderViewSongPaths } = useLibraryFolderSongPathCache();
+const { includesDescendantsFor } = useFolderSongScope();
 const { loadSong } = useLibrarySongResolver();
 
 const sidebarWidth = ref(240);
@@ -228,6 +230,7 @@ const resolveFolderMenuPaths = async (folderPath: string) => {
 
   const paths = await loadFolderViewSongPaths({
     folderPath,
+    includeSubfolders: includesDescendantsFor(folderPath),
     query: currentViewMode.value === 'folder' ? searchQuery.value : '',
     sortMode: folderSortMode.value === 'custom' ? 'title' : folderSortMode.value,
   });

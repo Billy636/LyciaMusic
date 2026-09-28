@@ -1390,6 +1390,7 @@ fn parse_track_or_disc_number(val: &Option<String>) -> Option<i32> {
 #[tauri::command]
 pub async fn get_library_song_paths_for_folder_view(
     folder_path: String,
+    include_subfolders: Option<bool>,
     query: Option<String>,
     sort_mode: FolderSongSortMode,
     offset: Option<u32>,
@@ -1439,7 +1440,10 @@ pub async fn get_library_song_paths_for_folder_view(
             .transpose()?;
         let mut song_rows: Vec<FolderViewSongRow> = rows
             .filter_map(Result::ok)
-            .filter(|row| is_direct_child_path(&normalized_folder, &row.path))
+            .filter(|row| {
+                include_subfolders.unwrap_or(false)
+                    || is_direct_child_path(&normalized_folder, &row.path)
+            })
             .filter(|row| {
                 matching_paths
                     .as_ref()

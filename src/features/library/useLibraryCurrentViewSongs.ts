@@ -1,5 +1,6 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue';
 import { useLibraryStore } from './store';
+import { useFolderSongScope } from './useFolderSongScope';
 import { storeToRefs } from 'pinia';
 import { useNavigationStore } from '../../shared/stores/navigation';
 import { tauriInvoke } from '../../services/tauri/invoke';
@@ -68,6 +69,7 @@ export function useLibraryCurrentViewSongs({
   debugOwnerId = 0,
 }: UseLibraryCurrentViewSongsOptions) {
   const libraryStore = useLibraryStore();
+  const { includeSubfolders } = useFolderSongScope(currentFolderFilter);
   const { searchRevision } = storeToRefs(useNavigationStore());
 
   const allViewLoading = ref(false);
@@ -397,13 +399,16 @@ export function useLibraryCurrentViewSongs({
       currentFolderFilter,
       searchQuery,
       folderSortMode,
+      includeSubfolders,
       currentFolderSongPaths,
       canonicalSongPaths,
       libraryFolderSongPathCacheVersion,
       searchRevision,
     ],
-    async ([viewMode, folderFilter, query, sortMode]) => {
+    async ([viewMode, folderFilter, query, sortMode, recursive]) => {
       const requestId = ++folderViewRequestId;
+      folderViewSongPaths.value = [];
+      folderSearchHasMore.value = false;
 
       if (viewMode !== 'folder' || !folderFilter) {
         folderViewSongPaths.value = [];
@@ -415,6 +420,7 @@ export function useLibraryCurrentViewSongs({
         if (query.trim() && sortMode !== 'custom') {
           const nextPaths = await tauriInvoke('get_library_song_paths_for_folder_view', {
             folderPath: folderFilter,
+            includeSubfolders: recursive,
             query,
             sortMode,
             offset: 0,
@@ -429,6 +435,7 @@ export function useLibraryCurrentViewSongs({
         folderSearchHasMore.value = false;
         const nextPaths = await loadFolderViewSongPaths({
           folderPath: folderFilter,
+          includeSubfolders: recursive,
           query,
           sortMode: sortMode === 'custom' ? 'title' : sortMode,
         });
@@ -873,14 +880,21 @@ export function useLibraryCurrentViewSongs({
           recentSearchHasMore.value = paths.length === 256;
         }
       } else if (viewMode === 'folder' && folderSearchHasMore.value && folderSortMode.value !== 'custom') {
+        const requestId = folderViewRequestId;
+        const folderPath = currentFolderFilter.value;
+        const recursive = includeSubfolders.value;
+        const offset = folderViewSongPaths.value.length;
         const paths = await tauriInvoke('get_library_song_paths_for_folder_view', {
-          folderPath: currentFolderFilter.value,
+          folderPath,
+          includeSubfolders: recursive,
           query,
           sortMode: folderSortMode.value,
-          offset: folderViewSongPaths.value.length,
+          offset,
           limit: 256,
         });
-        if (query === searchQuery.value && viewMode === currentViewMode.value) {
+        if (requestId === folderViewRequestId && query === searchQuery.value && viewMode === currentViewMode.value
+          && folderPath === currentFolderFilter.value && recursive === includeSubfolders.value
+          && offset === folderViewSongPaths.value.length) {
           folderViewSongPaths.value = [...folderViewSongPaths.value, ...paths];
           folderSearchHasMore.value = paths.length === 256;
         }

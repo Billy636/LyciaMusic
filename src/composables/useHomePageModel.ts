@@ -19,6 +19,7 @@ import { useAddToPlaylistDialog } from '../features/collections/addToPlaylistDia
 import { useLibraryCollections } from '../features/collections/useLibraryCollections';
 import { useLibraryRuntimeActions } from '../features/library/useLibraryRuntimeActions';
 import { usePlayerLibraryView } from '../features/library/usePlayerLibraryView';
+import { useFolderSongScope } from '../features/library/useFolderSongScope';
 import { usePlaybackController } from '../features/playback/usePlaybackController';
 import { useLibraryStore } from '../features/library/store';
 import { useLibrarySongResolver } from './useLibrarySongResolver';
@@ -112,12 +113,14 @@ export function useHomePageModel() {
       duration: 0,
     };
   });
+  const { includeSubfolders } = useFolderSongScope();
   const batchSelectionScopeKey = computed(() =>
     [
       route.path,
       currentViewMode.value,
       filterCondition.value,
       currentFolderFilter.value,
+      currentViewMode.value === 'folder' && includeSubfolders.value,
     ].join('::'),
   );
   const {
