@@ -449,6 +449,13 @@ function createPlayerCore() {
     return playerFileManager.deleteFolder(path);
   }
 
+  async function moveFolderToFolder(sourcePath: string, targetFolder: string) {
+    const path = await playerFileManager.moveFolderToFolder(sourcePath, targetFolder);
+    await fetchFolderTree();
+    await fetchLibraryFolders();
+    return path;
+  }
+
   async function moveFilePhysical(sourcePath: string, targetFolderPath: string) {
     return playerFileManager.moveFilePhysical(sourcePath, targetFolderPath);
   }
@@ -686,6 +693,7 @@ function createPlayerCore() {
     deleteFromDisk,
     moveFilesToFolder,
     deleteFolder,
+    moveFolderToFolder,
     moveFilePhysical,
     fetchFolderTree,
     ensureFolderChildrenLoaded,

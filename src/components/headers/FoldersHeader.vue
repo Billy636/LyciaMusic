@@ -106,7 +106,7 @@ const handleGlobalClick = (e: MouseEvent) => {
 const isRootDropTarget = (path: string) =>
   props.isManagementMode &&
   dragSession.active &&
-  dragSession.type === 'song' &&
+  ['song', 'folder'].includes(dragSession.type) &&
   dragSession.targetFolder?.path === path;
 
 const emitRootCreatePlaylist = () => {
@@ -184,6 +184,7 @@ onUnmounted(() => {
           :folder-path="targetRootPath"
           :selected-count="1"
           :isManagementMode="isManagementMode"
+          :is-root-folder="true"
           @close="showRootMenu = false"
           @create-playlist="emitRootCreatePlaylist"
           @add-to-playlist="emitRootAddToPlaylist"

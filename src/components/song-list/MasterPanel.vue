@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue';
+import { open } from '@tauri-apps/plugin-dialog';
+import { useFolderDrag } from '../../composables/useFolderDrag';
+import { folderMoveTargetError, isWithinFolder } from '../../utils/folderMove';
 
 import { usePlayer } from '../../composables/player';
 import { useToast } from '../../composables/toast';
@@ -32,15 +35,18 @@ const {
   fetchFolderTree,
   toggleFolderNode,
   expandFolderPath,
+  ensureFolderChildrenLoaded,
   refreshFolder,
   removeLibraryFolder,
   deleteFolder,
   moveFilesToFolder,
+  moveFolderToFolder,
   playSong,
   addSongPathsToQueue,
   openInFinder,
   createPlaylist,
   createFolder,
+  libraryScanProgress,
 } = usePlayer();
 
 const toast = useToast();
@@ -51,6 +57,44 @@ const { loadSong } = useLibrarySongResolver();
 const sidebarWidth = ref(240);
 const isResizing = ref(false);
 const treeContainerRef = ref<HTMLElement | null>(null);
+const isMovingFolder = ref(false);
+const canMoveFolder = (folder: { path: string }) =>
+  !folderTree.value.some(root => isWithinFolder(root.path, folder.path));
+
+const executeFolderMove = async (source: { path: string; name: string }, target: { path: string; name: string }) => {
+  if (!props.isManagementMode || isMovingFolder.value || !canMoveFolder(source)) return;
+  if (libraryScanProgress.value && !libraryScanProgress.value.done && !libraryScanProgress.value.failed) {
+    toast.showToast('音乐库正在扫描，请扫描完成后再移动文件夹', 'info');
+    return;
+  }
+  const error = folderMoveTargetError(source.path, target.path);
+  if (error) { toast.showToast(error, 'info'); return; }
+  isMovingFolder.value = true;
+  try {
+    const newPath = await moveFolderToFolder(source.path, target.path);
+    const root = folderTree.value.filter(root => isWithinFolder(newPath, root.path))
+      .sort((a, b) => b.path.length - a.path.length)[0];
+    if (root) activeRootPath.value = root.path;
+    currentFolderFilter.value = newPath;
+    await expandFolderPath(newPath);
+    toast.showToast(`已将“${source.name}”移动到“${target.name}”`, 'success');
+  } catch (error) {
+    toast.showToast(`移动文件夹失败：${error}`, 'error');
+  } finally {
+    isMovingFolder.value = false;
+  }
+};
+
+const { startFolderDrag } = useFolderDrag({
+  enabled: computed(() => currentViewMode.value === 'folder' && props.isManagementMode && !isMovingFolder.value),
+  container: treeContainerRef,
+  canMove: canMoveFolder,
+  expand: async path => {
+    await ensureFolderChildrenLoaded(path);
+    await expandFolderPath(path);
+  },
+  move: executeFolderMove,
+});
 let resizeStartX = 0;
 let resizeStartWidth = 0;
 
@@ -373,6 +417,24 @@ const handlePhysicalDelete = () => {
   showMenu.value = false;
 };
 
+const handleMoveFolder = async () => {
+  if (!props.isManagementMode || isMovingFolder.value || !targetFolder.value || !canMoveFolder(targetFolder.value)) return;
+  const source = { ...targetFolder.value };
+  showMenu.value = false;
+  try {
+    const target = await open({
+      directory: true, multiple: false,
+      title: `将“${source.name}”移动到（请选择音乐库内的文件夹）`,
+      defaultPath: activeRootPath.value || undefined,
+    });
+    if (typeof target === 'string') await executeFolderMove(source, {
+      path: target, name: target.split(/[/\\]/).filter(Boolean).pop() || target,
+    });
+  } catch (error) {
+    toast.showToast(`选择目标文件夹失败：${error}`, 'error');
+  }
+};
+
 const executePhysicalDelete = async () => {
   if (!folderToPhysicalDelete.value) {
     return;
@@ -413,7 +475,7 @@ const executePhysicalDelete = async () => {
 };
 
 const handleDropEvent = () => {
-  if (!props.isManagementMode) {
+  if (!props.isManagementMode || dragSession.type !== 'song') {
     return;
   }
 
@@ -530,6 +592,7 @@ onUnmounted(() => {
               @select="handleTreeSelect"
               @toggle="handleTreeToggle"
               @contextmenu="handleTreeContextMenu"
+              @drag-start="startFolderDrag"
             />
           </div>
 
@@ -571,6 +634,7 @@ onUnmounted(() => {
       @remove="removeFolderItem"
       @new-folder="handleCreateFolder"
       @delete-disk="handlePhysicalDelete"
+      @move-folder="handleMoveFolder"
     />
 
     <ModernModal

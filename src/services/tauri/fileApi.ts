@@ -3,6 +3,8 @@ import { tauriInvoke } from './invoke';
 
 export const fileApi = {
   deleteFolder: (path: string): Promise<void> => tauriInvoke('delete_folder', { path }),
+  moveFolderToFolder: (sourcePath: string, targetFolder: string) =>
+    tauriInvoke('move_folder_to_folder', { sourcePath, targetFolder }),
   moveFileToFolder: (sourcePath: string, targetFolder: string) =>
     tauriInvoke('move_file_to_folder', { sourcePath, targetFolder }),
   batchMoveMusicFiles: (paths: string[], targetFolder: string) =>

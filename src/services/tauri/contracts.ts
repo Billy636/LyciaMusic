@@ -299,6 +299,10 @@ export interface TauriCommandMap {
     response: void;
   };
   delete_folder: { payload: { path: string }; response: void };
+  move_folder_to_folder: {
+    payload: { sourcePath: string; targetFolder: string };
+    response: { old_path: string; new_path: string };
+  };
   move_file_to_folder: {
     payload: { sourcePath: string; targetFolder: string };
     response: void;

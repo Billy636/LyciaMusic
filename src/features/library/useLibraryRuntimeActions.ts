@@ -18,6 +18,7 @@ export function useLibraryRuntimeActions() {
     ensureFolderChildrenLoaded: libraryDomain.ensureFolderChildrenLoaded,
     createFolder: libraryDomain.createFolder,
     deleteFolder: libraryDomain.deleteFolder,
+    moveFolderToFolder: libraryDomain.moveFolderToFolder,
     toggleFolderNode: libraryDomain.toggleFolderNode,
     expandFolderPath: libraryDomain.expandFolderPath,
     moveFilesToFolder: libraryDomain.moveFilesToFolder,

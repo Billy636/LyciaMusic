@@ -74,7 +74,8 @@ const subtitle = computed(() => {
   if (dragSession.type === 'song' && dragSession.songs.length > 0) return dragSession.songs[0].artist;
   if (dragSession.type === 'song' && dragSession.songs.length > 1) return `等 ${dragSession.songs.length} 首歌曲`;
   if (dragSession.type === 'playlist') return '歌单';
-  if (dragSession.type === 'folder') return '文件夹';
+  if (dragSession.type === 'folder') return dragSession.targetFolder
+    ? `移动到 ${dragSession.targetFolder.name}` : '拖到目标文件夹以移动';
   if (dragSession.type === 'artist') return '歌手';
   if (dragSession.type === 'album') return '专辑';
   return '';

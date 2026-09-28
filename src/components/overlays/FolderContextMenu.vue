@@ -28,6 +28,7 @@ const emit = defineEmits([
   'cancel',
   'delete-disk',
   'new-folder',
+  'move-folder',
 ]);
 
 const menuRef = ref<HTMLElement | null>(null);
@@ -106,7 +107,7 @@ const canRemoveFromLibrary = computed(() =>
 );
 
 const emitIfAllowed = (
-  eventName: 'remove' | 'new-folder' | 'delete-disk',
+  eventName: 'remove' | 'new-folder' | 'delete-disk' | 'move-folder',
   allowed: boolean,
 ) => {
   if (!allowed) {
@@ -242,9 +243,24 @@ const motionDelay = (index: number): CSSProperties => ({
           </button>
 
           <button
+            v-if="!isRootFolder"
             type="button"
             :class="enabledItemClass"
             :style="motionDelay(12)"
+            @click="emitIfAllowed('move-folder', showManagementActions)"
+          >
+            <div class="mr-3 flex h-5 w-5 items-center justify-center text-gray-500 group-hover:text-gray-800">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h12m-4-4 4 4-4 4M3 19V5h6l2 2h8v2M3 19h10" />
+              </svg>
+            </div>
+            <div class="min-w-0">移动到…</div>
+          </button>
+
+          <button
+            type="button"
+            :class="enabledItemClass"
+            :style="motionDelay(13)"
             @click="emitIfAllowed('delete-disk', showManagementActions)"
           >
             <div class="mr-3 flex h-5 w-5 items-center justify-center text-[#EC4141]">

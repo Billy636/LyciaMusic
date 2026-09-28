@@ -317,6 +317,7 @@ export function useSongDrag(
     };
 
     const onGlobalPointerEnd = (cancelled = false) => {
+        if (dragSession.type === 'folder') return;
         isPointerDown = false;
         stopAutoScroll();
         isSelectionDragging.value = false;

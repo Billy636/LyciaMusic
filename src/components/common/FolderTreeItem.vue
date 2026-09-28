@@ -9,6 +9,8 @@
         isTarget ? 'ring-2 ring-blue-500 bg-blue-50/50 dark:bg-blue-900/20 z-10' : '',
       ]"
       @click.stop="handleSelect"
+      @pointerdown.stop="emit('drag-start', { event: $event, node })"
+      @dragstart.prevent
       @mousemove="handleMouseMoveDrag"
       @mouseleave="handleMouseLeaveDrag"
       @contextmenu.prevent.stop="handleContextMenu"
@@ -92,6 +94,7 @@
           @select="(childNode) => $emit('select', childNode)"
           @toggle="(childNode) => $emit('toggle', childNode)"
           @contextmenu="(payload) => $emit('contextmenu', payload)"
+          @drag-start="(payload) => emit('drag-start', payload)"
         />
       </div>
     </transition>
@@ -115,12 +118,13 @@ const emit = defineEmits<{
   (e: 'select', node: FolderNode): void;
   (e: 'toggle', node: FolderNode): void;
   (e: 'contextmenu', payload: { event: MouseEvent; node: FolderNode }): void;
+  (e: 'drag-start', payload: { event: PointerEvent; node: FolderNode }): void;
 }>();
 
 const isSelected = computed(() => props.selectedPath === props.node.path);
 
 const isTarget = computed(() =>
-  dragSession.active && dragSession.type === 'song' && dragSession.targetFolder?.path === props.node.path,
+  dragSession.active && ['song', 'folder'].includes(dragSession.type) && dragSession.targetFolder?.path === props.node.path,
 );
 
 const handleMouseMoveDrag = () => {

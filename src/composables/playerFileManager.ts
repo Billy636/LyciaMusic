@@ -12,6 +12,7 @@ import { useLibraryCollectionSongPathCache } from './useLibraryCollectionSongPat
 import { useLibraryDetailSongPathCache } from './useLibraryDetailSongPathCache';
 import { useLibraryFolderSongPathCache } from './useLibraryFolderSongPathCache';
 import { removeSongPathsFromPlaybackState } from './playbackCleanup';
+import { remapFolderPath } from '../utils/folderMove';
 
 interface CreatePlayerFileManagerDeps {
   removeLibraryFolderLinked: (
@@ -163,6 +164,46 @@ export const createPlayerFileManager = ({
     }
 
     removeNodeFromTree(libraryHierarchy.value, path);
+  };
+
+  const moveFolderToFolder = async (sourcePath: string, targetFolder: string) => {
+    const result = await fileApi.moveFolderToFolder(sourcePath, targetFolder);
+    const remap = (path: string) => remapFolderPath(path, result.old_path, result.new_path);
+    const remapSong = (song: Song): Song => ({
+      ...song,
+      path: remap(song.path),
+      cue_source_path: song.cue_source_path ? remap(song.cue_source_path) : song.cue_source_path,
+      cover_thumb_path: song.cover_thumb_path ? remap(song.cover_thumb_path) : song.cover_thumb_path,
+    });
+    for (const song of [...libraryStore.songLookup.values()]) {
+      if (remap(song.path) !== song.path || (song.cue_source_path && remap(song.cue_source_path) !== song.cue_source_path)) {
+        libraryStore.setSongRecord(remapSong(song));
+      }
+    }
+    libraryStore.setSourceSongOrder(sourceSongPaths.value.map(remap));
+    libraryStore.setCanonicalSongOrder(canonicalSongPaths.value.map(remap));
+    favoritePaths.value = favoritePaths.value.map(remap);
+    playlists.value.forEach(playlist => { playlist.songPaths = playlist.songPaths.map(remap); });
+    recentSongs.value = recentSongs.value.map(item => ({ ...item, path: remap(item.path) }));
+    playQueuePaths.value = playQueuePaths.value.map(remap);
+    tempQueuePaths.value = tempQueuePaths.value.map(remap);
+    if (currentSong.value && remap(currentSong.value.path) !== currentSong.value.path) {
+      currentSong.value = remapSong(currentSong.value);
+    }
+    libraryStore.localCustomOrder = libraryStore.localCustomOrder.map(remap);
+    libraryStore.folderCustomOrder = Object.fromEntries(Object.entries(libraryStore.folderCustomOrder)
+      .map(([folder, paths]) => [remap(folder), paths.map(remap)]));
+    for (const catalog of [libraryStore.artistCatalog, libraryStore.albumCatalog]) {
+      catalog.forEach(item => { item.firstSongPath = remap(item.firstSongPath); });
+    }
+    const overrides = settingsStore.settings.lyrics.readingOrderOverrides;
+    if (overrides) settingsStore.settings.lyrics.readingOrderOverrides = Object.fromEntries(
+      Object.entries(overrides).map(([path, value]) => [remap(path), value]),
+    );
+    navigationStore.currentFolderFilter = remap(navigationStore.currentFolderFilter);
+    libraryStore.pruneSongPool();
+    clearLibraryPathCaches();
+    return result.new_path;
   };
 
   const moveFilePhysical = async (sourcePath: string, targetFolderPath: string) => {
@@ -484,6 +525,7 @@ export const createPlayerFileManager = ({
 
   return {
     deleteFolder,
+    moveFolderToFolder,
     moveFilePhysical,
     moveFilesToFolder,
     refreshFolder,

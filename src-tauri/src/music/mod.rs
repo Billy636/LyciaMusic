@@ -3,6 +3,7 @@
 pub mod covers;
 pub mod cue;
 pub mod files;
+pub mod folder_moves;
 pub mod library;
 pub mod scanner;
 pub mod search;
@@ -16,6 +17,7 @@ pub mod utils;
 pub use types::*;
 
 // Re-export commands for lib.rs registration
+pub use folder_moves::move_folder_to_folder;
 pub use covers::{clear_cover_cache, get_song_cover, get_song_cover_thumbnail, run_cache_cleanup};
 pub use files::{
     batch_move_music_files, create_folder, delete_folder, delete_music_file, get_song_detail,
