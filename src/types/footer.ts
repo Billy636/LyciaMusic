@@ -10,6 +10,8 @@ export interface FooterBehavior {
   info: 'cover' | 'song' | 'time' | 'both' | 'none';
   progress: 'always' | 'hover' | 'hidden';
   lastVisibleProgress: 'always' | 'hover';
+  /** Empty/absent keeps the original progress-bar color. */
+  progressColor?: string;
   autoHide: boolean;
   visualizer: boolean;
 }

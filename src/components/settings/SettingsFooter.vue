@@ -23,8 +23,8 @@ function confirm() {
   pending.value = null;
 }
 const confirmation = computed(() => pending.value === 'link'
-  ? '将当前场景的通用按钮位置、显示状态和间距应用到另一个场景。歌曲信息、进度条和自动隐藏设置不会改变。'
-  : `恢复当前场景的原版布局、间距和显示行为。${footer.value.linked ? '通用按钮会同步恢复到两个场景。' : ''}不会修改播放状态或音频参数。`);
+  ? '将当前场景的按钮布局和显示设置应用到另一个场景，包括歌曲信息、进度条显示与颜色、底栏自动隐藏。播放页专属的音频频谱保持独立。'
+  : `恢复当前场景的原版布局、间距和显示设置。${footer.value.linked ? '通用按钮和显示设置会同步恢复到两个场景。' : ''}不会修改播放状态或音频参数。`);
 </script>
 
 <template>
@@ -34,7 +34,7 @@ const confirmation = computed(() => pending.value === 'link'
         <button v-for="entry in ([['main', '主界面'], ['detail', '播放页']] as const)" :key="entry[0]" type="button" :aria-pressed="scene === entry[0]"
           class="rounded-md px-6 py-2 text-sm transition-colors" :class="scene === entry[0] ? 'bg-white text-[#EC4141] shadow-sm dark:bg-white/10' : 'text-gray-500 dark:text-gray-400'" @click="scene = entry[0]">{{ entry[1] }}</button>
       </div>
-      <label class="flex items-center gap-2 text-xs"><input type="checkbox" class="accent-[#EC4141]" :checked="footer.linked" @change="changeLinked" />两个场景使用相同按钮布局</label>
+      <label class="flex items-center gap-2 text-xs" title="同步按钮布局和显示设置，播放页专属功能除外"><input type="checkbox" class="accent-[#EC4141]" :checked="footer.linked" @change="changeLinked" />两个场景保持一致</label>
     </div>
     <section class="space-y-3">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
@@ -47,6 +47,16 @@ const confirmation = computed(() => pending.value === 'link'
         <label class="setting-field">底栏显示<select :value="String(behavior.autoHide)" @change="changeBehavior('autoHide', $event)"><option value="false">始终显示</option><option value="true">闲置时自动隐藏</option></select></label>
         <label v-if="scene === 'detail'" class="setting-field">音频频谱<select :value="String(behavior.visualizer)" @change="changeBehavior('visualizer', $event)"><option value="true">开启</option><option value="false">关闭</option></select></label>
       </div>
+      <div class="flex flex-wrap items-center gap-3 text-[13px]">
+        <label class="flex items-center gap-3">
+          <span>进度条颜色</span>
+          <input type="color" aria-label="进度条颜色" class="progress-color-input"
+            :value="behavior.progressColor || '#d4d4d8'" @input="changeBehavior('progressColor', $event)" />
+        </label>
+        <span class="text-xs text-gray-500 dark:text-gray-400">{{ behavior.progressColor || '默认颜色' }}</span>
+        <button type="button" class="text-xs text-[#EC4141] disabled:opacity-40 disabled:cursor-default"
+          :disabled="!behavior.progressColor" @click="setBehavior(scene, { progressColor: '' })">恢复默认</button>
+      </div>
     </section>
     <section class="space-y-4">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
@@ -55,12 +65,57 @@ const confirmation = computed(() => pending.value === 'link'
       </h2>
       <FooterLayoutEditor :scene="scene" @reset="pending = 'reset'" />
     </section>
-    <ModernModal :visible="pending !== null" :title="pending === 'link' ? '同步按钮布局' : '恢复原版布局'" :content="confirmation" confirm-text="确认" @confirm="confirm" @cancel="pending = null" />
+    <ModernModal :visible="pending !== null" :title="pending === 'link' ? '两个场景保持一致' : '恢复原版布局'" :content="confirmation" confirm-text="确认" @confirm="confirm" @cancel="pending = null" />
   </div>
 </template>
 
 <style scoped>
-.footer-settings select { min-width: 0; width: 100%; border: 1px solid rgb(128 128 128 / .2); border-radius: 7px; padding: 7px 9px; font-size: 13px; background: var(--footer-select-bg, #fff); color: inherit; }
-:global(.dark) .footer-settings { --footer-select-bg: #242428; }
+.footer-settings {
+  --footer-field-bg: rgb(255 255 255 / .62);
+  --footer-field-hover-bg: rgb(255 255 255 / .82);
+  --footer-field-border: rgb(148 163 184 / .24);
+  --footer-option-bg: #fff;
+  --footer-option-text: #1f2937;
+  --footer-field-scheme: light;
+}
+.dark .footer-settings {
+  --footer-field-bg: rgb(255 255 255 / .05);
+  --footer-field-hover-bg: rgb(255 255 255 / .09);
+  --footer-field-border: rgb(255 255 255 / .12);
+  --footer-option-bg: #242428;
+  --footer-option-text: #f3f4f6;
+  --footer-field-scheme: dark;
+}
+.footer-settings select {
+  min-width: 0;
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--footer-field-border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  background-color: var(--footer-field-bg);
+  color: inherit;
+  color-scheme: var(--footer-field-scheme);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+.footer-settings select:hover {
+  background-color: var(--footer-field-hover-bg);
+  border-color: rgb(236 65 65 / .3);
+}
+.footer-settings select:focus-visible {
+  outline: none;
+  border-color: rgb(236 65 65 / .55);
+  box-shadow: 0 0 0 3px rgb(236 65 65 / .12);
+}
+/* Native option popups need an opaque surface to remain readable over artwork. */
+.footer-settings option {
+  background-color: var(--footer-option-bg);
+  color: var(--footer-option-text);
+}
 .setting-field { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.progress-color-input { width: 36px; height: 28px; padding: 2px; border: 1px solid rgb(128 128 128 / .25); border-radius: 6px; background: transparent; cursor: pointer; }
 </style>

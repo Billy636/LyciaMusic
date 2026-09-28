@@ -65,10 +65,20 @@ function normalizeBehavior(value: unknown, fallback: FooterBehavior): FooterBeha
     info: typeof raw.info === 'string' && ['cover', 'song', 'time', 'both', 'none'].includes(raw.info) ? raw.info as FooterBehavior['info'] : fallback.info,
     progress: typeof raw.progress === 'string' && ['always', 'hover', 'hidden'].includes(raw.progress) ? raw.progress as FooterBehavior['progress'] : fallback.progress,
     lastVisibleProgress: raw.lastVisibleProgress === 'hover' ? 'hover' : 'always',
+    progressColor: typeof raw.progressColor === 'string' && /^#[\da-f]{6}$/i.test(raw.progressColor)
+      ? raw.progressColor.toLowerCase() : '',
     autoHide: typeof raw.autoHide === 'boolean' ? raw.autoHide : fallback.autoHide,
     visualizer: typeof raw.visualizer === 'boolean' ? raw.visualizer : fallback.visualizer,
   };
 }
+
+/** Playback-page-only visualization remains independent of shared display settings. */
+export function syncFooterBehavior(settings: FooterSettings, source: FooterScene) {
+  const { visualizer: _visualizer, ...shared } = settings.behavior[source];
+  Object.assign(settings.behavior.main, shared);
+  Object.assign(settings.behavior.detail, shared);
+}
+
 export function normalizeFooterSettings(value: unknown): FooterSettings {
   const defaults = createDefaultFooterSettings(), raw = object(value), behavior = object(raw.behavior);
   const main = normalizeLayout(raw.main, defaults.main), detail = normalizeLayout(raw.detail, defaults.detail);
@@ -97,12 +107,14 @@ export function normalizeFooterSettings(value: unknown): FooterSettings {
       ? Math.max(min, Math.min(max, Math.round(input))) : fallback;
     return { controls: clamp(entry.controls, 24, 8, 40), utilities: clamp(entry.utilities, 8, 0, 24) };
   };
-  return {
+  const normalized: FooterSettings = {
     version: 1, linked, main, detail, detailExtras, detailOrder,
     spacing: { main: normalizeSpacing(spacing.main), detail: normalizeSpacing(spacing.detail) },
     placement: { main: normalizePlacement(placement.main), detail: normalizePlacement(placement.detail) },
     behavior: { main: normalizeBehavior(behavior.main, defaults.behavior.main), detail: normalizeBehavior(behavior.detail, defaults.behavior.detail) },
   };
+  if (linked) syncFooterBehavior(normalized, 'main');
+  return normalized;
 }
 
 export function migrateFooterSettings(read: (key: string) => string | null, showEqualizer: boolean): FooterSettings {

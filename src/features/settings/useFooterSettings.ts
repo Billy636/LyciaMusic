@@ -1,7 +1,7 @@
 import { computed } from 'vue';
 import { playerStorage } from '../../services/storage/playerStorage';
 import { useSettings } from './useSettings';
-import { allowedFooterPositions, createDefaultFooterSettings, effectiveFooterLayout, footerAction, migrateFooterSettings, normalizeFooterSettings } from './footer';
+import { allowedFooterPositions, createDefaultFooterSettings, effectiveFooterLayout, footerAction, migrateFooterSettings, normalizeFooterSettings, syncFooterBehavior } from './footer';
 import type { FooterActionId, FooterBehavior, FooterMovableId, FooterPlacement, FooterPosition, FooterScene, FooterSettings, FooterSpacing } from '../../types/footer';
 import { placementScene } from './freeFooterLayout';
 
@@ -23,6 +23,7 @@ export function useFooterSettings() {
   const setBehavior = (scene: FooterScene, patch: Partial<FooterBehavior>) => update(draft => {
     Object.assign(draft.behavior[scene], patch);
     if (patch.progress && patch.progress !== 'hidden') draft.behavior[scene].lastVisibleProgress = patch.progress;
+    if (draft.linked) syncFooterBehavior(draft, scene);
   });
   const setPosition = (scene: FooterScene, id: FooterActionId, position: FooterPosition) => update(draft => {
     const list = footerAction(id).detailOnly ? draft.detailExtras : draft[draft.linked ? 'main' : scene];
@@ -67,6 +68,7 @@ export function useFooterSettings() {
       draft.main = draft[scene].map(item => ({ ...item }));
       draft.spacing.main = { ...draft.spacing[scene] };
       draft.placement.main = Object.fromEntries(Object.entries(draft.placement[scene]).filter(([id]) => !footerAction(id as FooterMovableId).detailOnly));
+      syncFooterBehavior(draft, scene);
     } else {
       draft.detail = draft.main.map(item => ({ ...item }));
       draft.spacing.detail = { ...draft.spacing.main };
@@ -81,6 +83,7 @@ export function useFooterSettings() {
     const defaults = createDefaultFooterSettings();
     draft[draft.linked ? 'main' : scene] = defaults[scene];
     draft.behavior[scene] = defaults.behavior[scene];
+    if (draft.linked) syncFooterBehavior(draft, scene);
     draft.spacing[draft.linked ? 'main' : scene] = defaults.spacing[scene];
     draft.placement[draft.linked ? 'main' : scene] = {};
     if (scene === 'detail') draft.placement.detail = {};

@@ -130,7 +130,7 @@ onBeforeUnmount(() => {
       <button type="button" class="editor-reset" @click="$emit('reset')">恢复原版布局</button>
     </div>
     <div ref="bar" class="free-bar" :class="{ 'detail-scene': scene === 'detail', dragging: drag?.active }">
-      <div v-if="behavior.progress !== 'hidden'" class="preview-progress"><span></span></div>
+      <div v-if="behavior.progress !== 'hidden'" class="preview-progress"><span :style="{ backgroundColor: behavior.progressColor || 'rgb(212 212 216 / .3)' }"></span></div>
       <div v-if="behavior.info !== 'none'" class="preview-song" :style="{ width: `${layout.infoWidth}px` }">
         <img v-if="currentCover && behavior.info !== 'time'" :src="currentCover" alt="" draggable="false" />
         <div v-else-if="behavior.info === 'cover'" class="preview-cover-placeholder" aria-label="封面"></div>

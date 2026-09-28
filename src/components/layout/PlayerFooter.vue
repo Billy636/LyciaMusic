@@ -48,7 +48,14 @@ const showContextMenu = ref(false);
 const contextMenuX = ref(0), contextMenuY = ref(0);
 const showProgressContextMenu = ref(false);
 const progressContextMenuX = ref(0), progressContextMenuY = ref(0), progressContextTimeMs = ref(0);
-const handleOpenDetail = () => togglePlayerDetail();
+const handleOpenDetail = () => { if (currentSong.value) togglePlayerDetail(); };
+const handleFooterClick = (event: MouseEvent) => {
+  if (event.defaultPrevented || !currentSong.value || !(event.target instanceof Element)) return;
+  // Keep navigation available even when the song-info block is hidden or tiny.
+  // Interactive controls and the existing info/cover handlers own their clicks.
+  if (event.target.closest('button, a, input, select, textarea, [role="slider"], [data-player-song-info], .footer-popup')) return;
+  handleOpenDetail();
+};
 const handleSongInfoClick = (event: MouseEvent) => {
   if (!currentSong.value) return;
   if (event.target instanceof Element && event.target.closest('button, [data-footer-cover]')) return;
@@ -291,6 +298,9 @@ const openFooterContextMenu = (event: MouseEvent) => {
   popupLeft.value = Math.max(12, Math.min(event.clientX, window.innerWidth - 244));
 };
 const openFooterMenuFromKeyboard = (event: KeyboardEvent) => {
+  if (event.target === footerRef.value && (event.key === 'Enter' || event.key === ' ')) {
+    event.preventDefault(); event.stopPropagation(); handleOpenDetail(); return;
+  }
   if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
   event.preventDefault(); event.stopPropagation();
   showContextMenu.value = false; showProgressContextMenu.value = false;
@@ -357,8 +367,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <footer ref="footerRef" class="player-footer relative z-[60] h-20 select-none bg-transparent" :tabindex="isIdle ? 0 : -1" aria-label="播放底栏"
+  <footer ref="footerRef" class="player-footer relative z-[60] h-20 select-none bg-transparent" :tabindex="currentSong || isIdle ? 0 : -1" aria-label="播放底栏，按 Enter 切换播放页"
     :class="showPlayerDetail ? 'text-white' : 'text-gray-800 dark:text-white'"
+    @click="handleFooterClick"
     @mouseenter="handleFooterMouseEnter" @mousemove="handleFooterMouseEnter" @mouseleave="handleFooterMouseLeave"
     @focusin="isIdle = false; clearIdleTimer()" @focusout="handleFooterFocusOut" @contextmenu="openFooterContextMenu" @keydown="openFooterMenuFromKeyboard">
     <div v-if="showPlayerDetail && currentSong && isVisualizerEnabled" class="pointer-events-none absolute inset-x-5 -top-[76px] z-40 h-16 transition-opacity duration-300" :class="isIdle ? 'opacity-25' : 'opacity-100'">
@@ -370,8 +381,8 @@ onUnmounted(() => {
       :class="{ 'hover-only': behavior.progress === 'hover', dragging: isDraggingProgress }"
       @pointerdown="startProgressDrag" @contextmenu="handleProgressContextMenu" @keydown="seekWithKeyboard">
       <div class="progress-track absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full">
-        <div class="progress-fill absolute inset-y-0 left-0 rounded-full bg-zinc-300/30" :style="{ width: `${displayProgress}%` }">
-          <div class="progress-thumb absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 translate-x-1/2 rounded-full border border-black/10 bg-white shadow-sm"></div>
+        <div class="progress-fill absolute inset-y-0 left-0 rounded-full bg-zinc-300/30" :style="{ width: `${displayProgress}%`, backgroundColor: behavior.progressColor || undefined }">
+          <div class="progress-thumb absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 translate-x-1/2 rounded-full border border-black/10 bg-white shadow-sm" :style="{ backgroundColor: behavior.progressColor || undefined }"></div>
           <div v-if="isDraggingProgress" class="absolute bottom-4 right-0 translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900/95 px-2 py-1 text-[11px] tabular-nums text-white">{{ currentTimeStr }} / {{ totalTimeStr }}</div>
         </div>
       </div>
