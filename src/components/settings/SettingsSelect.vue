@@ -6,6 +6,9 @@ const props = defineProps<{
   label: string;
   modelValue: string;
   options: readonly { value: string; label: string }[];
+  hideLabel?: boolean;
+  triggerId?: string;
+  describedBy?: string;
 }>();
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 const id = useId();
@@ -89,9 +92,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="settings-select-field">
-    <span :id="`${id}-label`">{{ label }}</span>
-    <button ref="trigger" type="button" role="combobox" aria-haspopup="listbox"
+    <span :id="`${id}-label`" :class="{ 'sr-only': hideLabel }">{{ label }}</span>
+    <button :id="triggerId" ref="trigger" type="button" role="combobox" aria-haspopup="listbox"
       :aria-labelledby="`${id}-label ${id}-value`" :aria-controls="`${id}-listbox`" :aria-expanded="opened"
+      :aria-describedby="describedBy"
       :aria-activedescendant="opened ? `${id}-option-${activeIndex}` : undefined"
       class="settings-select-surface settings-select-trigger" :class="{ 'is-open': opened }"
       @click="opened ? close() : open()" @keydown="keydown" @blur="close">

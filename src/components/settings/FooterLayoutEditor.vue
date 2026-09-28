@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { X } from 'lucide-vue-next';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
+import { MoveHorizontal, RotateCcw, X } from 'lucide-vue-next';
 import { storeToRefs } from 'pinia';
 import { usePlaybackStore } from '../../features/playback/store';
 import { useFooterSettings } from '../../features/settings/useFooterSettings';
@@ -18,6 +18,7 @@ const width = ref(800);
 const layout = computed(() => resolveFreeFooterLayout(footer.value, props.scene, width.value));
 const behavior = computed(() => footer.value.behavior[props.scene]);
 const spacing = computed(() => footer.value.spacing[footer.value.linked ? 'main' : props.scene]);
+const spacingControlId = useId();
 const menuId = ref<FooterMovableId | null>(null);
 const menuLeft = ref(0), menuTop = ref(0);
 let menuAnchor: HTMLElement | null = null;
@@ -151,7 +152,26 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
-    <div class="spacing-row"><label>按钮最小间距 <output>{{ spacing.utilities }}px</output><input type="range" min="0" max="24" step="1" :value="spacing.utilities" @input="setSpacing(scene, { utilities: Number(($event.target as HTMLInputElement).value) })" /></label><button type="button" class="editor-reset" @click="setSpacing(scene, { controls: 24, utilities: 8 })">恢复原版间距</button></div>
+    <div class="spacing-row">
+      <label :for="spacingControlId" class="spacing-label">
+        <span class="spacing-icon"><MoveHorizontal class="h-4 w-4" aria-hidden="true" /></span>
+        <span>按钮最小间距</span>
+      </label>
+      <div class="spacing-control">
+        <span class="spacing-endpoint" aria-hidden="true">紧凑</span>
+        <input :id="spacingControlId" class="spacing-slider" type="range" min="0" max="24" step="1"
+          :value="spacing.utilities" :aria-valuetext="`${spacing.utilities} 像素`"
+          :style="{ '--spacing-fill': `${spacing.utilities / 24 * 100}%` }"
+          @input="setSpacing(scene, { utilities: Number(($event.target as HTMLInputElement).value) })" />
+        <span class="spacing-endpoint" aria-hidden="true">宽松</span>
+      </div>
+      <output :for="spacingControlId" class="spacing-value">{{ spacing.utilities }}<span>px</span></output>
+      <button type="button" class="spacing-reset" title="恢复默认间距" aria-label="恢复默认间距"
+        :disabled="spacing.utilities === 8 && spacing.controls === 24"
+        @click="setSpacing(scene, { controls: 24, utilities: 8 })">
+        <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+    </div>
     <p v-if="dragHint" class="editor-status" role="status" aria-live="polite">{{ dragHint }}</p>
     <div v-if="menuId" ref="menu" class="editor-menu" :style="{ left: `${menuLeft}px`, top: `${menuTop}px` }" :aria-label="`${footerAction(menuId).label}选项`" @pointerdown.stop>
       <div class="menu-heading"><FooterIcon :id="menuId" /><span>{{ footerAction(menuId).label }}</span><button type="button" aria-label="关闭按钮选项" @click.stop="closeMenu(true)"><X class="h-4 w-4" /></button></div>
@@ -191,17 +211,56 @@ onBeforeUnmount(() => {
 .pool-button:hover { background:rgb(128 128 128 / .08); }
 .empty-pool { color:#6b7280; font-size:11px; }
 .targeted { outline:2px solid #ec4141; }
-.spacing-row { display:flex; gap:20px; flex-wrap:wrap; align-items:center; margin-top:20px; }
-.spacing-row label { flex:1; min-width:180px; font-size:12px; }
-.spacing-row output { float:right; font-variant-numeric:tabular-nums; }
-.spacing-row input { display:block; width:100%; accent-color:#ec4141; margin-top:10px; }
+.spacing-row {
+  --spacing-track: rgb(15 23 42 / .1);
+  --spacing-muted: #6b7280;
+  display:grid;
+  grid-template-columns:minmax(144px, 1fr) minmax(160px, 340px) auto auto;
+  gap:16px;
+  align-items:center;
+  margin-top:18px;
+  padding:14px 16px;
+  border:1px solid rgb(128 128 128 / .14);
+  border-radius:12px;
+  background:rgb(255 255 255 / .32);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+}
+.dark .spacing-row { --spacing-track:rgb(255 255 255 / .16); --spacing-muted:#9ca3af; background:rgb(255 255 255 / .035); border-color:rgb(255 255 255 / .08); }
+.spacing-label { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:500; cursor:pointer; }
+.spacing-icon { display:flex; align-items:center; justify-content:center; width:28px; height:28px; flex-shrink:0; border-radius:8px; background:rgb(236 65 65 / .08); color:#ec4141; }
+.dark .spacing-icon { color:#ff8b8b; }
+.spacing-control { display:flex; align-items:center; gap:12px; min-width:0; }
+.spacing-endpoint { color:var(--spacing-muted); font-size:11px; white-space:nowrap; }
+.spacing-slider { appearance:none; -webkit-appearance:none; width:100%; min-width:0; height:28px; margin:0; padding:0; border:0; background:transparent; cursor:pointer; border-radius:6px; }
+.spacing-slider::-webkit-slider-runnable-track { height:4px; border-radius:999px; background:linear-gradient(to right, #ec4141 0%, #ec4141 var(--spacing-fill), var(--spacing-track) var(--spacing-fill), var(--spacing-track) 100%); }
+.spacing-slider::-moz-range-track { height:4px; border-radius:999px; background:var(--spacing-track); }
+.spacing-slider::-moz-range-progress { height:4px; border-radius:999px; background:#ec4141; }
+.spacing-slider::-webkit-slider-thumb { appearance:none; -webkit-appearance:none; box-sizing:border-box; width:14px; height:14px; margin-top:-5px; border:1px solid rgb(15 23 42 / .08); border-radius:50%; background:#fff; box-shadow:0 1px 5px rgb(0 0 0 / .2); transition:box-shadow 150ms ease; }
+.spacing-slider::-moz-range-thumb { box-sizing:border-box; width:14px; height:14px; border:1px solid rgb(15 23 42 / .08); border-radius:50%; background:#fff; box-shadow:0 1px 5px rgb(0 0 0 / .2); transition:box-shadow 150ms ease; }
+.spacing-slider:hover::-webkit-slider-thumb, .spacing-slider:active::-webkit-slider-thumb { box-shadow:0 0 0 4px rgb(236 65 65 / .13), 0 1px 5px rgb(0 0 0 / .2); }
+.spacing-slider:hover::-moz-range-thumb, .spacing-slider:active::-moz-range-thumb { box-shadow:0 0 0 4px rgb(236 65 65 / .13), 0 1px 5px rgb(0 0 0 / .2); }
+.spacing-slider:focus-visible, .spacing-reset:focus-visible { outline:2px solid rgb(236 65 65 / .65); outline-offset:3px; }
+.spacing-value { display:inline-flex; align-items:baseline; justify-content:center; gap:3px; min-width:52px; padding:6px 8px; border:1px solid rgb(128 128 128 / .14); border-radius:8px; background:rgb(128 128 128 / .06); font-size:13px; font-weight:500; font-variant-numeric:tabular-nums; }
+.spacing-value span { color:var(--spacing-muted); font-size:10px; font-weight:400; }
+.spacing-reset { display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:7px; color:var(--spacing-muted); transition:color 150ms, background-color 150ms; }
+.spacing-reset:hover:not(:disabled) { background:rgb(236 65 65 / .08); color:#ec4141; }
+.spacing-reset:disabled { opacity:.35; cursor:default; }
 .editor-status { margin-top:8px; color:#ec4141; font-size:12px; }
 .editor-menu { position:absolute; z-index:30; width:216px; max-width:calc(100% - 16px); padding:6px; background:#fff; border:1px solid rgb(128 128 128 / .2); border-radius:10px; box-shadow:0 12px 40px rgb(0 0 0 / .15); }
 .menu-heading { display:flex; align-items:center; gap:8px; padding:6px 8px 10px; font-size:13px; }
 .menu-heading>button { margin-left:auto; padding:4px; }
 .menu-option { display:block; width:100%; padding:8px 12px; text-align:left; border-radius:5px; font-size:13px; }
 .menu-option:hover { background:rgb(128 128 128 / .08); }
-:global(.dark) .editor-menu { background:#242428; }
-:global(.dark) :is(.editor-caption,.preview-song,.pool-title,.empty-pool) { color:#9ca3af; }
+.dark .editor-menu { background:#242428; }
+.dark :is(.editor-caption,.preview-song,.pool-title,.empty-pool) { color:#9ca3af; }
+@media(max-width:760px) {
+  .spacing-row { grid-template-columns:minmax(0, 1fr) auto auto; gap:10px 12px; }
+  .spacing-label { grid-column:1; grid-row:1; }
+  .spacing-value { grid-column:2; grid-row:1; }
+  .spacing-reset { grid-column:3; grid-row:1; }
+  .spacing-control { grid-column:1 / -1; grid-row:2; }
+}
+@media(prefers-reduced-motion:reduce) { .spacing-reset, .spacing-slider::-webkit-slider-thumb { transition:none; } .spacing-slider::-moz-range-thumb { transition:none; } }
 @media(max-width:600px) { .editor-pools { grid-template-columns:1fr; } }
 </style>

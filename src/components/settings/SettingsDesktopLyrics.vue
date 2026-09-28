@@ -33,8 +33,14 @@ import { DESKTOP_LYRICS_RESET_BOUNDS_EVENT } from '../../features/desktopLyrics/
 import { usesNativeDesktopLyrics } from '../../features/desktopLyrics/native';
 import { useSettings } from '../../features/settings/useSettings';
 import { useLyricsSettingsStore } from '../../features/lyricsSettings/store';
+import SettingsSelect from './SettingsSelect.vue';
 
 
+
+const OVERFLOW_OPTIONS = [
+  { value: 'scroll', label: '横向跟随（推荐）' },
+  { value: 'wrap', label: '自动换行（正文最多两行）' },
+];
 
 const ALIGNMENT_OPTIONS: Array<{ value: DesktopLyricsPlayerAlignment; label: string }> = [
   { value: 'left', label: '靠左' },
@@ -835,7 +841,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="w-full space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+  <div class="desktop-lyrics-settings w-full space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
     <section class="space-y-3">
       <h2 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">
         <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
@@ -913,16 +919,15 @@ onUnmounted(() => {
           </span>
         </button>
 
-        <div v-if="usesNativeDesktopLyrics()" class="desktop-setting-row">
-          <div>
+        <div v-if="usesNativeDesktopLyrics()" class="desktop-setting-row desktop-overflow-row">
+          <div class="desktop-overflow-copy">
             <label for="desktop-lyrics-overflow" class="text-sm font-medium text-gray-800 dark:text-gray-200">长句处理</label>
-            <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">横向跟随：最多缩小 15%，仍超宽时跟随演唱位置；空间不足时整体适配高度。</div>
+            <div id="desktop-lyrics-overflow-description" class="text-xs text-gray-500 dark:text-gray-400 mt-1">横向跟随：最多缩小 15%，仍超宽时跟随演唱位置；空间不足时整体适配高度。</div>
           </div>
-          <select id="desktop-lyrics-overflow" v-model="desktopLyricsSettings.overflowMode"
-            class="rounded-lg border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-800 dark:text-gray-200">
-            <option value="scroll">横向跟随（推荐）</option>
-            <option value="wrap">自动换行（正文最多两行）</option>
-          </select>
+          <SettingsSelect class="desktop-overflow-select" label="长句处理" hide-label
+            trigger-id="desktop-lyrics-overflow" described-by="desktop-lyrics-overflow-description"
+            :model-value="desktopLyricsSettings.overflowMode ?? 'scroll'" :options="OVERFLOW_OPTIONS"
+            @update:model-value="desktopLyricsSettings.overflowMode = $event === 'wrap' ? 'wrap' : 'scroll'" />
         </div>
 
         <button
@@ -1650,8 +1655,11 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-:root {
+.desktop-lyrics-settings,
+.desktop-font-menu,
+.desktop-custom-modal {
   /* 桌面歌词设置组件 - 浅色模式 CSS 变量 */
+  --desktop-divider: rgba(15, 23, 42, 0.07);
   --desktop-chip-bg: rgba(255, 255, 255, 0.72);
   --desktop-chip-border: rgba(15, 23, 42, 0.08);
   --desktop-chip-text: rgb(55 65 81);
@@ -1684,8 +1692,9 @@ onUnmounted(() => {
   --desktop-font-option-active-text: #ec4141;
 }
 
-:global(.dark) {
+.dark :is(.desktop-lyrics-settings, .desktop-font-menu, .desktop-custom-modal) {
   /* 桌面歌词设置组件 - 深色模式 CSS 变量重写 */
+  --desktop-divider: rgba(255, 255, 255, 0.05);
   --desktop-chip-bg: rgba(255, 255, 255, 0.04);
   --desktop-chip-border: rgba(255, 255, 255, 0.08);
   --desktop-chip-text: rgba(255, 255, 255, 0.82);
@@ -1724,7 +1733,7 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 16px;
   padding: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom: 1px solid var(--desktop-divider);
   text-align: left;
   transition: background-color 160ms ease;
 }
@@ -1734,16 +1743,20 @@ onUnmounted(() => {
 }
 
 .desktop-setting-row:hover {
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(128, 128, 128, 0.04);
 }
 
-:global(.dark) .desktop-setting-row {
+.dark .desktop-setting-row {
   border-bottom-color: rgba(255, 255, 255, 0.05);
 }
 
-:global(.dark) .desktop-setting-row:hover {
-  background: rgba(255, 255, 255, 0.08);
+.dark .desktop-setting-row:hover {
+  background: rgba(255, 255, 255, 0.035);
 }
+
+.desktop-overflow-row { flex-wrap: wrap; }
+.desktop-overflow-copy { flex: 1 1 280px; min-width: 0; }
+.desktop-overflow-select { flex: 0 1 260px; width: 260px; max-width: 100%; }
 
 .desktop-typography-panel {
   display: flex;
@@ -1752,20 +1765,20 @@ onUnmounted(() => {
 
 .desktop-setting-expand {
   overflow: hidden;
-  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  border-top: 1px solid var(--desktop-divider);
 }
 
 .desktop-setting-expand-inner {
   padding: 16px;
 }
 
-:global(.dark) .desktop-setting-expand {
+.dark .desktop-setting-expand {
   border-top-color: rgba(255, 255, 255, 0.05);
 }
 
 .desktop-typography-row {
   padding: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom: 1px solid var(--desktop-divider);
   transition: background-color 160ms ease;
 }
 
@@ -1774,15 +1787,15 @@ onUnmounted(() => {
 }
 
 .desktop-typography-row:hover {
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(128, 128, 128, 0.04);
 }
 
-:global(.dark) .desktop-typography-row {
+.dark .desktop-typography-row {
   border-bottom-color: rgba(255, 255, 255, 0.05);
 }
 
-:global(.dark) .desktop-typography-row:hover {
-  background: rgba(255, 255, 255, 0.08);
+.dark .desktop-typography-row:hover {
+  background: rgba(255, 255, 255, 0.035);
 }
 
 .desktop-typography-row--inline {
@@ -1852,11 +1865,11 @@ onUnmounted(() => {
   background: #ec4141;
 }
 
-:global(.dark) .desktop-switch {
+.dark .desktop-switch {
   background: rgb(55 65 81);
 }
 
-:global(.dark) .desktop-switch--on {
+.dark .desktop-switch--on {
   background: #ec4141;
 }
 
@@ -1878,7 +1891,7 @@ onUnmounted(() => {
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
 }
 
-:global(.dark) .desktop-card {
+.dark .desktop-card {
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.2);
 }
@@ -2134,7 +2147,7 @@ onUnmounted(() => {
   box-shadow: 0 26px 70px rgba(15, 23, 42, 0.22);
 }
 
-:global(.dark) .desktop-custom-modal {
+.dark .desktop-custom-modal {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(18, 18, 20, 0.92);
 }
@@ -2169,7 +2182,7 @@ onUnmounted(() => {
   word-break: keep-all;
 }
 
-:global(.dark) .desktop-color-picker {
+.dark .desktop-color-picker {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.88);
@@ -2209,7 +2222,7 @@ onUnmounted(() => {
   box-shadow: 0 24px 64px rgba(15, 23, 42, 0.24);
 }
 
-:global(.dark) .desktop-custom-color-panel {
+.dark .desktop-custom-color-panel {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(18, 18, 20, 0.96);
 }
@@ -2221,7 +2234,7 @@ onUnmounted(() => {
   font-weight: 800;
 }
 
-:global(.dark) .desktop-custom-color-panel-title {
+.dark .desktop-custom-color-panel-title {
   color: rgba(255, 255, 255, 0.9);
 }
 
@@ -2314,7 +2327,7 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
-:global(.dark) .desktop-custom-rgb-row label {
+.dark .desktop-custom-rgb-row label {
   color: rgba(255, 255, 255, 0.82);
 }
 
@@ -2331,7 +2344,7 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
-:global(.dark) .desktop-custom-rgb-row input {
+.dark .desktop-custom-rgb-row input {
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.9);
@@ -2541,13 +2554,11 @@ onUnmounted(() => {
   background: rgba(148, 163, 184, 0.16);
   border-color: rgba(148, 163, 184, 0.36);
 }
-:global(.dark) .desktop-preview-btn--cancel,
 .dark .desktop-preview-btn--cancel {
   border-color: rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.08);
   color: #f1f5f9 !important;
 }
-:global(.dark) .desktop-preview-btn--cancel:hover,
 .dark .desktop-preview-btn--cancel:hover {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.28);
@@ -2562,13 +2573,11 @@ onUnmounted(() => {
   background: rgba(148, 163, 184, 0.16);
   border-color: rgba(148, 163, 184, 0.36);
 }
-:global(.dark) .desktop-preview-btn--theme,
 .dark .desktop-preview-btn--theme {
   border-color: rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.08);
   color: #f1f5f9 !important;
 }
-:global(.dark) .desktop-preview-btn--theme:hover,
 .dark .desktop-preview-btn--theme:hover {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.28);
@@ -2617,7 +2626,7 @@ onUnmounted(() => {
     linear-gradient(135deg, #1e293b, #0f172a);
 }
 
-:global(.dark) .desktop-lyrics-preview-card--dark {
+.dark .desktop-lyrics-preview-card--dark {
   border-color: rgba(255, 255, 255, 0.06);
   background:
     radial-gradient(circle at top left, rgba(71, 85, 105, 0.22), transparent 45%),
@@ -2634,7 +2643,7 @@ onUnmounted(() => {
     linear-gradient(135deg, #f8fafc, #e2e8f0);
 }
 
-:global(.dark) .desktop-lyrics-preview-card--light {
+.dark .desktop-lyrics-preview-card--light {
   border-color: rgba(255, 255, 255, 0.08);
   background:
     radial-gradient(circle at top left, rgba(236, 65, 65, 0.08), transparent 45%),
@@ -2859,7 +2868,6 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-:global(.dark) .desktop-compact-label,
 .dark .desktop-compact-label {
   color: #e5e7eb !important;
 }
@@ -2907,16 +2915,16 @@ onUnmounted(() => {
   box-shadow: 0 0 0 2px #ec4141, 0 3px 8px rgba(236, 65, 65, 0.24) !important;
 }
 
-:global(.dark) .desktop-compact-color-preset {
+.dark .desktop-compact-color-preset {
   border-color: rgba(0, 0, 0, 0.4);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
-:global(.dark) .desktop-compact-color-preset:hover {
+.dark .desktop-compact-color-preset:hover {
   box-shadow: 0 0 0 1.5px #ff8b8b, 0 2px 6px rgba(236, 65, 65, 0.2);
 }
 
-:global(.dark) .desktop-compact-color-preset--active {
+.dark .desktop-compact-color-preset--active {
   box-shadow: 0 0 0 2px #ff8b8b, 0 3px 8px rgba(236, 65, 65, 0.3) !important;
 }
 
@@ -2953,7 +2961,7 @@ onUnmounted(() => {
   background-position: 0 0, 0 2px, 2px -2px, -2px 0;
 }
 
-:global(.dark) .desktop-compact-color-custom-swatch {
+.dark .desktop-compact-color-custom-swatch {
   border-color: rgba(0, 0, 0, 0.4);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.2);
 }
@@ -2968,11 +2976,11 @@ onUnmounted(() => {
   box-shadow: 0 0 0 2px #ec4141, 0 3px 8px rgba(236, 65, 65, 0.24) !important;
 }
 
-:global(.dark) .desktop-compact-color-custom:hover {
+.dark .desktop-compact-color-custom:hover {
   box-shadow: 0 0 0 1.5px #ff8b8b, 0 2px 6px rgba(236, 65, 65, 0.2);
 }
 
-:global(.dark) .desktop-compact-color-custom--active {
+.dark .desktop-compact-color-custom--active {
   box-shadow: 0 0 0 2px #ff8b8b, 0 3px 8px rgba(236, 65, 65, 0.3) !important;
 }
 
@@ -2987,7 +2995,7 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-:global(.dark) .desktop-segmented-control {
+.dark .desktop-segmented-control {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.03);
 }
@@ -3010,7 +3018,6 @@ onUnmounted(() => {
   user-select: none;
 }
 
-:global(.dark) .desktop-segmented-btn,
 .dark .desktop-segmented-btn {
   color: rgba(255, 255, 255, 0.85) !important;
 }
@@ -3020,7 +3027,6 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.5);
 }
 
-:global(.dark) .desktop-segmented-btn:hover,
 .dark .desktop-segmented-btn:hover {
   color: #ff8b8b !important;
   background: rgba(255, 255, 255, 0.1) !important;
@@ -3033,7 +3039,6 @@ onUnmounted(() => {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 4px 10px rgba(15, 23, 42, 0.03);
 }
 
-:global(.dark) .desktop-segmented-btn--active,
 .dark .desktop-segmented-btn--active {
   background: rgba(255, 255, 255, 0.18) !important;
   color: #ff8b8b !important;
@@ -3066,7 +3071,6 @@ onUnmounted(() => {
   transition: background 150ms ease;
 }
 
-:global(.dark) .desktop-compact-range-slider::-webkit-slider-runnable-track,
 .dark .desktop-compact-range-slider::-webkit-slider-runnable-track {
   background: rgba(255, 255, 255, 0.22);
 }
@@ -3075,7 +3079,6 @@ onUnmounted(() => {
   background: rgba(15, 23, 42, 0.16);
 }
 
-:global(.dark) .desktop-compact-range-slider:hover::-webkit-slider-runnable-track,
 .dark .desktop-compact-range-slider:hover::-webkit-slider-runnable-track {
   background: rgba(255, 255, 255, 0.32);
 }
@@ -3090,7 +3093,6 @@ onUnmounted(() => {
   border: none;
 }
 
-:global(.dark) .desktop-compact-range-slider::-moz-range-track,
 .dark .desktop-compact-range-slider::-moz-range-track {
   background: rgba(255, 255, 255, 0.22);
 }
@@ -3099,7 +3101,6 @@ onUnmounted(() => {
   background: rgba(15, 23, 42, 0.16);
 }
 
-:global(.dark) .desktop-compact-range-slider:hover::-moz-range-track,
 .dark .desktop-compact-range-slider:hover::-moz-range-track {
   background: rgba(255, 255, 255, 0.32);
 }
