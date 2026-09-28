@@ -3,7 +3,7 @@ import { playerStorage } from '../../services/storage/playerStorage';
 import { useSettings } from './useSettings';
 import { allowedFooterPositions, createDefaultFooterSettings, effectiveFooterLayout, footerAction, migrateFooterSettings, normalizeFooterSettings, syncFooterBehavior } from './footer';
 import type { FooterActionId, FooterBehavior, FooterMovableId, FooterPlacement, FooterPosition, FooterScene, FooterSettings, FooterSpacing } from '../../types/footer';
-import { placementScene } from './freeFooterLayout';
+import { placementScene, reflowFooterSpacing, resolveFreeFooterLayout, snapshotFooterPositions } from './freeFooterLayout';
 
 export function useFooterSettings() {
   const { settings } = useSettings();
@@ -55,11 +55,14 @@ export function useFooterSettings() {
     if (from < 0 || to < 0 || items[from].position !== items[to].position) return;
     place(scene, id, items[from].position, targetId, from < to);
   };
-  const setSpacing = (scene: FooterScene, patch: Partial<FooterSpacing>) => update(draft => {
+  const setSpacing = (scene: FooterScene, patch: Partial<FooterSpacing>, referenceWidth?: number) => update(draft => {
+    const before = referenceWidth ? resolveFreeFooterLayout(draft, scene, referenceWidth).bar : undefined;
     Object.assign(draft.spacing[draft.linked ? 'main' : scene], patch);
+    if (referenceWidth && before) reflowFooterSpacing(draft, scene, referenceWidth, before, patch);
   });
-  const setPlacement = (scene: FooterScene, id: FooterMovableId, patch: FooterPlacement) => update(draft => {
+  const setPlacement = (scene: FooterScene, id: FooterMovableId, patch: FooterPlacement, referenceWidth?: number) => update(draft => {
     if (id === 'more' && patch.visibility === 'more') return;
+    if (referenceWidth) snapshotFooterPositions(draft, scene, referenceWidth);
     const key = placementScene(draft, scene, id);
     draft.placement[key][id] = { ...draft.placement[key][id], ...patch };
   });

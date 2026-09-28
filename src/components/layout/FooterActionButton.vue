@@ -7,6 +7,7 @@ import type { FooterMovableId } from '../../types/footer';
 const props = defineProps<{
   id: FooterMovableId; label?: string; active?: boolean; disabled?: boolean; menu?: boolean; playing?: boolean;
   playMode?: number; volume?: number; progressHidden?: boolean; pinned?: boolean; expanded?: boolean;
+  editing?: boolean;
 }>();
 defineEmits<{ activate: [event: MouseEvent]; enter: [event: MouseEvent | FocusEvent]; leave: [] }>();
 const label = computed(() => props.label ?? footerAction(props.id).label);
@@ -22,10 +23,10 @@ const highlighted = computed(() => props.id === 'progress' ? props.progressHidde
     :aria-pressed="active"
     :aria-expanded="expanded"
     :disabled="disabled"
-    :data-queue-trigger="id === 'queue' ? 'true' : undefined"
-    :data-footer-action="id"
+    :data-queue-trigger="!editing && id === 'queue' ? 'true' : undefined"
+    :data-footer-action="editing ? undefined : id"
     class="footer-action rounded-md transition-colors disabled:cursor-default disabled:opacity-30"
-    :class="[menu ? 'flex w-full items-center gap-3 px-3 py-2 text-left text-sm' : ['flex shrink-0 items-center justify-center', id === 'play' ? 'h-11 w-11' : 'h-8 w-8'], highlighted ? 'text-[#EC4141]' : id === 'play' && !menu ? 'text-current' : 'text-current opacity-80 hover:opacity-100']"
+    :class="[{ 'footer-action--play': id === 'play' && !menu }, menu ? 'flex w-full items-center gap-3 px-3 py-2 text-left text-sm' : ['flex shrink-0 items-center justify-center', id === 'play' ? 'h-11 w-11' : 'h-8 w-8'], highlighted ? 'text-[#EC4141]' : id === 'play' && !menu ? 'text-current' : 'text-current opacity-80 hover:opacity-100']"
     @mousedown.stop
     @click.stop="$emit('activate', $event)"
     @mouseenter="$emit('enter', $event)"
@@ -40,4 +41,6 @@ const highlighted = computed(() => props.id === 'progress' ? props.progressHidde
 
 <style scoped>
 .footer-action:hover { background: color-mix(in srgb, currentColor 7%, transparent); }
+.footer-action.footer-action--play { border-radius:50%; background:color-mix(in srgb, currentColor 7%, transparent); border:1px solid color-mix(in srgb, currentColor 4%, transparent); }
+.footer-action.footer-action--play:hover { background:color-mix(in srgb, currentColor 12%, transparent); }
 </style>

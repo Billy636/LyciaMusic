@@ -1,24 +1,36 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import { MoveHorizontal, RotateCcw, X } from 'lucide-vue-next';
-import { storeToRefs } from 'pinia';
-import { usePlaybackStore } from '../../features/playback/store';
 import { useFooterSettings } from '../../features/settings/useFooterSettings';
 import { footerAction } from '../../features/settings/footer';
 import { footerButtonWidth, footerDropPosition, resolveFreeFooterLayout } from '../../features/settings/freeFooterLayout';
 import type { FooterMovableId, FooterPlacement, FooterScene } from '../../types/footer';
 import FooterIcon from '../layout/FooterIcon.vue';
+import FooterActionButton from '../layout/FooterActionButton.vue';
+import FooterSongInfo from '../layout/FooterSongInfo.vue';
+import { footerViewport, footerEditingScene, footerLivePresentation as live } from '../layout/footerPresentation';
 
 const props = defineProps<{ scene: FooterScene }>();
 defineEmits<{ reset: [] }>();
 const { footer, setPlacement, setSpacing } = useFooterSettings();
-const { currentSong, currentCover } = storeToRefs(usePlaybackStore());
 const root = ref<HTMLElement | null>(null), bar = ref<HTMLElement | null>(null), menu = ref<HTMLElement | null>(null);
-const width = ref(800);
+const viewport = ref<HTMLElement | null>(null);
+const previewWidth = ref(800);
+const width = computed(() => footerViewport.value.width || previewWidth.value);
+const previewScale = computed(() => Math.min(1, previewWidth.value / Math.max(1, width.value)));
 const layout = computed(() => resolveFreeFooterLayout(footer.value, props.scene, width.value));
 const behavior = computed(() => footer.value.behavior[props.scene]);
 const spacing = computed(() => footer.value.spacing[footer.value.linked ? 'main' : props.scene]);
 const spacingControlId = useId();
+const spacingControls = [
+  { key: 'controls', label: '播放按钮间距', min: 8, max: 40, default: 24, hint: '仅调整上一首、播放/暂停、下一首之间的间距' },
+  { key: 'utilities', label: '功能按钮间距', min: 0, max: 24, default: 8, hint: '调整播放模式、播放队列、音量、歌词、均衡器等功能按钮的间距' },
+] as const;
+const previewIconProps = (id: FooterMovableId) => ({
+  id: (id === 'play' && live.value.playing ? 'pause' : id) as FooterMovableId | 'pause',
+  active: live.value.active[id], playMode: live.value.playMode, volume: live.value.volume,
+  pinned: !behavior.value.autoHide, progressHidden: behavior.value.progress === 'hidden',
+});
 const menuId = ref<FooterMovableId | null>(null);
 const menuLeft = ref(0), menuTop = ref(0);
 let menuAnchor: HTMLElement | null = null;
@@ -45,7 +57,7 @@ async function openMenu(id: FooterMovableId, anchor: HTMLElement) {
 function choose(visibility: FooterPlacement['visibility']) {
   const id = menuId.value;
   if (!id || !visibility) return;
-  setPlacement(props.scene, id, { visibility });
+  setPlacement(props.scene, id, { visibility }, width.value);
   closeMenu(true);
 }
 function click(event: MouseEvent) {
@@ -75,7 +87,7 @@ function updateDrop() {
   }
   const rect = bar.value.getBoundingClientRect();
   if (session.x < rect.left || session.x > rect.right || session.y < rect.top || session.y > rect.bottom) return;
-  const position = footerDropPosition(footer.value, props.scene, width.value, session.id, session.x - rect.left);
+  const position = footerDropPosition(footer.value, props.scene, width.value, session.id, (session.x - rect.left) / previewScale.value);
   if (position) drop.value = { visibility: 'bar', ...position };
 }
 function move(event: PointerEvent) {
@@ -97,7 +109,7 @@ function finish(event: PointerEvent) {
   cancel();
   if (!session.active) { void openMenu(session.id, session.anchor); return; }
   if (!target) return;
-  setPlacement(props.scene, session.id, { visibility: target.visibility, ...(target.normalized !== undefined ? { x: target.normalized } : {}) });
+  setPlacement(props.scene, session.id, { visibility: target.visibility, ...(target.normalized !== undefined ? { x: target.normalized } : {}) }, width.value);
 }
 function keyboard(event: KeyboardEvent) {
   if (event.key === 'Escape' && (drag.value || menuId.value)) { event.preventDefault(); event.stopPropagation(); cancel(); closeMenu(true); return; }
@@ -107,19 +119,24 @@ function keyboard(event: KeyboardEvent) {
   if (!item) return;
   event.preventDefault(); event.stopPropagation();
   const target = footerDropPosition(footer.value, props.scene, width.value, id, item.x + (event.key === 'ArrowLeft' ? -8 : 8), false);
-  if (target) setPlacement(props.scene, id, { visibility: 'bar', x: target.normalized });
+  if (target) setPlacement(props.scene, id, { visibility: 'bar', x: target.normalized }, width.value);
 }
 function outside(event: PointerEvent) {
   if (menuId.value && !menu.value?.contains(event.target as Node) && !(event.target as Element).closest('[data-editor-action]')) closeMenu();
 }
 function interrupt() { cancel(); closeMenu(); }
 watch(() => JSON.stringify([props.scene, footer.value.placement, footer.value.spacing, footer.value.behavior[props.scene]]), interrupt);
+watch(() => props.scene, scene => { footerEditingScene.value = scene; }, { immediate: true });
+watch(width, cancel);
+onActivated(() => { footerEditingScene.value = props.scene; });
+onDeactivated(() => { footerEditingScene.value = null; interrupt(); });
 onMounted(() => {
-  observer = new ResizeObserver(entries => { width.value = entries[0].contentRect.width; cancel(); });
-  if (bar.value) observer.observe(bar.value);
+  observer = new ResizeObserver(entries => { previewWidth.value = entries[0].contentRect.width; cancel(); });
+  if (viewport.value) observer.observe(viewport.value);
   window.addEventListener('pointerdown', outside); window.addEventListener('blur', interrupt); window.addEventListener('resize', interrupt);
 });
 onBeforeUnmount(() => {
+  footerEditingScene.value = null;
   cancel(); observer?.disconnect(); window.removeEventListener('pointerdown', outside); window.removeEventListener('blur', interrupt); window.removeEventListener('resize', interrupt);
 });
 </script>
@@ -127,54 +144,57 @@ onBeforeUnmount(() => {
 <template>
   <section ref="root" class="free-footer-editor" tabindex="-1" aria-label="直接摆放底栏按钮" @pointerdown="begin" @pointermove="move" @pointerup="finish" @pointercancel="cancel" @lostpointercapture="cancel" @click="click" @keydown="keyboard" @dragstart.prevent>
     <div class="editor-toolbar">
-      <p class="editor-caption">按住按钮直接拖动，松手放下。点击按钮可隐藏或收入更多。</p>
+      <p class="editor-caption">按实际底栏等比预览。拖动调整位置，点击可隐藏或收入更多。</p>
       <button type="button" class="editor-reset" @click="$emit('reset')">恢复原版布局</button>
     </div>
-    <div ref="bar" class="free-bar" :class="{ 'detail-scene': scene === 'detail', dragging: drag?.active }">
-      <div v-if="behavior.progress !== 'hidden'" class="preview-progress"><span :style="{ backgroundColor: behavior.progressColor || 'rgb(212 212 216 / .3)' }"></span></div>
-      <div v-if="behavior.info !== 'none'" class="preview-song" :style="{ width: `${layout.infoWidth}px` }">
-        <img v-if="currentCover && behavior.info !== 'time'" :src="currentCover" alt="" draggable="false" />
-        <div v-else-if="behavior.info === 'cover'" class="preview-cover-placeholder" aria-label="封面"></div>
-        <span v-if="behavior.info !== 'cover'">{{ behavior.info === 'time' ? '01:28 / 04:06' : currentSong?.title || currentSong?.name || '歌曲信息' }}</span>
+    <div ref="viewport" class="free-bar" :class="{ 'detail-scene': live.expanded, dragging: drag?.active }"
+      :style="{ height: `${footerViewport.height * previewScale + 24}px` }">
+      <div ref="bar" class="preview-canvas" :class="live.expanded ? 'text-white' : 'text-gray-800 dark:text-white'"
+        :style="{ width: `${width}px`, height: `${footerViewport.height}px`, transform: `translateX(-50%) scale(${previewScale})` }">
+      <div v-if="behavior.progress !== 'hidden'" class="preview-progress" :class="{ 'hover-only': behavior.progress === 'hover' }"><div class="preview-progress-track"><span :style="{ width: `${live.progress}%`, backgroundColor: behavior.progressColor || 'rgb(212 212 216 / .3)' }"></span></div></div>
+      <div class="preview-song" :style="{ width: `${layout.infoWidth}px` }">
+        <FooterSongInfo preview :mode="behavior.info" :song="live.song" :cover="live.cover" :expanded="live.expanded"
+          :current-time="live.currentTime" :total-time="live.totalTime" :download-label="live.downloadLabel" />
       </div>
-      <button v-for="item in layout.bar" :key="item.id" type="button" class="preview-button" :class="{ 'play-control': item.id === 'play', moving: drag?.active && drag.id === item.id }"
-        :style="{ left: `${item.x}px`, width: `${item.width}px`, height: `${item.width}px` }" :data-editor-action="item.id" :aria-label="`编辑${footerAction(item.id).label}`" :title="`${footerAction(item.id).label}：直接拖动或点击`">
-        <FooterIcon :id="item.id" :pinned="!behavior.autoHide" :progress-hidden="behavior.progress === 'hidden'" />
-      </button>
-      <div v-if="drag?.active && drop?.visibility === 'bar'" class="drop-ghost" :class="{ 'play-control': drag.id === 'play' }" :style="{ left: `${drop.x}px`, width: `${footerButtonWidth(drag.id)}px`, height: `${footerButtonWidth(drag.id)}px` }" aria-hidden="true"><FooterIcon :id="drag.id" /></div>
+      <FooterActionButton v-for="item in layout.bar" :key="item.id" :id="item.id" editing class="preview-button" :class="{ moving: drag?.active && drag.id === item.id }"
+        :style="{ left: `${item.x}px`, width: `${item.width}px`, height: `${item.width}px` }" :data-editor-action="item.id" :label="`编辑${footerAction(item.id).label}`"
+        :active="live.active[item.id]" :playing="live.playing" :play-mode="live.playMode" :volume="live.volume" :pinned="!behavior.autoHide" :progress-hidden="behavior.progress === 'hidden'"
+        @activate="event => { if (event.detail === 0) openMenu(item.id, event.currentTarget as HTMLElement); }" />
+      <div v-if="drag?.active && drop?.visibility === 'bar'" class="drop-ghost" :class="{ 'play-control': drag.id === 'play' }" :style="{ left: `${drop.x}px`, width: `${footerButtonWidth(drag.id)}px`, height: `${footerButtonWidth(drag.id)}px` }" aria-hidden="true"><FooterIcon v-bind="previewIconProps(drag.id)" /></div>
+      </div>
     </div>
     <div class="editor-pools">
       <div v-for="pool in (['more', 'hidden'] as const)" :key="pool" class="editor-pool" :data-editor-pool="pool" :class="{ targeted: drag?.active && drop?.visibility === pool }">
         <div class="pool-title">{{ pool === 'more' ? '更多' : '已隐藏' }}</div>
         <div class="pool-items">
-          <button v-for="item in layout[pool]" :key="item.id" type="button" class="pool-button" :data-editor-action="item.id" :aria-label="`编辑${footerAction(item.id).label}`"><FooterIcon :id="item.id" :pinned="!behavior.autoHide" :progress-hidden="behavior.progress === 'hidden'" /><span>{{ footerAction(item.id).label }}</span></button>
+          <button v-for="item in layout[pool]" :key="item.id" type="button" class="pool-button" :data-editor-action="item.id" :aria-label="`编辑${footerAction(item.id).label}`"><FooterIcon v-bind="previewIconProps(item.id)" /><span>{{ footerAction(item.id).label }}</span></button>
           <span v-if="!layout[pool].length" class="empty-pool">拖入按钮，或从这里拖回底栏</span>
         </div>
       </div>
     </div>
-    <div class="spacing-row">
-      <label :for="spacingControlId" class="spacing-label">
+    <div v-for="control in spacingControls" :key="control.key" class="spacing-row" :title="control.hint">
+      <label :for="`${spacingControlId}-${control.key}`" class="spacing-label">
         <span class="spacing-icon"><MoveHorizontal class="h-4 w-4" aria-hidden="true" /></span>
-        <span>按钮最小间距</span>
+        <span>{{ control.label }}</span>
       </label>
       <div class="spacing-control">
         <span class="spacing-endpoint" aria-hidden="true">紧凑</span>
-        <input :id="spacingControlId" class="spacing-slider" type="range" min="0" max="24" step="1"
-          :value="spacing.utilities" :aria-valuetext="`${spacing.utilities} 像素`"
-          :style="{ '--spacing-fill': `${spacing.utilities / 24 * 100}%` }"
-          @input="setSpacing(scene, { utilities: Number(($event.target as HTMLInputElement).value) })" />
+        <input :id="`${spacingControlId}-${control.key}`" class="spacing-slider" type="range" :min="control.min" :max="control.max" step="1"
+          :value="spacing[control.key]" :aria-valuetext="`${spacing[control.key]} 像素`"
+          :style="{ '--spacing-fill': `${(spacing[control.key] - control.min) / (control.max - control.min) * 100}%` }"
+          @input="setSpacing(scene, { [control.key]: Number(($event.target as HTMLInputElement).value) }, width)" />
         <span class="spacing-endpoint" aria-hidden="true">宽松</span>
       </div>
-      <output :for="spacingControlId" class="spacing-value">{{ spacing.utilities }}<span>px</span></output>
-      <button type="button" class="spacing-reset" title="恢复默认间距" aria-label="恢复默认间距"
-        :disabled="spacing.utilities === 8 && spacing.controls === 24"
-        @click="setSpacing(scene, { controls: 24, utilities: 8 })">
+      <output :for="`${spacingControlId}-${control.key}`" class="spacing-value">{{ spacing[control.key] }}<span>px</span></output>
+      <button type="button" class="spacing-reset" :title="`恢复默认${control.label}`" :aria-label="`恢复默认${control.label}`"
+        :disabled="spacing[control.key] === control.default"
+        @click="setSpacing(scene, { [control.key]: control.default }, width)">
         <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
       </button>
     </div>
     <p v-if="dragHint" class="editor-status" role="status" aria-live="polite">{{ dragHint }}</p>
     <div v-if="menuId" ref="menu" class="editor-menu" :style="{ left: `${menuLeft}px`, top: `${menuTop}px` }" :aria-label="`${footerAction(menuId).label}选项`" @pointerdown.stop>
-      <div class="menu-heading"><FooterIcon :id="menuId" /><span>{{ footerAction(menuId).label }}</span><button type="button" aria-label="关闭按钮选项" @click.stop="closeMenu(true)"><X class="h-4 w-4" /></button></div>
+      <div class="menu-heading"><FooterIcon v-bind="previewIconProps(menuId)" /><span>{{ footerAction(menuId).label }}</span><button type="button" aria-label="关闭按钮选项" @click.stop="closeMenu(true)"><X class="h-4 w-4" /></button></div>
       <button v-if="!layout.bar.some(item => item.id === menuId)" type="button" class="menu-option" @click.stop="choose('bar')">放回底栏</button>
       <button v-if="menuId !== 'more' && !layout.more.some(item => item.id === menuId)" type="button" class="menu-option" @click.stop="choose('more')">放入更多</button>
       <button v-if="!layout.hidden.some(item => item.id === menuId)" type="button" class="menu-option" @click.stop="choose('hidden')">隐藏</button>
@@ -191,15 +211,14 @@ onBeforeUnmount(() => {
 .free-bar { position:relative; height:104px; border-radius:12px; background:rgb(128 128 128 / .035); outline:1px solid rgb(128 128 128 / .15); }
 .detail-scene { background:linear-gradient(125deg,rgb(128 100 150 / .14),rgb(60 120 160 / .14)); }
 .free-bar.dragging { background-image:radial-gradient(rgb(128 128 128 / .2) 1px,transparent 1px); background-size:12px 12px; }
-.preview-progress { position:absolute; top:0; left:16px; right:16px; height:2px; background:rgb(128 128 128 / .15); }
-.preview-progress>span { display:block; height:100%; width:36%; background:#ec4141; }
-.preview-song { position:absolute; left:16px; top:50%; transform:translateY(-50%); display:flex; gap:8px; align-items:center; min-width:0; font-size:12px; color:#6b7280; }
-.preview-song img { width:36px; height:36px; border-radius:6px; flex-shrink:0; }
-.preview-cover-placeholder { width:36px; height:36px; border-radius:6px; flex-shrink:0; background:rgb(128 128 128 / .12); }
-.preview-song span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.preview-canvas { position:absolute; left:50%; top:12px; transform-origin:top center; }
+.preview-progress { position:absolute; top:-10px; left:0; right:0; height:22px; }
+.preview-progress-track { position:absolute; top:50%; left:0; right:0; height:2px; transform:translateY(-50%); }
+.preview-progress-track>span { display:block; height:100%; border-radius:999px; }
+.preview-progress.hover-only:not(:hover) { opacity:0; }
+.preview-song { position:absolute; left:16px; top:0; height:100%; min-width:0; }
 .preview-button,.drop-ghost { position:absolute; top:50%; transform:translate(-50%,-50%); display:flex; align-items:center; justify-content:center; border-radius:6px; }
 .preview-button { cursor:grab; touch-action:none; }
-.preview-button:hover { background:rgb(236 65 65 / .07); }
 .play-control { border-radius:50%; background:rgb(128 128 128 / .09); }
 .moving { opacity:.2; }
 .drop-ghost { outline:2px solid #ec4141; outline-offset:4px; color:#ec4141; pointer-events:none; }
@@ -253,7 +272,7 @@ onBeforeUnmount(() => {
 .menu-option { display:block; width:100%; padding:8px 12px; text-align:left; border-radius:5px; font-size:13px; }
 .menu-option:hover { background:rgb(128 128 128 / .08); }
 .dark .editor-menu { background:#242428; }
-.dark :is(.editor-caption,.preview-song,.pool-title,.empty-pool) { color:#9ca3af; }
+.dark :is(.editor-caption,.pool-title,.empty-pool) { color:#9ca3af; }
 @media(max-width:760px) {
   .spacing-row { grid-template-columns:minmax(0, 1fr) auto auto; gap:10px 12px; }
   .spacing-label { grid-column:1; grid-row:1; }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue';
 import { useRoute } from 'vue-router';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { X } from 'lucide-vue-next';
@@ -7,14 +7,15 @@ import { useLibraryCollections } from '../../features/collections/useLibraryColl
 import { useLyrics } from '../../composables/lyrics';
 import { usePlaybackController } from '../../features/playback/usePlaybackController';
 import { useFooterSettings } from '../../features/settings/useFooterSettings';
-import { effectiveFooterLayout, footerAction } from '../../features/settings/footer';
+import { effectiveFooterLayout, footerAction, FOOTER_ACTIONS } from '../../features/settings/footer';
 import { resolveFreeFooterLayout } from '../../features/settings/freeFooterLayout';
-import { footerCoverVisible } from './footerPresentation';
+import { footerCoverVisible, footerViewport, footerEditingScene, footerLivePresentation } from './footerPresentation';
 import { useSongHighlights } from '../../features/highlights/useSongHighlights';
 import { useToast } from '../../composables/toast';
 import type { RemoteDownloadProgress } from '../../types';
 import type { FooterMovableId, FooterScene } from '../../types/footer';
 import FooterActionButton from './FooterActionButton.vue';
+import FooterSongInfo from './FooterSongInfo.vue';
 import AudioVisualizer from '../player/AudioVisualizer.vue';
 import SongHighlightMarkers from '../player/SongHighlightMarkers.vue';
 import FooterContextMenu from '../overlays/FooterContextMenu.vue';
@@ -33,13 +34,10 @@ const { footer, setBehavior, toggleProgress } = useFooterSettings();
 const route = useRoute();
 const footerRef = ref<HTMLElement | null>(null);
 const footerWidth = ref(window.innerWidth);
-const scene = computed<FooterScene>(() => showPlayerDetail.value ? 'detail' : 'main');
+const scene = computed<FooterScene>(() => footerEditingScene.value ?? (showPlayerDetail.value ? 'detail' : 'main'));
 const behavior = computed(() => footer.value.behavior[scene.value]);
 const groups = computed(() => resolveFreeFooterLayout(footer.value, scene.value, footerWidth.value));
 const hasCover = computed(() => behavior.value.info === 'cover' || behavior.value.info === 'song' || behavior.value.info === 'both');
-// Retain the outgoing song metadata while it slides out of the time-only view.
-const songInfoMode = computed<'song' | 'both'>(previous =>
-  behavior.value.info === 'song' || behavior.value.info === 'both' ? behavior.value.info : previous ?? 'song');
 const isProgressHidden = computed(() => behavior.value.progress === 'hidden');
 const isPinned = computed(() => !behavior.value.autoHide);
 const isVisualizerEnabled = computed(() => behavior.value.visualizer);
@@ -331,16 +329,33 @@ const handleFooterMouseEnter = () => { pointerInside.value = true; clearIdleTime
 const handleFooterMouseLeave = () => { pointerInside.value = false; startIdleTimer(); };
 const handleFooterFocusOut = () => { void nextTick(startIdleTimer); };
 watch([scene, () => behavior.value.autoHide, () => route.path, popup, showContextMenu, showProgressContextMenu, isDraggingProgress, showPlaylist, showLyricsPlayerSettingsPanel], startIdleTimer);
-watch([hasCover, isIdle, scene], () => {
-  footerCoverVisible.value = scene.value === 'main' && hasCover.value && !isIdle.value;
+watch([hasCover, isIdle, showPlayerDetail], () => {
+  footerCoverVisible.value = !showPlayerDetail.value && hasCover.value && !isIdle.value;
 }, { immediate: true });
 
 let resizeObserver: ResizeObserver | undefined;
+watchEffect(() => {
+  footerLivePresentation.value = {
+    song: currentSong.value, cover: currentCover.value, playing: isPlaying.value,
+    playMode: playMode.value, volume: volume.value, expanded: showPlayerDetail.value,
+    currentTime: currentTimeStr.value, totalTime: totalTimeStr.value, progress: displayProgress.value,
+    downloadLabel: isCurrentRemoteDownloadActive.value ? remoteDownloadText.value : '',
+    active: Object.fromEntries([...FOOTER_ACTIONS.map(item => item.id), 'previous', 'play', 'next']
+      .map(id => [id, actionActive(id as FooterMovableId)])),
+  };
+});
 let unlistenRemoteDownload: UnlistenFn | undefined;
 let disposed = false;
 const onWindowResize = () => { closePopup(); showProgressContextMenu.value = false; };
 onMounted(async () => {
-  resizeObserver = new ResizeObserver(entries => { footerWidth.value = entries[0].borderBoxSize?.[0]?.inlineSize ?? entries[0].contentRect.width; });
+  const measureFooter = () => {
+    if (!footerRef.value) return;
+    const { clientWidth: width, clientHeight: height } = footerRef.value;
+    footerWidth.value = width;
+    footerViewport.value = { width, height };
+  };
+  measureFooter();
+  resizeObserver = new ResizeObserver(measureFooter);
   if (footerRef.value) resizeObserver.observe(footerRef.value);
   window.addEventListener('pointermove', onGlobalPointerMove);
   window.addEventListener('pointerup', onGlobalPointerUp);
@@ -390,33 +405,13 @@ onUnmounted(() => {
     </div>
     <div class="footer-content h-full" :class="{ 'is-idle': isIdle }" :inert="isIdle || undefined">
       <div class="footer-info-area" :style="{ width: `${groups.infoWidth}px` }">
-        <div v-if="behavior.info !== 'none'" data-player-song-info class="flex h-full min-w-0 flex-1 items-center"
-          :class="{ 'cursor-pointer': currentSong }" @click="handleSongInfoClick" @contextmenu="handleContextMenu">
-          <!-- Keep the 48px cover anchor and 12px gap so text can slide into their space. -->
-          <button type="button" data-footer-cover title="切换播放页" class="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg"
-            :class="{ 'opacity-0 pointer-events-none': !hasCover }" :inert="!hasCover || undefined" :aria-hidden="!hasCover" @click.stop="handleOpenDetail">
-            <!-- The shared animated cover occupies this anchor on the main page. -->
-            <img v-if="showPlayerDetail && currentCover && hasCover" :src="currentCover" class="h-full w-full object-cover" alt="" draggable="false" />
-          </button>
-          <div v-if="behavior.info !== 'cover'" class="footer-info-text relative ml-3 h-10 min-w-0 flex-1"
-            :class="{ 'is-time-only': !hasCover }">
-            <div class="footer-info-state footer-info-song absolute inset-0 flex flex-col justify-center"
-              :class="{ 'is-hidden': !hasCover }" :aria-hidden="!hasCover">
-              <div class="truncate text-sm font-semibold">{{ currentSong ? currentSong.title || currentSong.name.replace(/\.[^/.]+$/, '') : '听我想听的音乐' }}</div>
-              <div class="truncate text-xs" :class="[showPlayerDetail ? 'text-white/60' : 'text-gray-500 dark:text-gray-400', { 'tabular-nums': songInfoMode === 'both' }]">{{ isCurrentRemoteDownloadActive ? remoteDownloadText : songInfoMode === 'song' ? currentSong?.artist || 'My Music' : `${currentTimeStr} / ${totalTimeStr}` }}</div>
-            </div>
-            <div class="footer-info-state footer-info-time absolute inset-0 flex flex-col justify-center"
-              :class="[showPlayerDetail ? 'text-white/90' : 'text-gray-500 dark:text-gray-400', { 'is-hidden': hasCover }]" :aria-hidden="hasCover">
-              <div class="truncate text-[12px] font-semibold tabular-nums tracking-wide">
-                <template v-if="isCurrentRemoteDownloadActive">{{ remoteDownloadText }}</template>
-                <template v-else>{{ currentTimeStr }} <span class="mx-1 opacity-50">/</span> {{ totalTimeStr }}</template>
-              </div>
-            </div>
-          </div>
-        </div>
+        <FooterSongInfo :mode="behavior.info" :song="currentSong" :cover="currentCover"
+          :current-time="currentTimeStr" :total-time="totalTimeStr" :expanded="showPlayerDetail"
+          :download-label="isCurrentRemoteDownloadActive ? remoteDownloadText : ''"
+          @click="handleSongInfoClick" @contextmenu="handleContextMenu" @toggle="handleOpenDetail" />
       </div>
       <FooterActionButton v-for="item in groups.bar" :id="item.id" :key="item.id" class="footer-free-button"
-        :class="{ 'play-button': item.id === 'play' }" :style="{ left: `${item.x}px`, width: `${item.width}px`, height: `${item.width}px` }"
+        :style="{ left: `${item.x}px`, width: `${item.width}px`, height: `${item.width}px` }"
         :label="actionLabel(item.id)" :active="actionActive(item.id)" :playing="isPlaying"
         :expanded="item.id === 'more' ? popup === 'more' : undefined" :disabled="item.id === 'favorite' && !currentSong"
         :play-mode="playMode" :volume="volume" :progress-hidden="isProgressHidden" :pinned="isPinned"
@@ -467,21 +462,10 @@ onUnmounted(() => {
 .footer-info-area { position: absolute; top: 0; left: 16px; height: 100%; min-width: 0; }
 .footer-free-button { position: absolute; top: 50%; transform: translate(-50%, -50%); }
 .footer-content.is-idle { opacity: 0; pointer-events: none; }
-.footer-info-text { transition: transform 400ms cubic-bezier(0.4, 0, 0.2, 1); }
-.footer-info-text.is-time-only { transform: translateX(-60px); }
-.footer-info-state { transition: opacity 400ms cubic-bezier(0.4, 0, 0.2, 1), transform 400ms cubic-bezier(0.4, 0, 0.2, 1); }
-.footer-info-state.is-hidden { opacity: 0; pointer-events: none; }
-.footer-info-song.is-hidden { transform: translateY(16px); }
-.footer-info-time.is-hidden { transform: translateY(-16px); }
-.play-button { border-radius: 50%; background: color-mix(in srgb, currentColor 7%, transparent); border: 1px solid color-mix(in srgb, currentColor 4%, transparent); }
-.play-button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
 .progress-track { transition: height 150ms ease, opacity 150ms ease; }
 .progress-thumb { opacity: 0; transition: opacity 150ms ease; }
 .footer-progress:hover .progress-track, .footer-progress:focus-visible .progress-track, .footer-progress.dragging .progress-track { height: 5px; }
 .footer-progress:hover .progress-thumb, .footer-progress:focus-visible .progress-thumb, .footer-progress.dragging .progress-thumb { opacity: 1; }
 .footer-progress.hover-only:not(:hover):not(:focus-visible):not(.dragging) { opacity: 0; }
 @media (prefers-reduced-motion: reduce) { .footer-content, .progress-track, .progress-thumb { transition: none; } }
-@media (prefers-reduced-motion: reduce) {
-  .footer-info-text, .footer-info-state { transition: none; }
-}
 </style>

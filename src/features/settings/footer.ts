@@ -157,9 +157,9 @@ export function effectiveFooterLayout(settings: FooterSettings, scene: FooterSce
 export function footerGeometry(settings: FooterSettings, scene: FooterScene) {
   const spacing = settings.spacing[settings.linked ? 'main' : scene];
   const core = 2 * FOOTER_BUTTON_SIZE + FOOTER_PLAY_SIZE + 2 * spacing.controls;
-  const wing = 2 * FOOTER_BUTTON_SIZE + spacing.controls;
+  const wing = 2 * FOOTER_BUTTON_SIZE + spacing.utilities;
   return { core, wing, controlGap: spacing.controls, sideGap: spacing.utilities,
-    center: core + 2 * (wing + spacing.controls), button: FOOTER_BUTTON_SIZE, padding: 16, regionGap: 16, rightInset: 8 };
+    center: core + 2 * (wing + spacing.utilities), button: FOOTER_BUTTON_SIZE, padding: 16, regionGap: 16, rightInset: 8 };
 }
 export function footerLayoutStyle(settings: FooterSettings, scene: FooterScene) {
   const geometry = footerGeometry(settings, scene);
