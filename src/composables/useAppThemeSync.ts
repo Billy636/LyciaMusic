@@ -1,7 +1,7 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue';
-import { syncWindowShadow, useWindowMaterial } from './windowMaterial';
+import { useWindowMaterial } from './windowMaterial';
 import { useThemeSettings } from './useThemeSettings';
 import { windowApi } from '../services/tauri/windowApi';
 
@@ -20,8 +20,6 @@ export function useAppThemeSync() {
   let restoreSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let unlistenFocusChanged: UnlistenFn | null = null;
   let unlistenThemeChanged: UnlistenFn | null = null;
-  let unlistenResized: UnlistenFn | null = null;
-  let disposed = false;
   let mediaQueryList: MediaQueryList | null = null;
   let syncGeneration = 0;
   let skipNextFocusRestore = false;
@@ -191,15 +189,6 @@ export function useAppThemeSync() {
   );
 
   onMounted(() => {
-    void appWindow.onResized(() => {
-      void syncWindowShadow();
-    }).then((unlisten) => {
-      if (disposed) unlisten();
-      else unlistenResized = unlisten;
-    }).catch((error) => {
-      console.warn('Failed to listen for window shadow updates:', error);
-    });
-
     if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
       mediaQueryList = window.matchMedia('(prefers-color-scheme: dark)');
       if (typeof mediaQueryList.addEventListener === 'function') {
@@ -225,9 +214,6 @@ export function useAppThemeSync() {
   });
 
   onBeforeUnmount(() => {
-    disposed = true;
-    unlistenResized?.();
-    unlistenResized = null;
     if (mediaQueryList) {
       if (typeof mediaQueryList.removeEventListener === 'function') {
         mediaQueryList.removeEventListener('change', handleMediaThemeChange);
