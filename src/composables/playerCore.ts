@@ -30,6 +30,7 @@ import { historyApi } from '../services/tauri/historyApi';
 import { playbackApi } from '../services/tauri/playbackApi';
 import { fileApi } from '../services/tauri/fileApi';
 import { useCollectionsStore } from '../features/collections/store';
+import { usePlaylistSort } from '../features/collections/usePlaylistSort';
 import { useLibraryStore } from '../features/library/store';
 import { useNavigationStore } from '../shared/stores/navigation';
 import { usePlaybackStore } from '../features/playback/store';
@@ -172,8 +173,8 @@ function createPlayerCore() {
   const navigationRefs = storeToRefs(navigationStore);
   const playbackRefs = storeToRefs(playbackStore);
   const uiRefs = storeToRefs(uiStore);
+  const { playlistSortMode, setPlaylistSortMode } = usePlaylistSort();
 
-  const { playlistSortMode } = collectionsRefs;
   const {
     artistSortMode,
     albumSortMode,
@@ -631,6 +632,7 @@ function createPlayerCore() {
 
   const state = {
     ...collectionsRefs,
+    playlistSortMode,
     ...libraryRefs,
     ...navigationRefs,
     ...playbackRefs,
@@ -742,9 +744,7 @@ function createPlayerCore() {
     setAlbumDetailSortMode: (mode: 'track_number' | 'track_number_desc' | 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc') => {
       albumDetailSortMode.value = mode;
     },
-    setPlaylistSortMode: (mode: 'title' | 'name' | 'artist' | 'added_at' | 'custom') => {
-      playlistSortMode.value = mode;
-    },
+    setPlaylistSortMode,
   };
 
   const lifecycle = {

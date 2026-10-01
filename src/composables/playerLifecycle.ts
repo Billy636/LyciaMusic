@@ -157,7 +157,7 @@ const restoreSortSettings = ({
   }
 
   const storedPlaylistSort = playerStorage.getString(playerStorageKeys.playlistSortMode);
-  if (storedPlaylistSort && ['title', 'name', 'artist', 'added_at', 'custom'].includes(storedPlaylistSort)) {
+  if (storedPlaylistSort && ['title', 'name', 'artist', 'added_at', 'added_at_asc', 'custom'].includes(storedPlaylistSort)) {
     playlistSortMode.value = storedPlaylistSort as PlaylistSortMode;
   }
 

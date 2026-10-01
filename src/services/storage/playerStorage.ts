@@ -24,6 +24,7 @@ export const playerStorageKeys = {
   folderSortMode: 'player_folder_sort_mode',
   localSortMode: 'player_local_sort_mode',
   playlistSortMode: 'player_playlist_sort_mode',
+  playlistSortOverrides: 'player_playlist_sort_overrides',
   artistCustomOrder: 'player_artist_custom_order',
   albumCustomOrder: 'player_album_custom_order',
   folderCustomOrder: 'player_folder_custom_order',

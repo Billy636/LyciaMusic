@@ -1,9 +1,12 @@
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { defineStore } from 'pinia';
 
 import type { PlaylistSortMode } from '../../services/storage/playerStorage';
 import type { HistoryItem, Playlist, Song } from '../../types';
 import { useLibraryStore } from '../library/store';
+import { playerStorage, playerStorageKeys } from '../../services/storage/playerStorage';
+import { localStore } from '../../services/storage/localStore';
+import { isPlaylistSortMode } from './playlistSort';
 
 const formatPlaylistDate = () => {
   const now = new Date();
@@ -16,6 +19,23 @@ export const useCollectionsStore = defineStore('collections', () => {
   const playlists = ref<Playlist[]>([]);
   const recentSongs = ref<HistoryItem[]>([]);
   const playlistSortMode = ref<PlaylistSortMode>('custom');
+  const storedOverrides = playerStorage.readObject<Record<string, unknown>>(playerStorageKeys.playlistSortOverrides);
+  const playlistSortOverrides = ref<Record<string, PlaylistSortMode>>(Object.fromEntries(
+    Object.entries(storedOverrides ?? {}).filter((entry): entry is [string, PlaylistSortMode] =>
+      !!entry[0] && isPlaylistSortMode(entry[1])),
+  ));
+  watch(playlistSortOverrides, value => {
+    localStore.setJson(playerStorageKeys.playlistSortOverrides, value);
+  }, { deep: true, flush: 'sync' });
+
+  const getPlaylistSortOverride = (id: string): PlaylistSortMode | undefined =>
+    Object.prototype.hasOwnProperty.call(playlistSortOverrides.value, id) ? playlistSortOverrides.value[id] : undefined;
+  const setPlaylistSortOverride = (id: string, mode: PlaylistSortMode | null) => {
+    if (!playlists.value.some(playlist => playlist.id === id)) return;
+    if (mode === null) delete playlistSortOverrides.value[id];
+    else playlistSortOverrides.value = { ...playlistSortOverrides.value, [id]: mode };
+  };
+  const resetPlaylistSortOverrides = () => { playlistSortOverrides.value = {}; };
 
   const setFavoritePaths = (paths: string[]) => {
     favoritePaths.value = paths;
@@ -46,6 +66,7 @@ export const useCollectionsStore = defineStore('collections', () => {
   };
 
   const deletePlaylist = (id: string) => {
+    delete playlistSortOverrides.value[id];
     const beforeLength = playlists.value.length;
     playlists.value = playlists.value.filter(playlist => playlist.id !== id);
     return beforeLength !== playlists.value.length;
@@ -178,6 +199,10 @@ export const useCollectionsStore = defineStore('collections', () => {
     playlists,
     recentSongs,
     playlistSortMode,
+    playlistSortOverrides,
+    getPlaylistSortOverride,
+    setPlaylistSortOverride,
+    resetPlaylistSortOverrides,
     setFavoritePaths,
     setPlaylists,
     setRecentSongs,

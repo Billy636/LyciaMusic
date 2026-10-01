@@ -357,7 +357,11 @@ export function useSongDrag(
                             // Keep drag behavior consistent with current visual order.
                             const { reordered, changed } = reorderPathOrder(visualPaths, movingPaths, targetPath);
                             if (changed) {
-                                pl.songPaths = reordered;
+                                // Preserve songs hidden by search, pagination or unavailable files.
+                                const visiblePaths = new Set(visualPaths);
+                                let visibleIndex = 0;
+                                pl.songPaths = pl.songPaths.map(path => visiblePaths.has(path)
+                                    ? reordered[visibleIndex++] ?? path : path);
                                 setPlaylistSortMode('custom');
                             }
                         }

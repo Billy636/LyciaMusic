@@ -65,6 +65,19 @@
         </button>
       </div>
 
+      <div class="folder-scope-setting flex-wrap gap-3">
+        <div class="folder-scope-copy">
+          <div class="folder-scope-title">歌单默认排序</div>
+          <div id="playlist-sort-description" class="folder-scope-desc">用于选择“跟随默认”的歌单，不影响已单独设置的歌单。</div>
+        </div>
+        <div class="w-[210px] shrink-0">
+          <SettingsSelect label="歌单默认排序" hide-label :model-value="collectionsStore.playlistSortMode"
+            :options="playlistSortOptions" described-by="playlist-sort-description" @update:model-value="setDefaultSort" />
+        </div>
+        <button type="button" class="text-xs app-text-secondary hover:underline disabled:opacity-40 disabled:no-underline"
+          :disabled="!hasSortOverrides" @click="showResetSortConfirm = true">所有歌单恢复跟随默认</button>
+      </div>
+
       <div v-if="libraryFolders.length > 0" class="library-list">
         <div v-for="folder in libraryFolders" :key="folder.path" class="library-item">
           <div class="folder-icon">
@@ -113,6 +126,10 @@
       </div>
     </div>
 
+    <ConfirmModal :visible="showResetSortConfirm" title="所有歌单恢复跟随默认"
+      content="将清除所有歌单的独立排序设置，并使用默认排序。不会删除歌曲或各歌单保存的手动排列顺序。"
+      @confirm="collectionsStore.resetPlaylistSortOverrides(); showResetSortConfirm = false"
+      @cancel="showResetSortConfirm = false" />
     <ConfirmModal
       :visible="showConfirm"
       title="移除文件夹"
@@ -134,6 +151,16 @@ import {
   useSettingsStore,
 } from '../../features/settings/store';
 import ConfirmModal from '../overlays/ConfirmModal.vue';
+import SettingsSelect from './SettingsSelect.vue';
+import { useCollectionsStore } from '../../features/collections/store';
+import { isPlaylistSortMode, playlistSortOptions } from '../../features/collections/playlistSort';
+
+const collectionsStore = useCollectionsStore();
+const showResetSortConfirm = ref(false);
+const hasSortOverrides = computed(() => Object.keys(collectionsStore.playlistSortOverrides).length > 0);
+const setDefaultSort = (value: string) => {
+  if (isPlaylistSortMode(value)) collectionsStore.playlistSortMode = value;
+};
 
 const { addLibraryFolderLinked, removeLibraryFolderLinked } = usePlayer();
 const libraryStore = useLibraryStore();

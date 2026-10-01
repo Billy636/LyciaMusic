@@ -1,15 +1,13 @@
 import { storeToRefs } from 'pinia';
-import { useCollectionsStore } from '../features/collections/store';
 import { useLibraryStore } from '../features/library/store';
 import { useNavigationStore } from '../shared/stores/navigation';
 import { useUiStore } from '../shared/stores/ui';
+import { usePlaylistSort } from '../features/collections/usePlaylistSort';
 
 export function usePlayerViewState() {
-  const collectionsStore = useCollectionsStore();
   const libraryStore = useLibraryStore();
   const navigationStore = useNavigationStore();
   const uiStore = useUiStore();
-  const collectionsRefs = storeToRefs(collectionsStore);
   const libraryRefs = storeToRefs(libraryStore);
   const navigationRefs = storeToRefs(navigationStore);
   const uiRefs = storeToRefs(uiStore);
@@ -26,9 +24,7 @@ export function usePlayerViewState() {
     libraryRefs.albumDetailSortMode.value = mode;
   };
 
-  const setPlaylistSortMode = (mode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'custom') => {
-    collectionsRefs.playlistSortMode.value = mode;
-  };
+  const { playlistSortMode, setPlaylistSortMode } = usePlaylistSort();
 
   return {
     ...navigationRefs,
@@ -36,7 +32,7 @@ export function usePlayerViewState() {
     folderSortMode: libraryRefs.folderSortMode,
     localSortMode: libraryRefs.localSortMode,
     albumDetailSortMode: libraryRefs.albumDetailSortMode,
-    playlistSortMode: collectionsRefs.playlistSortMode,
+    playlistSortMode,
     setSearch: navigationStore.setSearch,
     setFolderSortMode,
     setLocalSortMode,

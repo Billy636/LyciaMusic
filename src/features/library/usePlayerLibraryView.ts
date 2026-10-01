@@ -2,6 +2,7 @@ import { computed } from 'vue';
 import { getActivePinia, storeToRefs, type Pinia } from 'pinia';
 
 import { useCollectionsStore } from '../collections/store';
+import { usePlaylistSort } from '../collections/usePlaylistSort';
 import { useLibraryStore } from './store';
 import { useNavigationStore } from '../../shared/stores/navigation';
 import { useLibraryCatalogSelectors } from './useLibraryCatalogSelectors';
@@ -57,7 +58,8 @@ const createPlayerLibraryView = () => {
     albumDetailSortMode,
     localCustomOrder,
   } = storeToRefs(libraryStore);
-  const { favoritePaths, playlists, recentSongs, playlistSortMode } = storeToRefs(collectionsStore);
+  const { favoritePaths, playlists, recentSongs } = storeToRefs(collectionsStore);
+  const { playlistSortMode } = usePlaylistSort();
 
   const isLocalMusic = computed(() =>
     currentViewMode.value === 'all' ||

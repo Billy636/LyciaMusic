@@ -1,20 +1,51 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { computed, nextTick, ref, watch, onMounted, onUnmounted } from 'vue';
 import type { Song } from '../../types';
 import { usePlayerViewState } from '../../composables/usePlayerViewState';
 import { useLibraryCollections } from '../../features/collections/useLibraryCollections';
 import { useCoverCache } from '../../composables/useCoverCache';
 import SortModeIcon from '../common/SortModeIcon.vue';
+import { usePlaylistSort } from '../../features/collections/usePlaylistSort';
+import { useCollectionsStore } from '../../features/collections/store';
+import { playlistSortLabel } from '../../features/collections/playlistSort';
 
 const { playlistSortMode, setPlaylistSortMode, currentViewMode, filterCondition } = usePlayerViewState();
 const { playlists } = useLibraryCollections();
+const { followsDefault } = usePlaylistSort();
+const collectionsStore = useCollectionsStore();
+const defaultSortLabel = computed(() => playlistSortLabel(collectionsStore.playlistSortMode));
+const sortTitle = computed(() => `排序：${playlistSortLabel(playlistSortMode.value)} · ${followsDefault.value ? '跟随默认' : '当前歌单'}`);
+const sortTrigger = ref<HTMLButtonElement | null>(null);
+const sortMenu = ref<HTMLElement | null>(null);
+const sortMenuMaxHeight = ref(320);
+const closeSortMenu = () => { showSortMenu.value = false; };
+const finishSortSelection = () => {
+  closeSortMenu();
+  sortTrigger.value?.focus({ preventScroll: true });
+};
+const handleMenuKey = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    finishSortSelection();
+  } else if (event.key === 'Tab') closeSortMenu();
+  else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault();
+    event.stopPropagation();
+    const items = Array.from(sortMenu.value?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []);
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+      : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[index]?.focus();
+  }
+};
 
 const showSortMenu = ref(false);
 const sortMenuX = ref(0);
 const sortMenuY = ref(0);
 const sortMenuIsRightAligned = ref(false);
 
-const handleSortClick = (e: MouseEvent) => {
+const handleSortClick = (e: MouseEvent | KeyboardEvent) => {
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
   const windowWidth = window.innerWidth;
   
@@ -26,8 +57,17 @@ const handleSortClick = (e: MouseEvent) => {
     sortMenuX.value = rect.left;
   }
   
-  sortMenuY.value = rect.bottom + 8;
+  const below = window.innerHeight - rect.bottom - 16;
+  const above = rect.top - 16;
+  const downward = below >= 320 || below >= above;
+  sortMenuMaxHeight.value = Math.max(0, downward ? below : above);
+  sortMenuY.value = downward ? rect.bottom + 8 : Math.max(8, rect.top - 8 - Math.min(320, above));
+  if (sortMenuIsRightAligned.value) sortMenuX.value = Math.max(8, sortMenuX.value);
+  else sortMenuX.value = Math.max(8, Math.min(sortMenuX.value, windowWidth - 228));
   showSortMenu.value = !showSortMenu.value;
+  if (showSortMenu.value) void nextTick(() => {
+    sortMenu.value?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus({ preventScroll: true });
+  });
 };
 
 const handleGlobalClick = (e: MouseEvent) => {
@@ -37,8 +77,15 @@ const handleGlobalClick = (e: MouseEvent) => {
   }
 };
 
-onMounted(() => window.addEventListener('click', handleGlobalClick));
-onUnmounted(() => window.removeEventListener('click', handleGlobalClick));
+onMounted(() => {
+  window.addEventListener('click', handleGlobalClick);
+  window.addEventListener('resize', closeSortMenu);
+});
+onUnmounted(() => {
+  window.removeEventListener('click', handleGlobalClick);
+  window.removeEventListener('resize', closeSortMenu);
+});
+watch([currentViewMode, filterCondition], closeSortMenu);
 
 const props = defineProps<{
   title: string;
@@ -187,7 +234,12 @@ const handlePlayAll = () => {
            <!-- 排序方式按钮 -->
            <button 
              @click.stop="handleSortClick"
-             title="排序方式"
+             ref="sortTrigger"
+             :title="sortTitle"
+             :aria-label="sortTitle"
+             aria-haspopup="menu"
+             :aria-expanded="showSortMenu"
+             @keydown.down.prevent="handleSortClick"
              class="sort-menu-trigger bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-100 px-5 py-2 rounded-full text-sm font-medium transition flex items-center gap-2 active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
              :class="{ 'text-blue-500 border-blue-200 bg-blue-50/50 dark:bg-blue-500/10': playlistSortMode !== 'custom' }"
            >
@@ -198,27 +250,43 @@ const handlePlayAll = () => {
            <Teleport to="body">
              <div 
                v-if="showSortMenu"
-               class="fixed z-[9999] bg-white dark:bg-[#2b2b2b] rounded-lg shadow-xl border border-gray-100 dark:border-white/10 py-1 min-w-[120px] isolate animate-in fade-in zoom-in-95 duration-100"
-               :style="sortMenuIsRightAligned 
+               ref="sortMenu"
+               role="menu"
+               aria-label="当前歌单排序"
+               @click.stop
+               @keydown="handleMenuKey"
+               class="fixed z-[9999] bg-white dark:bg-[#2b2b2b] rounded-lg shadow-xl border border-gray-100 dark:border-white/10 py-1 w-[220px] max-w-[calc(100vw-16px)] overflow-y-auto isolate animate-in fade-in zoom-in-95 duration-100"
+               :style="[ { maxHeight: sortMenuMaxHeight + 'px' }, sortMenuIsRightAligned
                  ? { right: sortMenuX + 'px', top: sortMenuY + 'px' }
-                 : { left: sortMenuX + 'px', top: sortMenuY + 'px' }"
+                 : { left: sortMenuX + 'px', top: sortMenuY + 'px' } ]"
              >
-               <div 
+               <div class="px-3 py-2 text-xs text-gray-400">当前歌单排序</div>
+               <button type="button" role="menuitemradio" :aria-checked="followsDefault"
+                 class="w-full px-3 py-2 text-xs flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-white/5 focus-visible:outline focus-visible:outline-blue-500"
+                 :class="followsDefault ? 'text-blue-500 font-medium' : 'text-gray-600 dark:text-gray-300'"
+                 @click="setPlaylistSortMode(null); finishSortSelection()">
+                 <span>跟随默认</span><span class="ml-auto text-gray-400 text-[10px]">{{ defaultSortLabel }}</span>
+                 <span v-if="followsDefault" aria-hidden="true">✓</span>
+               </button>
+               <div role="separator" class="my-1 border-t border-gray-100 dark:border-white/10" />
+               <button type="button" role="menuitemradio"
                  v-for="mode in (['title', 'name', 'artist', 'added_at', 'custom'] as const)" 
                  :key="mode"
+                 :aria-checked="!followsDefault && playlistSortMode.startsWith(mode)"
                  @click="
                    if (mode === 'added_at') {
-                     setPlaylistSortMode(playlistSortMode === 'added_at' ? 'added_at_asc' : 'added_at');
+                     setPlaylistSortMode(!followsDefault && playlistSortMode === 'added_at' ? 'added_at_asc' : 'added_at');
                    } else {
                      setPlaylistSortMode(mode);
                    }
-                   showSortMenu = false;
+                   finishSortSelection();
                  "
-                 class="px-3 py-2 text-xs cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
-                 :class="(playlistSortMode || '').startsWith(mode) ? 'text-blue-500 font-medium' : 'text-gray-600 dark:text-gray-300'"
+                 class="w-full px-3 py-2 text-xs cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-white/5 transition-colors focus-visible:outline focus-visible:outline-blue-500"
+                 :class="!followsDefault && playlistSortMode.startsWith(mode) ? 'text-blue-500 font-medium' : 'text-gray-600 dark:text-gray-300'"
                >
                  <span>{{ { title: '\u6b4c\u66f2\u540d', name: '\u6587\u4ef6\u540d', artist: '\u6b4c\u624b', added_at: '\u6dfb\u52a0\u65f6\u95f4', custom: '\u81ea\u5b9a\u4e49' }[mode] }}</span>
-                 <div v-if="(playlistSortMode || '').startsWith(mode)" class="flex items-center gap-1.5">
+                 <span v-if="mode === 'added_at' && playlistSortMode.startsWith(mode)" class="ml-auto mr-2 text-[10px] text-gray-400">{{ playlistSortMode === 'added_at_asc' ? '最早在前' : '最新在前' }}</span>
+                 <div v-if="!followsDefault && playlistSortMode.startsWith(mode)" class="flex items-center gap-1.5">
                    <svg v-if="mode === 'added_at'" xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 transition-transform duration-200" :class="{ 'rotate-180': playlistSortMode === 'added_at_asc' }" viewBox="0 0 20 20" fill="currentColor">
                      <path fill-rule="evenodd" d="M14.707 12.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 14.586V3a1 1 0 012 0v11.586l2.293-2.293a1 1 0 011.414 0z" clip-rule="evenodd" />
                    </svg>
@@ -226,7 +294,8 @@ const handlePlayAll = () => {
                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
                    </svg>
                  </div>
-               </div>
+               </button>
+               <div class="px-3 py-2 mt-1 border-t border-gray-100 dark:border-white/10 text-[10px] text-gray-400">仅影响当前歌单</div>
              </div>
            </Teleport>
         </div>
