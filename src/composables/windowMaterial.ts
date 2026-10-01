@@ -112,16 +112,36 @@ async function trySetWindowBackgroundColor(color: Color): Promise<void> {
   }
 }
 
-async function trySetWindowShadow(enabled: boolean): Promise<void> {
+let requestedWindowShadow = true;
+let shadowSyncVersion = 0;
+let appliedWindowShadow: boolean | null = null;
+
+export async function syncWindowShadow(force = false): Promise<void> {
   const appWindow = getCurrentWindow();
+  const version = ++shadowSyncVersion;
 
   try {
     if (appWindow.setShadow) {
+      const [maximized, fullscreen] = await Promise.all([
+        appWindow.isMaximized(),
+        appWindow.isFullscreen(),
+      ]);
+      if (version !== shadowSyncVersion) return;
+      // Undecorated Windows shadows also add a native frame. Hide it when
+      // the window fills the work area, and restore it with the window.
+      const enabled = requestedWindowShadow && !maximized && !fullscreen;
+      if (!force && appliedWindowShadow === enabled) return;
       await appWindow.setShadow(enabled);
+      appliedWindowShadow = enabled;
     }
   } catch (error) {
     console.warn('Failed to set window shadow:', error);
   }
+}
+
+async function trySetWindowShadow(enabled: boolean): Promise<void> {
+  requestedWindowShadow = enabled;
+  await syncWindowShadow(true);
 }
 
 export async function loadWindowMaterialCapabilities(force = false): Promise<WindowMaterialCapabilities> {
