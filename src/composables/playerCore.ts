@@ -37,6 +37,7 @@ import { usePlaybackStore } from '../features/playback/store';
 import { useUiStore } from '../shared/stores/ui';
 import type { HistoryItem, Song } from '../types';
 import { useSongDetailCache } from './useSongDetailCache';
+import { useLibrarySongResolver } from './useLibrarySongResolver';
 import {
   cleanupRemovedLibrarySongPaths,
   isPathInFolderScope,
@@ -160,6 +161,7 @@ function createPlayerCore() {
   const { showToast } = useToast();
   const { clearCoverCaches } = useCoverCache();
   const { clearSongDetailCache } = useSongDetailCache();
+  const { clearResolvedSongCache } = useLibrarySongResolver();
   const { resolveSongForPlayback, clearSongRuntimeMetadataCache } = useSongRuntimeMetadata();
 
   const collectionsStore = useCollectionsStore();
@@ -292,6 +294,16 @@ function createPlayerCore() {
   const playerFileManager = createPlayerFileManager({
     removeLibraryFolderLinked,
     removeFromHistory: (songPaths: string[]) => playerHistoryFavorites.removeFromHistory(songPaths),
+    onSongPathsMoved: async (currentSongChanged) => {
+      clearCoverCaches();
+      clearSongDetailCache();
+      clearSongRuntimeMetadataCache();
+      clearResolvedSongCache();
+      resetShuffleState();
+      flushPersistedState();
+      if (currentSongChanged) void loadLyrics();
+      await Promise.all([fetchFolderTree(), fetchLibraryFolders()]);
+    },
     showToast,
   });
 
@@ -451,10 +463,7 @@ function createPlayerCore() {
   }
 
   async function moveFolderToFolder(sourcePath: string, targetFolder: string) {
-    const path = await playerFileManager.moveFolderToFolder(sourcePath, targetFolder);
-    await fetchFolderTree();
-    await fetchLibraryFolders();
-    return path;
+    return playerFileManager.moveFolderToFolder(sourcePath, targetFolder);
   }
 
   async function moveFilePhysical(sourcePath: string, targetFolderPath: string) {

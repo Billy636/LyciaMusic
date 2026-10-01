@@ -16,6 +16,7 @@ const FOLDER_VIEW_PATH_CACHE_NAMESPACE = 'folder';
 
 const inFlightRequests = new Map<string, Promise<string[]>>();
 const cacheVersion = ref(0);
+let cacheGeneration = 0;
 
 const makeCacheKey = (
   folderPath: string,
@@ -52,6 +53,7 @@ export function useLibraryFolderSongPathCache() {
       return inFlight;
     }
 
+    const requestGeneration = cacheGeneration;
     const request = tauriInvoke('get_library_song_paths_for_folder_view', {
       folderPath,
       query,
@@ -59,6 +61,11 @@ export function useLibraryFolderSongPathCache() {
       includeSubfolders,
     })
       .then((paths) => {
+        if (requestGeneration !== cacheGeneration) {
+          throw Object.assign(new Error('Stale library path request'), {
+            code: 'STALE_LIBRARY_PATH_REQUEST',
+          });
+        }
         setLibrarySongPathCacheEntry(
           FOLDER_VIEW_PATH_CACHE_NAMESPACE,
           cacheKey,
@@ -69,7 +76,7 @@ export function useLibraryFolderSongPathCache() {
         return paths;
       })
       .finally(() => {
-        inFlightRequests.delete(cacheKey);
+        if (inFlightRequests.get(cacheKey) === request) inFlightRequests.delete(cacheKey);
       });
 
     inFlightRequests.set(cacheKey, request);
@@ -79,6 +86,7 @@ export function useLibraryFolderSongPathCache() {
   return {
     loadFolderViewSongPaths,
     clearLibraryFolderSongPathCache: () => {
+      cacheGeneration += 1;
       clearLibrarySongPathCacheNamespace(FOLDER_VIEW_PATH_CACHE_NAMESPACE);
       inFlightRequests.clear();
       cacheVersion.value += 1;

@@ -764,7 +764,7 @@ const getRowStyle = (songIndex: number, songPath: string) => {
           :class="{ 'bg-red-500/10 dark:bg-red-500/20': selectedPaths.has(song.path) }"
           :style="getRowStyle(song.virtualIndex, song.path)"
         >
-          <div class="w-10 shrink-0 flex items-center justify-center">
+          <div class="w-10 shrink-0 flex items-center justify-center" :data-selection-control="isBatchMode ? '' : undefined">
             <div v-if="isBatchMode" class="flex items-center justify-center">
               <input type="checkbox" :checked="selectedPaths.has(song.path)" class="rounded text-[#EC4141] focus:ring-[#EC4141] pointer-events-none" />
             </div>

@@ -64,6 +64,7 @@ export function useHomePageModel() {
     createFolder,
     deleteFolder,
     expandFolderPath,
+    ensureFolderChildrenLoaded,
     fetchFolderTree,
     removeLibraryFolderLinked,
     refreshFolder,
@@ -128,14 +129,6 @@ export function useHomePageModel() {
     selectedPaths,
   } = useScopedBatchSelection(batchSelectionScopeKey);
 
-  const { handleTableDragStart } = useSongDrag(
-    localSongList,
-    isBatchMode,
-    selectedPaths,
-    songTableRef,
-    localSongPaths,
-  );
-
   const {
     showContextMenu,
     contextMenuX,
@@ -153,7 +146,11 @@ export function useHomePageModel() {
 
   const {
     showMoveToFolderModal,
+    pendingMovePaths,
+    isMovingSongs,
+    requestSongDrop,
     showConfirm,
+    confirmType,
     confirmTitle,
     confirmButtonText,
     confirmMessage,
@@ -169,6 +166,7 @@ export function useHomePageModel() {
     selectedPaths,
     isBatchMode,
     isManagementMode,
+    selectionScope: batchSelectionScopeKey,
     canonicalSongPaths,
     sourceSongPaths,
     favoritePaths,
@@ -178,6 +176,22 @@ export function useHomePageModel() {
     showToast,
     getRoutePath: () => route.path,
   });
+
+  const { handleTableDragStart } = useSongDrag(
+    localSongList,
+    isBatchMode,
+    selectedPaths,
+    songTableRef,
+    localSongPaths,
+    {
+      canDropToFolder: () => currentViewMode.value === 'folder' && isManagementMode.value && !isMovingSongs.value,
+      onDropToFolder: requestSongDrop,
+      expandFolder: async path => {
+        await ensureFolderChildrenLoaded(path);
+        await expandFolderPath(path);
+      },
+    },
+  );
 
   const {
     showCreateFolderModal,
@@ -355,12 +369,15 @@ export function useHomePageModel() {
     handleTableDragStart,
     handleArtistAlbumClick,
     showMoveToFolderModal,
+    pendingMovePaths,
+    isMovingSongs,
     confirmBatchMove,
     showContextMenu,
     contextMenuX,
     contextMenuY,
     contextMenuTargetSong,
     showConfirm,
+    confirmType,
     confirmTitle,
     confirmMessage,
     confirmButtonText,

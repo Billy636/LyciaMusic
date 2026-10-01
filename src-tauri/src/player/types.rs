@@ -295,6 +295,80 @@ pub enum AudioCommand {
     },
     SetDevice(Option<String>),
     SetOutputMode(AudioOutputMode),
+    RelocatePaths(AudioPathRelocation),
+}
+
+/// Successful filesystem moves only change future reopen paths, never playback state.
+#[derive(Clone, Debug)]
+pub enum AudioPathRelocation {
+    Files(Vec<(String, String)>),
+    Folder { old_path: String, new_path: String },
+}
+
+fn normalized_relocation_path(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    let path = if path
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("//?/UNC/"))
+    {
+        format!("//{}", &path[8..])
+    } else {
+        path.strip_prefix("//?/").unwrap_or(&path).to_string()
+    };
+    path.trim_end_matches('/').to_string()
+}
+
+fn relocation_path_key(path: &str) -> String {
+    let path = normalized_relocation_path(path);
+    if cfg!(windows) {
+        path.to_lowercase()
+    } else {
+        path
+    }
+}
+
+impl AudioPathRelocation {
+    pub(crate) fn relocated_path(&self, path: &str) -> Option<String> {
+        if path.is_empty() || path.contains("://") {
+            return None;
+        }
+        let path_key = relocation_path_key(path);
+        match self {
+            Self::Files(paths) => paths
+                .iter()
+                .find(|(old_path, _)| relocation_path_key(old_path) == path_key)
+                .map(|(_, new_path)| new_path.clone()),
+            Self::Folder { old_path, new_path } => {
+                let source = normalized_relocation_path(old_path);
+                let source_key = relocation_path_key(&source);
+                if source.is_empty() {
+                    return None;
+                }
+                if path_key == source_key {
+                    return Some(new_path.clone());
+                }
+                if !path_key.starts_with(&format!("{source_key}/")) {
+                    return None;
+                }
+                let normalized = normalized_relocation_path(path);
+                // Count components instead of slicing by a case-folded byte length.
+                let count = source.split('/').count();
+                let prefix_len = normalized
+                    .split('/')
+                    .take(count)
+                    .map(str::len)
+                    .sum::<usize>()
+                    + count.saturating_sub(1);
+                let suffix = normalized.get(prefix_len..)?.trim_start_matches('/');
+                let separator = if new_path.contains('\\') { "\\" } else { "/" };
+                Some(format!(
+                    "{}{separator}{}",
+                    new_path.trim_end_matches(['/', '\\']),
+                    suffix.replace('/', separator)
+                ))
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

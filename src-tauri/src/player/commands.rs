@@ -6,7 +6,8 @@ use crate::player::loudness::{
     calculate_playback_gain, get_song_loudness_record, process_song_on_play, LoudnessRecord,
 };
 use crate::player::types::{
-    AudioCommand, AudioOutputMode, AudioSource, PlayerState, VISUALIZER_BAND_COUNT,
+    AudioCommand, AudioOutputMode, AudioPathRelocation, AudioSource, PlayerState,
+    VISUALIZER_BAND_COUNT,
 };
 use crate::remote::cache::{
     ensure_cached_path, is_remote_uri, remote_playback_source, RemotePlaybackSource,
@@ -18,7 +19,26 @@ use souvlaki::{MediaMetadata, MediaPlayback, MediaPosition};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
+
+/// Call only after the filesystem move and database commit, with no DB lock held.
+/// A stopped audio worker must not turn a successful move into a frontend failure.
+pub(crate) fn notify_audio_paths_relocated(
+    app: &tauri::AppHandle,
+    relocation: AudioPathRelocation,
+) {
+    let Some(state) = app.try_state::<PlayerState>() else {
+        eprintln!("Audio path relocation skipped: player state is unavailable");
+        return;
+    };
+    let Ok(tx) = state.tx.lock() else {
+        eprintln!("Audio path relocation skipped: player command lock is unavailable");
+        return;
+    };
+    if let Err(error) = tx.send(AudioCommand::RelocatePaths(relocation)) {
+        eprintln!("Failed to notify audio worker of moved files: {error}");
+    }
+}
 
 const REMOTE_LYRICS_CACHE_READY_EVENT: &str = "remote-lyrics-cache-ready";
 

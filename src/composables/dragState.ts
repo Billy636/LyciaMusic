@@ -9,6 +9,8 @@ export interface DragSessionState {
   showGhost: boolean;
   type: DragSessionType;
   songs: Song[];
+  // Full drag payload, including selected rows outside the loaded metadata window.
+  songPaths?: string[];
   data: any;
   mouseX: number;
   mouseY: number;

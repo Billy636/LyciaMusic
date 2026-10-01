@@ -11,6 +11,7 @@ use super::types::{
 };
 use crate::database::DbState;
 use crate::error::CommandError;
+use crate::player::{notify_audio_paths_relocated, AudioPathRelocation};
 use crate::remote::{
     cache::is_remote_uri,
     repository::{get_song_cache_path, get_source_for_remote_uri},
@@ -20,15 +21,18 @@ use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::tag::{ItemKey, ItemValue, Tag, TagItem};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use tauri::{Emitter, State};
 use uuid::Uuid;
 
-use super::utils::normalize_path;
+use super::utils::{is_supported_library_extension, normalize_path};
+
+const SIDECAR_LYRIC_EXTENSIONS: &[&str] = &["ttml", "yrc", "qrc", "lys", "lrc", "txt"];
 
 #[derive(Serialize)]
 pub struct MovedMusicFilePath {
@@ -54,7 +58,6 @@ fn read_sidecar_lrc_with_path(path_obj: &Path) -> Option<(String, PathBuf)> {
     let parent = path_obj.parent()?;
 
     // 仅自动发现同名侧边文件时按信息完整度排序；用户指定的 source_path 不走这里。
-    let extensions = ["ttml", "yrc", "qrc", "lys", "lrc", "txt"];
     let candidates = fs::read_dir(parent)
         .ok()?
         .flatten()
@@ -62,7 +65,7 @@ fn read_sidecar_lrc_with_path(path_obj: &Path) -> Option<(String, PathBuf)> {
         .filter(|candidate| candidate.is_file())
         .collect::<Vec<_>>();
 
-    for ext in &extensions {
+    for ext in SIDECAR_LYRIC_EXTENSIONS {
         let exact_path = parent.join(format!("{}.{}", stem, ext));
         if let Ok(content) = fs::read_to_string(&exact_path) {
             return Some((content, exact_path));
@@ -300,34 +303,376 @@ fn load_song_id(conn: &rusqlite::Connection, path: &str) -> Result<Option<i64>, 
 }
 
 fn sync_moved_song_paths(
-    conn: &mut rusqlite::Connection,
+    conn: &rusqlite::Connection,
     moved_paths: &[(String, String)],
 ) -> Result<(), String> {
-    if moved_paths.is_empty() {
-        return Ok(());
+    // The caller owns the transaction so database failures happen before files move.
+    for (table, column) in [
+        ("songs", "path"),
+        ("play_history", "song_path"),
+        ("song_loudness", "song_path"),
+        ("song_highlight_paths", "path"),
+    ] {
+        let mut update = conn
+            .prepare(&format!(
+                "UPDATE {table} SET {column} = ?1 WHERE {column} = ?2"
+            ))
+            .map_err(|e| e.to_string())?;
+        for (old_path, new_path) in moved_paths {
+            update
+                .execute(params![new_path, old_path])
+                .map_err(|e| format!("更新歌曲关联路径失败（{old_path}）：{e}"))?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone)]
+struct PlannedMusicFileMove {
+    source: PathBuf,
+    destination: PathBuf,
+}
+
+struct MusicFileMovePlan {
+    songs: Vec<PlannedMusicFileMove>,
+    files: Vec<PlannedMusicFileMove>,
+}
+
+fn move_path_key(path: &Path) -> String {
+    let path = normalize_path(&path.to_string_lossy()).replace('\\', "/");
+    if cfg!(windows) {
+        path.to_lowercase()
+    } else {
+        path
+    }
+}
+
+fn require_regular_move_file(path: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|e| format!("无法读取源文件 {}：{e}", path.display()))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(format!(
+            "只能移动本地常规文件，不支持目录或符号链接：{}",
+            path.display()
+        ));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err(format!(
+                "暂不支持移动链接或重解析点文件：{}",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn canonical_audio_move_source(path: &Path) -> Result<PathBuf, String> {
+    let raw = path.to_string_lossy();
+    if raw.contains("://") || raw.contains("::track") {
+        return Err(format!(
+            "只能移动本地音频文件；CUE 分轨请移动整个所在文件夹：{raw}"
+        ));
+    }
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !is_supported_library_extension(&extension) {
+        return Err(format!(
+            "不支持直接移动此文件；CUE 分轨请移动整个所在文件夹：{raw}"
+        ));
+    }
+    require_regular_move_file(path)?;
+    fs::canonicalize(path).map_err(|e| format!("源文件不可访问（{raw}）：{e}"))
+}
+
+fn canonical_move_directory(path: &Path) -> Result<PathBuf, String> {
+    let resolved = fs::canonicalize(path)
+        .map_err(|e| format!("目标文件夹不可访问（{}）：{e}", path.display()))?;
+    if !resolved.is_dir() {
+        return Err(format!("目标路径不是文件夹：{}", path.display()));
+    }
+    Ok(resolved)
+}
+
+fn require_unused_move_destination(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Err(format!(
+            "目标位置已有同名文件或目录，不会覆盖：{}",
+            path.display()
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("无法检查目标位置（{}）：{error}", path.display())),
+    }
+}
+
+fn prepare_music_file_moves(
+    requests: Vec<(PathBuf, PathBuf)>,
+) -> Result<MusicFileMovePlan, String> {
+    let mut songs = Vec::new();
+    let mut seen_sources = HashSet::new();
+    for (source, destination) in requests {
+        let source = canonical_audio_move_source(&source)?;
+        if !seen_sources.insert(move_path_key(&source)) {
+            continue;
+        }
+        let parent = destination.parent().ok_or("目标文件缺少父文件夹")?;
+        let name = destination.file_name().ok_or("目标文件名无效")?;
+        let destination = canonical_move_directory(parent)?.join(name);
+        if move_path_key(&source) == move_path_key(&destination) {
+            continue;
+        }
+        songs.push(PlannedMusicFileMove {
+            source,
+            destination,
+        });
     }
 
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    {
-        let mut update_song_stmt = tx
-            .prepare("UPDATE songs SET path = ?1 WHERE path = ?2")
-            .map_err(|e| e.to_string())?;
-        let mut update_history_stmt = tx
-            .prepare("UPDATE play_history SET song_path = ?1 WHERE song_path = ?2")
-            .map_err(|e| e.to_string())?;
-
-        for (old_path, new_path) in moved_paths {
-            update_song_stmt
-                .execute(params![new_path, old_path])
-                .map_err(|e| format!("failed to update song path '{}': {}", old_path, e))?;
-            update_history_stmt
-                .execute(params![new_path, old_path])
-                .map_err(|e| format!("failed to update play history '{}': {}", old_path, e))?;
+    let selected: HashSet<String> = songs
+        .iter()
+        .map(|entry| move_path_key(&entry.source))
+        .collect();
+    let mut files = songs.clone();
+    let mut directory_entries: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+    for song in &songs {
+        let parent = song.source.parent().ok_or("源文件缺少父文件夹")?;
+        if !directory_entries.contains_key(parent) {
+            let entries = fs::read_dir(parent)
+                .map_err(|e| format!("无法检查配套歌词（{}）：{e}", parent.display()))?
+                .map(|entry| entry.map(|entry| entry.path()))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("无法读取源文件夹（{}）：{e}", parent.display()))?;
+            directory_entries.insert(parent.to_path_buf(), entries);
+        }
+        let entries = &directory_entries[parent];
+        let stem = song
+            .source
+            .file_stem()
+            .ok_or("源文件名无效")?
+            .to_string_lossy();
+        let mut sidecars = Vec::new();
+        let mut has_unselected_same_stem_audio = false;
+        for entry in entries {
+            // A directory named Song.lrc/Song.mp3 is not a lyric or shared audio file.
+            if entry.is_dir() {
+                continue;
+            }
+            let extension = entry
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if extension == "cue" {
+                if let Ok(sheet) = super::cue::parse_cue_file(entry) {
+                    if move_path_key(&sheet.resolved_audio_path) == move_path_key(&song.source) {
+                        return Err(format!(
+                            "音频被 CUE 分轨引用，请移动整个所在文件夹：{}",
+                            song.source.display()
+                        ));
+                    }
+                }
+            }
+            let same_stem = entry
+                .file_stem()
+                .map(|value| value.to_string_lossy())
+                .is_some_and(|value| value.eq_ignore_ascii_case(&stem));
+            if !same_stem {
+                continue;
+            }
+            if SIDECAR_LYRIC_EXTENSIONS.contains(&extension.as_str()) {
+                require_regular_move_file(entry)?;
+                sidecars.push(entry);
+            } else if is_supported_library_extension(&extension)
+                && !selected.contains(&move_path_key(entry))
+            {
+                has_unselected_same_stem_audio = true;
+            }
+        }
+        if !sidecars.is_empty() && has_unselected_same_stem_audio {
+            return Err(format!(
+                "同名歌词也被其他音频使用，请将同名音频一起移动，或移动整个文件夹：{}",
+                song.source.display()
+            ));
+        }
+        for sidecar in sidecars {
+            let target_stem = song
+                .destination
+                .file_stem()
+                .ok_or("目标文件名无效")?
+                .to_string_lossy();
+            let extension = sidecar
+                .extension()
+                .ok_or("配套歌词扩展名无效")?
+                .to_string_lossy();
+            files.push(PlannedMusicFileMove {
+                source: sidecar.clone(),
+                destination: song
+                    .destination
+                    .parent()
+                    .ok_or("目标文件缺少父文件夹")?
+                    .join(format!("{target_stem}.{extension}")),
+            });
         }
     }
 
-    tx.commit().map_err(|e| e.to_string())
+    let mut unique_files = Vec::new();
+    let mut destinations = HashMap::new();
+    let mut sources = HashMap::new();
+    for file in files {
+        let source_key = move_path_key(&file.source);
+        let destination_key = move_path_key(&file.destination);
+        if let Some(previous) = sources.get(&source_key) {
+            if previous == &destination_key {
+                continue;
+            }
+            return Err(format!(
+                "同一配套文件不能移动到多个位置：{}",
+                file.source.display()
+            ));
+        }
+        if destinations.contains_key(&destination_key) {
+            return Err(format!(
+                "所选歌曲或歌词在目标位置重名，不会覆盖：{}",
+                file.destination.display()
+            ));
+        }
+        require_unused_move_destination(&file.destination)?;
+        destinations.insert(destination_key.clone(), source_key.clone());
+        sources.insert(source_key, destination_key);
+        unique_files.push(file);
+    }
+    Ok(MusicFileMovePlan {
+        songs,
+        files: unique_files,
+    })
+}
+
+/// Unlike std::fs::rename, never replace a file that appeared after preflight.
+/// No cross-volume copy/delete fallback is used.
+#[cfg(windows)]
+fn move_file_without_replacing(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn MoveFileExW(existing: *const u16, target: *const u16, flags: u32) -> i32;
+    }
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    // Zero flags forbid both MOVEFILE_REPLACE_EXISTING and MOVEFILE_COPY_ALLOWED.
+    if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), 0) } == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn move_file_without_replacing(source: &Path, destination: &Path) -> std::io::Result<()> {
+    // A same-volume hard link is an exclusive destination claim, without a copy.
+    fs::hard_link(source, destination)?;
+    if let Err(error) = fs::remove_file(source) {
+        if let Err(cleanup) = fs::remove_file(destination) {
+            return Err(std::io::Error::new(
+                error.kind(),
+                format!(
+                    "源文件仍保留，目标另有硬链接 {}；清理失败：{cleanup}；{error}",
+                    destination.display()
+                ),
+            ));
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn rollback_music_file_moves(moved: &[&PlannedMusicFileMove]) -> String {
+    let mut failures = Vec::new();
+    for file in moved.iter().rev() {
+        if let Err(error) = move_file_without_replacing(&file.destination, &file.source) {
+            failures.push(format!(
+                "{}（原位置：{}；{error}）",
+                file.destination.display(),
+                file.source.display()
+            ));
+        }
+    }
+    if failures.is_empty() {
+        "本次已移动的文件已恢复原位置。".to_string()
+    } else {
+        format!(
+            "部分文件无法恢复，请勿再次移动；仍需检查以下目标位置：{}",
+            failures.join("；")
+        )
+    }
+}
+
+fn execute_music_file_moves(
+    conn: &mut rusqlite::Connection,
+    plan: MusicFileMovePlan,
+) -> Result<BatchMoveMusicFilesResult, String> {
+    if plan.songs.is_empty() {
+        return Ok(BatchMoveMusicFilesResult {
+            moved_paths: Vec::new(),
+        });
+    }
+    let moved_paths: Vec<(String, String)> = plan
+        .songs
+        .iter()
+        .map(|entry| {
+            (
+                normalize_path(&entry.source.to_string_lossy()),
+                normalize_path(&entry.destination.to_string_lossy()),
+            )
+        })
+        .collect();
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    for (source, _) in &moved_paths {
+        let cue_reference: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM songs WHERE cue_source_path = ?1 OR (path = ?1 AND cue_source_path IS NOT NULL))",
+            [source], |row| row.get(0),
+        ).map_err(|e| format!("检查 CUE 引用失败，文件未移动：{e}"))?;
+        if cue_reference {
+            return Err(format!(
+                "音频被 CUE 分轨引用，请移动整个所在文件夹：{source}"
+            ));
+        }
+    }
+    sync_moved_song_paths(&tx, &moved_paths)
+        .map_err(|error| format!("保存路径失败，文件未移动：{error}"))?;
+    let mut moved = Vec::new();
+    for file in &plan.files {
+        if let Err(error) = move_file_without_replacing(&file.source, &file.destination) {
+            return Err(format!(
+                "移动失败（可能跨磁盘、文件被占用或权限不足）：{} → {}；{error}。{}",
+                file.source.display(),
+                file.destination.display(),
+                rollback_music_file_moves(&moved)
+            ));
+        }
+        moved.push(file);
+    }
+    if let Err(error) = tx.commit() {
+        return Err(format!(
+            "保存移动结果失败：{error}。{}",
+            rollback_music_file_moves(&moved)
+        ));
+    }
+    Ok(BatchMoveMusicFilesResult {
+        moved_paths: moved_paths
+            .into_iter()
+            .map(|(old_path, new_path)| MovedMusicFilePath { old_path, new_path })
+            .collect(),
+    })
 }
 
 fn read_local_song_lyrics_source(path: &str) -> SongLyricsSource {
@@ -686,39 +1031,46 @@ pub fn batch_move_music_files(
     paths: Vec<String>,
     target_folder: String,
     db_state: State<'_, DbState>,
+    app: tauri::AppHandle,
 ) -> Result<BatchMoveMusicFilesResult, CommandError> {
-    let target = Path::new(&target_folder);
-    let mut moved_paths: Vec<(String, String)> = Vec::new();
-    if !target.exists() || !target.is_dir() {
-        return Err(CommandError::new("TARGET_NOT_FOUND", "目标文件夹不存在"));
-    }
+    let target = canonical_move_directory(Path::new(&target_folder))
+        .map_err(|error| CommandError::new("INVALID_MOVE_TARGET", &error))?;
+    let mut requests = Vec::new();
     for path_str in paths {
-        let src = Path::new(&path_str);
-        if let Some(file_name) = src.file_name() {
-            let dest = target.join(file_name);
-            if fs::rename(src, &dest).is_ok() {
-                moved_paths.push((
-                    normalize_path(&path_str),
-                    normalize_path(&dest.to_string_lossy()),
-                ));
-            }
-        }
+        let source = PathBuf::from(path_str);
+        let name = source
+            .file_name()
+            .ok_or_else(|| CommandError::new("INVALID_MOVE_SOURCE", "源文件名无效"))?;
+        let destination = target.join(name);
+        requests.push((source, destination));
     }
-    if !moved_paths.is_empty() {
-        let mut conn = db_state
-            .conn
-            .lock()
-            .map_err(|e| CommandError::new("DB_LOCK_FAILED", &e.to_string()))?;
-        sync_moved_song_paths(&mut conn, &moved_paths)
-            .map_err(|e| CommandError::new("DB_SYNC_FAILED", &e))?;
-    }
+    let plan = prepare_music_file_moves(requests)
+        .map_err(|error| CommandError::new("MOVE_PRECHECK_FAILED", &error))?;
+    let mut conn = db_state
+        .conn
+        .lock()
+        .map_err(|error| CommandError::new("DB_LOCK_FAILED", &error.to_string()))?;
+    let result = execute_music_file_moves(&mut conn, plan)
+        .map_err(|error| CommandError::new("MOVE_FAILED", &error))?;
+    drop(conn);
+    notify_moved_music_files(&app, &result);
+    Ok(result)
+}
 
-    Ok(BatchMoveMusicFilesResult {
-        moved_paths: moved_paths
-            .into_iter()
-            .map(|(old_path, new_path)| MovedMusicFilePath { old_path, new_path })
-            .collect(),
-    })
+fn notify_moved_music_files(app: &tauri::AppHandle, result: &BatchMoveMusicFilesResult) {
+    if result.moved_paths.is_empty() {
+        return;
+    }
+    notify_audio_paths_relocated(
+        app,
+        AudioPathRelocation::Files(
+            result
+                .moved_paths
+                .iter()
+                .map(|entry| (entry.old_path.clone(), entry.new_path.clone()))
+                .collect(),
+        ),
+    );
 }
 
 #[tauri::command]
@@ -726,22 +1078,20 @@ pub fn move_music_file(
     old_path: String,
     new_path: String,
     db_state: State<'_, DbState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let src = Path::new(&old_path);
-    let dest = Path::new(&new_path);
-    if !src.exists() {
-        return Err("源文件不存在".to_string());
-    }
-    if let Some(parent) = dest.parent() {
+    let source = canonical_audio_move_source(Path::new(&old_path))?;
+    let destination = PathBuf::from(new_path);
+    if let Some(parent) = destination.parent() {
         if !parent.exists() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
     }
-    fs::rename(src, dest).map_err(|e| e.to_string())?;
-    let normalized_old_path = normalize_path(&old_path);
-    let normalized_new_path = normalize_path(&dest.to_string_lossy());
+    let plan = prepare_music_file_moves(vec![(source, destination)])?;
     let mut conn = db_state.conn.lock().map_err(|e| e.to_string())?;
-    sync_moved_song_paths(&mut conn, &[(normalized_old_path, normalized_new_path)])?;
+    let result = execute_music_file_moves(&mut conn, plan)?;
+    drop(conn);
+    notify_moved_music_files(&app, &result);
     Ok(())
 }
 
@@ -1192,20 +1542,11 @@ pub fn move_file_to_folder(
     source_path: String,
     target_folder: String,
     db_state: State<'_, DbState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let source = Path::new(&source_path);
-    let filename = source.file_name().ok_or("Invalid source filename")?;
-    let target = Path::new(&target_folder).join(filename);
-
-    if target.exists() {
-        return Err("Target file already exists".to_string());
-    }
-
-    fs::rename(source, &target).map_err(|e| e.to_string())?;
-    let normalized_source = normalize_path(&source_path);
-    let normalized_target = normalize_path(&target.to_string_lossy());
-    let mut conn = db_state.conn.lock().map_err(|e| e.to_string())?;
-    sync_moved_song_paths(&mut conn, &[(normalized_source, normalized_target)])
+    batch_move_music_files(vec![source_path], target_folder, db_state, app)
+        .map(|_| ())
+        .map_err(|error| error.message)
 }
 
 #[tauri::command]

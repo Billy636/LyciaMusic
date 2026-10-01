@@ -1,6 +1,7 @@
 import { ref, watch, type Ref } from 'vue';
 
 import type { FolderNode } from '../types';
+import { isWithinFolder } from '../utils/folderMove';
 
 interface ConfirmOptions {
   title: string;
@@ -102,6 +103,10 @@ export function useHomeFolderManagement({
     if (!newPath || newPath === oldPath) {
       return;
     }
+
+    // A move/restoration may already have selected a child under the new root.
+    // Explicit root clicks use syncRootSelection and still select the root itself.
+    if (isWithinFolder(currentFolderFilter.value, newPath)) return;
 
     void syncRootSelection(newPath);
   });

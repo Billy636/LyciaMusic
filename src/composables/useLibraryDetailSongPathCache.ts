@@ -13,6 +13,7 @@ const DETAIL_PATH_CACHE_NAMESPACE = 'detail';
 
 const inFlightRequests = new Map<string, Promise<string[]>>();
 const cacheVersion = ref(0);
+let cacheGeneration = 0;
 
 const makeArtistKey = (artistName: string) => `artist::${artistName}`;
 const makeAlbumKey = (albumKey: string, sortMode: string) => `album::${sortMode}::${albumKey}`;
@@ -29,8 +30,14 @@ const loadWithCache = async (key: string, loader: () => Promise<string[]>) => {
     return inFlight;
   }
 
+  const requestGeneration = cacheGeneration;
   const request = loader()
     .then((paths) => {
+      if (requestGeneration !== cacheGeneration) {
+        throw Object.assign(new Error('Stale library path request'), {
+          code: 'STALE_LIBRARY_PATH_REQUEST',
+        });
+      }
       setLibrarySongPathCacheEntry(
         DETAIL_PATH_CACHE_NAMESPACE,
         key,
@@ -41,7 +48,7 @@ const loadWithCache = async (key: string, loader: () => Promise<string[]>) => {
       return paths;
     })
     .finally(() => {
-      inFlightRequests.delete(key);
+      if (inFlightRequests.get(key) === request) inFlightRequests.delete(key);
     });
 
   inFlightRequests.set(key, request);
@@ -76,6 +83,7 @@ export function useLibraryDetailSongPathCache() {
     loadArtistSongPaths,
     loadAlbumSongPaths,
     clearLibraryDetailSongPathCache: () => {
+      cacheGeneration += 1;
       clearLibrarySongPathCacheNamespace(DETAIL_PATH_CACHE_NAMESPACE);
       inFlightRequests.clear();
       cacheVersion.value += 1;

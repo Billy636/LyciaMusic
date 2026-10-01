@@ -47,7 +47,9 @@
 
     <MoveToFolderModal
       :visible="showMoveToFolderModal"
-      :selectedCount="selectedPaths.size"
+      :selectedCount="pendingMovePaths.length"
+      :source-paths="pendingMovePaths"
+      :busy="isMovingSongs"
       @close="showMoveToFolderModal = false"
       @confirm="confirmBatchMove"
     />
@@ -69,7 +71,7 @@
       :visible="showConfirm"
       :title="confirmTitle"
       :content="confirmMessage"
-      type="danger"
+      :type="confirmType"
       :confirm-text="confirmButtonText"
       @confirm="executeConfirmAction"
       @cancel="showConfirm = false"
@@ -158,12 +160,15 @@ const {
   handleTableDragStart,
   handleArtistAlbumClick,
   showMoveToFolderModal,
+  pendingMovePaths,
+  isMovingSongs,
   confirmBatchMove,
   showContextMenu,
   contextMenuX,
   contextMenuY,
   contextMenuTargetSong,
   showConfirm,
+  confirmType,
   confirmTitle,
   confirmMessage,
   confirmButtonText,

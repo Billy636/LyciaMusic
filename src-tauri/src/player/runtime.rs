@@ -771,6 +771,20 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
         loop {
             match rx.recv_timeout(player_poll_interval(is_playing_flag)) {
                 Ok(cmd) => match cmd {
+                    AudioCommand::RelocatePaths(relocation) => {
+                        if let Some(path) = relocation.relocated_path(&current_path) {
+                            current_path = path;
+                        }
+                        if let Some(AudioSource::LocalFile(path)) = &mut current_source {
+                            if let Some(next) = relocation.relocated_path(path) {
+                                *path = next;
+                            }
+                        }
+                        #[cfg(target_os = "windows")]
+                        if let Some(playback) = &exclusive_playback {
+                            playback.relocate_paths(relocation);
+                        }
+                    }
                     AudioCommand::Play {
                         source,
                         output_mode,

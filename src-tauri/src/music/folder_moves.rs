@@ -1,4 +1,5 @@
 use crate::database::DbState;
+use crate::player::{notify_audio_paths_relocated, AudioPathRelocation};
 use rusqlite::{params, TransactionBehavior};
 use serde::Serialize;
 use std::{fs, path::Path};
@@ -60,9 +61,10 @@ pub async fn move_folder_to_folder(
     source_path: String,
     target_folder: String,
     db_state: State<'_, DbState>,
+    app: tauri::AppHandle,
 ) -> Result<FolderMoveResult, String> {
     let db = db_state.conn.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let source_metadata = fs::symlink_metadata(&source_path).map_err(|e| e.to_string())?;
         #[cfg(windows)]
         {
@@ -147,5 +149,13 @@ pub async fn move_folder_to_folder(
             };
         }
         Ok(FolderMoveResult { old_path, new_path })
-    }).await.map_err(|e| e.to_string())?
+    }).await.map_err(|e| e.to_string())??;
+    notify_audio_paths_relocated(
+        &app,
+        AudioPathRelocation::Folder {
+            old_path: result.old_path.clone(),
+            new_path: result.new_path.clone(),
+        },
+    );
+    Ok(result)
 }

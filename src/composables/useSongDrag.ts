@@ -1,4 +1,4 @@
-import { ref, onMounted, onUnmounted, Ref } from 'vue';
+import { onDeactivated, onScopeDispose, watch, type Ref } from 'vue';
 import { storeToRefs } from 'pinia';
 
 import { dragSession } from './dragState';
@@ -7,426 +7,376 @@ import type { Song } from '../types';
 import { useToast } from './toast';
 import { useCollectionsStore } from '../features/collections/store';
 
+type FolderDropTarget = { path: string; name: string };
+interface SongDragOptions {
+    canDropToFolder?: () => boolean;
+    onDropToFolder?: (paths: string[], target: FolderDropTarget) => void;
+    expandFolder?: (path: string) => Promise<unknown>;
+}
+
+// Home can remain alive while Recent/Favorites mount another song list.
+let activeSongDragOwner: symbol | null = null;
+
 export function useSongDrag(
     displaySongList: Ref<Song[]>,
     isBatchMode: Ref<boolean>,
     selectedPaths: Ref<Set<string>>,
     songTableRef: Ref<{ containerRef: HTMLElement | null } | null>,
     displaySongPaths?: Ref<string[]>,
+    options: SongDragOptions = {},
 ) {
     const getVisualPaths = () => displaySongPaths?.value ?? displaySongList.value.map(song => song.path);
     const {
-        songList, currentViewMode, addSongsToPlaylist,
-        currentFolderFilter, updateFolderOrder // 🟢 导入文件夹排序函数
+        songList, currentViewMode, addSongsToPlaylist, currentFolderFilter,
+        updateFolderOrder, filterCondition, setPlaylistSortMode, updateLocalOrder,
     } = usePlayer();
     const { playlists } = storeToRefs(useCollectionsStore());
-    const { filterCondition, setPlaylistSortMode } = usePlayer();
-    const { updateLocalOrder } = usePlayer();
+    const owner = Symbol('song-drag');
+    const ROW_HEIGHT = 72;
+    const reorderViews = ['folder', 'playlist', 'all', 'artist', 'album', 'genre', 'year'];
+    let pending: {
+        pointerId: number; song: Song; index: number; batch: boolean; shift: boolean;
+        selection: boolean; selectionAction: 'select' | 'deselect'; selectionIndex: number;
+        x: number; y: number; lastX: number; lastY: number; moved: boolean;
+    } | null = null;
+    let lastSelectedIndex = -1;
+    let scrollFrame = 0;
+    let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+    let hoveredPath = '';
+    let suppressClickUntil = 0;
+    let suppressClickX = 0;
+    let suppressClickY = 0;
 
-    const reorderPathOrder = (
-        pathOrder: string[],
-        movingPaths: string[],
-        targetPath?: string
-    ) => {
+    const ownsDrag = () => !!pending && activeSongDragOwner === owner && dragSession.type === 'song';
+    const canDropToFolder = () => !!options.onDropToFolder && (options.canDropToFolder?.() ?? true);
+
+    const reorderPathOrder = (pathOrder: string[], movingPaths: string[], targetPath?: string) => {
         const movingSet = new Set(movingPaths);
-        const movingInOrder = pathOrder.filter(p => movingSet.has(p));
-        if (movingInOrder.length === 0) {
+        const movingInOrder = pathOrder.filter(path => movingSet.has(path));
+        if (movingInOrder.length === 0 || (targetPath && movingSet.has(targetPath))) {
             return { reordered: pathOrder, changed: false };
         }
-
-        if (targetPath && movingSet.has(targetPath)) {
-            return { reordered: pathOrder, changed: false };
-        }
-
-        const remaining = pathOrder.filter(p => !movingSet.has(p));
+        const remaining = pathOrder.filter(path => !movingSet.has(path));
         let insertIndex = remaining.length;
-
         if (targetPath) {
-            const targetIndexInRemaining = remaining.indexOf(targetPath);
-            if (targetIndexInRemaining !== -1) {
-                const firstMovingIndex = pathOrder.findIndex(p => movingSet.has(p));
-                const targetIndexInOriginal = pathOrder.indexOf(targetPath);
-                const movingFromAbove = firstMovingIndex !== -1 && firstMovingIndex < targetIndexInOriginal;
-                insertIndex = movingFromAbove ? targetIndexInRemaining + 1 : targetIndexInRemaining;
+            const targetIndex = remaining.indexOf(targetPath);
+            if (targetIndex !== -1) {
+                const firstMovingIndex = pathOrder.findIndex(path => movingSet.has(path));
+                const movingFromAbove = firstMovingIndex < pathOrder.indexOf(targetPath);
+                insertIndex = movingFromAbove ? targetIndex + 1 : targetIndex;
             }
         }
-
         const reordered = [...remaining];
         reordered.splice(insertIndex, 0, ...movingInOrder);
-        const changed = reordered.some((p, i) => p !== pathOrder[i]);
-        return { reordered, changed };
+        return { reordered, changed: reordered.some((path, index) => path !== pathOrder[index]) };
     };
 
-    const reorderSongArrayByPaths = (
-        songs: Song[],
-        movingPaths: string[],
-        targetPath?: string
-    ) => {
-        const originalPaths = songs.map(s => s.path);
-        const { reordered, changed } = reorderPathOrder(originalPaths, movingPaths, targetPath);
-        if (!changed) {
-            return { reordered: songs, changed: false };
+    const applyReorder = (movingPaths: string[], insertIndex: number) => {
+        const visualPaths = getVisualPaths();
+        const targetPath = visualPaths[insertIndex];
+        if (!targetPath) return;
+        if (currentViewMode.value === 'playlist') {
+            const playlist = playlists.value.find(item => item.id === filterCondition.value);
+            if (!playlist) return;
+            const { reordered, changed } = reorderPathOrder(visualPaths, movingPaths, targetPath);
+            if (changed) {
+                // Preserve songs hidden by search, pagination or unavailable files.
+                const visiblePaths = new Set(visualPaths);
+                let visibleIndex = 0;
+                playlist.songPaths = playlist.songPaths.map(path => visiblePaths.has(path)
+                    ? reordered[visibleIndex++] ?? path : path);
+                setPlaylistSortMode('custom');
+            }
+            return;
         }
-        const songMap = new Map(songs.map(s => [s.path, s]));
-        return {
-            reordered: reordered.map(path => songMap.get(path)).filter((s): s is Song => !!s),
-            changed: true
-        };
+        const fullList = [...songList.value];
+        const { reordered, changed } = reorderPathOrder(fullList.map(song => song.path), movingPaths, targetPath);
+        if (changed) {
+            const songMap = new Map(fullList.map(song => [song.path, song]));
+            songList.value = reordered.map(path => songMap.get(path)).filter((song): song is Song => !!song);
+        }
+        const viewOrder = reorderPathOrder(visualPaths, movingPaths, targetPath);
+        if (viewOrder.changed && currentViewMode.value === 'folder' && currentFolderFilter.value) {
+            updateFolderOrder(currentFolderFilter.value, viewOrder.reordered);
+        } else if (viewOrder.changed && currentViewMode.value === 'all') {
+            updateLocalOrder(viewOrder.reordered);
+        }
     };
 
+    const clearHover = () => {
+        clearTimeout(hoverTimer);
+        hoverTimer = undefined;
+        hoveredPath = '';
+    };
 
-    let isPointerDown = false;
-    let startX = 0;
-    let startY = 0;
-    const ROW_HEIGHT = 72;
+    const toggleSelection = (path: string, index: number, shift: boolean) => {
+        if (shift && lastSelectedIndex !== -1) {
+            const visualPaths = getVisualPaths();
+            const start = Math.min(lastSelectedIndex, index);
+            const end = Math.min(Math.max(lastSelectedIndex, index), visualPaths.length - 1);
+            for (let i = start; i <= end; i++) selectedPaths.value.add(visualPaths[i]);
+        } else {
+            if (selectedPaths.value.has(path)) selectedPaths.value.delete(path);
+            else selectedPaths.value.add(path);
+            lastSelectedIndex = index;
+        }
+    };
 
-    // 自动滚动
-    let autoScrollTimer: number | null = null;
-    const startAutoScroll = (direction: 'up' | 'down') => {
-        if (autoScrollTimer) return;
+    const updateSelection = () => {
+        if (!ownsDrag() || !pending?.selection || !pending.moved) return;
         const container = songTableRef.value?.containerRef;
         if (!container) return;
-
-        const scroll = () => {
-            if (!isPointerDown) { stopAutoScroll(); return; }
-            const speed = 15;
-            if (direction === 'up') container.scrollTop -= speed;
-            else container.scrollTop += speed;
-            autoScrollTimer = requestAnimationFrame(scroll);
-        };
-        autoScrollTimer = requestAnimationFrame(scroll);
+        const rect = container.getBoundingClientRect();
+        const { lastX: x, lastY: y } = pending;
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+        const element = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-index]');
+        let index = element && container.contains(element) ? Number(element.dataset.index) : -1;
+        if (index === -1) {
+            const rows = container.querySelectorAll<HTMLElement>('[data-index]');
+            if (!rows.length) return;
+            const row = y < rows[0].getBoundingClientRect().top ? rows[0] : rows[rows.length - 1];
+            index = Number(row.dataset.index);
+        }
+        const visualPaths = getVisualPaths();
+        if (!Number.isInteger(index) || !visualPaths.length) return;
+        index = Math.max(0, Math.min(index, visualPaths.length - 1));
+        const start = Math.min(pending.selectionIndex, index);
+        const end = Math.max(pending.selectionIndex, index);
+        for (let i = start; i <= end; i++) {
+            const path = visualPaths[i];
+            if (!path) continue;
+            if (pending.selectionAction === 'select') selectedPaths.value.add(path);
+            else selectedPaths.value.delete(path);
+        }
+        pending.selectionIndex = index;
     };
 
-    const stopAutoScroll = () => {
-        if (autoScrollTimer) { cancelAnimationFrame(autoScrollTimer); autoScrollTimer = null; }
-    };
-
-    const lastSelectedIndex = ref<number>(-1);
-    const isSelectionDragging = ref(false);
-    const dragSelectAction = ref<'select' | 'deselect' | null>(null);
-
-    const isPrimaryDragPointer = (event: PointerEvent) =>
-        event.isPrimary !== false && (event.pointerType !== 'mouse' || event.button === 0);
-
-    // 1. PointerDown 处理项
-    const handleTableDragStart = ({ event, song, index }: { event: PointerEvent; song: Song; index: number }) => {
-        if (!isPrimaryDragPointer(event)) {
-            return;
-        }
-
-        isPointerDown = true;
-        startX = event.clientX;
-        startY = event.clientY;
-
-        // --- 分支 A: 批量多选模式 ---
-        if (isBatchMode.value) {
-            const tr = event.currentTarget as HTMLElement;
-            const rect = tr.getBoundingClientRect();
-
-            // 判断点击位置：如果点击在左侧 60% 区域，视为“选择操作”
-            if ((event.clientX - rect.left) / rect.width < 0.6) {
-                isSelectionDragging.value = true;
-
-                // Shift 连选逻辑
-                if (event.shiftKey && lastSelectedIndex.value !== -1) {
-                    const start = Math.min(lastSelectedIndex.value, index);
-                    const end = Math.max(lastSelectedIndex.value, index);
-                    for (let i = start; i <= end; i++) {
-                        const path = getVisualPaths()[i];
-                        if (path) selectedPaths.value.add(path);
-                    }
-                } else {
-                    // 普通点击：单选/反选
-                    if (selectedPaths.value.has(song.path)) {
-                        selectedPaths.value.delete(song.path);
-                    } else {
-                        selectedPaths.value.add(song.path);
-                    }
-                    lastSelectedIndex.value = index;
-                }
-
-                dragSelectAction.value = selectedPaths.value.has(song.path) ? 'select' : 'deselect';
-            } else {
-                // 点击右侧区域，视为“拖拽已选歌曲”
-                isSelectionDragging.value = false;
-                if (!selectedPaths.value.has(song.path)) selectedPaths.value.add(song.path);
-                const loadedSelectedSongs = displaySongList.value.filter(s => selectedPaths.value.has(s.path));
-                dragSession.songs = loadedSelectedSongs.length > 0 ? loadedSelectedSongs : [song];
-                dragSession.insertIndex = index;
+    const updateTarget = () => {
+        if (!ownsDrag() || !dragSession.active || !pending) return;
+        const { lastX: x, lastY: y } = pending;
+        const element = document.elementFromPoint(x, y);
+        const folder = element?.closest<HTMLElement>('.folder-drop-target');
+        const folderPath = folder?.dataset.folderPath;
+        dragSession.targetFolder = folderPath && canDropToFolder()
+            ? { path: folderPath, name: folder?.dataset.folderName || folderPath } : null;
+        const nextHoveredPath = dragSession.targetFolder?.path ?? '';
+        if (hoveredPath !== nextHoveredPath) {
+            clearHover();
+            if (nextHoveredPath && options.expandFolder) {
+                hoveredPath = nextHoveredPath;
+                hoverTimer = setTimeout(() => {
+                    if (!ownsDrag() || hoveredPath !== nextHoveredPath || !canDropToFolder()) return;
+                    void Promise.resolve().then(() => options.expandFolder!(nextHoveredPath)).then(() => {
+                        if (ownsDrag() && hoveredPath === nextHoveredPath) updateTarget();
+                    }).catch(() => { /* A failed expansion must not complete a move. */ });
+                }, 650);
             }
         }
-        // --- 分支 B: 普通模式 ---
-        else {
-            if (['folder', 'playlist', 'all', 'artist', 'album', 'genre', 'year'].includes(currentViewMode.value)) {
-                dragSession.type = 'song';
-                dragSession.songs = [song];
-                dragSession.insertIndex = index;
-            }
-        }
-    };
-
-    // 2. PointerMove
-    const onGlobalPointerMove = (e: PointerEvent) => {
-        if (!isPointerDown) return;
-        if (e.pointerType !== 'mouse') {
-            e.preventDefault();
-        }
-
-        // 滑动框选逻辑
-        if (isBatchMode.value && isSelectionDragging.value) {
-            const container = songTableRef.value?.containerRef;
-            if (!container) return;
-
-            const rect = container.getBoundingClientRect();
-            if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-                // 🔥 使用 elementFromPoint 精确命中鼠标下方的行元素
-                // 不再依赖 ROW_HEIGHT 常量，彻底避免行高不一致导致的选择偏移
-                const target = document.elementFromPoint(e.clientX, e.clientY);
-                const rowEl = target?.closest('[data-index]') as HTMLElement | null;
-
-                let currentIndex = -1;
-                if (rowEl) {
-                    currentIndex = parseInt(rowEl.dataset.index!, 10);
-                } else {
-                    // 兜底：鼠标在虚拟滚动 padding 区域
-                    const rowElements = container.querySelectorAll('[data-index]');
-                    if (rowElements.length > 0) {
-                        const firstRow = rowElements[0] as HTMLElement;
-                        const lastRow = rowElements[rowElements.length - 1] as HTMLElement;
-                        if (e.clientY < firstRow.getBoundingClientRect().top) {
-                            currentIndex = parseInt(firstRow.dataset.index!, 10);
-                        } else {
-                            currentIndex = parseInt(lastRow.dataset.index!, 10);
-                        }
-                    }
-                }
-
-                if (currentIndex === -1) return;
-                const visualPaths = getVisualPaths();
-                currentIndex = Math.max(0, Math.min(visualPaths.length - 1, currentIndex));
-
-                if (currentIndex !== lastSelectedIndex.value) {
-                    const start = Math.min(lastSelectedIndex.value, currentIndex);
-                    const end = Math.max(lastSelectedIndex.value, currentIndex);
-
-                    for (let i = start; i <= end; i++) {
-                        const path = visualPaths[i];
-                        if (path) {
-                            if (dragSelectAction.value === 'select') {
-                                selectedPaths.value.add(path);
-                            } else if (dragSelectAction.value === 'deselect') {
-                                selectedPaths.value.delete(path);
-                            }
-                        }
-                    }
-                    lastSelectedIndex.value = currentIndex;
-                }
-
-                const threshold = 60;
-                if (e.clientY < rect.top + threshold) startAutoScroll('up');
-                else if (e.clientY > rect.bottom - threshold) startAutoScroll('down');
-                else stopAutoScroll();
-            }
-            return;
-        }
-
-        // 拖拽激活判断
-        if (!dragSession.active) {
-            const dist = Math.sqrt(Math.pow(e.clientX - startX, 2) + Math.pow(e.clientY - startY, 2));
-            if (dist > 5) {
-                dragSession.active = true;
-                dragSession.showGhost = true;
-            }
-        }
-
-        if (dragSession.active) {
-            dragSession.mouseX = e.clientX;
-            dragSession.mouseY = e.clientY;
-
-            const container = songTableRef.value?.containerRef;
-            if (container) {
-                const rect = container.getBoundingClientRect();
-                const threshold = 60;
-                if (e.clientY < rect.top + threshold) startAutoScroll('up');
-                else if (e.clientY > rect.bottom - threshold) startAutoScroll('down');
-                else stopAutoScroll();
-            }
-
-            const target = document.elementFromPoint(e.clientX, e.clientY);
-            const folderEl = target?.closest('.folder-drop-target');
-            if (folderEl) {
-                dragSession.targetFolder = {
-                    path: folderEl.getAttribute('data-folder-path')!,
-                    name: folderEl.getAttribute('data-folder-name')!
-                };
-                dragSession.targetPlaylist = null;
-                dragSession.insertIndex = -1;
-                return;
-            } else {
-                dragSession.targetFolder = null;
-            }
-
-            const playlistEl = target?.closest('.playlist-drop-target');
-            if (playlistEl) {
-                dragSession.targetPlaylist = {
-                    id: playlistEl.getAttribute('data-playlist-id')!,
-                    name: playlistEl.getAttribute('data-playlist-name')!
-                };
-                dragSession.targetFolder = null;
-                dragSession.insertIndex = -1;
-                return;
-            } else {
-                dragSession.targetPlaylist = null;
-            }
-
-            if (!isBatchMode.value && !dragSession.targetFolder && !dragSession.targetPlaylist && container) {
-                const containerRect = container.getBoundingClientRect();
-                if (
-                    e.clientX >= containerRect.left && e.clientX <= containerRect.right &&
-                    e.clientY >= containerRect.top && e.clientY <= containerRect.bottom
-                ) {
-                    const offsetY = e.clientY - containerRect.top + container.scrollTop;
-                    let currentGapIndex = dragSession.insertIndex;
-                    if (currentGapIndex === -1) currentGapIndex = 0;
-
-                    const upTriggerLimit = (currentGapIndex - 0.5) * ROW_HEIGHT;
-                    const downTriggerLimit = (currentGapIndex + 1.5) * ROW_HEIGHT;
-                    const maxIndex = getVisualPaths().length - 1;
-
-                    if (offsetY < upTriggerLimit) {
-                        const newIndex = Math.floor(offsetY / ROW_HEIGHT);
-                        dragSession.insertIndex = Math.max(0, newIndex);
-                    } else if (offsetY > downTriggerLimit) {
-                        const newIndex = Math.floor(offsetY / ROW_HEIGHT);
-                        dragSession.insertIndex = Math.min(maxIndex, newIndex);
-                    }
-                } else {
-                    dragSession.insertIndex = -1;
-                }
-            }
-        }
-    };
-
-    // 3. PointerUp / PointerCancel
-    const resetDragState = () => {
-        dragSession.showGhost = false;
-        dragSession.active = false;
-        dragSession.insertIndex = -1;
-        dragSession.targetFolder = null;
-        dragSession.targetPlaylist = null;
-    };
-
-    const onGlobalPointerEnd = (cancelled = false) => {
-        if (dragSession.type === 'folder') return;
-        isPointerDown = false;
-        stopAutoScroll();
-        isSelectionDragging.value = false;
-        dragSelectAction.value = null;
-
-        if (cancelled) {
-            resetDragState();
-            return;
-        }
-
-        if (dragSession.active) {
-            if (dragSession.targetFolder) {
-                dragSession.showGhost = false;
-                return;
-            }
-
-            if (dragSession.targetPlaylist) {
-                const paths = dragSession.songs.map(s => s.path);
-                const count = addSongsToPlaylist(dragSession.targetPlaylist.id, paths);
-                const msg = count > 0 ? `已添加 ${count} 首歌曲到 ${dragSession.targetPlaylist.name}` : '歌曲已存在于歌单';
-                useToast().showToast(msg, count > 0 ? 'success' : 'info');
-                dragSession.showGhost = false;
-                dragSession.active = false;
-            } else if (dragSession.insertIndex > -1) {
-                const movingSongs = dragSession.songs;
-                if (movingSongs.length > 0) {
-                    const movingPaths = movingSongs.map(s => s.path);
-                    const visualPaths = getVisualPaths();
-                    const targetPath = visualPaths[dragSession.insertIndex];
-
-                    // 处理歌单内排序
-                    if (currentViewMode.value === 'playlist') {
-                        const plId = filterCondition.value;
-                        const pl = playlists.value.find(p => p.id === plId);
-
-                        if (pl) {
-                            // Keep drag behavior consistent with current visual order.
-                            const { reordered, changed } = reorderPathOrder(visualPaths, movingPaths, targetPath);
-                            if (changed) {
-                                // Preserve songs hidden by search, pagination or unavailable files.
-                                const visiblePaths = new Set(visualPaths);
-                                let visibleIndex = 0;
-                                pl.songPaths = pl.songPaths.map(path => visiblePaths.has(path)
-                                    ? reordered[visibleIndex++] ?? path : path);
-                                setPlaylistSortMode('custom');
-                            }
-                        }
-                    }
-                    // 处理全局排序
-                    else {
-                        const fullList = [...songList.value];
-                        const { reordered, changed } = reorderSongArrayByPaths(fullList, movingPaths, targetPath);
-                        if (changed) {
-                            songList.value = reordered;
-                        }
-
-                        // 🟢 文件夹视图:保存自定义排序顺序
-                        if (currentViewMode.value === 'folder' && currentFolderFilter.value) {
-                            const { reordered: newOrder, changed: folderOrderChanged } = reorderPathOrder(
-                                visualPaths,
-                                movingPaths,
-                                targetPath
-                            );
-                            if (folderOrderChanged) {
-                                updateFolderOrder(currentFolderFilter.value, newOrder);
-                            }
-                        }
-
-                        // 本地音乐视图: 保存自定义排序并自动切换到 custom 模式
-                        if (currentViewMode.value === 'all') {
-                            const { reordered: newOrder, changed: localOrderChanged } = reorderPathOrder(
-                                visualPaths,
-                                movingPaths,
-                                targetPath
-                            );
-                            if (localOrderChanged) {
-                                updateLocalOrder(newOrder);
-                            }
-                        }
-                    }
-                }
-                dragSession.showGhost = false;
-                dragSession.active = false;
-            } else {
-                dragSession.showGhost = false;
-                dragSession.active = false;
-            }
+        const playlist = !folder ? element?.closest<HTMLElement>('.playlist-drop-target') : null;
+        const playlistId = playlist?.dataset.playlistId;
+        dragSession.targetPlaylist = playlistId
+            ? { id: playlistId, name: playlist?.dataset.playlistName || playlistId } : null;
+        if (folder || playlist || pending.batch || !reorderViews.includes(currentViewMode.value)) {
             dragSession.insertIndex = -1;
-            setTimeout(() => { dragSession.targetPlaylist = null; }, 100);
+            return;
+        }
+        const container = songTableRef.value?.containerRef;
+        const rect = container?.getBoundingClientRect();
+        if (!container || !rect || x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+            dragSession.insertIndex = -1;
+            return;
+        }
+        const offsetY = y - rect.top + container.scrollTop;
+        const currentIndex = Math.max(0, dragSession.insertIndex);
+        if (offsetY < (currentIndex - 0.5) * ROW_HEIGHT || offsetY > (currentIndex + 1.5) * ROW_HEIGHT) {
+            dragSession.insertIndex = Math.max(0, Math.min(getVisualPaths().length - 1, Math.floor(offsetY / ROW_HEIGHT)));
+        } else if (dragSession.insertIndex === -1) {
+            dragSession.insertIndex = currentIndex;
         }
     };
 
-    const onGlobalPointerUp = () => onGlobalPointerEnd(false);
-    const onGlobalPointerCancel = () => onGlobalPointerEnd(true);
-
-    onMounted(() => {
-        window.addEventListener('pointermove', onGlobalPointerMove);
-        window.addEventListener('pointerup', onGlobalPointerUp);
-        window.addEventListener('pointercancel', onGlobalPointerCancel);
-    });
-
-    onUnmounted(() => {
-        stopAutoScroll();
-        window.removeEventListener('pointermove', onGlobalPointerMove);
-        window.removeEventListener('pointerup', onGlobalPointerUp);
-        window.removeEventListener('pointercancel', onGlobalPointerCancel);
-    });
-
-    return {
-        handleTableDragStart
+    const autoScroll = () => {
+        if (!ownsDrag() || !pending) return;
+        const { lastX: x, lastY: y } = pending;
+        const tree = !pending.selection && canDropToFolder()
+            ? document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-folder-tree-scroll]') : null;
+        const container = tree || songTableRef.value?.containerRef;
+        if (container) {
+            const rect = container.getBoundingClientRect();
+            if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                const threshold = tree ? 36 : 60;
+                const speed = tree ? 8 : 15;
+                const delta = y < rect.top + threshold ? -speed : y > rect.bottom - threshold ? speed : 0;
+                if (delta) {
+                    container.scrollTop += delta;
+                    if (pending.selection) updateSelection();
+                    else updateTarget();
+                }
+            }
+        }
+        scrollFrame = requestAnimationFrame(autoScroll);
     };
+
+    const markClickSuppressed = () => {
+        if (!pending) return;
+        suppressClickUntil = Date.now() + 400;
+        suppressClickX = pending.lastX;
+        suppressClickY = pending.lastY;
+    };
+    const suppressClick = (event: MouseEvent) => {
+        if (event.detail > 0 && Date.now() < suppressClickUntil
+            && Math.hypot(event.clientX - suppressClickX, event.clientY - suppressClickY) < 8) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }
+    };
+
+    const reset = () => {
+        const owned = activeSongDragOwner === owner;
+        pending = null;
+        clearHover();
+        cancelAnimationFrame(scrollFrame);
+        scrollFrame = 0;
+        window.removeEventListener('pointermove', pointerMove);
+        window.removeEventListener('pointerup', pointerUp, true);
+        window.removeEventListener('pointercancel', pointerCancel, true);
+        window.removeEventListener('blur', cancel);
+        window.removeEventListener('keydown', keydown, true);
+        if (!owned) return;
+        activeSongDragOwner = null;
+        if (dragSession.type === 'song') {
+            Object.assign(dragSession, {
+                active: false, showGhost: false, songs: [], songPaths: undefined, data: null,
+                targetFolder: null, targetPlaylist: null, insertIndex: -1, sortLineTop: -1,
+            });
+        }
+    };
+    const cancel = () => {
+        if (ownsDrag() && (pending?.moved || pending?.selection)) markClickSuppressed();
+        reset();
+    };
+    const keydown = (event: KeyboardEvent) => {
+        if (ownsDrag() && event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            cancel();
+        }
+    };
+
+    const activateDrag = () => {
+        if (!pending || !ownsDrag()) return;
+        const { song, batch, shift, index } = pending;
+        if (batch) {
+            if (shift) toggleSelection(song.path, index, true);
+            selectedPaths.value.add(song.path);
+        }
+        // Paths are authoritative; metadata is only loaded for the visible virtual window.
+        const paths = batch
+            ? [...new Set([...getVisualPaths().filter(path => selectedPaths.value.has(path)), ...selectedPaths.value])]
+            : [song.path];
+        const movingSet = new Set(paths);
+        dragSession.songs = [song, ...displaySongList.value.filter(item => item.path !== song.path && movingSet.has(item.path))];
+        dragSession.songPaths = paths;
+        dragSession.active = true;
+        dragSession.showGhost = true;
+        dragSession.insertIndex = !batch && reorderViews.includes(currentViewMode.value) ? index : -1;
+    };
+
+    const pointerMove = (event: PointerEvent) => {
+        if (!pending || pending.pointerId !== event.pointerId) return;
+        if (!ownsDrag()) { reset(); return; }
+        pending.lastX = event.clientX;
+        pending.lastY = event.clientY;
+        if (!pending.moved) {
+            if (Math.hypot(event.clientX - pending.x, event.clientY - pending.y) < 6) return;
+            pending.moved = true;
+            if (!pending.selection) activateDrag();
+            scrollFrame = requestAnimationFrame(autoScroll);
+        }
+        event.preventDefault();
+        dragSession.mouseX = event.clientX;
+        dragSession.mouseY = event.clientY;
+        if (pending.selection) updateSelection();
+        else updateTarget();
+    };
+
+    const pointerUp = (event: PointerEvent) => {
+        if (!pending || pending.pointerId !== event.pointerId) return;
+        if (!ownsDrag()) { reset(); return; }
+        pending.lastX = event.clientX;
+        pending.lastY = event.clientY;
+        const wasDragging = dragSession.active;
+        const batch = pending.batch;
+        if (wasDragging) updateTarget();
+        else if (batch && !pending.selection && !pending.moved) {
+            toggleSelection(pending.song.path, pending.index, pending.shift);
+        }
+        if (wasDragging || batch || pending.moved) {
+            event.preventDefault();
+            markClickSuppressed();
+        }
+        const paths = [...(dragSession.songPaths ?? [])];
+        const folder = wasDragging && canDropToFolder() && dragSession.targetFolder
+            ? { ...dragSession.targetFolder } : null;
+        const playlist = wasDragging && dragSession.targetPlaylist ? { ...dragSession.targetPlaylist } : null;
+        const insertIndex = wasDragging && !batch ? dragSession.insertIndex : -1;
+        // Confirmation owns an immutable snapshot, never the live global drag session.
+        reset();
+        if (!paths.length) return;
+        if (folder) {
+            options.onDropToFolder?.(paths, folder);
+        } else if (playlist) {
+            const count = addSongsToPlaylist(playlist.id, paths);
+            useToast().showToast(count > 0 ? `已添加 ${count} 首歌曲到 ${playlist.name}` : '歌曲已存在于歌单', count > 0 ? 'success' : 'info');
+        } else if (insertIndex > -1) {
+            applyReorder(paths, insertIndex);
+        }
+    };
+    const pointerCancel = (event: PointerEvent) => {
+        if (pending?.pointerId === event.pointerId) cancel();
+    };
+
+    const handleTableDragStart = ({ event, song, index }: { event: PointerEvent; song: Song; index: number }) => {
+        if (event.isPrimary === false || (event.pointerType === 'mouse' && event.button !== 0)
+            || activeSongDragOwner || dragSession.active) return;
+        const target = event.target instanceof Element ? event.target : null;
+        const selection = isBatchMode.value && !!target?.closest('[data-selection-control], input[type="checkbox"], [role="checkbox"]');
+        if (!selection && target?.closest('button, a, input, select, textarea, [contenteditable="true"]')) return;
+        activeSongDragOwner = owner;
+        Object.assign(dragSession, {
+            type: 'song', active: false, showGhost: false, songs: [], songPaths: undefined, data: null,
+            targetFolder: null, targetPlaylist: null, insertIndex: -1, sortLineTop: -1,
+            mouseX: event.clientX, mouseY: event.clientY,
+        });
+        pending = {
+            pointerId: event.pointerId, song, index, batch: isBatchMode.value, shift: event.shiftKey,
+            selection, selectionAction: 'select', selectionIndex: index, moved: false,
+            x: event.clientX, y: event.clientY, lastX: event.clientX, lastY: event.clientY,
+        };
+        if (selection) {
+            event.preventDefault();
+            toggleSelection(song.path, index, event.shiftKey);
+            pending.selectionAction = selectedPaths.value.has(song.path) ? 'select' : 'deselect';
+        }
+        window.addEventListener('pointermove', pointerMove, { passive: false });
+        window.addEventListener('pointerup', pointerUp, true);
+        window.addEventListener('pointercancel', pointerCancel, true);
+        window.addEventListener('blur', cancel);
+        window.addEventListener('keydown', keydown, true);
+    };
+
+    window.addEventListener('click', suppressClick, true);
+    window.addEventListener('dblclick', suppressClick, true);
+    watch([isBatchMode, currentViewMode, currentFolderFilter, filterCondition], () => {
+        cancel();
+        lastSelectedIndex = -1;
+    }, { flush: 'sync' });
+    onDeactivated(cancel);
+    onScopeDispose(() => {
+        cancel();
+        window.removeEventListener('click', suppressClick, true);
+        window.removeEventListener('dblclick', suppressClick, true);
+    });
+
+    return { handleTableDragStart };
 }

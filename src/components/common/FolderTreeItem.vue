@@ -11,8 +11,6 @@
       @click.stop="handleSelect"
       @pointerdown.stop="emit('drag-start', { event: $event, node })"
       @dragstart.prevent
-      @mousemove="handleMouseMoveDrag"
-      @mouseleave="handleMouseLeaveDrag"
       @contextmenu.prevent.stop="handleContextMenu"
     >
       <div :style="{ width: `${depth * 16}px` }" class="shrink-0 transition-all"></div>
@@ -126,18 +124,6 @@ const isSelected = computed(() => props.selectedPath === props.node.path);
 const isTarget = computed(() =>
   dragSession.active && ['song', 'folder'].includes(dragSession.type) && dragSession.targetFolder?.path === props.node.path,
 );
-
-const handleMouseMoveDrag = () => {
-  if (dragSession.active && dragSession.type === 'song' && dragSession.targetFolder?.path !== props.node.path) {
-    dragSession.targetFolder = { name: props.node.name, path: props.node.path };
-  }
-};
-
-const handleMouseLeaveDrag = () => {
-  if (dragSession.active && dragSession.type === 'song' && dragSession.targetFolder?.path === props.node.path) {
-    dragSession.targetFolder = null;
-  }
-};
 
 const shouldAnimateExpansion = computed(() => props.node.child_count <= 16);
 

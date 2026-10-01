@@ -1,6 +1,6 @@
 use crate::player::equalizer::{EqualizerHandle, EqualizerSettings};
 use crate::player::output::OutputError;
-use crate::player::types::{SharedProgress, SharedVisualizer};
+use crate::player::types::{AudioPathRelocation, SharedProgress, SharedVisualizer};
 use rodio::Source;
 use std::fs::File;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -38,6 +38,7 @@ pub(crate) struct ExclusivePlayRequest {
 }
 
 enum ExclusiveCommand {
+    RelocatePaths(AudioPathRelocation),
     Pause,
     Resume,
     Seek { time: Duration, is_playing: bool },
@@ -47,6 +48,12 @@ enum ExclusiveCommand {
 }
 
 impl WasapiExclusivePlayback {
+    pub(crate) fn relocate_paths(&self, relocation: AudioPathRelocation) {
+        if let Err(error) = self.tx.send(ExclusiveCommand::RelocatePaths(relocation)) {
+            eprintln!("Failed to notify exclusive audio worker of moved files: {error}");
+        }
+    }
+
     pub(crate) fn start(request: ExclusivePlayRequest) -> Result<Self, OutputError> {
         let (command_tx, command_rx) = channel::<ExclusiveCommand>();
         let (init_tx, init_rx) = sync_channel::<Result<String, String>>(1);
@@ -333,7 +340,7 @@ fn negotiate_exclusive_format(
 }
 
 fn run_exclusive_playback(
-    request: ExclusivePlayRequest,
+    mut request: ExclusivePlayRequest,
     command_rx: Receiver<ExclusiveCommand>,
     init_tx: std::sync::mpsc::SyncSender<Result<String, String>>,
 ) -> Result<(), String> {
@@ -424,6 +431,11 @@ fn run_exclusive_playback(
     loop {
         while let Ok(command) = command_rx.try_recv() {
             match command {
+                ExclusiveCommand::RelocatePaths(relocation) => {
+                    if let Some(path) = relocation.relocated_path(&request.path) {
+                        request.path = path;
+                    }
+                }
                 ExclusiveCommand::Pause => {
                     if is_playing {
                         let _ = audio_client.stop_stream();

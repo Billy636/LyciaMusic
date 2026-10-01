@@ -1,17 +1,26 @@
 <script setup lang="ts">
 import { dragSession } from '../../composables/dragState';
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
+import { computed, ref, watch, onActivated, onDeactivated, onMounted, onUnmounted, type CSSProperties } from 'vue';
 import { useCoverCache } from '../../composables/useCoverCache';
 
-const ghostX = ref(0);
-const ghostY = ref(0);
+const POINTER_GAP = 12;
+// Leave room for the count badge, which extends 8px outside the card.
+const VIEWPORT_GUTTER = 16;
+const isViewActive = ref(true);
+const isGhostVisible = computed(() => isViewActive.value && dragSession.showGhost);
+const ghostElement = ref<HTMLElement | null>(null);
+const ghostSize = ref({ width: 0, height: 0 });
+const viewport = ref({ left: 0, top: 0, width: window.innerWidth, height: window.innerHeight });
+const visualViewport = window.visualViewport;
+let resizeObserver: ResizeObserver | null = null;
 const ghostCover = ref('');
 const { loadCover } = useCoverCache();
 let ghostRequestId = 0;
 
 // 🟢 监听拖拽状态和类型
-watch([() => dragSession.active, () => dragSession.type], async ([active, type]) => {
+watch([isGhostVisible, () => dragSession.type], async ([active, type]) => {
   const requestId = ++ghostRequestId;
+  ghostCover.value = '';
   if (active) {
     // 1. 歌曲类型
     if (type === 'song' && dragSession.songs.length > 0) {
@@ -38,27 +47,78 @@ watch([() => dragSession.active, () => dragSession.type], async ([active, type])
   } else {
     ghostCover.value = '';
   }
-});
+}, { immediate: true });
 
-const onPointerMove = (e: PointerEvent) => {
-  if (dragSession.active) {
-    ghostX.value = e.clientX;
-    ghostY.value = e.clientY;
-  }
+const updateViewport = () => {
+  viewport.value = {
+    left: visualViewport?.offsetLeft ?? 0,
+    top: visualViewport?.offsetTop ?? 0,
+    width: visualViewport?.width ?? window.innerWidth,
+    height: visualViewport?.height ?? window.innerHeight,
+  };
 };
 
+const measureGhost = () => {
+  const element = ghostElement.value;
+  if (!element) return;
+  // offset dimensions ignore the fade transition's scale transform.
+  ghostSize.value = { width: element.offsetWidth, height: element.offsetHeight };
+};
+
+watch(ghostElement, element => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  ghostSize.value = { width: 0, height: 0 };
+  if (!element) return;
+  updateViewport();
+  measureGhost();
+  resizeObserver = new ResizeObserver(measureGhost);
+  resizeObserver.observe(element);
+}, { flush: 'post' });
+
 onMounted(() => {
-  window.addEventListener('pointermove', onPointerMove, { passive: true });
+  updateViewport();
+  window.addEventListener('resize', updateViewport, { passive: true });
+  visualViewport?.addEventListener('resize', updateViewport, { passive: true });
+  visualViewport?.addEventListener('scroll', updateViewport, { passive: true });
 });
+
+onActivated(() => {
+  isViewActive.value = true;
+  updateViewport();
+});
+onDeactivated(() => { isViewActive.value = false; });
 
 onUnmounted(() => {
-  window.removeEventListener('pointermove', onPointerMove);
+  ++ghostRequestId;
+  resizeObserver?.disconnect();
+  window.removeEventListener('resize', updateViewport);
+  visualViewport?.removeEventListener('resize', updateViewport);
+  visualViewport?.removeEventListener('scroll', updateViewport);
 });
 
-const ghostStyle = computed(() => ({
-  top: `${ghostY.value + 10}px`,
-  left: `${ghostX.value + 10}px`,
-}));
+const ghostStyle = computed<CSSProperties>(() => {
+  const { width, height } = ghostSize.value;
+  const minX = viewport.value.left + VIEWPORT_GUTTER;
+  const minY = viewport.value.top + VIEWPORT_GUTTER;
+  const maxX = viewport.value.left + viewport.value.width - VIEWPORT_GUTTER - width;
+  const maxY = viewport.value.top + viewport.value.height - VIEWPORT_GUTTER - height;
+  let left = dragSession.mouseX + POINTER_GAP;
+  let top = dragSession.mouseY + POINTER_GAP;
+
+  // Prefer the other side of the pointer before clamping to the window edges.
+  if (left > maxX) left = dragSession.mouseX - POINTER_GAP - width;
+  if (top > maxY) top = dragSession.mouseY - POINTER_GAP - height;
+
+  return {
+    left: `${Math.max(minX, Math.min(left, maxX))}px`,
+    top: `${Math.max(minY, Math.min(top, maxY))}px`,
+    maxWidth: `${Math.max(0, viewport.value.width - VIEWPORT_GUTTER * 2)}px`,
+    visibility: width > 0 && height > 0 ? 'visible' : 'hidden',
+  };
+});
+
+const songCount = computed(() => dragSession.songPaths?.length ?? dragSession.songs.length);
 
 // 🟢 计算显示内容
 const title = computed(() => {
@@ -71,8 +131,9 @@ const title = computed(() => {
 });
 
 const subtitle = computed(() => {
+  if (dragSession.type === 'song' && dragSession.targetFolder) return `移动到 ${dragSession.targetFolder.name}`;
+  if (dragSession.type === 'song' && songCount.value > 1) return `共 ${songCount.value} 首歌曲`;
   if (dragSession.type === 'song' && dragSession.songs.length > 0) return dragSession.songs[0].artist;
-  if (dragSession.type === 'song' && dragSession.songs.length > 1) return `等 ${dragSession.songs.length} 首歌曲`;
   if (dragSession.type === 'playlist') return '歌单';
   if (dragSession.type === 'folder') return dragSession.targetFolder
     ? `移动到 ${dragSession.targetFolder.name}` : '拖到目标文件夹以移动';
@@ -82,7 +143,7 @@ const subtitle = computed(() => {
 });
 
 const badgeCount = computed(() => {
-  if (dragSession.type === 'song') return dragSession.songs.length;
+  if (dragSession.type === 'song') return songCount.value;
   return 0;
 });
 </script>
@@ -91,8 +152,9 @@ const badgeCount = computed(() => {
   <teleport to="body">
     <transition name="fade">
       <div 
-        v-if="dragSession.showGhost"
-        class="fixed z-[9999] pointer-events-none p-3 bg-white/90 dark:bg-[#1a1a1a]/90 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 dark:border-white/10 flex items-center gap-3 select-none transition-transform"
+        v-if="isGhostVisible"
+        ref="ghostElement"
+        class="fixed w-max z-[9999] pointer-events-none p-3 bg-white/90 dark:bg-[#1a1a1a]/90 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 dark:border-white/10 flex items-center gap-3 select-none transition-transform"
         :style="ghostStyle"
       >
         <!-- Icon / Cover Area -->

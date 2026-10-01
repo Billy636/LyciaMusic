@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue';
-import { open } from '@tauri-apps/plugin-dialog';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useFolderDrag } from '../../composables/useFolderDrag';
 import { folderMoveTargetError, isWithinFolder } from '../../utils/folderMove';
 
 import { usePlayer } from '../../composables/player';
 import { useToast } from '../../composables/toast';
-import { dragSession } from '../../composables/dragState';
 import { useLibraryFolderSongPathCache } from '../../composables/useLibraryFolderSongPathCache';
 import { useFolderSongScope } from '../../features/library/useFolderSongScope';
 import { useListScrollMemory } from '../../composables/useListScrollMemory';
@@ -16,6 +14,7 @@ import FolderTreeItem from '../common/FolderTreeItem.vue';
 import ModernInputModal from '../common/ModernInputModal.vue';
 import ModernModal from '../common/ModernModal.vue';
 import FolderContextMenu from '../overlays/FolderContextMenu.vue';
+import MoveToFolderModal from '../overlays/MoveToFolderModal.vue';
 import { useAddToPlaylistDialog } from '../../features/collections/addToPlaylistDialog';
 
 const props = withDefaults(defineProps<{
@@ -39,7 +38,6 @@ const {
   refreshFolder,
   removeLibraryFolder,
   deleteFolder,
-  moveFilesToFolder,
   moveFolderToFolder,
   playSong,
   addSongPathsToQueue,
@@ -58,6 +56,8 @@ const sidebarWidth = ref(240);
 const isResizing = ref(false);
 const treeContainerRef = ref<HTMLElement | null>(null);
 const isMovingFolder = ref(false);
+const showFolderMoveModal = ref(false);
+const folderMoveSource = ref<{ path: string; name: string } | null>(null);
 const canMoveFolder = (folder: { path: string }) =>
   !folderTree.value.some(root => isWithinFolder(root.path, folder.path));
 
@@ -77,6 +77,8 @@ const executeFolderMove = async (source: { path: string; name: string }, target:
     if (root) activeRootPath.value = root.path;
     currentFolderFilter.value = newPath;
     await expandFolderPath(newPath);
+    showFolderMoveModal.value = false;
+    folderMoveSource.value = null;
     toast.showToast(`已将“${source.name}”移动到“${target.name}”`, 'success');
   } catch (error) {
     toast.showToast(`移动文件夹失败：${error}`, 'error');
@@ -109,9 +111,6 @@ const createFolderParentPath = ref('');
 const showPhysicalDeleteConfirm = ref(false);
 const folderToPhysicalDelete = ref<string | null>(null);
 
-const showMoveConfirm = ref(false);
-const dragPendingFiles = ref<string[]>([]);
-const moveTarget = ref<{ name: string; path: string } | null>(null);
 let skipNextSelectionExpand = false;
 
 const activeTreeNodes = computed(() => {
@@ -417,22 +416,15 @@ const handlePhysicalDelete = () => {
   showMenu.value = false;
 };
 
-const handleMoveFolder = async () => {
+const handleMoveFolder = () => {
   if (!props.isManagementMode || isMovingFolder.value || !targetFolder.value || !canMoveFolder(targetFolder.value)) return;
-  const source = { ...targetFolder.value };
+  folderMoveSource.value = { ...targetFolder.value };
   showMenu.value = false;
-  try {
-    const target = await open({
-      directory: true, multiple: false,
-      title: `将“${source.name}”移动到（请选择音乐库内的文件夹）`,
-      defaultPath: activeRootPath.value || undefined,
-    });
-    if (typeof target === 'string') await executeFolderMove(source, {
-      path: target, name: target.split(/[/\\]/).filter(Boolean).pop() || target,
-    });
-  } catch (error) {
-    toast.showToast(`选择目标文件夹失败：${error}`, 'error');
-  }
+  showFolderMoveModal.value = true;
+};
+
+const confirmFolderMove = async (path: string, name: string) => {
+  if (folderMoveSource.value) await executeFolderMove({ ...folderMoveSource.value }, { path, name });
 };
 
 const executePhysicalDelete = async () => {
@@ -474,58 +466,6 @@ const executePhysicalDelete = async () => {
   }
 };
 
-const handleDropEvent = () => {
-  if (!props.isManagementMode || dragSession.type !== 'song') {
-    return;
-  }
-
-  if (!dragSession.targetFolder || dragSession.targetFolder.path === currentFolderFilter.value) {
-    return;
-  }
-
-  const songsToMove = dragSession.songs && dragSession.songs.length > 0
-    ? dragSession.songs
-    : (dragSession.data ? [dragSession.data] : []);
-
-  if (songsToMove.length === 0) {
-    return;
-  }
-
-  dragPendingFiles.value = songsToMove.map(song => song.path);
-  moveTarget.value = { ...dragSession.targetFolder };
-  showMoveConfirm.value = true;
-};
-
-const resetMoveState = () => {
-  dragPendingFiles.value = [];
-  showMoveConfirm.value = false;
-  moveTarget.value = null;
-  dragSession.showGhost = false;
-  dragSession.active = false;
-  dragSession.targetFolder = null;
-  dragSession.songs = [];
-};
-
-const executeMove = async () => {
-  if (!moveTarget.value || dragPendingFiles.value.length === 0) {
-    resetMoveState();
-    return;
-  }
-
-  try {
-    await moveFilesToFolder(dragPendingFiles.value, moveTarget.value.path);
-    toast.showToast('Files moved successfully', 'success');
-  } catch (error) {
-    toast.showToast(`Move failed: ${error}`, 'error');
-  } finally {
-    resetMoveState();
-  }
-};
-
-const cancelMove = () => {
-  resetMoveState();
-};
-
 const startResize = (event: MouseEvent) => {
   isResizing.value = true;
   resizeStartX = event.clientX;
@@ -554,7 +494,6 @@ const stopResize = () => {
 };
 
 onMounted(async () => {
-  window.addEventListener('custom-drop-trigger', handleDropEvent);
   await restoreFolderViewState();
 });
 
@@ -563,9 +502,13 @@ onActivated(async () => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener('custom-drop-trigger', handleDropEvent);
   stopResize();
 });
+
+watch(() => props.isManagementMode, enabled => {
+  if (!enabled) showFolderMoveModal.value = false;
+});
+onDeactivated(() => { showFolderMoveModal.value = false; showMenu.value = false; });
 </script>
 
 <template>
@@ -581,7 +524,7 @@ onUnmounted(() => {
 
     <div class="h-full overflow-y-auto custom-scrollbar">
       <div class="flex flex-col h-full bg-transparent">
-        <div ref="treeContainerRef" class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4 space-y-0.5 mt-1">
+        <div ref="treeContainerRef" data-folder-tree-scroll class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4 space-y-0.5 mt-1">
           <div v-if="activeTreeNodes.length > 0">
             <FolderTreeItem
               v-for="node in activeTreeNodes"
@@ -637,12 +580,12 @@ onUnmounted(() => {
       @move-folder="handleMoveFolder"
     />
 
-    <ModernModal
-      v-model:visible="showMoveConfirm"
-      title="Move Files"
-      :content="`Move ${dragPendingFiles.length} file(s) to folder '${moveTarget?.name}'?`"
-      @confirm="executeMove"
-      @cancel="cancelMove"
+    <MoveToFolderModal
+      :visible="showFolderMoveModal"
+      :source-folder="folderMoveSource"
+      :busy="isMovingFolder"
+      @close="showFolderMoveModal = false"
+      @confirm="confirmFolderMove"
     />
 
     <ModernModal

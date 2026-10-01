@@ -22,6 +22,7 @@ const ALL_VIEW_PATH_CACHE_NAMESPACE = 'all';
 
 const inFlightRequests = new Map<string, Promise<string[]>>();
 const cacheVersion = ref(0);
+let cacheGeneration = 0;
 const STALE_LIBRARY_PATH_REQUEST = 'STALE_LIBRARY_PATH_REQUEST';
 
 const makeCacheKey = (
@@ -69,6 +70,7 @@ export function useLibraryAllSongPathCache() {
 
     // 记录发起异步请求时的全局数据版本
     const requestVersion = libraryStore.libraryDataVersion;
+    const requestGeneration = cacheGeneration;
     const profileStart = isProfilingEnabled() ? performance.now() : 0;
 
     if (isProfilingEnabled()) {
@@ -121,7 +123,7 @@ export function useLibraryAllSongPathCache() {
     const request = pathRequest
       .then((entry) => {
         // 强一致性校验：若在请求未决期间数据版本发生变更（如新增、删除或重排），则丢弃缓存回填
-        if (libraryStore.libraryDataVersion === requestVersion) {
+        if (libraryStore.libraryDataVersion === requestVersion && cacheGeneration === requestGeneration) {
           setLibrarySongPathCacheEntry(
             ALL_VIEW_PATH_CACHE_NAMESPACE,
             cacheKey,
@@ -143,7 +145,7 @@ export function useLibraryAllSongPathCache() {
         });
       })
       .finally(() => {
-        inFlightRequests.delete(cacheKey);
+        if (inFlightRequests.get(cacheKey) === request) inFlightRequests.delete(cacheKey);
       });
 
     inFlightRequests.set(cacheKey, request);
@@ -153,6 +155,7 @@ export function useLibraryAllSongPathCache() {
   return {
     loadAllViewSongPaths,
     clearLibraryAllSongPathCache: () => {
+      cacheGeneration += 1;
       clearLibrarySongPathCacheNamespace(ALL_VIEW_PATH_CACHE_NAMESPACE);
       inFlightRequests.clear();
       cacheVersion.value += 1;
