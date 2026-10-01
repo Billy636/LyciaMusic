@@ -88,7 +88,7 @@ const handleReset = () => {
 </script>
 
 <template>
-  <div class="toolbox-enter w-full space-y-6 pb-10">
+  <div class="w-full space-y-6 pb-10">
     <!-- 标题说明 -->
     <section class="w-full px-5 pt-1">
       <h2 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">
@@ -219,20 +219,3 @@ const handleReset = () => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.toolbox-enter {
-  animation: toolbox-enter 0.3s ease-out;
-}
-
-@keyframes toolbox-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-</style>

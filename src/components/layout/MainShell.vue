@@ -230,6 +230,7 @@ useDesktopLyricsWindowBridge();
           <router-view v-slot="{ Component, route }">
             <transition
               :name="pageTransitionName"
+              :duration="pageTransitionName.startsWith('settings-') ? { enter: 240, leave: 120 } : undefined"
               mode="out-in"
               @after-leave="commitPageLayout"
               @before-enter="commitPageLayout"
@@ -297,11 +298,11 @@ useDesktopLyricsWindowBridge();
 }
 
 /* Animate route content only: the brand, title bar and playback controls stay
-   anchored. Returning retraces the entry direction (120ms out + 220ms in). */
+   anchored. Returning retraces the entry direction (120ms out + 240ms in). */
 .settings-forward-enter-active,
 .settings-back-enter-active {
   will-change: opacity, transform;
-  transition: opacity 0.22s ease-out, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 240ms cubic-bezier(0.16, 1, 0.3, 1), transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .settings-forward-leave-active,
@@ -314,13 +315,13 @@ useDesktopLyricsWindowBridge();
 .settings-forward-enter-from,
 .settings-back-leave-to {
   opacity: 0;
-  transform: translate3d(18px, 0, 0);
+  transform: translate3d(12px, 0, 0);
 }
 
 .settings-forward-leave-to,
 .settings-back-enter-from {
   opacity: 0;
-  transform: translate3d(-18px, 0, 0);
+  transform: translate3d(-12px, 0, 0);
 }
 
 @media (prefers-reduced-motion: reduce) {

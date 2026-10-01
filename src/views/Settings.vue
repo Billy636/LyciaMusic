@@ -89,13 +89,12 @@ watch([activeSection, personalizationPage], ([section, page], [previousSection, 
     : null;
   isSidebarNavigation = false;
 
-  // For animated drill-downs, reset only when the incoming page is inserted.
-  if (section !== 'personalization' || previousSection !== 'personalization') resetContentScroll();
+  // Both category switches and drill-downs reset when the incoming page enters.
 });
 </script>
 
 <template>
-  <div class="flex h-full flex-1 overflow-hidden transition-colors duration-500">
+  <div class="settings-page flex h-full flex-1 overflow-hidden transition-colors duration-500">
     <aside
       class="z-10 flex shrink-0 flex-col border-r border-white/20 p-4 dark:border-white/5"
       :style="{ width: 'var(--app-sidebar-width)' }"
@@ -107,7 +106,7 @@ watch([activeSection, personalizationPage], ([section, page], [previousSection, 
           type="button"
           :data-settings-section="tab.id"
           :aria-current="activeSection === tab.id ? 'page' : undefined"
-          class="relative flex w-full cursor-pointer items-center rounded-md px-4 py-2.5 text-left text-sm transition-all duration-300 active:scale-[0.97]"
+          class="settings-nav-item relative flex w-full cursor-pointer items-center rounded-md px-4 py-2.5 text-left text-sm transition-all duration-300 active:scale-[0.97]"
           :class="activeSection === tab.id ? 'translate-x-1 bg-black/10 font-semibold text-black shadow-sm dark:bg-white/10 dark:text-white' : 'font-medium text-gray-800 hover:translate-x-1 hover:bg-black/5 hover:text-black dark:text-gray-200 dark:hover:bg-white/5 dark:hover:text-white'"
           @click="selectSection(tab.id)"
         >
@@ -123,9 +122,12 @@ watch([activeSection, personalizationPage], ([section, page], [previousSection, 
     <main
       ref="contentRef"
       class="custom-scrollbar relative h-full min-w-0 flex-1 overflow-y-auto px-6 py-4"
-      :class="activeSection === 'personalization' ? 'sm:py-4' : 'sm:py-10'"
     >
-      <div :class="activeSection === 'about' ? 'w-full min-h-full flex flex-col justify-center items-center py-4' : 'w-full pb-16'">
+      <Transition name="settings-section" mode="out-in" @before-enter="resetContentScroll">
+      <div :key="activeSection" :class="[
+        activeSection === 'about' ? 'w-full min-h-full flex flex-col justify-center items-center py-4' : 'w-full pb-16',
+        activeSection !== 'personalization' ? 'sm:pt-6' : '',
+      ]">
         <SettingsGeneral v-if="activeSection === 'general'" />
         <section v-else-if="activeSection === 'personalization'" aria-labelledby="settings-page-heading">
           <Transition
@@ -175,35 +177,47 @@ watch([activeSection, personalizationPage], ([section, page], [previousSection, 
           <div>当前设置模块正在整理中。</div>
         </div>
       </div>
+      </Transition>
     </main>
   </div>
 </template>
 
 <style scoped>
-.personalization-forward-enter-active,
-.personalization-back-enter-active {
-  transition: opacity 180ms ease-out, transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+/* Route entry moves both panes together; category feedback resumes afterwards. */
+.settings-page:is(.settings-forward-enter-active, .settings-forward-leave-active, .settings-back-enter-active, .settings-back-leave-active) .settings-nav-item {
+  transition: none;
 }
 
+.settings-section-enter-active,
+.personalization-forward-enter-active,
+.personalization-back-enter-active {
+  transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.settings-section-leave-active,
 .personalization-forward-leave-active,
 .personalization-back-leave-active {
   pointer-events: none;
   transition: opacity 100ms ease-in, transform 100ms ease-in;
 }
 
+.settings-section-enter-from,
 .personalization-forward-enter-from,
 .personalization-back-leave-to {
   opacity: 0;
-  transform: translateX(14px);
+  transform: translateX(12px);
 }
 
+.settings-section-leave-to,
 .personalization-forward-leave-to,
 .personalization-back-enter-from {
   opacity: 0;
-  transform: translateX(-14px);
+  transform: translateX(-12px);
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .settings-section-enter-active,
+  .settings-section-leave-active,
   .personalization-forward-enter-active,
   .personalization-forward-leave-active,
   .personalization-back-enter-active,
@@ -211,6 +225,8 @@ watch([activeSection, personalizationPage], ([section, page], [previousSection, 
     transition: none;
   }
 
+  .settings-section-enter-from,
+  .settings-section-leave-to,
   .personalization-forward-enter-from,
   .personalization-forward-leave-to,
   .personalization-back-enter-from,
