@@ -23,6 +23,9 @@ import {
   TASKBAR_PLAYER_VISIBILITY_EVENT,
   TASKBAR_PLAYER_DRAG_EVENT,
   TASKBAR_PLAYER_WINDOW_WIDTH,
+  TASKBAR_PLAYER_MIN_WIDTH,
+  TASKBAR_PLAYER_MAX_WIDTH,
+  normalizeTaskbarWidth,
   TASKBAR_PLAYER_WINDOW_HEIGHT,
   readSavedTaskbarPositionX,
   type TaskbarTrayGeometry,
@@ -46,10 +49,11 @@ const TASKBAR_PLAYBACK_SYNC_INTERVAL_MS = 250;
 let isPositioning = false;
 let pendingPositionUpdate = false;
 let isTaskbarPlayerDragging = false;
+let configuredWindowWidth = TASKBAR_PLAYER_WINDOW_WIDTH;
 
 async function ensureTaskbarWindowSize(targetWindow: WebviewWindow) {
   await targetWindow.setSize(new LogicalSize(
-    TASKBAR_PLAYER_WINDOW_WIDTH,
+    configuredWindowWidth,
     TASKBAR_PLAYER_WINDOW_HEIGHT,
   )).catch((err) => {
     console.warn('Failed to normalize taskbar player size:', err);
@@ -64,6 +68,7 @@ async function refreshTaskbarWindowTopmost(targetWindow: WebviewWindow) {
 }
 
 async function stabilizeTaskbarWindowGeometry(targetWindow: WebviewWindow) {
+  if (isTaskbarPlayerDragging) return;
   await ensureTaskbarWindowSize(targetWindow);
   await updatePosition();
   await refreshTaskbarWindowTopmost(targetWindow);
@@ -146,7 +151,7 @@ async function updatePosition() {
         ? primary.workArea.size.toLogical(scaleFactor)
         : { width: 1920, height: 1040 };
 
-      const winWidth = TASKBAR_PLAYER_WINDOW_WIDTH;
+      const winWidth = (await targetWindow.innerSize()).toLogical(scaleFactor).width;
       const winHeight = TASKBAR_PLAYER_WINDOW_HEIGHT;
 
       // 四边任务栏朝向识别
@@ -227,11 +232,11 @@ async function ensureTaskbarPlayerWindow() {
       const windowInstance = new WebviewWindow(TASKBAR_PLAYER_WINDOW_LABEL, {
         url: '/',
         title: 'Lycia Taskbar Player',
-        width: TASKBAR_PLAYER_WINDOW_WIDTH,
+        width: configuredWindowWidth,
         height: TASKBAR_PLAYER_WINDOW_HEIGHT,
-        minWidth: TASKBAR_PLAYER_WINDOW_WIDTH,
+        minWidth: TASKBAR_PLAYER_MIN_WIDTH,
         minHeight: TASKBAR_PLAYER_WINDOW_HEIGHT,
-        maxWidth: TASKBAR_PLAYER_WINDOW_WIDTH,
+        maxWidth: TASKBAR_PLAYER_MAX_WIDTH,
         maxHeight: TASKBAR_PLAYER_WINDOW_HEIGHT,
         visible: false,
         decorations: false,
@@ -311,6 +316,12 @@ function waitForTaskbarPlayerStateApplied(timeoutMs = 500) {
 export function useTaskbarPlayerBridge() {
   const mainWindow = getCurrentWindow();
   const { settings, audioDelay } = useSettings();
+  watch(() => settings.value.taskbarWindowWidth, value => {
+    configuredWindowWidth = normalizeTaskbarWidth(value);
+    void getTaskbarPlayerWindow().then(targetWindow => {
+      if (targetWindow) return stabilizeTaskbarWindowGeometry(targetWindow);
+    }).catch(error => console.warn('Failed to update taskbar window width:', error));
+  }, { immediate: true });
   const {
     currentSong,
     currentTime,
@@ -392,6 +403,8 @@ export function useTaskbarPlayerBridge() {
       currentSong: song,
       coverUrl: coverUrl || '',
       isDarkTheme: isDarkTheme.value,
+      backgroundOpacity: settings.value.taskbarBackgroundOpacity,
+      textColor: settings.value.taskbarTextColor,
       parsedLyrics: lyricsStatus.value === 'ready' && lyricsSongPath === song?.path
         ? toRaw(parsedLyrics.value)
         : [],
@@ -597,6 +610,11 @@ export function useTaskbarPlayerBridge() {
     unlisteners.push(
       await listen<{ dragging: boolean }>(TASKBAR_PLAYER_DRAG_EVENT, (event) => {
         isTaskbarPlayerDragging = event.payload.dragging;
+        if (!isTaskbarPlayerDragging) {
+          void getTaskbarPlayerWindow().then(targetWindow => {
+            if (targetWindow) return stabilizeTaskbarWindowGeometry(targetWindow);
+          }).catch(error => console.warn('Failed to stabilize taskbar window after dragging:', error));
+        }
       })
     );
 
@@ -619,6 +637,8 @@ export function useTaskbarPlayerBridge() {
         currentSong,
         isDarkTheme,
         parsedLyrics,
+        () => settings.value.taskbarBackgroundOpacity,
+        () => settings.value.taskbarTextColor,
         lyricsStatus,
       ],
       () => {

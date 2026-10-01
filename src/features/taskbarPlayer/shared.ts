@@ -13,6 +13,18 @@ export const TASKBAR_PLAYER_DRAG_EVENT = 'taskbar-player:drag';
 export const TASKBAR_PLAYER_POSITION_X_KEY = 'taskbar_player_window_position_x';
 
 export const TASKBAR_PLAYER_WINDOW_WIDTH = 280;
+export const TASKBAR_PLAYER_MIN_WIDTH = 220;
+export const TASKBAR_PLAYER_MAX_WIDTH = 600;
+export const TASKBAR_PLAYER_DEFAULT_TEXT_COLOR = '#ffffff';
+export function normalizeTaskbarTextColor(value: unknown): string {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)
+    ? value.toLowerCase() : TASKBAR_PLAYER_DEFAULT_TEXT_COLOR;
+}
+export function normalizeTaskbarWidth(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(TASKBAR_PLAYER_MAX_WIDTH, Math.max(TASKBAR_PLAYER_MIN_WIDTH, Math.round(value)))
+    : TASKBAR_PLAYER_WINDOW_WIDTH;
+}
 export const TASKBAR_PLAYER_WINDOW_HEIGHT = 40;
 
 export type OwnerBindingState = 'bound' | 'failed' | 'unsupported' | 'already_bound';
@@ -59,6 +71,8 @@ export interface TaskbarPlayerStatePayload extends TaskbarPlayerPlaybackPayload 
   currentSong: Song | null;
   coverUrl: string;
   isDarkTheme: boolean;
+  backgroundOpacity?: number;
+  textColor?: string;
   parsedLyrics: LyricLine[];
   lyricsStatus: LyricsStatus;
 }

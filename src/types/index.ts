@@ -489,6 +489,9 @@ export interface AppSettings {
   shortcuts: ShortcutSettings;
   showTaskbarPlayer: boolean;
   showTaskbarPlayerIcon: boolean;
+  taskbarBackgroundOpacity: number;
+  taskbarWindowWidth: number;
+  taskbarTextColor: string;
   taskbarPlayerCanDrag: boolean;
   gpuAcceleration: boolean;
   writeArtistAvatarToTags: boolean;

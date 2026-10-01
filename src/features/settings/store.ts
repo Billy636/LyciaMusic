@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
+import { normalizeTaskbarWidth, normalizeTaskbarTextColor } from '../taskbarPlayer/shared';
 
 import type {
   AppSettings,
@@ -152,6 +153,9 @@ export const defaultAppSettings: AppSettings = {
   shortcuts: createDefaultShortcutSettings(),
   showTaskbarPlayer: false,
   showTaskbarPlayerIcon: true,
+  taskbarBackgroundOpacity: 0,
+  taskbarWindowWidth: 280,
+  taskbarTextColor: '#ffffff',
   taskbarPlayerCanDrag: false,
   gpuAcceleration: true,
   writeArtistAvatarToTags: false,
@@ -313,6 +317,11 @@ export const mergeAppSettings = (
     lyrics: mergeLyricsSettings(base.lyrics, patch.lyrics ?? {}),
     desktopLyrics: mergeDesktopLyricsSettings(base.desktopLyrics, patch.desktopLyrics ?? {}),
     audio: mergeAudioSettings(base.audio ?? createDefaultAudioSettings(), patch.audio ?? {}),
+    taskbarBackgroundOpacity: typeof (patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity) === 'number'
+      && Number.isFinite(patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity)
+      ? Math.min(100, Math.max(0, Math.round(patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity))) : 0,
+    taskbarWindowWidth: normalizeTaskbarWidth(patch.taskbarWindowWidth ?? base.taskbarWindowWidth),
+    taskbarTextColor: normalizeTaskbarTextColor(patch.taskbarTextColor ?? base.taskbarTextColor),
     customLyricsFonts: normalizeImportedLyricsFonts(patch.customLyricsFonts ?? base.customLyricsFonts),
     theme: mergeThemeSettings(base.theme, patch.theme ?? {}),
     sidebar: mergeSidebarSettings(base.sidebar, patch.sidebar ?? {}),

@@ -11,7 +11,7 @@ export type SettingsSection =
   | 'shortcuts'
   | 'about';
 
-export type PersonalizationPage = 'theme' | 'sidebar' | 'footer' | 'desktopLyrics';
+export type PersonalizationPage = 'theme' | 'sidebar' | 'footer' | 'desktopLyrics' | 'taskbarPlayer';
 
 export const SETTINGS_SECTION_LABELS = {
   general: '常规',
@@ -29,6 +29,7 @@ export const PERSONALIZATION_PAGE_LABELS = {
   sidebar: '侧边栏管理',
   footer: '播放底栏',
   desktopLyrics: '桌面歌词',
+  taskbarPlayer: '任务栏播控',
 } satisfies Record<PersonalizationPage, string>;
 
 // Settings navigation is session state, separate from persisted preferences.

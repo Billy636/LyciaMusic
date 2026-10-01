@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { Captions, ChevronRight, PaintRoller, PanelLeft, PanelBottom } from 'lucide-vue-next';
+import { Captions, ChevronRight, PaintRoller, PanelLeft, PanelBottom, PanelBottomDashed } from 'lucide-vue-next';
 import { useRoute } from 'vue-router';
 import {
   PERSONALIZATION_PAGE_LABELS,
@@ -21,6 +21,7 @@ import SettingsTheme from "../components/settings/SettingsTheme.vue";
 import SettingsToolbox from "../components/settings/SettingsToolbox.vue";
 import SettingsAudioOutput from "../components/settings/SettingsAudioOutput.vue";
 import SettingsFooter from '../components/settings/SettingsFooter.vue';
+import SettingsTaskbarPlayer from '../components/settings/SettingsTaskbarPlayer.vue';
 
 const navigation = useSettingsNavigationStore();
 const { activeSection, personalizationPage } = storeToRefs(navigation);
@@ -54,6 +55,7 @@ const personalizationPages = [
   { id: 'sidebar', name: PERSONALIZATION_PAGE_LABELS.sidebar, icon: PanelLeft },
   { id: 'footer', name: PERSONALIZATION_PAGE_LABELS.footer, icon: PanelBottom },
   { id: 'desktopLyrics', name: PERSONALIZATION_PAGE_LABELS.desktopLyrics, icon: Captions },
+  { id: 'taskbarPlayer', name: PERSONALIZATION_PAGE_LABELS.taskbarPlayer, icon: PanelBottomDashed },
 ] satisfies { id: PersonalizationPage; name: string; icon: typeof PaintRoller }[];
 
 const resetContentScroll = () => {
@@ -157,6 +159,7 @@ watch([activeSection, personalizationPage], ([section, page], [previousSection, 
               <SettingsSidebar v-else-if="personalizationPage === 'sidebar'" />
               <SettingsFooter v-else-if="personalizationPage === 'footer'" />
               <SettingsDesktopLyrics v-else-if="personalizationPage === 'desktopLyrics'" />
+              <SettingsTaskbarPlayer v-else-if="personalizationPage === 'taskbarPlayer'" />
             </div>
           </Transition>
         </section>

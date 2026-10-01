@@ -13,7 +13,7 @@ import {
   TASKBAR_PLAYER_VISIBILITY_EVENT,
   TASKBAR_PLAYER_DRAG_EVENT,
   TASKBAR_PLAYER_WINDOW_HEIGHT,
-  TASKBAR_PLAYER_WINDOW_WIDTH,
+  normalizeTaskbarTextColor,
   writeSavedTaskbarPositionX,
   type TaskbarTrayGeometry,
   type TaskbarPlayerStatePayload,
@@ -36,6 +36,12 @@ const localCoverUrl = ref('');
 const isPlaying = ref(false);
 const isVisible = ref(false);
 const isDragging = ref(false);
+const backgroundOpacity = ref(0);
+const textColor = ref('#ffffff');
+const backgroundStyle = computed(() => ({
+  backgroundColor: `rgba(18, 18, 20, ${backgroundOpacity.value / 100})`,
+  '--taskbar-text-rgb': [1, 3, 5].map(offset => parseInt(textColor.value.slice(offset, offset + 2), 16)).join(' '),
+}));
 const parsedLyrics = shallowRef<LyricLine[]>([]);
 const lyricsStatus = ref<LyricsStatus>('idle');
 const playbackTime = ref(0);
@@ -114,7 +120,7 @@ const getTaskbarDragBounds = async (): Promise<DragBounds | null> => {
 
   return {
     minX: taskbarRect.left,
-    maxX: Math.max(taskbarRect.left, taskbarRect.right - TASKBAR_PLAYER_WINDOW_WIDTH),
+    maxX: Math.max(taskbarRect.left, taskbarRect.right - (await appWindow.innerSize()).toLogical(factor).width),
     y: Math.round(taskbarRect.top + (taskbarHeight - TASKBAR_PLAYER_WINDOW_HEIGHT) / 2),
   };
 };
@@ -259,6 +265,10 @@ onMounted(async () => {
   // 1. 监听状态更新
   unlistenState = await listen<TaskbarPlayerStatePayload>(TASKBAR_PLAYER_STATE_EVENT, (event) => {
     currentSong.value = event.payload.currentSong;
+    const opacity = event.payload.backgroundOpacity;
+    textColor.value = normalizeTaskbarTextColor(event.payload.textColor);
+    backgroundOpacity.value = typeof opacity === 'number' && Number.isFinite(opacity)
+      ? Math.min(100, Math.max(0, opacity)) : 0;
     localCoverUrl.value = event.payload.coverUrl;
     parsedLyrics.value = event.payload.parsedLyrics;
     lyricsStatus.value = event.payload.lyricsStatus;
@@ -306,12 +316,8 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="taskbar-player group w-[280px] h-[40px] relative flex items-center justify-between select-none overflow-hidden rounded-xl border pl-2 pr-3.5 transition-all duration-300"
-    :class="[
-      isDragging 
-        ? 'bg-[#121214]/65 border-white/5 shadow-2xl backdrop-blur-md' 
-        : 'bg-black/20 border-white/10 shadow-none hover:bg-[#121214]/80 hover:border-white/15 hover:shadow-2xl hover:backdrop-blur-md focus-within:bg-[#121214]/80'
-    ]"
+    class="taskbar-player group w-full h-[40px] relative flex items-center justify-between select-none overflow-hidden rounded-xl pl-2 pr-3.5 transition-colors duration-200"
+    :style="backgroundStyle"
   >
     <!-- 极简白色竖条拉手（采用外层 22px 宽的隐形热区, 并在悬停时 group 联动触发内层竖条呼吸显隐与高亮） -->
     <div 
@@ -381,7 +387,7 @@ onUnmounted(() => {
 
       <!-- 默认展示歌名与实时歌词；悬停/键盘聚焦时让出播控操作区。 -->
       <div class="taskbar-song-info flex flex-col min-w-0 flex-1 leading-tight">
-        <div class="text-[11px] leading-[14px] text-white/50 font-semibold truncate" :title="songTitle">
+        <div class="taskbar-song-title text-[11px] leading-[14px] font-semibold truncate" :title="songTitle">
           {{ songTitle }}
         </div>
 
@@ -401,11 +407,11 @@ onUnmounted(() => {
                 :style="{ '--word-progress': `${getTaskbarLyricWordProgress(word, lyricTime) * 100}%` }"
               >{{ word.text }}</span>
             </template>
-            <span v-else aria-hidden="true" :class="lyricTime >= currentLyric.time ? 'text-white/95' : 'text-white/45'">
+            <span v-else aria-hidden="true" class="taskbar-line" :class="{ 'is-played': lyricTime >= currentLyric.time }">
               {{ currentLyric.text }}
             </span>
           </div>
-          <div v-else class="truncate text-white/70">{{ fallbackText }}</div>
+          <div v-else class="taskbar-fallback truncate">{{ fallbackText }}</div>
         </div>
       </div>
     </div>
@@ -520,16 +526,21 @@ onUnmounted(() => {
 .taskbar-lyric-word {
   position: relative;
   display: inline-block;
-  color: rgb(255 255 255 / 45%);
+  color: rgb(var(--taskbar-text-rgb, 255 255 255) / 50%);
 }
 
 .taskbar-lyric-word::after {
   content: attr(data-text);
   position: absolute;
   inset: 0;
-  color: rgb(255 255 255 / 95%);
+  color: rgb(var(--taskbar-text-rgb, 255 255 255) / 95%);
   clip-path: inset(0 calc(100% - var(--word-progress, 0%)) 0 0);
 }
+
+.taskbar-song-title { color: rgb(var(--taskbar-text-rgb, 255 255 255) / 80%); }
+.taskbar-line { color: rgb(var(--taskbar-text-rgb, 255 255 255) / 50%); }
+.taskbar-line.is-played { color: rgb(var(--taskbar-text-rgb, 255 255 255) / 95%); }
+.taskbar-fallback { color: rgb(var(--taskbar-text-rgb, 255 255 255) / 85%); }
 
 @media (prefers-reduced-motion: reduce) {
   .taskbar-song-info,
