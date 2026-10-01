@@ -74,7 +74,7 @@
           </div>
           <div class="folder-info">
             <div class="folder-path" :title="folder.path">{{ folder.path }}</div>
-            <div v-if="folder.locked" class="folder-stats" title="文件夹已被 BitLocker 锁定或暂时无法访问">🔒 已锁定</div>
+            <div v-if="folder.locked" class="folder-stats" title="目录或网络共享暂时不可访问，已有歌曲记录已保留">暂不可访问</div>
             <div v-else class="folder-stats">{{ folder.song_count }} 首歌曲</div>
           </div>
           <button class="remove-btn" title="移除文件夹" @click="requestRemove(folder.path)">

@@ -188,20 +188,30 @@ fn resolve_audio_path(file_path: &str, cue_dir: &Path) -> Result<PathBuf, CuePar
         cue_dir.join(file_path)
     };
 
-    if candidate.exists() {
-        return Ok(crate::music::utils::normalize_path(&candidate.to_string_lossy()).into());
+    match fs::metadata(&candidate) {
+        Ok(metadata) if metadata.is_file() => {
+            return Ok(crate::music::utils::normalize_path(&candidate.to_string_lossy()).into())
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+        _ => {}
     }
 
     if let Some(parent) = candidate.parent() {
-        if let Ok(entries) = fs::read_dir(parent) {
+        let entries = match fs::read_dir(parent) {
+            Ok(entries) => Some(entries),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+        if let Some(entries) = entries {
             let file_name_lower = candidate
                 .file_name()
                 .map(|n| n.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
-            for entry in entries.flatten() {
+            for entry in entries {
+                let entry = entry?;
                 if entry.file_name().to_string_lossy().to_lowercase() == file_name_lower {
                     let found = entry.path();
-                    if found.is_file() {
+                    if fs::metadata(&found)?.is_file() {
                         return Ok(
                             crate::music::utils::normalize_path(&found.to_string_lossy()).into(),
                         );

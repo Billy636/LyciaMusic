@@ -1,7 +1,7 @@
 use super::super::cue::CueTrack;
 use super::super::tags::{extract_detail_metadata, read_tagged_file_from_path_for_scan};
 use super::super::types::Song;
-use super::super::utils::{is_supported_library_extension, normalize_path};
+use super::super::utils::{describe_scan_io_error, is_supported_library_extension, normalize_path};
 use super::{
     build_album_key, fill_text_fields_from_tags, normalize_album_key_part, primary_artist_name,
     split_artist_names, ScanOptions, UNKNOWN_ALBUM, UNKNOWN_ARTIST, VARIOUS_ARTISTS,
@@ -110,6 +110,28 @@ pub(super) fn song_identity_missing(song: &Song) -> bool {
 }
 
 pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) -> Option<Song> {
+    parse_song_for_scan(path, path_str, format).ok().flatten()
+}
+
+pub(super) fn parse_song_for_scan(
+    path: &Path,
+    path_str: &str,
+    format: &str,
+) -> Result<Option<Song>, String> {
+    let mut io_failure = None;
+    let song = parse_song_internal(path, path_str, format, &mut io_failure);
+    match io_failure {
+        Some(error) => Err(error),
+        None => Ok(song),
+    }
+}
+
+fn parse_song_internal(
+    path: &Path,
+    path_str: &str,
+    format: &str,
+    io_failure: &mut Option<String>,
+) -> Option<Song> {
     let mut artist = String::from("未知歌手");
     let mut album = String::from("未知专辑");
     let mut album_artist = String::new();
@@ -118,7 +140,6 @@ pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) ->
     let mut bitrate = 0u32;
     let mut sample_rate = 0u32;
     let mut bit_depth: Option<u8> = None;
-    let mut file_size = 0u64;
     let mut file_created_at: Option<u64> = None;
     let mut file_modified_at: Option<u64> = None;
     let mut track_number: Option<String> = None;
@@ -128,19 +149,35 @@ pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) ->
     let mut codec = None;
     let mut artist_avatar_bytes: Option<Vec<u8>> = None;
 
-    if let Ok(meta) = fs::metadata(path) {
-        file_size = meta.len();
-        if let Ok(created) = meta.created() {
-            file_created_at = system_time_to_unix_seconds(created);
+    let meta = match fs::metadata(path) {
+        Ok(meta) => meta,
+        Err(error) => {
+            *io_failure = Some(describe_scan_io_error(path, "读取文件信息", &error));
+            return None;
         }
-        if let Ok(modified) = meta.modified() {
-            file_modified_at = system_time_to_unix_seconds(modified);
-        }
+    };
+    let file_size = meta.len();
+    if let Ok(created) = meta.created() {
+        file_created_at = system_time_to_unix_seconds(created);
+    }
+    if let Ok(modified) = meta.modified() {
+        file_modified_at = system_time_to_unix_seconds(modified);
     }
 
-    if let Ok(tagged_file) =
-        read_tagged_file_from_path_for_scan(path).map_err(|error| error.to_string())
-    {
+    let tagged_file = match read_tagged_file_from_path_for_scan(path) {
+        Ok(tagged_file) => Some(tagged_file),
+        Err(error) => {
+            if let lofty::error::ErrorKind::Io(error) = error.kind() {
+                // Truncated/malformed tags still use the existing decoder fallback.
+                if error.kind() != std::io::ErrorKind::UnexpectedEof {
+                    *io_failure = Some(describe_scan_io_error(path, "读取歌曲", error));
+                    return None;
+                }
+            }
+            None
+        }
+    };
+    if let Some(tagged_file) = tagged_file {
         let props = tagged_file.properties();
         duration = props.duration().as_secs() as u32;
         bitrate = props.audio_bitrate().unwrap_or(0);
@@ -166,7 +203,10 @@ pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) ->
     }
 
     if duration == 0 || sample_rate == 0 || bit_depth.is_none() {
-        let identity = detect_audio_identity(path, format);
+        let identity = detect_audio_identity(path, format, io_failure);
+        if io_failure.is_some() {
+            return None;
+        }
 
         if duration == 0 {
             duration = identity.duration_seconds.unwrap_or(0);
@@ -330,10 +370,11 @@ fn normalize_codec(short_name: &str) -> String {
     }
 }
 
-fn detect_audio_identity(path: &Path, ext: &str) -> AudioIdentity {
+fn detect_audio_identity(path: &Path, ext: &str, io_failure: &mut Option<String>) -> AudioIdentity {
     let file = match File::open(path) {
         Ok(file) => file,
-        Err(_) => {
+        Err(error) => {
+            *io_failure = Some(describe_scan_io_error(path, "读取音频", &error));
             return AudioIdentity {
                 container: Some(normalize_container_from_extension(ext)),
                 ..Default::default()
@@ -355,7 +396,12 @@ fn detect_audio_identity(path: &Path, ext: &str) -> AudioIdentity {
         },
     ) {
         Ok(probed) => probed,
-        Err(_) => {
+        Err(error) => {
+            if let symphonia::core::errors::Error::IoError(error) = error {
+                if error.kind() != std::io::ErrorKind::UnexpectedEof {
+                    *io_failure = Some(describe_scan_io_error(path, "解析音频", &error));
+                }
+            }
             return AudioIdentity {
                 container: Some(normalize_container_from_extension(ext)),
                 ..Default::default()

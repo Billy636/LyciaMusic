@@ -1,5 +1,7 @@
 use super::super::types::{FolderNode, GeneratedFolder, Song};
-use super::super::utils::{descendant_like_patterns, is_dot_prefixed_path, normalize_path};
+use super::super::utils::{
+    descendant_like_patterns, describe_scan_io_error, is_dot_prefixed_path, normalize_path,
+};
 use super::diff::{collect_scan_diff, load_db_snapshot_for_folder};
 use super::parser::parse_audio_files_internal;
 use super::progress::ScanProgressReporter;
@@ -80,32 +82,50 @@ fn scan_single_directory_with_mode(
         )
     });
 
+    let retain_existing = |message: String| -> Result<ScanDirectoryOutcome, String> {
+        let message = format!("{message}；本次扫描未完成，保留已有记录，请恢复访问后重新扫描");
+        eprintln!("[扫描] {message}");
+        if let Some(reporter) = reporter.as_ref() {
+            reporter.emit_error(message);
+        }
+        let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        let snapshot = load_db_snapshot_for_folder(&conn, &normalized_folder)?;
+        let song_count = snapshot.len();
+        let songs = return_songs.then(|| snapshot.into_values().map(|entry| entry.song).collect());
+        Ok(ScanDirectoryOutcome { songs, song_count })
+    };
+
+    // Check before traversing, and once more before writing. No failure should
+    // turn a temporarily unavailable share (or child directory) into deletions.
+    if let Err(error) = fs::read_dir(&normalized_folder) {
+        return retain_existing(describe_scan_io_error(
+            Path::new(&normalized_folder),
+            "访问文件夹",
+            &error,
+        ));
+    }
+
     let db_snapshot = {
         let conn = db_conn.lock().map_err(|error| error.to_string())?;
         load_db_snapshot_for_folder(&conn, &normalized_folder)?
     };
 
-    let original_db_count = db_snapshot.len();
     let mut scan_diff =
-        collect_scan_diff(&normalized_folder, db_snapshot, reporter.as_ref(), options)?;
+        match collect_scan_diff(&normalized_folder, db_snapshot, reporter.as_ref(), options) {
+            Ok(diff) => diff,
+            Err(error) => return retain_existing(error),
+        };
     let song_count = scan_diff.songs.len();
     if !return_songs {
         scan_diff.songs = Vec::new();
     }
 
-    let folder_is_accessible =
-        Path::new(&normalized_folder).is_dir() && fs::read_dir(&normalized_folder).is_ok();
-
-    if !folder_is_accessible {
-        scan_diff.to_delete.clear();
-        let error = "文件夹可能已断开连接或已被锁定（如 BitLocker），保留已有记录".to_string();
-        if let Some(reporter) = reporter.as_ref() {
-            reporter.emit_error(error.clone());
-        }
-        return Ok(ScanDirectoryOutcome {
-            songs: if return_songs { Some(Vec::new()) } else { None },
-            song_count: original_db_count,
-        });
+    if let Err(error) = fs::read_dir(&normalized_folder) {
+        return retain_existing(describe_scan_io_error(
+            Path::new(&normalized_folder),
+            "扫描结束时访问文件夹",
+            &error,
+        ));
     }
 
     let covers_dir = app

@@ -1,11 +1,11 @@
 use super::super::cue;
 use super::super::types::Song;
 use super::super::utils::{
-    descendant_like_patterns, is_cue_file_extension, is_dot_prefixed_path,
+    descendant_like_patterns, describe_scan_io_error, is_cue_file_extension, is_dot_prefixed_path,
     is_supported_library_extension, normalize_path,
 };
 use super::parser::{
-    build_cue_track_song, enrich_album_groups, parse_song_from_file, preferred_parse_workers,
+    build_cue_track_song, enrich_album_groups, parse_song_for_scan, preferred_parse_workers,
     song_identity_missing, song_metadata_incomplete,
 };
 use super::progress::ScanProgressReporter;
@@ -167,7 +167,7 @@ pub(super) fn load_db_snapshot_for_folder(
 fn collect_disk_candidates(
     normalized_folder: &str,
     reporter: Option<&ScanProgressReporter>,
-) -> Vec<DiskCandidate> {
+) -> Result<Vec<DiskCandidate>, String> {
     let mut candidates = Vec::new();
     let mut discovered = 0usize;
 
@@ -176,9 +176,9 @@ fn collect_disk_candidates(
     }
 
     let mut it = WalkDir::new(normalized_folder).into_iter();
-    while let Some(entry) = next_visible_walk_entry(&mut it) {
+    while let Some(entry) = next_visible_walk_entry(&mut it)? {
         let path = entry.path();
-        if !path.is_file() {
+        if entry.file_type().is_dir() {
             continue;
         }
 
@@ -191,10 +191,13 @@ fn collect_disk_candidates(
             continue;
         }
 
-        let metadata = match entry.metadata() {
+        let metadata = match std::fs::metadata(path) {
             Ok(metadata) => metadata,
-            Err(_) => continue,
+            Err(error) => return Err(describe_scan_io_error(path, "读取文件信息", &error)),
         };
+        if !metadata.is_file() {
+            continue;
+        }
 
         let raw_path_str = path.to_string_lossy().to_string();
         let path_str = normalize_path(&raw_path_str);
@@ -227,9 +230,9 @@ fn collect_disk_candidates(
     let mut cue_referenced_audio: Vec<String> = Vec::new();
 
     let mut it = WalkDir::new(normalized_folder).into_iter();
-    while let Some(entry) = next_visible_walk_entry(&mut it) {
+    while let Some(entry) = next_visible_walk_entry(&mut it)? {
         let path = entry.path();
-        if !path.is_file() {
+        if entry.file_type().is_dir() {
             continue;
         }
 
@@ -242,30 +245,42 @@ fn collect_disk_candidates(
             continue;
         }
 
-        let cue_file_mtime = entry
-            .metadata()
+        let metadata = std::fs::metadata(path)
+            .map_err(|error| describe_scan_io_error(path, "读取 CUE 文件信息", &error))?;
+        if !metadata.is_file() {
+            continue;
+        }
+        let cue_file_mtime = metadata
+            .modified()
             .ok()
-            .and_then(|m| m.modified().ok())
             .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
             .map(|duration| duration.as_secs() as i64);
-        let cue_file_size = entry.metadata().map(|m| m.len() as i64).unwrap_or(0);
+        let cue_file_size = metadata.len() as i64;
 
         let cue_path_str = normalize_path(&path.to_string_lossy().to_string());
 
-        if let Ok(sheet) = cue::parse_cue_file(path) {
-            let resolved = normalize_path(&sheet.resolved_audio_path.to_string_lossy());
-            cue_referenced_audio.push(resolved);
-
-            for track in &sheet.tracks {
-                let synthetic_path = format!("{}::track{:02}", cue_path_str, track.track_number);
-                candidates.push(DiskCandidate {
-                    path: PathBuf::from(&synthetic_path),
-                    path_str: synthetic_path,
-                    ext: "cue_track".to_string(),
-                    disk_mtime: cue_file_mtime,
-                    disk_size: cue_file_size,
-                });
+        let sheet = match cue::parse_cue_file(path) {
+            Ok(sheet) => sheet,
+            Err(cue::CueParseError::Io(error)) => {
+                return Err(describe_scan_io_error(path, "读取 CUE", &error))
             }
+            Err(cue::CueParseError::AudioFileNotFound(audio)) => {
+                return Err(format!("CUE 音源不可访问：{audio}（{}）", path.display()))
+            }
+            Err(_) => continue, // Malformed sheets remain unsupported, not an I/O failure.
+        };
+        let resolved = normalize_path(&sheet.resolved_audio_path.to_string_lossy());
+        cue_referenced_audio.push(resolved);
+
+        for track in &sheet.tracks {
+            let synthetic_path = format!("{}::track{:02}", cue_path_str, track.track_number);
+            candidates.push(DiskCandidate {
+                path: PathBuf::from(&synthetic_path),
+                path_str: synthetic_path,
+                ext: "cue_track".to_string(),
+                disk_mtime: cue_file_mtime,
+                disk_size: cue_file_size,
+            });
         }
     }
 
@@ -285,18 +300,29 @@ fn collect_disk_candidates(
         );
     }
 
-    candidates
+    Ok(candidates)
 }
 
 fn should_skip_dot_prefixed_child_directory(entry: &walkdir::DirEntry) -> bool {
     entry.depth() > 0 && entry.file_type().is_dir() && is_dot_prefixed_path(entry.path())
 }
 
-fn next_visible_walk_entry(iter: &mut walkdir::IntoIter) -> Option<walkdir::DirEntry> {
+fn describe_walk_error(error: &walkdir::Error) -> String {
+    let path = error.path().unwrap_or_else(|| Path::new(""));
+    match error.io_error() {
+        Some(error) => describe_scan_io_error(path, "扫描目录", error),
+        None => format!("扫描目录失败：{}；{error}", path.display()),
+    }
+}
+
+fn next_visible_walk_entry(
+    iter: &mut walkdir::IntoIter,
+) -> Result<Option<walkdir::DirEntry>, String> {
     loop {
-        let entry = match iter.next()? {
-            Ok(entry) => entry,
-            Err(_) => continue,
+        let entry = match iter.next() {
+            None => return Ok(None),
+            Some(Err(error)) => return Err(describe_walk_error(&error)),
+            Some(Ok(entry)) => entry,
         };
 
         if should_skip_dot_prefixed_child_directory(&entry) {
@@ -304,7 +330,7 @@ fn next_visible_walk_entry(iter: &mut walkdir::IntoIter) -> Option<walkdir::DirE
             continue;
         }
 
-        return Some(entry);
+        return Ok(Some(entry));
     }
 }
 
@@ -327,14 +353,14 @@ fn parse_tasks_in_parallel(
     let results = pool.install(|| {
         tasks
             .into_par_iter()
-            .filter_map(|task| {
-                let parsed = parse_song_from_file(&task.path, &task.path_str, &task.ext);
+            .map(|task| {
+                let parsed = parse_song_for_scan(&task.path, &task.path_str, &task.ext);
 
                 if let Some(reporter) = reporter.as_ref() {
                     reporter.advance_parsing(total);
                 }
 
-                parsed.and_then(|song| {
+                Ok(parsed?.and_then(|song| {
                     if song_meets_duration_threshold(&song, options) {
                         return Some(ParsedTaskResult::Song {
                             index: task.index,
@@ -346,41 +372,53 @@ fn parse_tasks_in_parallel(
                     (task.change == ChangeKind::Update).then(|| ParsedTaskResult::Delete {
                         path: task.path_str,
                     })
-                })
+                }))
             })
-            .collect()
+            .collect::<Result<Vec<Option<ParsedTaskResult>>, String>>()
     });
 
-    Ok(results)
+    Ok(results?.into_iter().flatten().collect())
 }
 
-fn probe_audio_duration_ms(path: &Path) -> Option<u32> {
+fn probe_audio_duration_ms(path: &Path) -> Result<Option<u32>, String> {
     use symphonia::core::codecs::CODEC_TYPE_NULL;
     use symphonia::core::formats::FormatOptions;
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::MetadataOptions;
     use symphonia::core::probe::Hint;
 
-    let file = std::fs::File::open(path).ok()?;
+    let file = std::fs::File::open(path)
+        .map_err(|error| describe_scan_io_error(path, "读取 CUE 音源", &error))?;
     let media_source = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         hint.with_extension(ext);
     }
-    let probed = symphonia::default::get_probe()
-        .format(
-            &hint,
-            media_source,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
-        )
-        .ok()?;
-    let track = probed
+    let probed = match symphonia::default::get_probe().format(
+        &hint,
+        media_source,
+        &FormatOptions::default(),
+        &MetadataOptions::default(),
+    ) {
+        Ok(probed) => probed,
+        Err(symphonia::core::errors::Error::IoError(error))
+            if error.kind() != std::io::ErrorKind::UnexpectedEof =>
+        {
+            return Err(describe_scan_io_error(path, "解析 CUE 音源", &error))
+        }
+        Err(_) => return Ok(None),
+    };
+    let Some(track) = probed
         .format
         .tracks()
         .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)?;
-    let seconds = if let (Some(time_base), Some(frames)) = (track.codec_params.time_base, track.codec_params.n_frames) {
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+    else {
+        return Ok(None);
+    };
+    let seconds = if let (Some(time_base), Some(frames)) =
+        (track.codec_params.time_base, track.codec_params.n_frames)
+    {
         if frames > 0 {
             let time = time_base.calc_time(frames);
             time.seconds.saturating_add(u64::from(time.frac > 0.0))
@@ -402,15 +440,18 @@ fn probe_audio_duration_ms(path: &Path) -> Option<u32> {
     };
 
     if seconds > 0 {
-        Some((seconds.min(u32::MAX as u64) * 1000) as u32)
+        Ok(Some((seconds.min(u32::MAX as u64) * 1000) as u32))
     } else {
-        None
+        Ok(None)
     }
 }
 
-fn process_cue_parse_tasks(tasks: &[ParseTask], options: ScanOptions) -> Vec<ParsedTaskResult> {
+fn process_cue_parse_tasks(
+    tasks: &[ParseTask],
+    options: ScanOptions,
+) -> Result<Vec<ParsedTaskResult>, String> {
     if tasks.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let mut grouped: HashMap<String, Vec<&ParseTask>> = HashMap::new();
@@ -426,10 +467,17 @@ fn process_cue_parse_tasks(tasks: &[ParseTask], options: ScanOptions) -> Vec<Par
         let cue_path_buf = PathBuf::from(&cue_path);
         let sheet = match cue::parse_cue_file(&cue_path_buf) {
             Ok(s) => s,
-            Err(_) => continue,
+            Err(cue::CueParseError::Io(error)) => {
+                return Err(describe_scan_io_error(&cue_path_buf, "读取 CUE", &error))
+            }
+            Err(error) => {
+                return Err(format!(
+                    "扫描过程中 CUE 或音源发生变化：{cue_path}；{error}"
+                ))
+            }
         };
         let flac_path = sheet.resolved_audio_path.to_string_lossy().to_string();
-        let flac_duration_ms = probe_audio_duration_ms(&sheet.resolved_audio_path).unwrap_or(0);
+        let flac_duration_ms = probe_audio_duration_ms(&sheet.resolved_audio_path)?.unwrap_or(0);
         let cue_path_normalized = normalize_path(&cue_path);
 
         for task in group_tasks {
@@ -469,7 +517,7 @@ fn process_cue_parse_tasks(tasks: &[ParseTask], options: ScanOptions) -> Vec<Par
         }
     }
 
-    results
+    Ok(results)
 }
 
 pub(super) fn collect_scan_diff(
@@ -478,7 +526,7 @@ pub(super) fn collect_scan_diff(
     reporter: Option<&ScanProgressReporter>,
     options: ScanOptions,
 ) -> Result<ScanDiff, String> {
-    let candidates = collect_disk_candidates(normalized_folder, reporter);
+    let candidates = collect_disk_candidates(normalized_folder, reporter)?;
     let has_disk_songs = !candidates.is_empty();
     let mut songs_by_index: Vec<Option<Song>> = vec![None; candidates.len()];
     let mut changes_by_index = vec![None; candidates.len()];
@@ -522,7 +570,7 @@ pub(super) fn collect_scan_diff(
     parse_tasks = audio_tasks;
 
     // Process CUE tasks: group by CUE file, parse once, build all track songs
-    let cue_results = process_cue_parse_tasks(&cue_tasks, options);
+    let cue_results = process_cue_parse_tasks(&cue_tasks, options)?;
 
     if let Some(reporter) = reporter {
         reporter.start_parsing(parse_tasks.len());
