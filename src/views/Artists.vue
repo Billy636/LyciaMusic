@@ -11,6 +11,7 @@ import { useHomeNavigation } from '../composables/useHomeNavigation';
 import { useListScrollMemory } from '../composables/useListScrollMemory';
 import { useVisibleCoverUrls } from '../composables/useVisibleCoverUrls';
 import SortModeIcon from '../components/common/SortModeIcon.vue';
+import { useArtistImages } from '../features/library/artistImages';
 import { useLibraryBrowse } from '../features/library/useLibraryBrowse';
 import type { ArtistListItem } from '../features/library/playerLibraryViewShared';
 import { getAlphabetIndexKey } from '../utils/alphabetIndex';
@@ -22,6 +23,7 @@ const route = useRoute();
 const { openHomeArtist } = useHomeNavigation(router);
 const isSearchActive = computed(() => searchQuery.value.trim().length > 0);
 const { preloadPriorityCovers } = useCoverCache();
+const artistImages = useArtistImages();
 
 const showSortMenu = ref(false);
 const dragOverName = ref<string | null>(null);
@@ -55,7 +57,7 @@ const handleContextMenu = (event: MouseEvent, artist: ArtistListItem) => {
 
 const handleArtistClick = (artist: ArtistListItem) => {
   const avatarUrl = getArtistAvatarUrl(artist);
-  if (avatarUrl) {
+  if (avatarUrl && !artistImages.urlFor(artist.name)) {
     artistHeaderCache.set(artist.name, avatarUrl);
   }
   void openHomeArtist(artist.name);
@@ -100,11 +102,11 @@ const getArtistAvatarUrl = (artist: ArtistListItem) => {
   if (artist.avatarPath) {
     return convertFileSrc(artist.avatarPath);
   }
-  return getDisplayedCoverUrl(artist.firstSongPath);
+  return artistImages.urlFor(artist.name) || getDisplayedCoverUrl(artist.firstSongPath);
 };
 
 const isArtistAvatarLoading = (artist: ArtistListItem) => {
-  if (artist.avatarPath) {
+  if (artist.avatarPath || artistImages.urlFor(artist.name)) {
     return false;
   }
   return isCoverLoading(artist.firstSongPath);
@@ -657,7 +659,7 @@ onUnmounted(() => {
                 :class="{ 'ring-2 ring-[#EC4141] ring-offset-2 ring-offset-gray-50 dark:ring-offset-[#222222] rounded-full': dragSession.active && dragSession.type === 'artist' && dragOverName === item.artist.name && dragSession.data?.name !== item.artist.name }"
               >
                 <div class="w-full h-full rounded-full overflow-hidden shadow-sm group-hover:shadow transition-shadow duration-300 relative bg-gray-100 dark:bg-white/5 flex items-center justify-center">
-                  <img v-if="getArtistAvatarUrl(item.artist)" :src="getArtistAvatarUrl(item.artist)" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="item.artist.name">
+                  <img v-if="getArtistAvatarUrl(item.artist)" :src="getArtistAvatarUrl(item.artist)" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="item.artist.name" @error="!item.artist.avatarPath && artistImages.markFailed(item.artist.name)">
                   <div v-else class="w-full h-full flex items-center justify-center text-lg md:text-xl font-bold text-white bg-gradient-to-br animate-in fade-in duration-300" :class="[getGradientForArtist(item.artist.name), { 'animate-pulse': isArtistAvatarLoading(item.artist) }]">
                     {{ item.artist.name.charAt(0).toUpperCase() }}
                   </div>
@@ -699,7 +701,7 @@ onUnmounted(() => {
             :class="{ 'ring-2 ring-[#EC4141] ring-offset-2 ring-offset-gray-50 dark:ring-offset-[#222222] rounded-full': dragSession.active && dragSession.type === 'artist' && dragOverName === item.artist.name && dragSession.data?.name !== item.artist.name }"
           >
             <div class="w-full h-full rounded-full overflow-hidden shadow-sm group-hover:shadow transition-shadow duration-300 relative bg-gray-100 dark:bg-white/5 flex items-center justify-center">
-              <img v-if="getArtistAvatarUrl(item.artist)" :src="getArtistAvatarUrl(item.artist)" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="item.artist.name">
+              <img v-if="getArtistAvatarUrl(item.artist)" :src="getArtistAvatarUrl(item.artist)" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="item.artist.name" @error="!item.artist.avatarPath && artistImages.markFailed(item.artist.name)">
               <div v-else class="w-full h-full flex items-center justify-center text-lg md:text-xl font-bold text-white bg-gradient-to-br animate-in fade-in duration-300" :class="[getGradientForArtist(item.artist.name), { 'animate-pulse': isArtistAvatarLoading(item.artist) }]">
                 {{ item.artist.name.charAt(0).toUpperCase() }}
               </div>

@@ -9,6 +9,7 @@ import { useSettings } from '../../features/settings/useSettings';
 import { useToast } from '../../composables/toast';
 import { artistHeaderCache } from '../../caches/imageCaches';
 import { useCoverCache } from '../../composables/useCoverCache';
+import { useArtistImages } from '../../features/library/artistImages';
 import { type ArtistTabId, getOrderedArtistTabs, saveTabsOrder } from '../../utils/artistTabsOrder';
 
 const props = defineProps<{
@@ -159,6 +160,7 @@ const onPointerUp = () => {
 };
 
 const libraryStore = useLibraryStore();
+const artistImages = useArtistImages();
 const { settings } = useSettings();
 const { showToast } = useToast();
 
@@ -170,7 +172,7 @@ const displayedCover = computed(() => {
   if (currentArtist.value?.avatarPath) {
     return convertFileSrc(currentArtist.value.avatarPath);
   }
-  return coverUrl.value;
+  return artistImages.urlFor(props.artistName) || coverUrl.value;
 });
 
 const isSavingAvatar = ref(false);
@@ -447,8 +449,8 @@ const handlePlayAll = () => {
         @click="handleAvatarClick"
         class="w-36 h-36 rounded-full shadow-sm flex items-center justify-center shrink-0 overflow-hidden group relative select-none bg-gray-100 dark:bg-white/5 border-4 border-white/50 dark:border-white/5 cursor-pointer"
       >
-        <div v-if="isLoading" class="w-full h-full bg-gray-200 dark:bg-white/10 animate-pulse"></div>
-        <img v-else-if="displayedCover" :src="displayedCover" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="artistName"/>
+        <div v-if="isLoading && !displayedCover" class="w-full h-full bg-gray-200 dark:bg-white/10 animate-pulse"></div>
+        <img v-else-if="displayedCover" :src="displayedCover" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="artistName" @error="!currentArtist?.avatarPath && artistImages.markFailed(artistName)"/>
         <div v-else class="w-full h-full flex items-center justify-center text-4xl font-bold text-white bg-gradient-to-br animate-in fade-in duration-300" :class="getGradientForArtist(artistName)">
           {{ artistName.charAt(0).toUpperCase() }}
         </div>

@@ -1,5 +1,6 @@
 mod app_runtime;
 mod custom_background;
+mod artist_images;
 mod custom_fonts;
 mod database;
 mod desktop_lyrics;
@@ -174,6 +175,7 @@ pub fn run() {
             get_library_folders,
             is_directory,
             save_artist_avatar,
+            artist_images::scan_artist_images,
             add_library_folder,
             remove_library_folder,
             get_library_songs_cached,
