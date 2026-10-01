@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
+import { isTauri } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import alipayQrcode from '../../assets/alipay.png';
 import wechatpayQrcode from '../../assets/wechatpay.png';
 
@@ -10,6 +12,20 @@ const props = defineProps<{
 const emit = defineEmits(['update:visible']);
 
 const isClosing = ref(false);
+const sponsorPageUrl = 'https://lycia.prettyboy.fun/sponsors.html';
+const sponsorLinkError = ref(false);
+
+const handleOpenSponsors = async (event: MouseEvent) => {
+  sponsorLinkError.value = false;
+  if (!isTauri()) return;
+  event.preventDefault();
+  try {
+    await openUrl(sponsorPageUrl);
+  } catch (error) {
+    console.error('Failed to open sponsor page:', error);
+    sponsorLinkError.value = true;
+  }
+};
 
 const handleClose = () => {
   isClosing.value = true;
@@ -113,7 +129,19 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown));
           <!-- Sponsor List -->
           <div class="mb-5 space-y-2 rounded-2xl bg-gray-50/40 p-4 text-left dark:bg-white/5 border border-gray-100/50 dark:border-white/5">
             <p class="text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-200">赞助名单</p>
-            <p class="text-xs sm:text-sm text-gray-500 dark:text-gray-400">名单整理中，敬请期待……</p>
+            <p class="text-xs sm:text-sm text-gray-500 dark:text-gray-400">赞助名单已收录于官网，感谢每一份支持。</p>
+            <a
+              :href="sponsorPageUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1 rounded text-xs sm:text-sm font-semibold text-sky-600 transition hover:text-sky-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 dark:text-sky-400 dark:hover:text-sky-300 dark:focus-visible:ring-offset-gray-900"
+              @click="handleOpenSponsors"
+            >
+              前往官网查看赞助名单 <span aria-hidden="true">↗</span>
+            </a>
+            <p v-if="sponsorLinkError" role="alert" class="text-xs text-red-500 dark:text-red-400">
+              无法打开浏览器，请稍后重试或手动访问 {{ sponsorPageUrl }}
+            </p>
           </div>
         </div>
 
