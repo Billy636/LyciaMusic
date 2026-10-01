@@ -8,6 +8,7 @@
     "dev": "vite",
     "dev:lyrics": "vite --config scripts/lyrics-smoke/vite.config.ts --open /scripts/lyrics-smoke/index.html",
     "build": "npm run typecheck && vite build",
+    "build:installer": "npm run version:check && tauri build --bundles nsis --config src-tauri/tauri.installer.conf.json",
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "eslint .",

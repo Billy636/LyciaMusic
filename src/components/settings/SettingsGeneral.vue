@@ -311,7 +311,7 @@ onScopeDispose(() => {
         <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">启动时检查更新</div>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">后台检查，仅发现新版本时提示，不会自动下载安装。</p>
+            <p class="mt-1 text-xs app-text-secondary">后台检查，仅发现新版本时提示，不会自动下载安装。</p>
           </div>
           <button
             type="button"

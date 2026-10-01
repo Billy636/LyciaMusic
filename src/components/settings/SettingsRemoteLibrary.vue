@@ -253,7 +253,7 @@ onScopeDispose(() => {
         </h2>
         <button
           type="button"
-          class="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600/50 bg-transparent py-5 text-sm font-bold text-gray-500 dark:text-gray-400 hover:border-[#EC4141] hover:text-[#EC4141] hover:bg-[#EC4141]/5 transition-all duration-200"
+          class="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600/50 bg-transparent py-5 text-sm font-bold app-text-secondary hover:border-[#EC4141] hover:text-[#EC4141] hover:bg-[#EC4141]/5 transition-all duration-200"
           @click="openAddForm"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>

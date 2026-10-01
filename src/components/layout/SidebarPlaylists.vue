@@ -55,12 +55,12 @@ const getPlaylistCover = (playlistId: string) => {
         <svg xmlns="http://www.w3.org/2000/svg" :class="['h-3 w-3 transition-transform duration-200', isOpen ? 'rotate-90' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
         <span class="text-xs font-bold tracking-wide">快捷歌单</span>
       </button>
-      <button type="button" @click.stop="$emit('createPlaylist')" class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded p-0.5 transition-colors" title="新建歌单" aria-label="新建歌单"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></button>
+      <button type="button" @click.stop="$emit('createPlaylist')" class="app-text-secondary hover:text-gray-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded p-0.5 transition-colors" title="新建歌单" aria-label="新建歌单"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></button>
     </div>
 
     <Transition name="playlist-list">
       <div v-show="isOpen" id="sidebar-playlist-shortcuts" class="mt-1 overflow-hidden">
-      <div v-if="playlists.length === 0" class="px-4 py-3 text-xs leading-5 text-gray-500 dark:text-gray-400">
+      <div v-if="playlists.length === 0" class="px-4 py-3 text-xs leading-5 app-text-secondary">
         还没有歌单，点击 + 创建。<br />
         置顶的歌单会优先显示在这里。
       </div>
@@ -91,7 +91,7 @@ const getPlaylistCover = (playlistId: string) => {
             </div>
             <div class="flex-1 min-w-0 flex flex-col justify-center">
               <span class="text-xs line-clamp-2 break-all leading-tight" :title="list.name">{{ list.name }}</span>
-              <span class="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">{{ list.songPaths.length }} 首</span>
+              <span class="mt-0.5 text-[10px] app-text-secondary">{{ list.songPaths.length }} 首</span>
             </div>
             <svg v-if="pinnedIds.includes(list.id)" xmlns="http://www.w3.org/2000/svg" class="ml-1 h-3 w-3 shrink-0 text-[#EC4141]/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" role="img" aria-label="已置顶"><title>已置顶</title><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 9V4l1-1V2H7v1l1 1v5l-2 3v1h12v-1l-2-3M12 13v9" /></svg>
           </li>

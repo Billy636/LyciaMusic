@@ -2,7 +2,13 @@ export type FooterScene = 'main' | 'detail';
 export type FooterActionId = 'favorite' | 'mode' | 'queue' | 'volume' | 'desktopLyrics'
   | 'equalizer' | 'pin' | 'progress' | 'lyricsStyle' | 'visualizer' | 'more';
 export type FooterMovableId = FooterActionId | 'previous' | 'play' | 'next';
-export interface FooterPlacement { x?: number; visibility?: 'bar' | 'more' | 'hidden' }
+export type FooterPlacementBasis = 'canvas' | 'legacy-none' | 'legacy-cover' | 'legacy-text';
+export interface FooterPlacement {
+  x?: number;
+  /** Freeze the coordinate basis so info-mode changes never reinterpret x. */
+  basis?: FooterPlacementBasis;
+  visibility?: 'bar' | 'more' | 'hidden';
+}
 export type FooterPosition = 'left' | 'before' | 'after' | 'right' | 'more' | 'hidden';
 export interface FooterLayoutItem { id: FooterActionId; position: FooterPosition }
 export interface FooterSpacing { controls: number; utilities: number }

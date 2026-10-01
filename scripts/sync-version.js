@@ -56,7 +56,10 @@ function updateCargoLockVersion(filePath, packageName, nextVersion) {
 const packageJson = readJson(packageJsonPath);
 const version = packageJson.version;
 
-if (!/^\d+\.\d+\.\d+$/.test(version)) {
+// Accept SemVer prereleases (for example 1.5.0-beta1) as well as stable builds.
+const versionMatch = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(version);
+const invalidNumericPrerelease = versionMatch?.[4]?.split('.').some(part => /^0\d+$/.test(part));
+if (!versionMatch || invalidNumericPrerelease) {
   console.error(`Invalid version in package.json: ${version}`);
   process.exit(1);
 }

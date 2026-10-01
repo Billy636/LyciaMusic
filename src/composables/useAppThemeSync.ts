@@ -40,6 +40,8 @@ export function useAppThemeSync() {
   };
 
   const applyTheme = async () => {
+    if (theme.value.mode === 'custom') document.documentElement.classList.add('custom-background-theme');
+    else document.documentElement.classList.remove('custom-background-theme');
     if (theme.value.mode === 'system') {
       try {
         await appWindow.setTheme(null);

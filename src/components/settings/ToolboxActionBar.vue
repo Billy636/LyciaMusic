@@ -62,12 +62,12 @@ const store = useToolboxStore();
       class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-white/40 pt-4 dark:border-white/5"
     >
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span class="text-sm text-gray-600 dark:text-white/70">
+        <span class="text-sm app-text-secondary">
           已选
           <span class="font-semibold text-gray-900 dark:text-white">{{ store.selectionSummary.selectedCount }}</span>
           / {{ store.selectionSummary.selectableCount }} 个可整理文件
         </span>
-        <label class="flex cursor-pointer items-center gap-2 text-sm text-gray-600 dark:text-white/70">
+        <label class="flex cursor-pointer items-center gap-2 text-sm app-text-secondary">
           <AppCheckbox :checked="store.autoRefresh" @change="store.autoRefresh = $event" />
           应用后自动刷新音乐库
         </label>

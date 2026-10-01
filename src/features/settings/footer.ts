@@ -72,9 +72,9 @@ function normalizeBehavior(value: unknown, fallback: FooterBehavior): FooterBeha
   };
 }
 
-/** Playback-page-only visualization remains independent of shared display settings. */
+/** Song info and playback-page-only visualization are always scene-specific. */
 export function syncFooterBehavior(settings: FooterSettings, source: FooterScene) {
-  const { visualizer: _visualizer, ...shared } = settings.behavior[source];
+  const { info: _info, visualizer: _visualizer, ...shared } = settings.behavior[source];
   Object.assign(settings.behavior.main, shared);
   Object.assign(settings.behavior.detail, shared);
 }
@@ -90,12 +90,20 @@ export function normalizeFooterSettings(value: unknown): FooterSettings {
   detailOrder.push(...fallbackOrder.filter(id => !detailOrder.includes(id)));
   const spacing = object(raw.spacing);
   const placement = object(raw.placement);
-  const normalizePlacement = (value: unknown) => {
+  const normalizedBehavior = {
+    main: normalizeBehavior(behavior.main, defaults.behavior.main),
+    detail: normalizeBehavior(behavior.detail, defaults.behavior.detail),
+  };
+  const normalizePlacement = (value: unknown, info: FooterBehavior['info']) => {
     const entries = object(value), result: Partial<Record<FooterMovableId, FooterPlacement>> = {};
     for (const id of [...FOOTER_ACTIONS.map(item => item.id), 'previous', 'play', 'next'] as FooterMovableId[]) {
       const entry = object(entries[id]);
       const next: FooterPlacement = {};
-      if (typeof entry.x === 'number' && Number.isFinite(entry.x)) next.x = Math.max(0, Math.min(1, entry.x));
+      if (typeof entry.x === 'number' && Number.isFinite(entry.x)) {
+        next.x = Math.max(0, Math.min(1, entry.x));
+        next.basis = entry.basis === 'canvas' || entry.basis === 'legacy-none' || entry.basis === 'legacy-cover' || entry.basis === 'legacy-text'
+          ? entry.basis : info === 'none' ? 'legacy-none' : info === 'cover' ? 'legacy-cover' : 'legacy-text';
+      }
       if (entry.visibility === 'bar' || entry.visibility === 'hidden' || (entry.visibility === 'more' && id !== 'more')) next.visibility = entry.visibility;
       if (Object.keys(next).length) result[id] = next;
     }
@@ -110,9 +118,14 @@ export function normalizeFooterSettings(value: unknown): FooterSettings {
   const normalized: FooterSettings = {
     version: 1, linked, main, detail, detailExtras, detailOrder,
     spacing: { main: normalizeSpacing(spacing.main), detail: normalizeSpacing(spacing.detail) },
-    placement: { main: normalizePlacement(placement.main), detail: normalizePlacement(placement.detail) },
-    behavior: { main: normalizeBehavior(behavior.main, defaults.behavior.main), detail: normalizeBehavior(behavior.detail, defaults.behavior.detail) },
+    placement: { main: normalizePlacement(placement.main, normalizedBehavior.main.info), detail: normalizePlacement(placement.detail, normalizedBehavior.detail.info) },
+    behavior: normalizedBehavior,
   };
+  // Old linked settings may have copied a cover-bearing main-page mode into
+  // the playback footer. Keep the main preference and repair only the detail.
+  if (normalized.behavior.detail.info !== 'time' && normalized.behavior.detail.info !== 'none') {
+    normalized.behavior.detail.info = 'time';
+  }
   if (linked) syncFooterBehavior(normalized, 'main');
   return normalized;
 }

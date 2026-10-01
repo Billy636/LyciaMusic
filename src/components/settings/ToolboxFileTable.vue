@@ -48,12 +48,12 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
           </span>
           <span
             v-if="store.missingTagCount > 0"
-            class="rounded-full bg-gray-100 px-2 py-0.5 text-gray-500 dark:bg-white/10 dark:text-white/50"
+            class="rounded-full bg-gray-100 px-2 py-0.5 app-text-secondary dark:bg-white/10"
           >
             缺标签 {{ store.missingTagCount }}
           </span>
           <label
-            class="ml-1 flex cursor-pointer items-center gap-1.5 text-xs text-gray-500 transition hover:text-[#EC4141] dark:text-white/60"
+            class="ml-1 flex cursor-pointer items-center gap-1.5 text-xs app-text-secondary transition hover:text-[#EC4141]"
             title="目标名冲突时自动追加 (2)、(3) 后缀，让同名文件都能改名"
           >
             <AppCheckbox
@@ -67,7 +67,7 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
 
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-gray-500 transition hover:bg-white/60 hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:text-white/60 dark:hover:bg-white/10"
+        class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs app-text-secondary transition hover:bg-white/60 hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
         :disabled="store.isScanning || !store.hasTarget"
         title="重新扫描当前文件夹"
         @click="store.refreshPreview()"
@@ -79,7 +79,7 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
 
     <!-- 表头 -->
     <div
-      class="grid grid-cols-[28px_minmax(0,1fr)_20px_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/40 py-2 text-xs font-semibold text-gray-500 dark:border-white/5 dark:text-white/50"
+      class="grid grid-cols-[28px_minmax(0,1fr)_20px_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/40 py-2 text-xs font-semibold app-text-secondary dark:border-white/5"
     >
       <span></span>
       <span>当前文件名</span>
@@ -90,8 +90,8 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
 
     <!-- 未选择文件夹 -->
     <div v-if="!store.hasTarget" class="px-6 py-14 text-center">
-      <p class="text-sm font-medium text-gray-600 dark:text-white/70">先选择要整理的文件夹</p>
-      <p class="mt-2 text-xs leading-6 text-gray-400 dark:text-white/50">
+      <p class="text-sm font-medium app-text-secondary">先选择要整理的文件夹</p>
+      <p class="mt-2 text-xs leading-6 app-text-secondary">
         选择文件夹后会自动扫描其中的音频文件，<br />
         勾选清理规则与命名模板即可实时预览改名效果。
       </p>
@@ -100,9 +100,9 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
     <!-- 扫描中 -->
     <div
       v-else-if="store.isScanning && store.previewItems.length === 0"
-      class="flex items-center justify-center gap-3 px-6 py-14 text-sm text-gray-500 dark:text-white/60"
+      class="flex items-center justify-center gap-3 px-6 py-14 text-sm app-text-secondary"
     >
-      <svg class="h-5 w-5 animate-spin text-gray-400" viewBox="0 0 24 24" fill="none">
+      <svg class="h-5 w-5 animate-spin app-text-secondary" viewBox="0 0 24 24" fill="none">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
       </svg>
@@ -112,10 +112,10 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
     <!-- 扫描失败 -->
     <div v-else-if="store.scanError" class="px-6 py-12 text-center">
       <p class="text-sm font-medium text-red-500">扫描失败</p>
-      <p class="mt-2 break-all text-xs text-gray-400 dark:text-white/50">{{ store.scanError }}</p>
+      <p class="mt-2 break-all text-xs app-text-secondary">{{ store.scanError }}</p>
       <button
         type="button"
-        class="mt-4 rounded-lg border border-gray-200 bg-white/70 px-4 py-2 text-xs text-gray-600 transition hover:border-[#EC4141] hover:text-[#EC4141] dark:border-white/10 dark:bg-white/5 dark:text-gray-300"
+        class="mt-4 rounded-lg border border-gray-200 bg-white/70 px-4 py-2 text-xs app-text-secondary transition hover:border-[#EC4141] hover:text-[#EC4141] dark:border-white/10 dark:bg-white/5"
         @click="store.refreshPreview()"
       >
         重试
@@ -147,7 +147,7 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
         />
 
         <div
-          class="truncate text-gray-600 dark:text-white/60"
+          class="truncate app-text-secondary"
           :class="item.will_change ? 'line-through decoration-gray-400/70 dark:decoration-white/30' : ''"
           :title="item.original_name"
         >
@@ -167,7 +167,7 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
             :class="
               item.will_change
                 ? 'font-medium text-gray-900 dark:text-white'
-                : 'text-gray-400 dark:text-white/40'
+                : 'app-text-secondary'
             "
             :title="item.final_name"
           >
@@ -198,7 +198,7 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
           </span>
           <span
             v-else-if="!item.will_change"
-            class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-400 dark:bg-white/10 dark:text-white/40"
+            class="rounded-full bg-gray-100 px-2 py-0.5 text-xs app-text-secondary dark:bg-white/10"
           >
             无变化
           </span>

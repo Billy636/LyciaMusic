@@ -9,7 +9,7 @@ import { usePlaybackController } from '../../features/playback/usePlaybackContro
 import { useFooterSettings } from '../../features/settings/useFooterSettings';
 import { effectiveFooterLayout, footerAction, FOOTER_ACTIONS } from '../../features/settings/footer';
 import { resolveFreeFooterLayout } from '../../features/settings/freeFooterLayout';
-import { footerCoverVisible, footerViewport, footerEditingScene, footerLivePresentation } from './footerPresentation';
+import { footerCoverVisible, footerCoverAnchor, footerViewport, footerLivePresentation } from './footerPresentation';
 import { useSongHighlights } from '../../features/highlights/useSongHighlights';
 import { useToast } from '../../composables/toast';
 import type { RemoteDownloadProgress } from '../../types';
@@ -34,10 +34,10 @@ const { footer, setBehavior, toggleProgress } = useFooterSettings();
 const route = useRoute();
 const footerRef = ref<HTMLElement | null>(null);
 const footerWidth = ref(window.innerWidth);
-const scene = computed<FooterScene>(() => footerEditingScene.value ?? (showPlayerDetail.value ? 'detail' : 'main'));
+const scene = computed<FooterScene>(() => showPlayerDetail.value ? 'detail' : 'main');
 const behavior = computed(() => footer.value.behavior[scene.value]);
 const groups = computed(() => resolveFreeFooterLayout(footer.value, scene.value, footerWidth.value));
-const hasCover = computed(() => behavior.value.info === 'cover' || behavior.value.info === 'song' || behavior.value.info === 'both');
+const hasCover = computed(() => ['cover', 'song', 'both'].includes(behavior.value.info) && groups.value.infoWidth >= 48);
 const isProgressHidden = computed(() => behavior.value.progress === 'hidden');
 const isPinned = computed(() => !behavior.value.autoHide);
 const isVisualizerEnabled = computed(() => behavior.value.visualizer);
@@ -49,15 +49,11 @@ const progressContextMenuX = ref(0), progressContextMenuY = ref(0), progressCont
 const handleOpenDetail = () => { if (currentSong.value) togglePlayerDetail(); };
 const handleFooterClick = (event: MouseEvent) => {
   if (event.defaultPrevented || !currentSong.value || !(event.target instanceof Element)) return;
-  // Keep navigation available even when the song-info block is hidden or tiny.
-  // Interactive controls and the existing info/cover handlers own their clicks.
-  if (event.target.closest('button, a, input, select, textarea, [role="slider"], [data-player-song-info], .footer-popup')) return;
+  // Only one navigation handler for text and blank space. Mode changes may
+  // detach the target node, so inspect the original event propagation path.
+  if (event.composedPath().some(node => node instanceof Element
+    && node.matches('button, a, input, select, textarea, [role="slider"], .footer-popup'))) return;
   handleOpenDetail();
-};
-const handleSongInfoClick = (event: MouseEvent) => {
-  if (!currentSong.value) return;
-  if (event.target instanceof Element && event.target.closest('button, [data-footer-cover]')) return;
-  togglePlayerDetail();
 };
 const handleContextMenu = (event: MouseEvent) => {
   if (!currentSong.value) return;
@@ -346,14 +342,20 @@ watchEffect(() => {
 });
 let unlistenRemoteDownload: UnlistenFn | undefined;
 let disposed = false;
-const onWindowResize = () => { closePopup(); showProgressContextMenu.value = false; };
+const measureFooter = () => {
+  if (!footerRef.value) return;
+  const { clientWidth: width, clientHeight: height } = footerRef.value;
+  footerWidth.value = width;
+  footerViewport.value = { width, height };
+  const footerRect = footerRef.value.getBoundingClientRect();
+  const coverRect = footerRef.value.querySelector<HTMLElement>('[data-footer-cover]')?.getBoundingClientRect();
+  footerCoverAnchor.value = coverRect?.width && coverRect.height
+    ? { x: coverRect.left, y: coverRect.top, width: coverRect.width, height: coverRect.height }
+    : { x: footerRect.left + 16, y: footerRect.top + (height - 48) / 2, width: 48, height: 48 };
+};
+const onWindowResize = () => { closePopup(); showProgressContextMenu.value = false; measureFooter(); };
+watch([() => behavior.value.info, showPlayerDetail], () => { void nextTick(measureFooter); });
 onMounted(async () => {
-  const measureFooter = () => {
-    if (!footerRef.value) return;
-    const { clientWidth: width, clientHeight: height } = footerRef.value;
-    footerWidth.value = width;
-    footerViewport.value = { width, height };
-  };
   measureFooter();
   resizeObserver = new ResizeObserver(measureFooter);
   if (footerRef.value) resizeObserver.observe(footerRef.value);
@@ -372,6 +374,7 @@ onMounted(async () => {
 onUnmounted(() => {
   disposed = true; clearIdleTimer(); clearVolumeTimer(); cancelVolumeDrag(); resizeObserver?.disconnect(); unlistenRemoteDownload?.();
   footerCoverVisible.value = true;
+  footerCoverAnchor.value = null;
   window.removeEventListener('pointermove', onGlobalPointerMove);
   window.removeEventListener('pointerup', onGlobalPointerUp);
   window.removeEventListener('pointercancel', onGlobalPointerCancel);
@@ -405,10 +408,10 @@ onUnmounted(() => {
     </div>
     <div class="footer-content h-full" :class="{ 'is-idle': isIdle }" :inert="isIdle || undefined">
       <div class="footer-info-area" :style="{ width: `${groups.infoWidth}px` }">
-        <FooterSongInfo :mode="behavior.info" :song="currentSong" :cover="currentCover"
+        <FooterSongInfo :mode="behavior.info" :width="groups.infoWidth" :song="currentSong" :cover="currentCover"
           :current-time="currentTimeStr" :total-time="totalTimeStr" :expanded="showPlayerDetail"
           :download-label="isCurrentRemoteDownloadActive ? remoteDownloadText : ''"
-          @click="handleSongInfoClick" @contextmenu="handleContextMenu" @toggle="handleOpenDetail" />
+          @contextmenu="handleContextMenu" @toggle="handleOpenDetail" />
       </div>
       <FooterActionButton v-for="item in groups.bar" :id="item.id" :key="item.id" class="footer-free-button"
         :style="{ left: `${item.x}px`, width: `${item.width}px`, height: `${item.width}px` }"

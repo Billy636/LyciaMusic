@@ -18,10 +18,13 @@ function changeBehavior(key: keyof FooterBehavior, event: Event) {
 function changeSelection(key: keyof FooterBehavior, value: string) {
   setBehavior(scene.value, { [key]: key === 'autoHide' || key === 'visualizer' ? value === 'true' : value });
 }
-const infoOptions = [
+const mainInfoOptions = [
   { value: 'cover', label: '封面' }, { value: 'song', label: '封面与歌曲' },
   { value: 'time', label: '播放时间' }, { value: 'both', label: '歌曲与时间' }, { value: 'none', label: '不显示' },
 ];
+const infoOptions = computed(() => scene.value === 'detail'
+  ? mainInfoOptions.filter(option => option.value === 'time' || option.value === 'none')
+  : mainInfoOptions);
 const progressOptions = [{ value: 'always', label: '始终' }, { value: 'hover', label: '悬停' }, { value: 'hidden', label: '隐藏' }] as const;
 const progressIndex = computed(() => Math.max(0, progressOptions.findIndex(option => option.value === behavior.value.progress)));
 const progressColors = [
@@ -77,8 +80,8 @@ function confirm() {
   pending.value = null;
 }
 const confirmation = computed(() => pending.value === 'link'
-  ? '将当前场景的按钮布局和显示设置应用到另一个场景，包括歌曲信息、进度条显示与颜色、底栏自动隐藏。播放页专属的音频频谱保持独立。'
-  : `恢复当前场景的原版布局、间距和显示设置。${footer.value.linked ? '通用按钮和显示设置会同步恢复到两个场景。' : ''}不会修改播放状态或音频参数。`);
+  ? '将当前场景的按钮布局、间距、进度条显示与颜色、底栏自动隐藏设置应用到另一个场景。歌曲信息和播放页专属音频频谱始终独立，不会同步。'
+  : `恢复当前场景的原版布局、间距和显示设置。${footer.value.linked ? '通用按钮和可同步的显示设置会同时恢复；另一场景的歌曲信息不变。' : ''}不会修改播放状态或音频参数。`);
 </script>
 
 <template>
@@ -86,9 +89,9 @@ const confirmation = computed(() => pending.value === 'link'
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex rounded-lg bg-black/5 p-1 dark:bg-white/5" aria-label="底栏场景">
         <button v-for="entry in ([['main', '主界面'], ['detail', '播放页']] as const)" :key="entry[0]" type="button" :aria-pressed="scene === entry[0]"
-          class="rounded-md px-6 py-2 text-sm transition-colors" :class="scene === entry[0] ? 'bg-white text-[#EC4141] shadow-sm dark:bg-white/10' : 'text-gray-500 dark:text-gray-400'" @click="scene = entry[0]">{{ entry[1] }}</button>
+          class="rounded-md px-6 py-2 text-sm transition-colors" :class="scene === entry[0] ? 'bg-white text-[#EC4141] shadow-sm dark:bg-white/10' : 'app-text-secondary'" @click="scene = entry[0]">{{ entry[1] }}</button>
       </div>
-      <label class="flex items-center gap-2 text-xs" title="同步按钮布局和显示设置，播放页专属功能除外"><input type="checkbox" class="accent-[#EC4141]" :checked="footer.linked" @change="changeLinked" />两个场景保持一致</label>
+      <label class="flex items-center gap-2 text-xs" title="同步按钮布局、间距和进度条等设置；歌曲信息始终按场景独立保存"><input type="checkbox" class="accent-[#EC4141]" :checked="footer.linked" @change="changeLinked" />两个场景保持一致</label>
     </div>
     <section class="space-y-3">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
@@ -97,7 +100,10 @@ const confirmation = computed(() => pending.value === 'link'
       </h2>
       <div class="display-rows">
         <div class="display-row">
-          <label for="footer-song-info" class="display-label">歌曲信息</label>
+          <div>
+            <label for="footer-song-info" class="display-label">歌曲信息</label>
+            <p class="mt-1 text-xs app-text-secondary">{{ scene === 'detail' ? '播放页已展示大封面，底栏仅保留时间或隐藏' : '此项按场景独立保存，不参与同步' }}</p>
+          </div>
           <SettingsSelect :key="`info-${scene}`" class="display-info-select" label="歌曲信息" hide-label trigger-id="footer-song-info"
             :model-value="behavior.info" :options="infoOptions" @update:model-value="changeSelection('info', $event)" />
         </div>
@@ -165,8 +171,8 @@ const confirmation = computed(() => pending.value === 'link'
 </template>
 
 <style scoped>
-.display-rows { --display-divider:rgb(15 23 42 / .07); --display-muted:#6b7280; position:relative; z-index:1; container-type:inline-size; }
-.dark .display-rows { --display-divider:rgb(255 255 255 / .05); --display-muted:#9ca3af; }
+.display-rows { --display-divider:rgb(15 23 42 / .07); --display-muted:var(--app-text-secondary); position:relative; z-index:1; container-type:inline-size; }
+.dark .display-rows { --display-divider:rgb(255 255 255 / .05); }
 .display-row { display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:66px; padding:14px 2px; border-bottom:1px solid var(--display-divider); }
 .display-row:last-child { border-bottom:0; }
 .display-label { font-size:13px; font-weight:500; }

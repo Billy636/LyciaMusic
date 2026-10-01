@@ -28,7 +28,7 @@ const toggleRule = (key: keyof ToolboxRules, value: boolean) => {
       <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
       清理规则
     </h3>
-    <p class="mt-1 pl-3 text-xs text-gray-400 dark:text-white/50">按需勾选，预览实时更新</p>
+    <p class="mt-1 pl-3 text-xs app-text-secondary">按需勾选，预览实时更新</p>
 
     <div class="mt-2">
       <div
@@ -43,7 +43,7 @@ const toggleRule = (key: keyof ToolboxRules, value: boolean) => {
         />
         <div class="min-w-0">
           <div class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ option.label }}</div>
-          <div class="mt-0.5 truncate font-mono text-xs text-gray-400 dark:text-white/50">
+          <div class="mt-0.5 truncate font-mono text-xs app-text-secondary">
             {{ option.example }}
           </div>
         </div>

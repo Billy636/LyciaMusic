@@ -68,6 +68,11 @@
       "icons/icon.ico"
     ],
     "windows": {
+      "nsis": {
+        "languages": ["SimpChinese"],
+        "displayLanguageSelector": false,
+        "template": "./windows/installer.nsi"
+      },
       "webviewInstallMode": {
         "type": "skip"
       }

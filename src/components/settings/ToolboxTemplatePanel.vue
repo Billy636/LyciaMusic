@@ -52,7 +52,7 @@ const setAsDefault = () => {
       <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
       命名模板
     </h3>
-    <p class="mt-1 pl-3 text-xs text-gray-400 dark:text-white/50">
+    <p class="mt-1 pl-3 text-xs app-text-secondary">
       有标签的文件按模板重命名，缺标签的文件仅套用清理规则
     </p>
 
@@ -65,12 +65,12 @@ const setAsDefault = () => {
         :class="
           activePreset?.value === preset.value
             ? 'border-[#EC4141] bg-[#EC4141] text-white'
-            : 'border-gray-200/80 bg-white/45 text-gray-600 hover:border-[#EC4141] hover:text-[#EC4141] dark:border-white/10 dark:bg-white/[0.06] dark:text-gray-300'
+            : 'border-gray-200/80 bg-white/45 app-text-secondary hover:border-[#EC4141] hover:text-[#EC4141] dark:border-white/10 dark:bg-white/[0.06]'
         "
         @click="store.setTemplate(preset.value)"
       >
         {{ preset.label }}
-        <span class="ml-1 opacity-60">{{ preset.example }}</span>
+        <span class="ml-1">{{ preset.example }}</span>
       </button>
     </div>
 
@@ -91,14 +91,14 @@ const setAsDefault = () => {
         @click="insertVariable(variable.code)"
       >
         <span class="font-mono font-semibold text-gray-700 dark:text-gray-300">{{ variable.code }}</span>
-        <span class="ml-1 text-gray-400 dark:text-white/40">{{ variable.name }}</span>
+        <span class="ml-1 app-text-secondary">{{ variable.name }}</span>
       </button>
     </div>
 
     <div class="mt-3 flex items-center justify-between">
       <button
         type="button"
-        class="text-xs text-gray-500 transition hover:text-[#EC4141] dark:text-white/60 dark:hover:text-[#EC4141]"
+        class="text-xs app-text-secondary transition hover:text-[#EC4141] dark:hover:text-[#EC4141]"
         :disabled="template === DEFAULT_TOOLBOX_TEMPLATE"
         @click="setAsDefault"
       >

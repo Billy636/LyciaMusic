@@ -95,7 +95,7 @@ const handleReset = () => {
         <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
         歌曲文件整理
       </h2>
-      <p class="mt-2 text-xs leading-6 text-gray-400 dark:text-white/50">
+      <p class="mt-2 text-xs leading-6 app-text-secondary">
         选择下载目录，勾选清理规则和命名模板，预览确认后一键应用。缺标签的文件可以用 MusicTag 在线获取标签。
       </p>
     </section>
@@ -111,7 +111,7 @@ const handleReset = () => {
             目标文件夹
           </h3>
           <p
-            class="mt-1 truncate pl-3 text-xs text-gray-400 dark:text-white/50"
+            class="mt-1 truncate pl-3 text-xs app-text-secondary"
             :title="store.targetPath"
           >
             {{ store.hasTarget ? store.targetPath : '尚未选择，选择后自动扫描' }}
@@ -120,13 +120,13 @@ const handleReset = () => {
         <div class="flex items-center gap-3">
           <span
             v-if="store.hasTarget"
-            class="rounded-full bg-black/5 px-2.5 py-1 text-xs text-gray-500 dark:bg-white/10 dark:text-gray-300"
+            class="rounded-full bg-black/5 px-2.5 py-1 text-xs app-text-secondary dark:bg-white/10"
           >
             {{ pathLeaf(store.targetPath) }}
           </span>
           <button
             type="button"
-            class="rounded-lg border border-gray-200/80 bg-white/45 px-4 py-2 text-xs text-gray-600 transition hover:border-[#EC4141] hover:text-[#EC4141] dark:border-white/10 dark:bg-white/[0.06] dark:text-gray-300"
+            class="rounded-lg border border-gray-200/80 bg-white/45 px-4 py-2 text-xs app-text-secondary transition hover:border-[#EC4141] hover:text-[#EC4141] dark:border-white/10 dark:bg-white/[0.06]"
             @click="selectTargetFolder"
           >
             {{ store.hasTarget ? '更换文件夹' : '选择文件夹' }}
@@ -140,7 +140,7 @@ const handleReset = () => {
             <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
             MusicTag 获取标签
           </h3>
-          <div class="mt-1 pl-3 text-xs text-gray-400 dark:text-white/50">
+          <div class="mt-1 pl-3 text-xs app-text-secondary">
             <template v-if="store.missingTagCount > 0">
               {{ store.missingTagCount }} 个文件缺标签，重命名只能套用清理规则
             </template>
@@ -149,7 +149,7 @@ const handleReset = () => {
         </div>
         <button
           type="button"
-          class="flex items-center gap-2 rounded-lg border border-gray-200/80 bg-white/45 px-4 py-2 text-xs text-gray-600 transition hover:border-[#EC4141] hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-gray-300"
+          class="flex items-center gap-2 rounded-lg border border-gray-200/80 bg-white/45 px-4 py-2 text-xs app-text-secondary transition hover:border-[#EC4141] hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.06]"
           :disabled="!store.hasTarget"
           @click="launchMusicTag"
         >
@@ -171,7 +171,7 @@ const handleReset = () => {
             <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
             LDDC 获取歌词
           </h3>
-          <p class="mt-1 pl-3 text-xs leading-6 text-gray-400 dark:text-white/50">
+          <p class="mt-1 pl-3 text-xs leading-6 app-text-secondary">
             使用外部软件 LDDC 搜索和匹配歌词，需自行下载。仅打开软件，歌曲或文件夹需在 LDDC 中选择。
           </p>
         </div>
@@ -179,7 +179,7 @@ const handleReset = () => {
           <button
             v-if="store.lddcConfigured"
             type="button"
-            class="text-xs text-gray-400 transition hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:text-white/50 dark:hover:text-[#EC4141]"
+            class="text-xs app-text-secondary transition hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:text-[#EC4141]"
             :disabled="store.isLddcBusy"
             :title="store.lddcPath"
             aria-label="更换 LDDC 程序"
@@ -189,7 +189,7 @@ const handleReset = () => {
           </button>
           <button
             type="button"
-            class="flex items-center gap-2 rounded-lg border border-gray-200/80 bg-white/45 px-4 py-2 text-xs text-gray-600 transition hover:border-[#EC4141] hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-gray-300"
+            class="flex items-center gap-2 rounded-lg border border-gray-200/80 bg-white/45 px-4 py-2 text-xs app-text-secondary transition hover:border-[#EC4141] hover:text-[#EC4141] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.06]"
             :disabled="store.isLddcBusy"
             :aria-busy="store.isLddcBusy"
             title="仅打开 LDDC，不会传入当前歌曲或文件夹"

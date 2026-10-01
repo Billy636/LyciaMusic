@@ -73,7 +73,7 @@ const { settings } = useSettings();
             </div>
             <div>
               <div class="text-sm font-medium text-gray-800 dark:text-gray-200">歌单</div>
-              <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">显示歌单管理页面的导航入口</div>
+              <div class="mt-0.5 text-xs app-text-secondary">显示歌单管理页面的导航入口</div>
             </div>
           </div>
           <button type="button" role="switch" aria-label="显示歌单导航入口" :aria-checked="settings.sidebar.showPlaylistLibrary"
@@ -158,7 +158,7 @@ const { settings } = useSettings();
             </div>
             <div>
               <div class="text-sm font-medium text-gray-800 dark:text-gray-200">歌单快捷列表</div>
-              <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">显示侧边栏下方的歌单快捷入口</div>
+              <div class="mt-0.5 text-xs app-text-secondary">显示侧边栏下方的歌单快捷入口</div>
             </div>
           </div>
               <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.sidebar.showPlaylists ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">

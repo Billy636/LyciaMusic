@@ -78,7 +78,7 @@ const toggleEqualizer = () => {
                   {{ settings.audio.volumeBalance.gainOffsetDb > 0 ? '+' : '' }}{{ settings.audio.volumeBalance.gainOffsetDb }} dB
                 </span>
               </div>
-              <div class="text-xs text-gray-500 dark:text-gray-400 max-w-xl">
+              <div class="text-xs app-text-secondary max-w-xl">
                 默认 0 dB，表示完全按 ReplayGain 标签播放。调高会整体更响，调低会保留更多余量。
               </div>
             </div>
@@ -100,7 +100,7 @@ const toggleEqualizer = () => {
               <div class="text-sm font-medium text-gray-800 dark:text-gray-200">
                 防削波破音保护
               </div>
-              <div class="text-xs text-gray-500 dark:text-gray-400 max-w-xl">
+              <div class="text-xs app-text-secondary max-w-xl">
                 当音量增益过大可能超出 0 dB 极限时自动降低音频信号。无峰值标签曲目会降级为不应用任何正增益。
               </div>
             </div>
@@ -135,7 +135,7 @@ const toggleEqualizer = () => {
         >
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">底栏快捷入口</div>
-            <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <div class="text-xs app-text-secondary mt-1">
               均衡器按钮的显示与位置已统一在“个性化 → 播放底栏”中管理，不影响音效是否启用。
             </div>
           </div>
@@ -157,7 +157,7 @@ const toggleEqualizer = () => {
         >
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">启用均衡器</div>
-            <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <div class="text-xs app-text-secondary mt-1">
               通过调整不同频段的增益，改善音乐在不同音频设备上的表现。
             </div>
           </div>

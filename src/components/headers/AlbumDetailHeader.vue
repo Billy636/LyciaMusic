@@ -175,7 +175,7 @@ const getGradientForAlbum = (name: string) => {
             <span class="bg-[#EC4141] text-white text-[12px] px-1.5 py-0.5 rounded border border-[#EC4141] font-normal leading-none -mt-1 relative top-[1px]">专辑</span>
             {{ albumName }}
           </h1>
-          <p class="text-[14px] text-gray-500 dark:text-gray-400 mt-2 truncate w-full flex items-center gap-2">
+          <p class="text-[14px] app-text-secondary mt-2 truncate w-full flex items-center gap-2">
             <span>专辑艺人:</span>
             <span class="text-[#507DAF] dark:text-[#6a9adb]">{{ artistName }}</span>
           </p>

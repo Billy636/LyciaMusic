@@ -922,7 +922,7 @@ onUnmounted(() => {
         <div v-if="usesNativeDesktopLyrics()" class="desktop-setting-row desktop-overflow-row">
           <div class="desktop-overflow-copy">
             <label for="desktop-lyrics-overflow" class="text-sm font-medium text-gray-800 dark:text-gray-200">长句处理</label>
-            <div id="desktop-lyrics-overflow-description" class="text-xs text-gray-500 dark:text-gray-400 mt-1">横向跟随：最多缩小 15%，仍超宽时跟随演唱位置；空间不足时整体适配高度。</div>
+            <div id="desktop-lyrics-overflow-description" class="text-xs app-text-secondary mt-1">横向跟随：最多缩小 15%，仍超宽时跟随演唱位置；空间不足时整体适配高度。</div>
           </div>
           <SettingsSelect class="desktop-overflow-select" label="长句处理" hide-label
             trigger-id="desktop-lyrics-overflow" described-by="desktop-lyrics-overflow-description"
@@ -963,7 +963,7 @@ onUnmounted(() => {
         >
           <div>
               <div class="text-sm font-medium text-gray-800 dark:text-gray-200">桌面歌词水平居中</div>
-              <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">启用时居中，拖动后保留新位置</div>
+              <div class="text-xs app-text-secondary mt-1">启用时居中，拖动后保留新位置</div>
           </div>
           <span class="desktop-switch" :class="desktopLyricsSettings.centerHorizontally ? 'desktop-switch--on' : ''">
             <span class="desktop-switch-thumb" :class="desktopLyricsSettings.centerHorizontally ? 'translate-x-5' : ''" />
@@ -1063,7 +1063,7 @@ onUnmounted(() => {
       <!-- 桌面歌词排版效果预览区 (回归单栏顶部，与下方紧凑滑块同视口呈现) -->
       <div class="desktop-lyrics-preview-container select-none">
         <div class="desktop-lyrics-preview-header">
-          <div class="text-xs font-semibold text-gray-500 dark:text-gray-400">效果实时预览</div>
+          <div class="text-xs font-semibold app-text-secondary">效果实时预览</div>
           <div class="flex items-center gap-2">
             <!-- 深浅色预览背景切换按钮 -->
             <button

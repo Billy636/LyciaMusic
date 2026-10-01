@@ -1,16 +1,38 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useCoverCache } from '../../composables/useCoverCache';
 import { usePlaybackController } from '../../features/playback/usePlaybackController';
 import { usePlaybackStore } from '../../features/playback/store';
 import FooterContextMenu from "../overlays/FooterContextMenu.vue";
-import { footerCoverVisible } from '../layout/footerPresentation';
+import { footerCoverVisible, footerCoverAnchor, footerViewport } from '../layout/footerPresentation';
+import { useFooterSettings } from '../../features/settings/useFooterSettings';
+import { resolveFreeFooterLayout } from '../../features/settings/freeFooterLayout';
 
 const props = defineProps<{
   isExpanded?: boolean;
   isResizingWindow?: boolean;
 }>();
+
+const { footer } = useFooterSettings();
+const mainHasCover = computed(() => ['cover', 'song', 'both'].includes(footer.value.behavior.main.info)
+  && (!footerViewport.value.width || resolveFreeFooterLayout(footer.value, 'main', footerViewport.value.width).infoWidth >= 48));
+// Without a main-page thumbnail, keep the cover at its large-cover geometry
+// even when collapsed: only opacity changes, never a flight from empty space.
+const usesLargeCoverLayout = computed(() => !!props.isExpanded || !mainHasCover.value);
+const skipCoverTransition = ref(false);
+let transitionResetFrame = 0;
+watch(mainHasCover, () => {
+  cancelAnimationFrame(transitionResetFrame);
+  if (props.isExpanded) { skipCoverTransition.value = false; return; }
+  // Changing the main info mode must not flash a large cover while collapsing
+  // its thumbnail. Snap hidden geometry before re-enabling page transitions.
+  skipCoverTransition.value = true;
+  transitionResetFrame = requestAnimationFrame(() => {
+    transitionResetFrame = requestAnimationFrame(() => { skipCoverTransition.value = false; });
+  });
+});
+onBeforeUnmount(() => cancelAnimationFrame(transitionResetFrame));
 
 const {
   currentSong, currentCover, currentCoverPath, currentCoverFull, isPlaying, dominantColors
@@ -166,15 +188,22 @@ defineExpose({ detailCoverRef });
     <!-- Album Art -->
     <div 
       ref="detailCoverRef"
-      class="absolute aspect-square transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] z-50 will-change-transform pointer-events-auto"
-      :class="props.isExpanded ? 'top-[45%] left-[calc(75px+18%)] -translate-x-1/2 -translate-y-1/2 w-[clamp(220px,45vh,580px)] rounded-2xl' : 'top-[calc(100vh-64px)] left-[16px] translate-x-0 translate-y-0 w-12 rounded-lg pointer-events-none'"
+      class="shared-cover absolute aspect-square ease-[cubic-bezier(0.22,1,0.36,1)] z-50 will-change-transform"
+      :class="[
+        usesLargeCoverLayout ? 'top-[45%] left-[calc(75px+18%)] -translate-x-1/2 -translate-y-1/2 w-[clamp(220px,45vh,580px)] rounded-2xl' : 'top-[calc(100vh-64px)] left-[16px] translate-x-0 translate-y-0 w-12 rounded-lg',
+        props.isExpanded ? 'pointer-events-auto' : 'pointer-events-none',
+      ]"
       :style="{ 
-        transitionDuration: props.isResizingWindow && props.isExpanded ? '0ms' : undefined,
+        transitionProperty: mainHasCover ? 'top, left, width, height, translate, transform, border-radius, opacity, box-shadow' : 'opacity, box-shadow',
+        transitionDuration: (props.isResizingWindow && props.isExpanded) || (skipCoverTransition && !props.isExpanded) ? '0ms' : mainHasCover ? '700ms' : '300ms',
+        left: !usesLargeCoverLayout && footerCoverAnchor ? `${footerCoverAnchor.x}px` : undefined,
+        top: !usesLargeCoverLayout && footerCoverAnchor ? `${footerCoverAnchor.y}px` : undefined,
+        width: !usesLargeCoverLayout && footerCoverAnchor ? `${footerCoverAnchor.width}px` : undefined,
         boxShadow: props.isExpanded && isPlaying
           ? `0 30px 60px -12px rgba(0,0,0,0.6), 0 18px 36px -18px rgba(0,0,0,0.7), 0 0 80px -20px ${dominantColors[0]}44` 
           : (props.isExpanded ? `0 10px 20px -5px rgba(0,0,0,0.4)` : 'none'),
         transform: props.isExpanded ? (isPlaying ? 'scale(1)' : 'scale(1)') : 'scale(1)',
-        opacity: props.isExpanded || footerCoverVisible ? 1 : 0,
+        opacity: props.isExpanded || (mainHasCover && footerCoverVisible) ? 1 : 0,
       }"
     >
       <!-- Main Cover Container -->
@@ -214,6 +243,9 @@ defineExpose({ detailCoverRef });
 </template>
 
 <style scoped>
+@media (prefers-reduced-motion: reduce) {
+  .shared-cover { transition-duration: 0ms !important; }
+}
 .reflection-wrapper {
   perspective: 1500px;
   transform-origin: top;
