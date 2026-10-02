@@ -323,7 +323,18 @@ export interface ThemeSettings {
   }
 }
 
+export type SidebarNavigationId =
+  | 'localMusic'
+  | 'artists'
+  | 'albums'
+  | 'playlists'
+  | 'favorites'
+  | 'recent'
+  | 'folders'
+  | 'statistics';
+
 export interface SidebarSettings {
+  navigationOrder?: SidebarNavigationId[];
   showLocalMusic: boolean;
   showPlaylistLibrary: boolean;
   showArtists: boolean;

@@ -1,172 +1,274 @@
 <script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onDeactivated, ref } from 'vue';
+import { ChevronDown, ChevronUp, GripVertical } from 'lucide-vue-next';
+import {
+  getOrderedSidebarNavigation,
+  getVisibleSidebarNavigation,
+  type SidebarNavigationId,
+} from '../../features/settings/sidebarNavigation';
 import { useSettings } from '../../features/settings/useSettings';
+import SidebarNavigationIcon from '../layout/SidebarNavigationIcon.vue';
 
 const { settings } = useSettings();
+const items = computed(() => getOrderedSidebarNavigation(settings.value.sidebar));
+const homepageId = computed(() => getVisibleSidebarNavigation(settings.value.sidebar)[0]?.id);
+const list = ref<HTMLOListElement | null>(null);
+const announcement = ref('');
+const drag = ref<{
+  id: SidebarNavigationId;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  handle: HTMLButtonElement;
+  active: boolean;
+  beforeId: SidebarNavigationId | null;
+  order: SidebarNavigationId[] | null;
+} | null>(null);
+
+function isVisible(item: (typeof items.value)[number]) {
+  return item.visibilityKey === 'showPlaylistLibrary'
+    ? settings.value.sidebar.showPlaylistLibrary !== false
+    : settings.value.sidebar[item.visibilityKey];
+}
+
+function toggleItem(item: (typeof items.value)[number]) {
+  if (drag.value) return;
+  settings.value.sidebar[item.visibilityKey] = !isVisible(item);
+}
+
+function announcePosition(id: SidebarNavigationId) {
+  const index = items.value.findIndex(item => item.id === id);
+  announcement.value = `${items.value[index].label}已移至第 ${index + 1} 位`;
+}
+
+function focusHandle(id: SidebarNavigationId) {
+  void nextTick(() => list.value?.querySelector<HTMLButtonElement>(`[data-reorder="${id}"]`)?.focus({ preventScroll: true }));
+}
+
+function moveItem(id: SidebarNavigationId, direction: -1 | 1) {
+  if (drag.value) return;
+  const order = items.value.map(item => item.id);
+  const index = order.indexOf(id);
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return;
+  order.splice(index, 1);
+  order.splice(nextIndex, 0, id);
+  settings.value.sidebar.navigationOrder = order;
+  announcePosition(id);
+  focusHandle(id);
+}
+
+function beginDrag(event: PointerEvent, id: SidebarNavigationId) {
+  if (event.button !== 0 || drag.value) return;
+  const handle = event.currentTarget as HTMLButtonElement;
+  handle.focus({ preventScroll: true });
+  handle.setPointerCapture(event.pointerId);
+  drag.value = {
+    id,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    handle,
+    active: false,
+    beforeId: null,
+    order: null,
+  };
+}
+
+function moveDrag(event: PointerEvent) {
+  const current = drag.value;
+  if (!current || event.pointerId !== current.pointerId) return;
+  if (!current.active && Math.hypot(event.clientX - current.startX, event.clientY - current.startY) < 6) return;
+  current.active = true;
+  const rows = Array.from(list.value?.querySelectorAll<HTMLElement>('[data-navigation-id]') ?? [])
+    .filter(row => row.dataset.navigationId !== current.id);
+  const target = rows.find(row => {
+    const rect = row.getBoundingClientRect();
+    return event.clientY < rect.top + rect.height / 2;
+  });
+  const beforeId = target?.dataset.navigationId as SidebarNavigationId | undefined;
+  const order = items.value.map(item => item.id).filter(id => id !== current.id);
+  order.splice(beforeId ? order.indexOf(beforeId) : order.length, 0, current.id);
+  current.beforeId = beforeId ?? null;
+  current.order = order.some((id, index) => items.value[index].id !== id) ? order : null;
+}
+
+function clearDrag() {
+  const current = drag.value;
+  drag.value = null;
+  if (current?.handle.hasPointerCapture(current.pointerId)) {
+    current.handle.releasePointerCapture(current.pointerId);
+  }
+  return current;
+}
+
+function finishDrag(event: PointerEvent) {
+  if (event.pointerId !== drag.value?.pointerId) return;
+  const current = clearDrag();
+  if (!current?.order) return;
+  settings.value.sidebar.navigationOrder = current.order;
+  announcePosition(current.id);
+  focusHandle(current.id);
+}
+
+function cancelDrag() {
+  clearDrag();
+}
+
+onBeforeUnmount(cancelDrag);
+onDeactivated(cancelDrag);
 </script>
 
 <template>
   <div class="w-full space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
-    <!-- Interface Layout (Sidebar Visibility) -->
-    <section v-if="settings.sidebar" class="space-y-3">
+    <section class="space-y-3">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
         <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
         导航项目
       </h2>
-      <div class="flex flex-col rounded-xl overflow-hidden">
-        
-        <!-- Local Music -->
-        <div 
-          @click="settings.sidebar.showLocalMusic = !settings.sidebar.showLocalMusic"
-          class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors cursor-pointer"
+      <p class="text-xs app-text-secondary">拖动左侧手柄或使用箭头调整顺序，第一个开启的栏目即为首页。</p>
+      <ol
+        ref="list"
+        class="flex flex-col rounded-xl"
+        aria-label="侧边栏导航顺序"
+        @pointermove="moveDrag"
+        @pointerup="finishDrag"
+        @pointercancel="cancelDrag"
+        @lostpointercapture="cancelDrag"
+        @keydown.esc.prevent.stop="cancelDrag"
+        @dragstart.prevent
+      >
+        <li
+          v-for="(item, index) in items"
+          :key="item.id"
+          :data-navigation-id="item.id"
+          class="navigation-setting-row relative p-4 flex items-center gap-3 border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors rounded-lg"
+          :class="{
+            'bg-red-100/40 dark:bg-red-500/10 opacity-60': drag?.active && drag.id === item.id,
+            'drop-before': drag?.order && drag.beforeId === item.id,
+            'drop-after': drag?.order && !drag.beforeId && index === items.length - 1,
+          }"
         >
-          <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showLocalMusic ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
-            </div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">本地音乐</div>
-          </div>
-          <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.sidebar.showLocalMusic ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showLocalMusic ? 'translate-x-6' : 'translate-x-1'" />
+          <button
+            type="button"
+            :data-reorder="item.id"
+            :aria-label="`调整${item.label}顺序，使用上下方向键移动`"
+            title="拖动排序，或使用上下方向键"
+            class="reorder-handle shrink-0 p-1.5 -ml-1.5 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#EC4141]"
+            @pointerdown.prevent.stop="beginDrag($event, item.id)"
+            @keydown.up.prevent.stop="moveItem(item.id, -1)"
+            @keydown.down.prevent.stop="moveItem(item.id, 1)"
+            @click.stop
+          >
+            <GripVertical :size="18" aria-hidden="true" />
           </button>
-        </div>
-
-        <!-- Artists -->
-        <div 
-              @click="settings.sidebar.showArtists = !settings.sidebar.showArtists"
-          class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors cursor-pointer"
-        >
-          <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showArtists ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-            </div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">歌手</div>
-          </div>
-              <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.sidebar.showArtists ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-                <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showArtists ? 'translate-x-6' : 'translate-x-1'" />
+          <button type="button" class="min-w-0 flex flex-1 items-center gap-3 text-left rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#EC4141]" :aria-label="`${isVisible(item) ? '隐藏' : '显示'}${item.label}`" @click="toggleItem(item)">
+            <span class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="isVisible(item) ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
+              <SidebarNavigationIcon :id="item.id" />
+            </span>
+            <span class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ item.label }}</span>
+            <span v-if="homepageId === item.id" class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-[#EC4141] bg-red-100/60 dark:bg-red-500/15">首页</span>
           </button>
-        </div>
-
-        <!-- Albums -->
-        <div 
-              @click="settings.sidebar.showAlbums = !settings.sidebar.showAlbums"
-          class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors cursor-pointer"
-        >
-          <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showAlbums ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><circle cx="12" cy="12" r="10" stroke-width="2" /><circle cx="12" cy="12" r="3" stroke-width="2" /></svg>
-            </div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">专辑</div>
+          <div class="flex shrink-0 items-center gap-1 mr-2">
+            <button type="button" class="order-button" :disabled="index === 0 || !!drag" :aria-label="`上移${item.label}`" title="上移" @click.stop="moveItem(item.id, -1)">
+              <ChevronUp :size="16" aria-hidden="true" />
+            </button>
+            <button type="button" class="order-button" :disabled="index === items.length - 1 || !!drag" :aria-label="`下移${item.label}`" title="下移" @click.stop="moveItem(item.id, 1)">
+              <ChevronDown :size="16" aria-hidden="true" />
+            </button>
           </div>
-              <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.sidebar.showAlbums ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-                <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showAlbums ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-
-        <!-- Playlist library navigation (independent of playlist shortcuts). -->
-        <div
-          @click="settings.sidebar.showPlaylistLibrary = !settings.sidebar.showPlaylistLibrary"
-          class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors cursor-pointer"
-        >
-          <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showPlaylistLibrary ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h14M4 10h14M4 15h7m5 3V8l5-1v9m-5 2c0 1.1-1.1 2-2.5 2S11 19.1 11 18s1.1-2 2.5-2 2.5.9 2.5 2zm5-2c0 1.1-1.1 2-2.5 2S16 17.1 16 16s1.1-2 2.5-2 2.5.9 2.5 2z" /></svg>
-            </div>
-            <div>
-              <div class="text-sm font-medium text-gray-800 dark:text-gray-200">歌单</div>
-              <div class="mt-0.5 text-xs app-text-secondary">显示歌单管理页面的导航入口</div>
-            </div>
-          </div>
-          <button type="button" role="switch" aria-label="显示歌单导航入口" :aria-checked="settings.sidebar.showPlaylistLibrary"
+          <button
+            type="button"
+            role="switch"
+            :aria-label="`显示${item.label}导航入口`"
+            :aria-checked="isVisible(item)"
             class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#EC4141]"
-            :class="settings.sidebar.showPlaylistLibrary ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showPlaylistLibrary ? 'translate-x-6' : 'translate-x-1'" />
+            :class="isVisible(item) ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'"
+            @click.stop="toggleItem(item)"
+          >
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="isVisible(item) ? 'translate-x-6' : 'translate-x-1'" />
           </button>
-        </div>
+        </li>
+      </ol>
+      <p v-if="!homepageId" class="text-xs app-text-secondary">未开启导航栏目，首页将显示本地音乐。</p>
+      <p class="sr-only" role="status" aria-live="polite">{{ announcement }}</p>
+    </section>
 
-        <!-- Favorites -->
-        <div 
-              @click="settings.sidebar.showFavorites = !settings.sidebar.showFavorites"
-          class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors cursor-pointer"
-        >
-          <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showFavorites ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
-            </div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">我的收藏</div>
-          </div>
-              <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.sidebar.showFavorites ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-                <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showFavorites ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-
-        <!-- Recent -->
-        <div 
-              @click="settings.sidebar.showRecent = !settings.sidebar.showRecent"
-          class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors cursor-pointer"
-        >
-          <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showRecent ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            </div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">最近播放</div>
-          </div>
-              <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.sidebar.showRecent ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-                <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showRecent ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-
-        <!-- Folders -->
-        <div 
-              @click="settings.sidebar.showFolders = !settings.sidebar.showFolders"
-          class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors cursor-pointer"
-        >
-          <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showFolders ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" /></svg>
-            </div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">文件夹</div>
-          </div>
-              <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.sidebar.showFolders ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-                <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showFolders ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-
-        <!-- Statistics -->
-        <div 
-              @click="settings.sidebar.showStatistics = !settings.sidebar.showStatistics"
-          class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors cursor-pointer"
-        >
-          <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showStatistics ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-            </div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">统计</div>
-          </div>
-              <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.sidebar.showStatistics ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-                <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showStatistics ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-
-        <!-- Playlists -->
-        <div
-              @click="settings.sidebar.showPlaylists = !settings.sidebar.showPlaylists"
-          class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors cursor-pointer"
-        >
-          <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showPlaylists ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 10l12-3M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" /></svg>
-            </div>
-            <div>
-              <div class="text-sm font-medium text-gray-800 dark:text-gray-200">歌单快捷列表</div>
-              <div class="mt-0.5 text-xs app-text-secondary">显示侧边栏下方的歌单快捷入口</div>
-            </div>
-          </div>
-              <button class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.sidebar.showPlaylists ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-                <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showPlaylists ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-
+    <section class="space-y-3">
+      <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+        <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
+        附加区域
+      </h2>
+      <div class="p-4 flex items-center justify-between gap-3 rounded-xl hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <button type="button" class="flex flex-1 items-center gap-3 text-left rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#EC4141]" :aria-label="`${settings.sidebar.showPlaylists ? '隐藏' : '显示'}歌单快捷列表`" @click="settings.sidebar.showPlaylists = !settings.sidebar.showPlaylists">
+          <span class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showPlaylists ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
+            <SidebarNavigationIcon id="playlists" />
+          </span>
+          <span class="text-sm font-medium text-gray-800 dark:text-gray-200">歌单快捷列表</span>
+        </button>
+        <button type="button" role="switch" aria-label="显示歌单快捷列表" :aria-checked="settings.sidebar.showPlaylists"
+          class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#EC4141]"
+          :class="settings.sidebar.showPlaylists ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'"
+          @click="settings.sidebar.showPlaylists = !settings.sidebar.showPlaylists">
+          <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.sidebar.showPlaylists ? 'translate-x-6' : 'translate-x-1'" />
+        </button>
       </div>
     </section>
   </div>
 </template>
+
+<style scoped>
+.reorder-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.reorder-handle:active {
+  cursor: grabbing;
+}
+
+.order-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.375rem;
+  color: var(--text-secondary, #6b7280);
+  transition: background-color 100ms, opacity 100ms;
+}
+
+.order-button:hover:not(:disabled) {
+  background-color: rgb(127 127 127 / 12%);
+}
+
+.order-button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.order-button:focus-visible {
+  outline: 2px solid #ec4141;
+  outline-offset: 2px;
+}
+
+.drop-before::before,
+.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  height: 2px;
+  border-radius: 1px;
+  background: #ec4141;
+  pointer-events: none;
+}
+
+.drop-before::before {
+  top: -1px;
+}
+
+.drop-after::after {
+  bottom: -1px;
+}
+</style>

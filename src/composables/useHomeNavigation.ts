@@ -1,4 +1,6 @@
 import type { RouteLocationRaw, Router } from 'vue-router';
+import type { SidebarNavigationId, SidebarSettings } from '../types';
+import { getVisibleSidebarNavigation } from '../features/settings/sidebarNavigation';
 
 type HomeNavigationTarget =
   | { view: 'all' }
@@ -17,6 +19,8 @@ type AppNavigationTarget =
 
 const buildHomeLocation = (target: HomeNavigationTarget): RouteLocationRaw => {
   switch (target.view) {
+    case 'all':
+      return { path: '/', query: { view: 'all' } };
     case 'artist':
     case 'album':
     case 'playlist':
@@ -76,6 +80,23 @@ export const buildAppLocation = (target: AppNavigationTarget): RouteLocationRaw 
   }
 };
 
+const sidebarTargets: Record<SidebarNavigationId, AppNavigationTarget> = {
+  localMusic: { section: 'home', target: { view: 'all' } },
+  artists: { section: 'artists' },
+  albums: { section: 'albums' },
+  playlists: { section: 'playlists' },
+  favorites: { section: 'favorites' },
+  recent: { section: 'recent' },
+  folders: { section: 'home', target: { view: 'folder' } },
+  statistics: { section: 'home', target: { view: 'statistics' } },
+};
+
+export const buildDefaultHomeLocation = (sidebar: SidebarSettings): RouteLocationRaw => {
+  const firstItem = getVisibleSidebarNavigation(sidebar)[0];
+  // Keep a usable music page if every navigation item has been hidden.
+  return buildAppLocation(sidebarTargets[firstItem?.id ?? 'localMusic']);
+};
+
 export function useHomeNavigation(router: Router) {
   const openApp = async (target: AppNavigationTarget, options: { replace?: boolean } = {}) => {
     const location = buildAppLocation(target);
@@ -92,6 +113,11 @@ export function useHomeNavigation(router: Router) {
 
   const openHomeAll = (options?: { replace?: boolean }) =>
     openHome({ view: 'all' }, options);
+
+  const openHomeDefault = (options: { replace?: boolean } = {}) => {
+    const location = { path: '/', query: {} };
+    return options.replace ? router.replace(location) : router.push(location);
+  };
 
   const openHomeArtist = (artistName: string, options?: { replace?: boolean }) =>
     openHome({ view: 'artist', filter: artistName }, options);
@@ -130,6 +156,7 @@ export function useHomeNavigation(router: Router) {
     openApp,
     openHome,
     openHomeAll,
+    openHomeDefault,
     openHomeArtist,
     openHomeAlbum,
     openHomePlaylist,

@@ -199,6 +199,10 @@ export function useHomeRouteSync({
 
       const nextQuery = {
         ...baseQuery,
+        // An explicit local-music selection must not turn into the configurable home entry.
+        ...(currentViewMode.value === 'all' && readQueryString(route.query.view) === 'all'
+          ? { view: 'all' }
+          : {}),
         ...buildHomeRouteQuery(
           currentViewMode.value,
           filterCondition.value,
