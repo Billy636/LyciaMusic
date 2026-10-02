@@ -11,14 +11,16 @@ import { useListScrollMemory } from '../composables/useListScrollMemory';
 import { useVisibleCoverUrls } from '../composables/useVisibleCoverUrls';
 import SortModeIcon from '../components/common/SortModeIcon.vue';
 import { useLibraryBrowse } from '../features/library/useLibraryBrowse';
+import { useFolderAlbumCollections } from '../features/library/useFolderAlbumCollections';
 import type { AlbumListItem } from '../features/library/playerLibraryViewShared';
 import { getAlphabetIndexKey } from '../utils/alphabetIndex';
 import ArtistAlbumContextMenu from '../components/overlays/ArtistAlbumContextMenu.vue';
 
 const { filteredAlbumList, albumSortMode, updateAlbumOrder, searchQuery } = useLibraryBrowse();
+const folderAlbumCollections = useFolderAlbumCollections();
 const router = useRouter();
 const route = useRoute();
-const { openHomeAlbum } = useHomeNavigation(router);
+const { openHomeAlbum, openHomeFolder } = useHomeNavigation(router);
 const isSearchActive = computed(() => searchQuery.value.trim().length > 0);
 const { preloadPriorityCovers } = useCoverCache();
 
@@ -41,8 +43,13 @@ const ALBUM_CARD_EXTRA_HEIGHT = 108;
 const ALBUM_SECTION_HEADER_HEIGHT = 24;
 const ALBUM_OVERSCAN_ROWS = 2;
 
-const handleAlbumClick = (albumKey: string) => {
-  void openHomeAlbum(albumKey);
+const handleAlbumClick = (album: AlbumListItem) => {
+  if (album.folderPath) {
+    searchQuery.value = '';
+    void openHomeFolder(album.folderPath, { collection: true });
+    return;
+  }
+  void openHomeAlbum(album.key);
 };
 
 const handleSortChange = (mode: 'count' | 'name' | 'artist' | 'custom') => {
@@ -443,12 +450,14 @@ const contextMenuX = ref(0);
 const contextMenuY = ref(0);
 const contextMenuTargetKey = ref('');
 const contextMenuTargetName = ref('');
+const contextMenuFolderPath = ref<string>();
 
 const handleContextMenu = (event: MouseEvent, album: AlbumListItem) => {
   contextMenuX.value = event.clientX;
   contextMenuY.value = event.clientY;
   contextMenuTargetKey.value = album.key;
   contextMenuTargetName.value = album.name;
+  contextMenuFolderPath.value = album.folderPath;
   showContextMenu.value = true;
 };
 
@@ -624,6 +633,22 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+      <div
+        v-if="folderAlbumCollections.loading || folderAlbumCollections.error"
+        role="status"
+        aria-live="polite"
+        class="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
+      >
+        <span v-if="folderAlbumCollections.error" :title="folderAlbumCollections.error">文件夹合集更新失败，请重试</span>
+        <span v-else>正在更新专辑展示…</span>
+        <button
+          v-if="folderAlbumCollections.error"
+          type="button"
+          class="text-[#EC4141] hover:underline disabled:opacity-50"
+          :disabled="folderAlbumCollections.loading"
+          @click.stop="folderAlbumCollections.refresh()"
+        >重试</button>
+      </div>
     </header>
 
     <section ref="containerRef" class="albums-scroll-container flex-1 overflow-y-auto px-4 pb-4 pt-2 md:px-6 md:pb-6 md:pt-3 lg:px-8 lg:pb-8 lg:pt-3 custom-scrollbar relative z-0" @scroll="handleContainerScroll">
@@ -669,6 +694,7 @@ onUnmounted(() => {
               v-for="item in row.items"
               :key="item.album.key"
               data-album-card
+              :title="item.album.folderPath ? `文件夹合集：${item.album.folderPath}` : undefined"
               class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5 [touch-action:none]"
               :class="[
                 dragSession.active && dragSession.type === 'album' && dragSession.data?.key === item.album.key ? 'opacity-50' : '',
@@ -676,7 +702,7 @@ onUnmounted(() => {
               ]"
               @pointerdown="handlePointerDown($event, item.index, item.album)"
               @pointermove="handleItemPointerMove($event, item.album.key)"
-              @click="handleAlbumClick(item.album.key)"
+              @click="handleAlbumClick(item.album)"
               @contextmenu.prevent="handleContextMenu($event, item.album)"
             >
               <div class="relative w-full aspect-square mb-3 mt-1" :data-cover-path="item.album.firstSongPath">
@@ -714,7 +740,7 @@ onUnmounted(() => {
                 <p class="text-xs text-gray-500 dark:text-gray-400 truncate w-full mt-1.5 flex items-center gap-1.5 opacity-80">
                   <span class="font-medium">{{ item.album.count }}首</span>
                   <span class="w-0.5 h-0.5 rounded-full bg-gray-400"></span>
-                  <span>{{ item.album.artist }}</span>
+                  <span>{{ item.album.folderPath ? '文件夹合集' : item.album.artist }}</span>
                 </p>
               </div>
             </div>
@@ -732,6 +758,7 @@ onUnmounted(() => {
           v-for="item in flatAlbumVirtualState.items"
           :key="item.album.key"
           data-album-card
+          :title="item.album.folderPath ? `文件夹合集：${item.album.folderPath}` : undefined"
           class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5 [touch-action:none]"
           :class="[
             dragSession.active && dragSession.type === 'album' && dragSession.data?.key === item.album.key ? 'opacity-50' : '',
@@ -739,7 +766,7 @@ onUnmounted(() => {
           ]"
           @pointerdown="handlePointerDown($event, item.index, item.album)"
           @pointermove="handleItemPointerMove($event, item.album.key)"
-          @click="handleAlbumClick(item.album.key)"
+          @click="handleAlbumClick(item.album)"
           @contextmenu.prevent="handleContextMenu($event, item.album)"
         >
           <div class="relative w-full aspect-square mb-3 mt-1" :data-cover-path="item.album.firstSongPath">
@@ -777,7 +804,7 @@ onUnmounted(() => {
             <p class="text-xs text-gray-500 dark:text-gray-400 truncate w-full mt-1.5 flex items-center gap-1.5 opacity-80">
               <span class="font-medium">{{ item.album.count }}首</span>
               <span class="w-0.5 h-0.5 rounded-full bg-gray-400"></span>
-              <span>{{ item.album.artist }}</span>
+              <span>{{ item.album.folderPath ? '文件夹合集' : item.album.artist }}</span>
             </p>
           </div>
         </div>
@@ -792,6 +819,7 @@ onUnmounted(() => {
       type="album"
       :targetKey="contextMenuTargetKey"
       :targetName="contextMenuTargetName"
+      :folderPath="contextMenuFolderPath"
       @close="showContextMenu = false"
     />
   </div>

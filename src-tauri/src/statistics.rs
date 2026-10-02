@@ -2172,6 +2172,7 @@ pub fn get_favorite_album_catalog(
                     row.album_artist.clone()
                 },
                 first_song_path: row.path.clone(),
+                folder_path: None,
             });
 
         existing.count = existing.count.saturating_add(1);

@@ -27,6 +27,7 @@ export const playerStorageKeys = {
   playlistSortOverrides: 'player_playlist_sort_overrides',
   artistCustomOrder: 'player_artist_custom_order',
   albumCustomOrder: 'player_album_custom_order',
+  albumFolderCollections: 'player_album_folder_collections',
   folderCustomOrder: 'player_folder_custom_order',
   localCustomOrder: 'player_local_custom_order',
   legacyAppSettings: 'app_settings',

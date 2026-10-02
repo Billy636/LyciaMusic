@@ -567,11 +567,185 @@ fn load_album_catalog(conn: &rusqlite::Connection) -> Result<Vec<AlbumCatalogIte
                 count: clamp_i64_to_u32_count(row.get::<_, i64>(3)?),
                 artist: album_artist_name,
                 first_song_path: row.get::<_, String>(4)?,
+                folder_path: None,
             })
         })
         .map_err(|e| e.to_string())?;
 
     Ok(rows.filter_map(Result::ok).collect())
+}
+
+struct AlbumFolderCollection {
+    path: String,
+    comparison_path: String,
+    name: String,
+}
+
+fn normalize_album_collection_path(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    #[cfg(target_os = "windows")]
+    let path = if path
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("//?/UNC/"))
+    {
+        format!("//{}", &path[8..])
+    } else if let Some(path) = path.strip_prefix("//?/") {
+        path.to_string()
+    } else {
+        path
+    };
+    if path == "/" {
+        path
+    } else {
+        path.trim_end_matches('/').to_string()
+    }
+}
+
+fn album_collection_path_key(path: &str) -> String {
+    let path = normalize_album_collection_path(path);
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        path.to_lowercase()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        path
+    }
+}
+
+fn album_collection_contains(folder_key: &str, path_key: &str) -> bool {
+    path_key == folder_key
+        || path_key
+            .strip_prefix(folder_key)
+            .is_some_and(|suffix| folder_key.ends_with('/') || suffix.starts_with('/'))
+}
+
+fn load_album_catalog_with_folder_collections(
+    conn: &rusqlite::Connection,
+    folder_paths: Vec<String>,
+) -> Result<Vec<AlbumCatalogItem>, String> {
+    let mut folders: Vec<_> = folder_paths
+        .into_iter()
+        .filter(|path| !path.trim().is_empty())
+        .map(|path| {
+            // Folder rules already come from library paths. Keep presentation
+            // independent of disk access, including disconnected NAS shares.
+            let normalized = normalize_album_collection_path(&path);
+            let name = normalized
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .filter(|name| !name.is_empty())
+                .unwrap_or(&normalized)
+                .to_string();
+            AlbumFolderCollection {
+                comparison_path: album_collection_path_key(&normalized),
+                path,
+                name,
+            }
+        })
+        .filter(|folder| !folder.comparison_path.is_empty())
+        .collect();
+    folders.sort_by(|left, right| {
+        left.comparison_path
+            .len()
+            .cmp(&right.comparison_path.len())
+            .then_with(|| left.comparison_path.cmp(&right.comparison_path))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    let mut effective_folders: Vec<AlbumFolderCollection> = Vec::new();
+    for folder in folders {
+        // An outer folder owns all its descendants, even if a nested rule was
+        // saved earlier. Never count a song in two collection cards.
+        if !effective_folders.iter().any(|parent| {
+            album_collection_contains(&parent.comparison_path, &folder.comparison_path)
+        }) {
+            effective_folders.push(folder);
+        }
+    }
+    if effective_folders.is_empty() {
+        return load_album_catalog(conn);
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT path,
+                COALESCE(NULLIF(TRIM(album_key), ''), ''),
+                COALESCE(NULLIF(TRIM(album), ''), 'Unknown'),
+                COALESCE(NULLIF(TRIM(album_artist), ''), NULLIF(TRIM(artist), ''), 'Unknown')
+         FROM songs ORDER BY added_at DESC, id ASC",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut rows = stmt.query([]).map_err(|error| error.to_string())?;
+    let mut albums = HashMap::<(String, String, String), (AlbumCatalogItem, bool)>::new();
+    let mut collections = vec![None::<AlbumCatalogItem>; effective_folders.len()];
+    while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+        let path = row.get::<_, String>(0).map_err(|error| error.to_string())?;
+        // CUE tracks keep their virtual path inside their CUE file's folder;
+        // this comparison does not try to canonicalize non-file track paths.
+        let path_key = album_collection_path_key(&path);
+        let folder_index = effective_folders
+            .iter()
+            .position(|folder| album_collection_contains(&folder.comparison_path, &path_key));
+        if let Some(index) = folder_index {
+            let folder = &effective_folders[index];
+            let collection = collections[index].get_or_insert_with(|| AlbumCatalogItem {
+                key: format!("folder-collection::{}", folder.comparison_path),
+                name: folder.name.clone(),
+                count: 0,
+                artist: String::new(),
+                first_song_path: path.clone(),
+                folder_path: Some(folder.path.clone()),
+            });
+            collection.count = collection.count.saturating_add(1);
+        }
+
+        let album_key = row.get::<_, String>(1).map_err(|error| error.to_string())?;
+        let name = row.get::<_, String>(2).map_err(|error| error.to_string())?;
+        let artist = row.get::<_, String>(3).map_err(|error| error.to_string())?;
+        let (album, has_uncollected_songs) = albums
+            .entry((album_key.clone(), name.clone(), artist.clone()))
+            .or_insert_with(|| {
+                (
+                    AlbumCatalogItem {
+                        key: if album_key.is_empty() {
+                            format!(
+                                "{}::{}",
+                                name.to_ascii_lowercase(),
+                                artist.to_ascii_lowercase()
+                            )
+                        } else {
+                            album_key
+                        },
+                        name,
+                        count: 0,
+                        artist,
+                        first_song_path: path,
+                        folder_path: None,
+                    },
+                    false,
+                )
+            });
+        album.count = album.count.saturating_add(1);
+        *has_uncollected_songs |= folder_index.is_none();
+    }
+
+    // Request-local presentation only: canonical album keys and song tags stay
+    // untouched. Only hide albums whose entire membership belongs to collections;
+    // mixed albums keep their full count and cover, matching their album detail.
+    let mut catalog: Vec<_> = albums
+        .into_values()
+        .filter_map(|(album, has_uncollected_songs)| has_uncollected_songs.then_some(album))
+        .chain(collections.into_iter().flatten())
+        .collect();
+    catalog.sort_by_cached_key(|album| {
+        (
+            album.name.to_ascii_lowercase(),
+            album.artist.to_ascii_lowercase(),
+            album.key.clone(),
+        )
+    });
+    Ok(catalog)
 }
 
 #[tauri::command]
@@ -754,13 +928,19 @@ pub async fn get_library_artist_catalog(
 
 #[tauri::command]
 pub async fn get_library_album_catalog(
+    folder_collections: Option<Vec<String>>,
     db_state: State<'_, DbState>,
 ) -> Result<Vec<AlbumCatalogItem>, String> {
     let db_conn = db_state.conn.clone();
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
-        load_album_catalog(&conn)
+        match folder_collections {
+            Some(folders) if !folders.is_empty() => {
+                load_album_catalog_with_folder_collections(&conn, folders)
+            }
+            _ => load_album_catalog(&conn),
+        }
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -817,6 +997,7 @@ pub async fn get_library_album_catalog_by_artist(
                     artist,
                     count: clamp_i64_to_u32_count(row.get::<_, i64>(3)?),
                     first_song_path: row.get::<_, String>(4)?,
+                    folder_path: None,
                 })
             })
             .map_err(|error| error.to_string())?;

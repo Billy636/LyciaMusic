@@ -217,6 +217,8 @@ pub struct AlbumCatalogItem {
     pub count: u32,
     pub artist: String,
     pub first_song_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder_path: Option<String>,
 }
 
 #[derive(Serialize)]

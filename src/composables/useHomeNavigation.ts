@@ -3,7 +3,7 @@ import type { RouteLocationRaw, Router } from 'vue-router';
 type HomeNavigationTarget =
   | { view: 'all' }
   | { view: 'artist' | 'album' | 'playlist'; filter: string }
-  | { view: 'folder'; folder?: string }
+  | { view: 'folder'; folder?: string; collection?: boolean }
   | { view: 'statistics' };
 
 type AppNavigationTarget =
@@ -34,6 +34,7 @@ const buildHomeLocation = (target: HomeNavigationTarget): RouteLocationRaw => {
           ? {
               view: 'folder',
               folder: target.folder,
+              ...(target.collection ? { collection: '1' } : {}),
             }
           : {
               view: 'folder',
@@ -101,8 +102,8 @@ export function useHomeNavigation(router: Router) {
   const openHomePlaylist = (playlistId: string, options?: { replace?: boolean }) =>
     openHome({ view: 'playlist', filter: playlistId }, options);
 
-  const openHomeFolder = (folderPath?: string, options?: { replace?: boolean }) =>
-    openHome({ view: 'folder', folder: folderPath }, options);
+  const openHomeFolder = (folderPath?: string, options?: { replace?: boolean; collection?: boolean }) =>
+    openHome({ view: 'folder', folder: folderPath, collection: options?.collection }, options);
 
   const openHomeStatistics = (options?: { replace?: boolean }) =>
     openHome({ view: 'statistics' }, options);

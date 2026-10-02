@@ -7,6 +7,7 @@ import { usePlayer } from '../../composables/player';
 import { useToast } from '../../composables/toast';
 import { useLibraryFolderSongPathCache } from '../../composables/useLibraryFolderSongPathCache';
 import { useFolderSongScope } from '../../features/library/useFolderSongScope';
+import { useNavigationStore } from '../../shared/stores/navigation';
 import { useListScrollMemory } from '../../composables/useListScrollMemory';
 import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver';
 import type { FolderNode } from '../../types';
@@ -50,6 +51,7 @@ const {
 const toast = useToast();
 const { loadFolderViewSongPaths } = useLibraryFolderSongPathCache();
 const { includesDescendantsFor } = useFolderSongScope();
+const navigationStore = useNavigationStore();
 const { loadSong } = useLibrarySongResolver();
 
 const sidebarWidth = ref(240);
@@ -148,12 +150,20 @@ watch(
       return;
     }
 
-    if (!activeRootPath.value || !newTree.find(node => node.path === activeRootPath.value)) {
+    const collectionTarget = navigationStore.folderCollectionPath
+      && navigationStore.folderCollectionPath === currentFolderFilter.value
+      ? currentFolderFilter.value : '';
+    if (collectionTarget) {
+      const owningRoot = newTree.filter(node => isWithinFolder(collectionTarget, node.path))
+        .sort((left, right) => right.path.length - left.path.length)[0];
+      if (owningRoot) activeRootPath.value = owningRoot.path;
+    } else if (!activeRootPath.value || !newTree.find(node => node.path === activeRootPath.value)) {
       activeRootPath.value = newTree[0].path;
     }
 
     const selectedRoot = newTree.find(node => node.path === activeRootPath.value);
-    if (selectedRoot && selectedRoot.children.length === 0 && selectedRoot.song_count > 0) {
+    // Keep an explicit collection target while its folder tree is unavailable.
+    if (!collectionTarget && selectedRoot && selectedRoot.children.length === 0 && selectedRoot.song_count > 0) {
       currentFolderFilter.value = selectedRoot.path;
       try {
         await refreshFolder(selectedRoot.path, false);

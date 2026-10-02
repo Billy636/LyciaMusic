@@ -4,6 +4,7 @@ import type { FolderNode, Song } from '../types';
 import { fileApi } from '../services/tauri/fileApi';
 import { useCollectionsStore } from '../features/collections/store';
 import { useLibraryStore } from '../features/library/store';
+import { useFolderAlbumCollections } from '../features/library/useFolderAlbumCollections';
 import { useNavigationStore } from '../shared/stores/navigation';
 import { usePlaybackStore } from '../features/playback/store';
 import { useSettingsStore } from '../features/settings/store';
@@ -170,6 +171,13 @@ export const createPlayerFileManager = ({
       Object.entries(overrides).map(([path, value]) => [remap(path), value]),
     );
     navigationStore.currentFolderFilter = remap(navigationStore.currentFolderFilter);
+    navigationStore.folderCollectionPath = remap(navigationStore.folderCollectionPath);
+    try {
+      useFolderAlbumCollections().remapFolders(remap);
+    } catch (error) {
+      console.error('Failed to update album folder collections after moving files:', error);
+      showToast('文件已移动，专辑合集设置保存失败，请重新设置合并显示', 'error');
+    }
     libraryStore.pruneSongPool();
     clearLibraryPathCaches();
     return currentSongChanged;

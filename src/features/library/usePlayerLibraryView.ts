@@ -10,6 +10,7 @@ import { useLibraryCollectionSelectors } from './useLibraryCollectionSelectors';
 import { useLibraryCurrentViewSongs } from './useLibraryCurrentViewSongs';
 import { useLibraryFolderSelectors } from './useLibraryFolderSelectors';
 import { useFolderSongScope } from './useFolderSongScope';
+import { useFolderAlbumCollections } from './useFolderAlbumCollections';
 import { isProfilingEnabled } from '../../utils/profiling';
 export type { AlbumListItem, ArtistListItem } from './playerLibraryViewShared';
 
@@ -41,7 +42,6 @@ const createPlayerLibraryView = () => {
     libraryHierarchy,
     libraryFolders,
     artistCatalog,
-    albumCatalog,
     canonicalSongs,
     canonicalSongPaths,
     songLookup,
@@ -60,6 +60,7 @@ const createPlayerLibraryView = () => {
   } = storeToRefs(libraryStore);
   const { favoritePaths, playlists, recentSongs } = storeToRefs(collectionsStore);
   const { playlistSortMode } = usePlaylistSort();
+  const { catalog: albumBrowseCatalog } = storeToRefs(useFolderAlbumCollections());
 
   const isLocalMusic = computed(() =>
     currentViewMode.value === 'all' ||
@@ -71,7 +72,7 @@ const createPlayerLibraryView = () => {
 
   const catalogSelectors = useLibraryCatalogSelectors({
     artistCatalog,
-    albumCatalog,
+    albumCatalog: albumBrowseCatalog,
     searchQuery,
     artistSortMode,
     albumSortMode,

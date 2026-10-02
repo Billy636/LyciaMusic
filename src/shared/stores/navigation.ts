@@ -20,6 +20,7 @@ export const useNavigationStore = defineStore('navigation', () => {
   const currentArtistFilter = ref('');
   const currentAlbumFilter = ref('');
   const currentFolderFilter = ref('');
+  const folderCollectionPath = ref('');
   const favTab = ref<'songs' | 'artists' | 'albums'>('songs');
   const favDetailFilter = ref<{ type: 'artist' | 'album'; name: string } | null>(null);
   const recentTab = ref<'songs' | 'playlists' | 'albums'>('songs');
@@ -42,6 +43,7 @@ export const useNavigationStore = defineStore('navigation', () => {
     currentArtistFilter,
     currentAlbumFilter,
     currentFolderFilter,
+    folderCollectionPath,
     favTab,
     favDetailFilter,
     recentTab,

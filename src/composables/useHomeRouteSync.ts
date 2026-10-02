@@ -1,4 +1,4 @@
-import { watch, type Ref } from 'vue';
+import { ref, watch, type Ref } from 'vue';
 import type {
   LocationQuery,
   LocationQueryRaw,
@@ -21,12 +21,13 @@ interface UseHomeRouteSyncOptions {
   currentViewMode: Ref<string>;
   filterCondition: Ref<string>;
   currentFolderFilter: Ref<string>;
+  folderCollectionPath?: Ref<string>;
   activeRootPath: Ref<string | null>;
   folderTree: Ref<FolderNode[]>;
   searchQuery: Ref<string>;
 }
 
-const HOME_QUERY_KEYS = ['view', 'filter', 'folder'] as const;
+const HOME_QUERY_KEYS = ['view', 'filter', 'folder', 'collection'] as const;
 
 const readQueryString = (value: LocationQuery[string]) => {
   if (Array.isArray(value)) {
@@ -81,6 +82,7 @@ const buildHomeRouteQuery = (
   currentViewMode: string,
   filterCondition: string,
   currentFolderFilter: string,
+  folderCollectionPath: string,
 ): LocationQueryRaw => {
   switch (currentViewMode) {
     case 'artist':
@@ -90,7 +92,11 @@ const buildHomeRouteQuery = (
     case 'statistics':
       return { view: 'statistics' };
     case 'folder':
-      return currentFolderFilter ? { view: 'folder', folder: currentFolderFilter } : { view: 'folder' };
+      return currentFolderFilter ? {
+        view: 'folder',
+        folder: currentFolderFilter,
+        ...(folderCollectionPath ? { collection: '1' } : {}),
+      } : { view: 'folder' };
     default:
       return {};
   }
@@ -100,6 +106,7 @@ const getComparableHomeQuery = (query: LocationQuery | LocationQueryRaw) => ({
   view: readQueryString(query.view as LocationQuery[string]),
   filter: readQueryString(query.filter as LocationQuery[string]),
   folder: readQueryString(query.folder as LocationQuery[string]),
+  collection: readQueryString(query.collection as LocationQuery[string]),
 });
 
 export function useHomeRouteSync({
@@ -108,6 +115,7 @@ export function useHomeRouteSync({
   currentViewMode,
   filterCondition,
   currentFolderFilter,
+  folderCollectionPath = ref(''),
   activeRootPath,
   folderTree,
 }: UseHomeRouteSyncOptions) {
@@ -122,8 +130,9 @@ export function useHomeRouteSync({
   };
 
   watch(
-    [() => route.path, () => route.query.view, () => route.query.filter, () => route.query.folder],
+    [() => route.path, () => route.query.view, () => route.query.filter, () => route.query.folder, () => route.query.collection],
     ([path]) => {
+      folderCollectionPath.value = '';
       if (path === '/favorites') {
         applyCollectionRouteState('favorites');
         return;
@@ -158,6 +167,10 @@ export function useHomeRouteSync({
           currentFolderFilter.value = resolvedFolder;
         }
 
+        if (nextState.folder && readQueryString(route.query.collection) === '1') {
+          folderCollectionPath.value = resolvedFolder;
+        }
+
         const rootPath = findOwningRootPath(folderTree.value, resolvedFolder);
         if (rootPath) {
           activeRootPath.value = rootPath;
@@ -168,8 +181,13 @@ export function useHomeRouteSync({
   );
 
   watch(
-    [() => route.path, currentViewMode, filterCondition, currentFolderFilter],
+    [() => route.path, currentViewMode, filterCondition, currentFolderFilter, folderCollectionPath],
     ([path]) => {
+      if (currentViewMode.value !== 'folder'
+        || normalizePath(currentFolderFilter.value).toLowerCase() !== normalizePath(folderCollectionPath.value).toLowerCase()) {
+        folderCollectionPath.value = '';
+      }
+
       if (path !== '/') {
         return;
       }
@@ -185,6 +203,7 @@ export function useHomeRouteSync({
           currentViewMode.value,
           filterCondition.value,
           currentFolderFilter.value,
+          folderCollectionPath.value,
         ),
       };
 

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from 'vue';
+import { useToast } from '../../composables/toast';
+import { useFolderAlbumCollections } from '../../features/library/useFolderAlbumCollections';
 
 import {
   canUseFolderManagementAction,
@@ -33,6 +35,28 @@ const emit = defineEmits([
 
 const menuRef = ref<HTMLElement | null>(null);
 const menuSize = ref({ width: 0, height: 0 });
+const folderAlbumCollections = useFolderAlbumCollections();
+const { showToast } = useToast();
+const isMergedAlbum = computed(() => folderAlbumCollections.isMerged(props.folderPath));
+const mergedParentPath = computed(() => folderAlbumCollections.parentCollection(props.folderPath));
+const mergeAlbumTitle = computed(() => mergedParentPath.value
+  ? `已随上级文件夹合并：${mergedParentPath.value}；包含文件夹及子文件夹，不修改歌曲标签`
+  : isMergedAlbum.value
+    ? '恢复此文件夹及子文件夹中歌曲的原专辑展示，不修改歌曲标签'
+    : '将此文件夹及子文件夹在专辑页显示为一个同名合集，不修改歌曲标签');
+
+const toggleMergedAlbum = () => {
+  if (mergedParentPath.value || !props.folderPath) return;
+
+  const enabled = !isMergedAlbum.value;
+  try {
+    folderAlbumCollections.setMerged(props.folderPath, enabled);
+    emit('close');
+    showToast(enabled ? '已在专辑页合并显示，歌曲标签保持不变' : '已取消合并显示，恢复原专辑展示', 'success');
+  } catch (error) {
+    showToast(`无法保存合并设置：${error instanceof Error ? error.message : String(error)}`, 'error');
+  }
+};
 
 watch(
   () => props.visible,
@@ -189,7 +213,26 @@ const motionDelay = (index: number): CSSProperties => ({
           <span>添加到歌单</span>
         </div>
 
-        <div :class="itemClass" :style="motionDelay(5)" @click="emit('openFolder')">
+        <button
+          type="button"
+          :class="mergedParentPath ? disabledItemClass : enabledItemClass"
+          :style="motionDelay(5)"
+          :disabled="!!mergedParentPath"
+          :title="mergeAlbumTitle"
+          :aria-pressed="isMergedAlbum || !!mergedParentPath"
+          @click="toggleMergedAlbum"
+        >
+          <div class="mr-3 flex h-5 w-5 items-center justify-center text-gray-500 group-hover:text-gray-800">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 4h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1z" />
+              <path v-if="isMergedAlbum || mergedParentPath" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m8 12 3 3 5-6" />
+              <circle v-else cx="12" cy="12" r="4" stroke-width="2" />
+            </svg>
+          </div>
+          <span>{{ mergedParentPath ? '已随上级文件夹合并' : isMergedAlbum ? '取消合并显示' : '在专辑页合并显示' }}</span>
+        </button>
+
+        <div :class="itemClass" :style="motionDelay(6)" @click="emit('openFolder')">
           <div class="mr-3 flex h-5 w-5 items-center justify-center text-gray-500 group-hover:text-gray-800">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
@@ -198,9 +241,9 @@ const motionDelay = (index: number): CSSProperties => ({
           <span>打开所在目录</span>
         </div>
 
-        <div class="song-menu-divider" :style="motionDelay(6)"></div>
+        <div class="song-menu-divider" :style="motionDelay(7)"></div>
 
-        <div :class="itemClass" :style="motionDelay(7)" @click="emit('refresh')">
+        <div :class="itemClass" :style="motionDelay(8)" @click="emit('refresh')">
           <div class="mr-3 flex h-5 w-5 items-center justify-center text-gray-500 group-hover:text-gray-800">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -210,13 +253,13 @@ const motionDelay = (index: number): CSSProperties => ({
         </div>
 
         <template v-if="showManagementActions">
-          <div class="song-menu-divider" :style="motionDelay(8)"></div>
-          <div :class="sectionTitleClass" :style="motionDelay(9)">仅管理模式可用</div>
+          <div class="song-menu-divider" :style="motionDelay(9)"></div>
+          <div :class="sectionTitleClass" :style="motionDelay(10)">仅管理模式可用</div>
 
           <button
             type="button"
             :class="canRemoveFromLibrary ? enabledItemClass : disabledItemClass"
-            :style="motionDelay(10)"
+            :style="motionDelay(11)"
             :disabled="!canRemoveFromLibrary"
             @click="emitIfAllowed('remove', canRemoveFromLibrary)"
           >
@@ -231,7 +274,7 @@ const motionDelay = (index: number): CSSProperties => ({
           <button
             type="button"
             :class="enabledItemClass"
-            :style="motionDelay(11)"
+            :style="motionDelay(12)"
             @click="emitIfAllowed('new-folder', showManagementActions)"
           >
             <div class="mr-3 flex h-5 w-5 items-center justify-center text-gray-500 group-hover:text-gray-800">
@@ -246,7 +289,7 @@ const motionDelay = (index: number): CSSProperties => ({
             v-if="!isRootFolder"
             type="button"
             :class="enabledItemClass"
-            :style="motionDelay(12)"
+            :style="motionDelay(13)"
             @click="emitIfAllowed('move-folder', showManagementActions)"
           >
             <div class="mr-3 flex h-5 w-5 items-center justify-center text-gray-500 group-hover:text-gray-800">
@@ -260,7 +303,7 @@ const motionDelay = (index: number): CSSProperties => ({
           <button
             type="button"
             :class="enabledItemClass"
-            :style="motionDelay(13)"
+            :style="motionDelay(14)"
             @click="emitIfAllowed('delete-disk', showManagementActions)"
           >
             <div class="mr-3 flex h-5 w-5 items-center justify-center text-[#EC4141]">

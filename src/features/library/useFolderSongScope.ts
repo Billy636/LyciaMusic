@@ -7,9 +7,9 @@ import { useSettingsStore } from '../settings/store';
 const normalizeFolderPath = (path: string) =>
   path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 
-/** The recursive view is available only for folders below a library root. */
+/** Folder collections always include descendants without changing the normal folder preference. */
 export function useFolderSongScope(folderPath?: Ref<string>) {
-  const { currentFolderFilter, activeRootPath } = storeToRefs(useNavigationStore());
+  const { currentFolderFilter, currentViewMode, folderCollectionPath, activeRootPath } = storeToRefs(useNavigationStore());
   const library = useLibraryStore();
   const settingsStore = useSettingsStore();
   const selectedFolder = folderPath ?? currentFolderFilter;
@@ -24,12 +24,18 @@ export function useFolderSongScope(folderPath?: Ref<string>) {
       && !library.watchedFolders.some(path => normalizeFolderPath(path) === folder);
   };
 
-  const includeSubfolders = computed(() =>
-    settingsStore.settings.folderIncludeSubfolders && canIncludeDescendants(selectedFolder.value),
-  );
+  const includesDescendantsFor = (path: string) => {
+    const collectionPath = normalizeFolderPath(folderCollectionPath.value);
+    if (folderCollectionPath.value && currentViewMode.value === 'folder'
+      && normalizeFolderPath(currentFolderFilter.value) === collectionPath
+      && normalizeFolderPath(path) === collectionPath) return true;
+    return settingsStore.settings.folderIncludeSubfolders && canIncludeDescendants(path);
+  };
+
+  const includeSubfolders = computed(() => includesDescendantsFor(selectedFolder.value));
 
   return {
     includeSubfolders,
-    includesDescendantsFor: (path: string) => settingsStore.settings.folderIncludeSubfolders && canIncludeDescendants(path),
+    includesDescendantsFor,
   };
 }

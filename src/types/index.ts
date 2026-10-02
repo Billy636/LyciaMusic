@@ -144,6 +144,8 @@ export interface AlbumCatalogItem {
   count: number;
   artist: string;
   firstSongPath: string;
+  /** Present only for a folder collection in the album browser. */
+  folderPath?: string;
 }
 
 export interface RecentAlbumCatalogItem {

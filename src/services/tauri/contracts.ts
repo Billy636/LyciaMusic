@@ -255,7 +255,7 @@ export interface TauriCommandMap {
   get_library_hierarchy: { payload: undefined; response: FolderNode[] };
   get_library_artist_catalog: { payload: undefined; response: ArtistCatalogItem[] };
   save_artist_avatar: { payload: { artistId: number; imagePath: string; writeToTags: boolean }; response: SaveArtistAvatarResponse };
-  get_library_album_catalog: { payload: undefined; response: AlbumCatalogItem[] };
+  get_library_album_catalog: { payload: { folderCollections?: string[] } | undefined; response: AlbumCatalogItem[] };
   get_library_album_catalog_by_artist: { payload: { artistName: string }; response: AlbumCatalogItem[] };
   get_library_song_paths_by_artist: { payload: { artistName: string }; response: string[] };
   get_library_song_paths_by_album: { payload: { albumKey: string; sortMode?: 'title' | 'track_number' | 'track_number_desc' }; response: string[] };
