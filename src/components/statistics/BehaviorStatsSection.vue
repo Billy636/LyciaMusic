@@ -28,7 +28,8 @@ const TEXT = {
   topByDuration: '\u6700\u5e38\u64ad\u653e(\u6309\u65f6\u957f)',
   topArtists: '\u5e38\u542c\u6b4c\u624b',
   topAlbums: '\u5e38\u542c\u4e13\u8f91',
-  hourlyDistribution: '24 \u5c0f\u65f6\u64ad\u653e\u5206\u5e03',
+  dailyDuration: '\u6700\u8fd1\u4e03\u5929\u6bcf\u65e5\u64ad\u653e\u65f6\u957f',
+  today: '\u4eca\u5929',
   hideCard: '\u9690\u85cf\u6b64\u5361\u7247',
   unknownSong: '\u672a\u77e5\u6b4c\u66f2',
   unknownArtist: '\u672a\u77e5\u827a\u672f\u5bb6',
@@ -175,6 +176,24 @@ const allSongPaths = computed(() => {
 });
 
 const maxHourCount = computed(() => Math.max(...props.hourDistribution, 1));
+
+const dailyActivity = computed(() => {
+  const today = new Date();
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6 + index);
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+
+    return {
+      date: `${date.getFullYear()}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+      label: index === 6 ? TEXT.today : `${month}/${day}`,
+      duration: Math.max(0, props.recentActivity[index] ?? 0),
+    };
+  });
+});
+
+const maxDailyDuration = computed(() => Math.max(...dailyActivity.value.map(day => day.duration), 1));
 
 const peakHour = computed(() => {
   let maxIndex = 0;
@@ -412,9 +431,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="!hiddenCards.has(TEXT.hourlyDistribution)" class="relative rounded-xl p-4 backdrop-blur-md bg-white/60 dark:bg-white/5 border border-white/20 dark:border-white/10 shadow-lg group animate-slide-up-fade" style="animation-delay: 900ms;">
+    <div v-if="!hiddenCards.has(TEXT.dailyDuration)" class="relative rounded-xl p-4 backdrop-blur-md bg-white/60 dark:bg-white/5 border border-white/20 dark:border-white/10 shadow-lg group animate-slide-up-fade" style="animation-delay: 900ms;">
       <div class="delete-trigger-area absolute top-0 right-0 w-14 h-14 z-20 flex items-start justify-end p-2 cursor-pointer">
-        <button @click.stop="emit('hide', TEXT.hourlyDistribution)" class="card-close-btn p-1 rounded-full bg-black/5 dark:bg-white/5 text-gray-600 dark:text-gray-300 hover:text-black dark:hover:text-white transition-opacity" :title="TEXT.hideCard">
+        <button @click.stop="emit('hide', TEXT.dailyDuration)" class="card-close-btn p-1 rounded-full bg-black/5 dark:bg-white/5 text-gray-600 dark:text-gray-300 hover:text-black dark:hover:text-white transition-opacity" :title="TEXT.hideCard">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
         </button>
       </div>
@@ -422,19 +441,24 @@ onBeforeUnmount(() => {
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
         </svg>
-        {{ TEXT.hourlyDistribution }}
+        {{ TEXT.dailyDuration }}
       </h4>
-      <div class="flex items-end gap-1 h-24">
-        <div v-for="(count, hour) in hourDistribution" :key="hour" class="flex-1 flex flex-col items-center gap-1">
-          <div :style="{ height: `${(count / maxHourCount) * 100}%`, opacity: 0.3 + (count / maxHourCount) * 0.7, animationDelay: `${1000 + hour * 30}ms` }" :class="['w-full rounded-t min-h-[2px] animate-bar-grow', 'bg-indigo-500 dark:bg-indigo-400']" :title="`${hour}:00 - ${count} ${TEXT.timesSuffix}`"></div>
+      <div class="grid grid-cols-7 gap-2 sm:gap-4">
+        <div
+          v-for="(day, index) in dailyActivity"
+          :key="day.date"
+          class="min-w-0 flex flex-col items-center gap-2"
+          :title="`${day.date} - ${formatDuration(day.duration)}`"
+        >
+          <span class="text-[10px] sm:text-xs text-gray-700 dark:text-gray-300 font-medium tabular-nums whitespace-nowrap">{{ formatDuration(day.duration) }}</span>
+          <div class="h-24 w-full max-w-16 flex items-end">
+            <div
+              class="w-full rounded-t min-h-[2px] bg-indigo-500 dark:bg-indigo-400 animate-bar-grow"
+              :style="{ height: `${(day.duration / maxDailyDuration) * 100}%`, animationDelay: `${1000 + index * 60}ms` }"
+            ></div>
+          </div>
+          <span class="text-[10px] text-gray-700 dark:text-gray-300 font-medium tabular-nums">{{ day.label }}</span>
         </div>
-      </div>
-      <div class="flex justify-between mt-2 text-[10px] text-gray-700 dark:text-gray-300 font-medium px-1">
-        <span>00</span>
-        <span>06</span>
-        <span>12</span>
-        <span>18</span>
-        <span>24</span>
       </div>
     </div>
   </div>

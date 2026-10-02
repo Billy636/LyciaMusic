@@ -1591,6 +1591,31 @@ fn query_daily_stats(conn: &rusqlite::Connection) -> Result<Vec<PortableDailySta
     Ok(rows.filter_map(|row| row.ok()).collect())
 }
 
+fn query_recent_activity(conn: &rusqlite::Connection) -> Result<Vec<i64>, String> {
+    // 按本地自然日排列，从六天前到今天；没有播放记录的日期保留为零。
+    let mut recent_activity = vec![0; 7];
+    let mut stmt = conn
+        .prepare(
+            "SELECT CAST(julianday(date) - julianday(date('now', 'localtime')) AS INTEGER) AS day_offset,
+                    play_time_ms
+             FROM daily_stats
+             WHERE date BETWEEN date('now', 'localtime', '-6 day') AND date('now', 'localtime')",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1).unwrap_or(0)))
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows.flatten() {
+        if (-6..=0).contains(&row.0) {
+            recent_activity[(row.0 + 6) as usize] = row.1.max(0) / 1000;
+        }
+    }
+
+    Ok(recent_activity)
+}
+
 fn query_hourly_stats(conn: &rusqlite::Connection) -> Result<Vec<PortableHourlyStats>, String> {
     let mut buckets = vec![
         PortableHourlyStats {
@@ -1658,8 +1683,6 @@ fn query_recent_plays(conn: &rusqlite::Connection) -> Result<Vec<PortableRecentP
 }
 
 fn aggregate_behavior_stats(conn: &rusqlite::Connection) -> Result<BehaviorStats, String> {
-    ensure_statistics_aggregates(conn)?;
-
     let global = query_global_stats(conn)?;
     let song_entries = query_song_stats(conn)?;
     let index = build_library_match_index(conn)?;
@@ -1762,29 +1785,7 @@ fn aggregate_behavior_stats(conn: &rusqlite::Connection) -> Result<BehaviorStats
         }
     }
 
-    let mut recent_activity = vec![0; 7];
-
-    let mut stmt = conn
-        .prepare(
-            "SELECT CAST(julianday(date) - julianday(date('now', 'localtime')) AS INTEGER) AS day_offset,
-                    play_time_ms
-             FROM daily_stats
-             WHERE date >= date('now', 'localtime', '-6 day')",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0).unwrap_or(0),
-                row.get::<_, i64>(1).unwrap_or(0),
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-    for row in rows.flatten() {
-        if (-6..=0).contains(&row.0) {
-            recent_activity[(row.0 + 6) as usize] = row.1 / 1000;
-        }
-    }
+    let recent_activity = query_recent_activity(conn)?;
 
     Ok(BehaviorStats {
         total_plays: global.total_play_count,
@@ -2605,6 +2606,7 @@ pub fn get_behavior_stats(
     time_range: TimeRange,
 ) -> Result<BehaviorStats, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    ensure_statistics_aggregates(&conn)?;
 
     if matches!(time_range, TimeRange::All) {
         return aggregate_behavior_stats(&conn);
@@ -2773,42 +2775,8 @@ pub fn get_behavior_stats(
         }
     }
 
-    // 指标 E: 最近 7 天播放趋势 (Timeline)
-    // 即使 time_range 不是 7Days，我们也始终返回最近 7 天的趋势供 UI 显示
-    let mut recent_activity: Vec<i64> = vec![0; 7];
-    {
-        // 算出 7 天前的零点时间戳 (简化处理，按 24h 倒推)
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let day_seconds = 24 * 60 * 60;
-        let start_time = now - 7 * day_seconds;
-
-        // 查询最近 7 天的每一天的播放时长
-        // Output: day_offset (0-6), total_duration
-        let sql_activity = format!(
-            "SELECT CAST((ph.played_at - {}) / {} AS INTEGER) as day_offset, 
-                    COALESCE(SUM(ph.played_seconds), 0) as duration 
-             FROM play_history ph 
-             INNER JOIN songs s ON ph.song_id = s.id 
-             WHERE ph.played_at >= {} AND ph.event = 'play' AND ph.song_id IS NOT NULL 
-             GROUP BY day_offset",
-            start_time, day_seconds, start_time
-        );
-
-        let mut stmt = conn.prepare(&sql_activity).map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
-            .map_err(|e| e.to_string())?;
-
-        for row in rows.flatten() {
-            let offset = row.0;
-            if offset >= 0 && offset < 7 {
-                recent_activity[offset as usize] = row.1;
-            }
-        }
-    }
+    // 最近 7 天的每日播放时长固定包含今天，不随其他行为统计的时间筛选变化。
+    let recent_activity = query_recent_activity(&conn)?;
 
     Ok(BehaviorStats {
         total_plays,
