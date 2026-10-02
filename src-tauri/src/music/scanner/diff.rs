@@ -64,6 +64,7 @@ enum ParsedTaskResult {
         change: ChangeKind,
     },
     Delete {
+        index: usize,
         path: String,
     },
 }
@@ -360,7 +361,15 @@ fn parse_tasks_in_parallel(
                     reporter.advance_parsing(total);
                 }
 
-                Ok(parsed?.and_then(|song| {
+                let parsed = parsed?;
+                if parsed.is_none()
+                    && task.change == ChangeKind::Update
+                    && options.force_metadata_refresh
+                {
+                    return Err(format!("无法重新读取歌曲信息：{}", task.path_str));
+                }
+
+                Ok(parsed.and_then(|song| {
                     if song_meets_duration_threshold(&song, options) {
                         return Some(ParsedTaskResult::Song {
                             index: task.index,
@@ -370,6 +379,7 @@ fn parse_tasks_in_parallel(
                     }
 
                     (task.change == ChangeKind::Update).then(|| ParsedTaskResult::Delete {
+                        index: task.index,
                         path: task.path_str,
                     })
                 }))
@@ -491,6 +501,9 @@ fn process_cue_parse_tasks(
 
             let track = match sheet.tracks.iter().find(|t| t.track_number == track_number) {
                 Some(t) => t,
+                None if options.force_metadata_refresh => {
+                    return Err(format!("扫描过程中 CUE 曲目发生变化：{}", task.path_str));
+                }
                 None => continue,
             };
 
@@ -510,6 +523,7 @@ fn process_cue_parse_tasks(
                     });
                 } else if task.change == ChangeKind::Update {
                     results.push(ParsedTaskResult::Delete {
+                        index: task.index,
                         path: task.path_str.clone(),
                     });
                 }
@@ -535,12 +549,16 @@ pub(super) fn collect_scan_diff(
 
     for (candidate_index, candidate) in candidates.into_iter().enumerate() {
         if let Some(db_info) = db_snapshot.remove(&candidate.path_str) {
-            let needs_parse = db_info.file_modified_at != candidate.disk_mtime
+            let needs_parse = options.force_metadata_refresh
+                || db_info.file_modified_at != candidate.disk_mtime
                 || db_info.file_size != candidate.disk_size
                 || song_identity_missing(&db_info.song)
                 || song_metadata_incomplete(&db_info.song);
 
             if needs_parse {
+                // Retain the persisted identity and keep the existing record if an
+                // incremental scan cannot parse this file. Successful parsing replaces it.
+                songs_by_index[candidate_index] = Some(db_info.song);
                 parse_tasks.push(ParseTask {
                     index: candidate_index,
                     path: candidate.path,
@@ -582,13 +600,19 @@ pub(super) fn collect_scan_diff(
         match result {
             ParsedTaskResult::Song {
                 index,
-                song,
+                mut song,
                 change,
             } => {
+                if let Some(existing) = songs_by_index[index].as_ref() {
+                    song.id = existing.id;
+                }
                 songs_by_index[index] = Some(song);
                 changes_by_index[index] = Some(change);
             }
-            ParsedTaskResult::Delete { path } => to_delete.push(path),
+            ParsedTaskResult::Delete { index, path } => {
+                songs_by_index[index] = None;
+                to_delete.push(path);
+            }
         }
     }
 
@@ -597,13 +621,19 @@ pub(super) fn collect_scan_diff(
         match result {
             ParsedTaskResult::Song {
                 index,
-                song,
+                mut song,
                 change,
             } => {
+                if let Some(existing) = songs_by_index[index].as_ref() {
+                    song.id = existing.id;
+                }
                 songs_by_index[index] = Some(song);
                 changes_by_index[index] = Some(change);
             }
-            ParsedTaskResult::Delete { path } => to_delete.push(path),
+            ParsedTaskResult::Delete { index, path } => {
+                songs_by_index[index] = None;
+                to_delete.push(path);
+            }
         }
     }
 

@@ -16,7 +16,7 @@ interface UseHomeFolderManagementOptions {
   currentFolderFilter: Ref<string>;
   libraryHierarchy: Ref<FolderNode[]>;
   sourceSongPaths: Ref<string[]>;
-  refreshFolder: (folderPath: string) => Promise<unknown>;
+  refreshFolder: (folderPath: string, forceMetadataRefresh?: boolean) => Promise<unknown>;
   fetchFolderTree: () => Promise<unknown>;
   createFolder: (parentPath: string, folderName: string) => Promise<string>;
   deleteFolder: (path: string) => Promise<unknown>;
@@ -84,7 +84,7 @@ export function useHomeFolderManagement({
     }
 
     try {
-      await refreshFolder(normalizedPath);
+      await refreshFolder(normalizedPath, false);
     } catch (error: any) {
       showToast(`切换文件夹失败: ${error?.message || error}`, 'error');
     }
@@ -236,7 +236,7 @@ export function useHomeFolderManagement({
         } else if (removedCount > 0) {
           showToast(`刷新成功，检测到少了 ${removedCount} 首歌曲`, 'success');
         } else {
-          showToast('刷新成功，文件夹歌曲已是最新', 'success');
+          showToast('刷新成功，已重新读取歌曲标签和封面', 'success');
         }
         return;
       }

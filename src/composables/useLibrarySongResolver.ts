@@ -11,6 +11,7 @@ const resolvedSongCache = new MemoryCache<string, Song>({
   ttlMs: RESOLVED_SONG_CACHE_TTL_MS,
 });
 const inFlightSongs = new Map<string, Promise<Song | null>>();
+let cacheGeneration = 0;
 
 const rememberSongs = (songs: Song[]) => {
   songs.forEach((song) => {
@@ -33,8 +34,12 @@ const loadSong = (path: string): Promise<Song | null> => {
     return inFlight;
   }
 
+  const requestGeneration = cacheGeneration;
   const request = tauriInvoke('get_library_songs_by_paths', { paths: [path] })
     .then((songs) => {
+      if (requestGeneration !== cacheGeneration) {
+        return null;
+      }
       const song = songs[0] ?? null;
       if (song) {
         resolvedSongCache.set(path, song);
@@ -42,13 +47,16 @@ const loadSong = (path: string): Promise<Song | null> => {
       return song;
     })
     .finally(() => {
-      inFlightSongs.delete(path);
+      if (inFlightSongs.get(path) === request) {
+        inFlightSongs.delete(path);
+      }
     });
   inFlightSongs.set(path, request);
   return request;
 };
 
 const loadSongs = async (paths: string[]): Promise<LibrarySong[]> => {
+  const requestGeneration = cacheGeneration;
   const result = new Map<string, LibrarySong>();
   const missingPaths: string[] = [];
   const missingPathSet = new Set<string>();
@@ -65,6 +73,9 @@ const loadSongs = async (paths: string[]): Promise<LibrarySong[]> => {
   for (let offset = 0; offset < missingPaths.length; offset += SONG_BATCH_SIZE) {
     const chunk = missingPaths.slice(offset, offset + SONG_BATCH_SIZE);
     const loaded = await tauriInvoke('get_library_songs_by_paths', { paths: chunk });
+    if (requestGeneration !== cacheGeneration) {
+      return [];
+    }
     loaded.forEach((song) => {
       resolvedSongCache.set(song.path, song);
       result.set(song.path, song);
@@ -83,6 +94,7 @@ export function useLibrarySongResolver() {
     rememberSongs,
     peekSong: (path: string) => resolvedSongCache.get(path) ?? null,
     clearResolvedSongCache: () => {
+      cacheGeneration += 1;
       resolvedSongCache.clear();
       inFlightSongs.clear();
     },

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import { usePlayer } from '../../composables/player';
+import { useLibraryStore } from '../../features/library/store';
 import { isRemoteSong } from '../../utils/remoteSong';
 import ModernModal from '../common/ModernModal.vue';
 import { useLibrarySongWindowCache } from '../../composables/useLibrarySongWindowCache';
@@ -18,7 +20,8 @@ const {
   clearQueue,
   removeSongFromQueue,
 } = usePlayer();
-const { ensureWindow, getSongAt } = useLibrarySongWindowCache();
+const { libraryDataVersion } = storeToRefs(useLibraryStore());
+const { ensureWindow, getSongAt, clearSongWindowCache } = useLibrarySongWindowCache();
 const { loadSong } = useLibrarySongResolver();
 
 const showClearModal = ref(false);
@@ -121,7 +124,10 @@ watch(
   },
 );
 
-watch([playQueuePaths, showPlaylist], () => {
+watch([playQueuePaths, showPlaylist, libraryDataVersion], ([, , version], previous) => {
+  if (version !== previous[2]) {
+    clearSongWindowCache();
+  }
   if (showPlaylist.value) {
     ensureVisibleQueue();
   }

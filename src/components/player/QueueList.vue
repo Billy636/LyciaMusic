@@ -10,10 +10,10 @@ import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver
 
 const libraryStore = useLibraryStore();
 const playbackStore = usePlaybackStore();
-const { sourceSongPaths } = storeToRefs(libraryStore);
+const { sourceSongPaths, libraryDataVersion } = storeToRefs(libraryStore);
 const { playQueuePaths } = storeToRefs(playbackStore);
 const { currentSong, playSong, formatDuration } = usePlaybackController();
-const { ensureWindow, getSongAt } = useLibrarySongWindowCache();
+const { ensureWindow, getSongAt, clearSongWindowCache } = useLibrarySongWindowCache();
 const { loadSong } = useLibrarySongResolver();
 
 const queuePaths = computed(() => playQueuePaths.value.length > 0 ? playQueuePaths.value : sourceSongPaths.value);
@@ -89,7 +89,12 @@ const scrollToCurrent = () => {
   }
 };
 
-watch(queuePaths, ensureVisibleQueue, { immediate: true });
+watch([queuePaths, libraryDataVersion], ([, version], previous) => {
+  if (version !== previous[1]) {
+    clearSongWindowCache();
+  }
+  ensureVisibleQueue();
+}, { immediate: true });
 </script>
 
 <template>

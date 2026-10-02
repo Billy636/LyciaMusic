@@ -316,7 +316,7 @@ export interface TauriCommandMap {
     response: string | null;
   };
   scan_music_folder: {
-    payload: { folderPath: string; minimumDurationSeconds?: number };
+    payload: { folderPath: string; minimumDurationSeconds?: number; forceMetadataRefresh?: boolean };
     response: Song[];
   };
   move_music_file: { payload: { oldPath: string; newPath: string }; response: void };

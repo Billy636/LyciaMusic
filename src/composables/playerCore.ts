@@ -159,7 +159,7 @@ const formatTimeAgo = (timestamp: number) => {
 function createPlayerCore() {
   const { loadLyrics } = useLyrics();
   const { showToast } = useToast();
-  const { clearCoverCaches } = useCoverCache();
+  const { clearCoverCaches, loadCover, loadFullCover, loadFullCoverPath } = useCoverCache();
   const { clearSongDetailCache } = useSongDetailCache();
   const { clearResolvedSongCache } = useLibrarySongResolver();
   const { resolveSongForPlayback, clearSongRuntimeMetadataCache } = useSongRuntimeMetadata();
@@ -230,6 +230,7 @@ function createPlayerCore() {
   let playerQueue: ReturnType<typeof createPlayerQueue>;
   let playerPlayback: ReturnType<typeof createPlayerPlayback>;
   let libraryRuntime: ReturnType<typeof createPlayerLibraryRuntime>;
+  let metadataRefreshVersion = 0;
 
   const addLibraryFolder = async (): Promise<void> => {
     await librarySync.addLibraryFolder();
@@ -294,6 +295,54 @@ function createPlayerCore() {
   const playerFileManager = createPlayerFileManager({
     removeLibraryFolderLinked,
     removeFromHistory: (songPaths: string[]) => playerHistoryFavorites.removeFromHistory(songPaths),
+    onFolderMetadataRefreshed: async (folderPaths) => {
+      flushBufferedLibraryScanBatch();
+      clearSongDetailCache();
+      clearSongRuntimeMetadataCache();
+      clearResolvedSongCache();
+      clearCoverCaches();
+
+      const refreshVersion = ++metadataRefreshVersion;
+      const song = currentSong.value;
+      const playbackId = playbackStore.currentPlaybackId;
+      const isCurrentRefresh = () => refreshVersion === metadataRefreshVersion
+        && currentSong.value?.path === song?.path
+        && playbackStore.currentPlaybackId === playbackId;
+      const refreshCurrentMetadata = async () => {
+        if (!song || !folderPaths.some(path => isPathInFolderScope(path, song.path))) return;
+
+        const coverPath = song.cue_source_path || song.path;
+        const [refreshedSong, cover, fullCover, fullCoverPath] = await Promise.all([
+          resolveSongForPlayback({ ...song }),
+          loadCover(coverPath),
+          loadFullCover(coverPath),
+          loadFullCoverPath(coverPath),
+        ]);
+        if (!isCurrentRefresh()) return;
+
+        // Update metadata only: keep the decoder, queue and playback position intact.
+        currentSong.value = refreshedSong;
+        currentCover.value = cover || '';
+        playbackStore.currentCoverPath = cover ? song.path : '';
+        currentCoverFull.value = fullCover || cover || '';
+        await Promise.all([
+          loadLyrics(),
+          playbackApi.updatePlaybackMetadata({
+            title: refreshedSong.title?.trim() || refreshedSong.name.replace(/\.[^/.]+$/, ''),
+            artist: refreshedSong.artist,
+            album: refreshedSong.album,
+            cover: fullCoverPath || '',
+            duration: refreshedSong.duration,
+            isPlaying: isPlaying.value,
+          }).catch(error => console.warn('Failed to refresh system playback metadata:', error)),
+        ]);
+      };
+
+      await Promise.all([
+        libraryRuntime.loadLibraryCatalogsFromCache(),
+        refreshCurrentMetadata(),
+      ]);
+    },
     onSongPathsMoved: async (currentSongChanged) => {
       clearCoverCaches();
       clearSongDetailCache();
@@ -502,8 +551,8 @@ function createPlayerCore() {
     return playerFileManager.moveFilesToFolder(paths, targetFolder);
   }
 
-  async function refreshFolder(folderPath: string) {
-    return playerFileManager.refreshFolder(folderPath);
+  async function refreshFolder(folderPath: string, forceMetadataRefresh = true) {
+    return playerFileManager.refreshFolder(folderPath, forceMetadataRefresh);
   }
 
   function removeFolder(folderPath: string) {

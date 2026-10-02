@@ -22,7 +22,7 @@ interface ProcessExternalPathsResult {
 interface UseLibrarySyncOptions {
   fetchLibraryFolders: () => Promise<unknown>;
   scanLibrary: (options?: ScanLibraryOptions) => Promise<unknown>;
-  refreshFolder: (folderPath: string) => Promise<unknown>;
+  refreshFolder: (folderPath: string, forceMetadataRefresh?: boolean) => Promise<unknown>;
   refreshAllFolders: () => Promise<unknown>;
   addLibraryFolder?: () => Promise<unknown>;
   addLibraryFolderLinked?: (

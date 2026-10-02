@@ -21,6 +21,7 @@ interface CreatePlayerFileManagerDeps {
   ) => Promise<void>;
   removeFromHistory: (songPaths: string[]) => Promise<void>;
   onSongPathsMoved?: (currentSongChanged: boolean) => Promise<void>;
+  onFolderMetadataRefreshed?: (folderPaths: string[]) => Promise<void>;
   showToast: (message: string, type: 'success' | 'info' | 'error') => void;
 }
 
@@ -56,6 +57,7 @@ export const createPlayerFileManager = ({
   removeLibraryFolderLinked,
   removeFromHistory,
   onSongPathsMoved,
+  onFolderMetadataRefreshed,
   showToast,
 }: CreatePlayerFileManagerDeps) => {
   const collectionsStore = useCollectionsStore();
@@ -203,13 +205,16 @@ export const createPlayerFileManager = ({
     await moveFilesToFolder([sourcePath], targetFolderPath);
   };
 
-  const refreshFolder = async (folderPath: string) => {
+  const refreshFolder = async (folderPath: string, forceMetadataRefresh = true) => {
+    // Capture membership before scan events can apply additions and deletions.
+    const previousScopedPaths = canonicalSongPaths.value
+      .filter(path => isSongInFolderScope(folderPath, path));
+    if (forceMetadataRefresh) libraryStore.setLastLibraryScanError(null);
     const newSongs = await fileApi.scanMusicFolder(
       folderPath,
       settingsStore.settings.libraryMinDurationSeconds,
+      forceMetadataRefresh,
     );
-    const previousScopedPaths = canonicalSongPaths.value
-      .filter(path => isSongInFolderScope(folderPath, path));
     const normalizedNewPaths = new Set(newSongs.map(song => normalizePathForMatch(song.path)));
     const normalizedOldPaths = new Set(previousScopedPaths.map(path => normalizePathForMatch(path)));
 
@@ -244,7 +249,12 @@ export const createPlayerFileManager = ({
       if (currentSong.value && removedPathSet.has(normalizePathForMatch(currentSong.value.path))) {
         currentSong.value = null;
       }
+    }
 
+    if (forceMetadataRefresh) {
+      await onFolderMetadataRefreshed?.([folderPath]);
+    }
+    if (removedPaths.length > 0) {
       await removeFromHistory(removedPaths);
     }
 

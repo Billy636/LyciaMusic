@@ -7,6 +7,14 @@ import type { Song } from '../../types';
 const areSamePaths = (left: string[], right: string[]) =>
   left.length === right.length && left.every((path, index) => path === right[index]);
 
+const runtimeMetadataKeys = [
+  'id',
+  'remote_source_id',
+  'cue_source_path',
+  'cue_start_offset',
+  'cue_end_offset',
+] as const;
+
 export const usePlaybackStore = defineStore('playback', () => {
   const libraryStore = useLibraryStore();
   const isPlaying = ref(false);
@@ -46,9 +54,6 @@ export const usePlaybackStore = defineStore('playback', () => {
       }
     }
 
-    if (currentSongPath.value && libraryStore.getSongByPath(currentSongPath.value)) {
-      currentSongFallback.value = null;
-    }
     if (currentSongPath.value !== currentSongFallback.value?.path) {
       currentSongFallback.value = null;
     }
@@ -76,10 +81,12 @@ export const usePlaybackStore = defineStore('playback', () => {
     return nextPaths;
   };
 
-  const materializeSongs = (paths: string[], fallbackMap: Map<string, Song>) =>
-    paths
+  const materializeSongs = (paths: string[], fallbackMap: Map<string, Song>) => {
+    libraryStore.libraryDataVersion;
+    return paths
       .map(path => libraryStore.getSongByPath(path, fallbackMap.get(path)))
       .filter((song): song is Song => !!song);
+  };
 
   const playQueue = computed<Song[]>({
     get: () => materializeSongs(playQueuePaths.value, queueFallbackSongs),
@@ -104,10 +111,34 @@ export const usePlaybackStore = defineStore('playback', () => {
   });
 
   const currentSong = computed<Song | null>({
-    get: () => libraryStore.getSongByPath(currentSongPath.value, currentSongFallback.value),
+    get: () => {
+      libraryStore.libraryDataVersion;
+      const snapshot = currentSongFallback.value?.path === currentSongPath.value
+        ? currentSongFallback.value
+        : null;
+      const song = libraryStore.getSongByPath(currentSongPath.value, snapshot);
+      if (!song) return null;
+
+      // The library mutates pooled records in place. Publish a new snapshot so
+      // same-path tag changes notify consumers without reloading the audio.
+      const updatedSong = { ...snapshot, ...song };
+      if (snapshot) {
+        // Runtime fields belong to the active playback snapshot, not the
+        // lightweight library record (which may retain older hydrated fields).
+        for (const key of runtimeMetadataKeys) {
+          if (Object.prototype.hasOwnProperty.call(snapshot, key)) {
+            Object.assign(updatedSong, { [key]: snapshot[key] });
+          }
+        }
+      }
+      return updatedSong;
+    },
     set: (song) => {
+      const previousSong = currentSong.value;
+      currentSongFallback.value = song
+        ? { ...(previousSong?.path === song.path ? previousSong : {}), ...song }
+        : null;
       currentSongPath.value = song?.path ?? null;
-      currentSongFallback.value = song && !libraryStore.getSongByPath(song.path) ? song : null;
       pruneFallbackSongs();
     },
   });

@@ -152,7 +152,7 @@ describe('playerFileManager.refreshFolder', () => {
 
     await fileManager.refreshFolder('c:/music/a');
 
-    expect(scanMusicFolderMock).toHaveBeenCalledWith('c:/music/a', 60);
+    expect(scanMusicFolderMock).toHaveBeenCalledWith('c:/music/a', 60, true);
   });
 
   it('accurately syncs songs when path casing or slashes differ on Windows', async () => {

@@ -45,7 +45,7 @@ interface UseSongTableAlphabetIndexOptions {
   activeRootPath: Ref<string | null>;
   currentFolderFilter: Ref<string>;
   folderTree: Ref<FolderNode[]>;
-  refreshFolder: (folderPath: string) => Promise<unknown>;
+  refreshFolder: (folderPath: string, forceMetadataRefresh?: boolean) => Promise<unknown>;
   expandFolderPath: (path: string) => Promise<unknown>;
 }
 
@@ -360,7 +360,7 @@ export function useSongTableAlphabetIndex({
     activeRootPath.value = targetRootPath;
     currentFolderFilter.value = targetFolderPath;
     await expandFolderPath(targetFolderPath);
-    await refreshFolder(targetFolderPath);
+    await refreshFolder(targetFolderPath, false);
     await nextTick();
     requestAnimationFrame(() => {
       scrollFolderTargetsIntoView(targetFolderPath, targetRootPath);

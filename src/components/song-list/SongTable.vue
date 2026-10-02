@@ -71,9 +71,13 @@ const { isFavorite, toggleFavorite } = useLibraryCollections();
 const router = useRouter();
 const route = useRoute();
 const { openHomeArtist } = useHomeNavigation(router);
-const { coverCache, loadCover, touchCoverPaths, preloadPriorityCovers, primeCoverPath } = useCoverCache();
+const { coverCache, coverCacheResetVersion, loadCover, touchCoverPaths, preloadPriorityCovers, primeCoverPath } = useCoverCache();
 const { loadSongDetail } = useSongDetailCache();
-const { ensureWindow: ensureSongWindow, getSongAt: getPagedSongAt } = useLibrarySongWindowCache();
+const {
+  ensureWindow: ensureSongWindow,
+  getSongAt: getPagedSongAt,
+  clearSongWindowCache,
+} = useLibrarySongWindowCache();
 
 const ROW_HEIGHT = 72;
 const OVERSCAN = 20;
@@ -88,6 +92,8 @@ const isScrollbarActive = computed(() => isScrollbarHot.value || isScrollbarScro
 const displayedCoverUrls = reactive(new Map<string, string>());
 const songCommentCache = reactive(new Map<string, string>());
 const loadingSongCommentPaths = new Set<string>();
+let visibleMetadataGeneration = 0;
+let canPrimeUnpagedCovers = coverCacheResetVersion.value === 0;
 let visibleCoverPaths = new Set<string>();
 let scrollbarActiveTimer: ReturnType<typeof window.setTimeout> | null = null;
 let scrollVelocityResetTimer: ReturnType<typeof window.setTimeout> | null = null;
@@ -146,15 +152,20 @@ const loadVisibleSongComments = (songs: Song[]) => {
     }
 
     loadingSongCommentPaths.add(song.path);
+    const requestGeneration = visibleMetadataGeneration;
     void loadSongDetail(song.path)
       .then((detail) => {
+        if (requestGeneration !== visibleMetadataGeneration) return;
         songCommentCache.set(song.path, detail?.comment?.trim() ?? '');
       })
       .catch(() => {
+        if (requestGeneration !== visibleMetadataGeneration) return;
         songCommentCache.set(song.path, '');
       })
       .finally(() => {
-        loadingSongCommentPaths.delete(song.path);
+        if (requestGeneration === visibleMetadataGeneration) {
+          loadingSongCommentPaths.delete(song.path);
+        }
       });
   });
 };
@@ -184,7 +195,7 @@ const restoreViewportCoverSnapshot = (key = tableViewportKey.value) => {
   preloadPriorityCovers(snapshot);
 };
 
-const syncVisibleCoverUrls = (songs: Song[]) => {
+const syncVisibleCoverUrls = (songs: Array<Song & { virtualIndex: number }>) => {
   const nextVisiblePaths = new Set(songs.map(song => song.path).filter(Boolean));
   visibleCoverPaths = nextVisiblePaths;
 
@@ -209,14 +220,22 @@ const syncVisibleCoverUrls = (songs: Song[]) => {
       return;
     }
 
-    const persistedCoverUrl = primeCoverPath(path, song.cover_thumb_path);
+    // Only freshly loaded pages can supply persisted paths after invalidation;
+    // a fallback row can still carry the thumbnail removed by the refresh.
+    const persistedSong = pagedRenderingEnabled.value
+      ? getPagedSongAt(song.virtualIndex)
+      : canPrimeUnpagedCovers ? song : undefined;
+    const persistedCoverUrl = persistedSong?.path === path
+      ? primeCoverPath(path, persistedSong.cover_thumb_path)
+      : '';
     if (persistedCoverUrl) {
       displayedCoverUrls.set(path, persistedCoverUrl);
       return;
     }
 
+    const requestGeneration = visibleMetadataGeneration;
     void loadCover(path).then((coverUrl) => {
-      if (!coverUrl || !visibleCoverPaths.has(path)) {
+      if (requestGeneration !== visibleMetadataGeneration || !coverUrl || !visibleCoverPaths.has(path)) {
         return;
       }
 
@@ -436,36 +455,44 @@ const onScroll = (event: Event) => {
   showScrollbarDuringScroll();
 };
 
+const ensureVisibleSongWindow = () => {
+  if (!pagedRenderingEnabled.value || !props.songPaths) {
+    return;
+  }
+  const firstVisibleIndex = Math.floor(scrollTop.value / ROW_HEIGHT);
+  const visibleCount = Math.ceil(containerHeight.value / ROW_HEIGHT);
+  void ensureSongWindow({
+    paths: props.songPaths,
+    start: Math.max(0, firstVisibleIndex - OVERSCAN),
+    end: Math.min(props.songPaths.length, firstVisibleIndex + visibleCount + OVERSCAN),
+    viewportHeight: containerHeight.value,
+    rowHeight: ROW_HEIGHT,
+    scrollVelocityPxPerSecond: scrollVelocityPxPerSecond.value,
+    memoryBudgetBytes: resolveSongWindowMemoryBudget(),
+  });
+  if (
+    searchQuery.value.trim()
+    && hasMoreCurrentSearchResults.value
+    && firstVisibleIndex + visibleCount + OVERSCAN >= props.songPaths.length - 32
+  ) {
+    void loadMoreCurrentSearchResults();
+  }
+};
+
 watch(
   [
+    libraryDataVersion,
     pagedRenderingEnabled,
     () => props.songPaths,
     scrollTop,
     containerHeight,
     scrollVelocityPxPerSecond,
   ],
-  () => {
-    if (!pagedRenderingEnabled.value || !props.songPaths) {
-      return;
+  ([version], previous) => {
+    if (version !== previous[0]) {
+      clearSongWindowCache();
     }
-    const firstVisibleIndex = Math.floor(scrollTop.value / ROW_HEIGHT);
-    const visibleCount = Math.ceil(containerHeight.value / ROW_HEIGHT);
-    void ensureSongWindow({
-      paths: props.songPaths,
-      start: Math.max(0, firstVisibleIndex - OVERSCAN),
-      end: Math.min(props.songPaths.length, firstVisibleIndex + visibleCount + OVERSCAN),
-      viewportHeight: containerHeight.value,
-      rowHeight: ROW_HEIGHT,
-      scrollVelocityPxPerSecond: scrollVelocityPxPerSecond.value,
-      memoryBudgetBytes: resolveSongWindowMemoryBudget(),
-    });
-    if (
-      searchQuery.value.trim()
-      && hasMoreCurrentSearchResults.value
-      && firstVisibleIndex + visibleCount + OVERSCAN >= props.songPaths.length - 32
-    ) {
-      void loadMoreCurrentSearchResults();
-    }
+    ensureVisibleSongWindow();
   },
   { immediate: true },
 );
@@ -522,6 +549,20 @@ watch(
   },
   { immediate: true },
 );
+
+watch(coverCacheResetVersion, () => {
+  visibleMetadataGeneration += 1;
+  displayedCoverUrls.clear();
+  songCommentCache.clear();
+  loadingSongCommentPaths.clear();
+  // An explicit reset can remove the persisted files as well. Older row
+  // metadata must not seed those stale paths back into the shared URL cache.
+  canPrimeUnpagedCovers = false;
+  clearSongWindowCache();
+  ensureVisibleSongWindow();
+  syncVisibleCoverUrls(virtualItems.value);
+  loadVisibleSongComments(virtualItems.value);
+}, { flush: 'sync' });
 
 watch(
   () => settings.value.showSongComments,

@@ -233,6 +233,25 @@ fn full_cover_alias_path(cache_dir: &Path, source_hash: &str) -> PathBuf {
     ))
 }
 
+pub(crate) fn invalidate_song_cover_cache(path: &Path, app: &AppHandle) -> Result<(), String> {
+    let source_hash = generate_source_hash(path);
+    let cache_dir = get_cover_cache_dir(app);
+
+    // Only discard source aliases. Their content-addressed targets may also be
+    // used by other songs or artist avatars and must remain untouched.
+    for alias_path in [
+        thumbnail_alias_path(&cache_dir, &source_hash),
+        full_cover_alias_path(&cache_dir, &source_hash),
+    ] {
+        if let Err(error) = fs::remove_file(&alias_path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(format!("刷新歌曲封面缓存失败：{}；{error}", path.display()));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn full_cover_extension_from_mime(mime: Option<&MimeType>) -> Option<&'static str> {
     match mime {
         Some(MimeType::Jpeg) => Some("jpg"),
@@ -319,6 +338,12 @@ fn find_sidecar_image(path: &Path) -> Option<PathBuf> {
     None
 }
 
+fn read_sidecar_image(path: &Path) -> Option<(DynamicImage, String)> {
+    let bytes = fs::read(find_sidecar_image(path)?).ok()?;
+    let image = image::load_from_memory(&bytes).ok()?;
+    Some((image, generate_content_hash(&bytes)))
+}
+
 pub fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
     let source_hash = generate_source_hash(path);
     let cache_dir = get_cover_cache_dir(app);
@@ -355,18 +380,17 @@ pub fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
     }
 
     // 内嵌封面缺失时回退到同名外部图片（如 song.mp3 旁的 song.jpg）
-    if let Some(sidecar) = find_sidecar_image(path) {
-        if let Ok(img) = image::open(&sidecar) {
-            let resized = img.resize(
-                THUMBNAIL_EDGE_PX,
-                THUMBNAIL_EDGE_PX,
-                image::imageops::FilterType::Triangle,
-            );
-            let cache_path = cache_dir.join(format!("{}.jpg", thumbnail_cache_stem(&source_hash)));
-            if let Some(persisted) = persist_image_atomically(&resized, ImageFormat::Jpeg, &cache_path) {
-                let _ = persist_alias_target(&alias_path, &cache_path);
-                return Some(persisted);
-            }
+    if let Some((img, content_hash)) = read_sidecar_image(path) {
+        let resized = img.resize(
+            THUMBNAIL_EDGE_PX,
+            THUMBNAIL_EDGE_PX,
+            image::imageops::FilterType::Triangle,
+        );
+        let cache_path = cache_dir.join(format!("{}.jpg", thumbnail_cache_stem(&content_hash)));
+        if let Some(persisted) = persist_image_atomically(&resized, ImageFormat::Jpeg, &cache_path)
+        {
+            let _ = persist_alias_target(&alias_path, &cache_path);
+            return Some(persisted);
         }
     }
     None
@@ -437,25 +461,24 @@ pub fn get_or_create_full_cover(path: &Path, app: &AppHandle) -> Option<String> 
     }
 
     // 内嵌封面缺失时回退到同名外部图片（如 song.mp3 旁的 song.jpg）
-    if let Some(sidecar) = find_sidecar_image(path) {
-        if let Ok(img) = image::open(&sidecar) {
-            let should_resize =
-                img.width() > FULL_COVER_EDGE_PX || img.height() > FULL_COVER_EDGE_PX;
-            let display_img = if should_resize {
-                img.resize(
-                    FULL_COVER_EDGE_PX,
-                    FULL_COVER_EDGE_PX,
-                    image::imageops::FilterType::Lanczos3,
-                )
-            } else {
-                img
-            };
-            let cache_stem = full_cover_cache_stem(&source_hash);
-            let cache_path = cache_dir.join(format!("{cache_stem}.{FULL_COVER_FALLBACK_EXT}"));
-            if let Some(persisted) = persist_image_atomically(&display_img, ImageFormat::Png, &cache_path) {
-                let _ = persist_alias_target(&alias_path, &cache_path);
-                return Some(persisted);
-            }
+    if let Some((img, content_hash)) = read_sidecar_image(path) {
+        let should_resize = img.width() > FULL_COVER_EDGE_PX || img.height() > FULL_COVER_EDGE_PX;
+        let display_img = if should_resize {
+            img.resize(
+                FULL_COVER_EDGE_PX,
+                FULL_COVER_EDGE_PX,
+                image::imageops::FilterType::Lanczos3,
+            )
+        } else {
+            img
+        };
+        let cache_stem = full_cover_cache_stem(&content_hash);
+        let cache_path = cache_dir.join(format!("{cache_stem}.{FULL_COVER_FALLBACK_EXT}"));
+        if let Some(persisted) =
+            persist_image_atomically(&display_img, ImageFormat::Png, &cache_path)
+        {
+            let _ = persist_alias_target(&alias_path, &cache_path);
+            return Some(persisted);
         }
     }
     None

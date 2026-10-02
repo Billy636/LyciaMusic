@@ -10,6 +10,7 @@ const runtimeMetadataCache = new MemoryCache<string, SongRuntimeMetadata | null>
   ttlMs: RUNTIME_METADATA_CACHE_TTL_MS,
 });
 const inFlightRequests = new Map<string, Promise<SongRuntimeMetadata | null>>();
+let cacheGeneration = 0;
 
 const loadSongRuntimeMetadata = (path: string) => {
   if (!path) {
@@ -25,13 +26,19 @@ const loadSongRuntimeMetadata = (path: string) => {
     return inFlight;
   }
 
+  const requestGeneration = cacheGeneration;
   const request = tauriInvoke('get_song_runtime_metadata', { path })
     .then((metadata) => {
+      if (requestGeneration !== cacheGeneration) {
+        return null;
+      }
       runtimeMetadataCache.set(path, metadata);
       return metadata;
     })
     .finally(() => {
-      inFlightRequests.delete(path);
+      if (inFlightRequests.get(path) === request) {
+        inFlightRequests.delete(path);
+      }
     });
 
   inFlightRequests.set(path, request);
@@ -50,6 +57,7 @@ export function useSongRuntimeMetadata() {
   return {
     resolveSongForPlayback,
     clearSongRuntimeMetadataCache: () => {
+      cacheGeneration += 1;
       runtimeMetadataCache.clear();
       inFlightRequests.clear();
     },

@@ -11,8 +11,8 @@ export const fileApi = {
     tauriInvoke('batch_move_music_files', { paths, targetFolder }),
   getFolderFirstSong: (folderPath: string) =>
     tauriInvoke('get_folder_first_song', { folderPath }),
-  scanMusicFolder: (folderPath: string, minimumDurationSeconds = 0) =>
-    tauriInvoke('scan_music_folder', { folderPath, minimumDurationSeconds }),
+  scanMusicFolder: (folderPath: string, minimumDurationSeconds = 0, forceMetadataRefresh = false) =>
+    tauriInvoke('scan_music_folder', { folderPath, minimumDurationSeconds, forceMetadataRefresh }),
   moveMusicFile: (oldPath: string, newPath: string) =>
     tauriInvoke('move_music_file', { oldPath, newPath }),
   showInFolder: (path: string): Promise<void> => tauriInvoke('show_in_folder', { path }),

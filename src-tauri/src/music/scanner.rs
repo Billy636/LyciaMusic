@@ -38,12 +38,14 @@ pub(super) const UNKNOWN_ALBUM: &str = "未知专辑";
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ScanOptions {
     pub(crate) minimum_duration_seconds: u32,
+    pub(crate) force_metadata_refresh: bool,
 }
 
 impl ScanOptions {
     pub(crate) fn from_minimum_duration_seconds(value: Option<u32>) -> Self {
         Self {
             minimum_duration_seconds: value.unwrap_or(0),
+            ..Self::default()
         }
     }
 }
@@ -469,6 +471,7 @@ mod tests {
             None,
             ScanOptions {
                 minimum_duration_seconds: 10,
+                ..ScanOptions::default()
             },
         )
         .expect("collect diff");

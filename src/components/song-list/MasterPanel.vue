@@ -156,7 +156,7 @@ watch(
     if (selectedRoot && selectedRoot.children.length === 0 && selectedRoot.song_count > 0) {
       currentFolderFilter.value = selectedRoot.path;
       try {
-        await refreshFolder(selectedRoot.path);
+        await refreshFolder(selectedRoot.path, false);
       } catch (error) {
         console.error('Failed to auto-load root folder songs:', error);
       }
@@ -254,7 +254,7 @@ const handleRefreshFolder = async () => {
       } else if (removedCount > 0) {
         toast.showToast(`刷新成功，检测到少了 ${removedCount} 首歌曲`, 'success');
       } else {
-        toast.showToast('刷新成功，文件夹歌曲已是最新', 'success');
+        toast.showToast('刷新成功，已重新读取歌曲标签和封面', 'success');
       }
     } else {
       toast.showToast('刷新成功', 'success');
