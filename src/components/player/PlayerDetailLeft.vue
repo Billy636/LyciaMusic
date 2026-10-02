@@ -8,11 +8,16 @@ import FooterContextMenu from "../overlays/FooterContextMenu.vue";
 import { footerCoverVisible, footerCoverAnchor, footerViewport } from '../layout/footerPresentation';
 import { useFooterSettings } from '../../features/settings/useFooterSettings';
 import { resolveFreeFooterLayout } from '../../features/settings/freeFooterLayout';
+import { useRenderingPower } from '../../composables/renderingPower';
+import { useCoverTilt } from './useCoverTilt';
 
 const props = defineProps<{
   isExpanded?: boolean;
   isResizingWindow?: boolean;
+  isCoverFocused?: boolean;
+  isFocusTransitioning?: boolean;
 }>();
+const emit = defineEmits<{ (event: 'toggle-focus'): void }>();
 
 const { footer } = useFooterSettings();
 const mainHasCover = computed(() => ['cover', 'song', 'both'].includes(footer.value.behavior.main.info)
@@ -20,6 +25,12 @@ const mainHasCover = computed(() => ['cover', 'song', 'both'].includes(footer.va
 // Without a main-page thumbnail, keep the cover at its large-cover geometry
 // even when collapsed: only opacity changes, never a flight from empty space.
 const usesLargeCoverLayout = computed(() => !!props.isExpanded || !mainHasCover.value);
+const isCoverFocusMove = ref(false);
+watch([() => !!props.isExpanded, () => !!props.isCoverFocused], ([expanded, focused], [wasExpanded, wasFocused]) => {
+  // Only an in-page layout toggle uses the focus timing. A remembered layout
+  // must expand directly from the thumbnail with the same easing as its geometry.
+  isCoverFocusMove.value = expanded && wasExpanded && focused !== wasFocused;
+});
 const skipCoverTransition = ref(false);
 let transitionResetFrame = 0;
 watch(mainHasCover, () => {
@@ -34,6 +45,21 @@ watch(mainHasCover, () => {
 });
 onBeforeUnmount(() => cancelAnimationFrame(transitionResetFrame));
 
+const coverTransitionStyle = computed(() => {
+  const instant = (props.isResizingWindow && props.isExpanded)
+    || (skipCoverTransition.value && !props.isExpanded);
+  const opacityDuration = mainHasCover.value ? '700ms' : '300ms';
+  return {
+    '--cover-layout-duration': instant || !mainHasCover.value ? '0ms' : '700ms',
+    '--cover-opacity-duration': instant ? '0ms' : opacityDuration,
+    '--cover-move-duration': instant ? '0ms' : isCoverFocusMove.value
+      ? 'var(--player-cover-focus-duration, 600ms)' : opacityDuration,
+    '--cover-move-easing': isCoverFocusMove.value
+      ? 'var(--player-cover-focus-easing, cubic-bezier(0.4, 0, 0.2, 1))'
+      : 'var(--cover-layout-easing)',
+  };
+});
+
 const {
   currentSong, currentCover, currentCoverPath, currentCoverFull, isPlaying, dominantColors
 } = usePlaybackController();
@@ -45,6 +71,19 @@ const showContextMenu = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
 const currentSongPath = computed(() => currentSong.value?.path ?? '');
+
+const toggleCoverFocus = () => {
+  if (!props.isExpanded || props.isResizingWindow || showContextMenu.value) return;
+  emit('toggle-focus');
+};
+
+const handleCoverKeydown = (event: KeyboardEvent) => {
+  if (!props.isExpanded) return;
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (!event.repeat) toggleCoverFocus();
+};
 
 const handleContextMenu = (e: MouseEvent) => {
   if (!currentSong.value) return;
@@ -144,6 +183,7 @@ watch(() => props.isExpanded, (isExpanded) => {
     return;
   }
 
+  if (document.activeElement === detailCoverRef.value) detailCoverRef.value?.blur();
   bigCoverLoaded.value = false;
   fullCoverLoading.value = false;
   reflectionCoverUrl.value = '';
@@ -179,6 +219,13 @@ const onBigCoverError = () => {
 };
 
 const detailCoverRef = ref<HTMLElement | null>(null);
+const tiltSurfaceRef = ref<HTMLElement | null>(null);
+const { isMainWindowLowPower, mainWindowRenderingSnapshot } = useRenderingPower();
+useCoverTilt(detailCoverRef, tiltSurfaceRef, () => !!props.isExpanded
+  && !props.isResizingWindow
+  && !showContextMenu.value
+  && !isMainWindowLowPower.value
+  && mainWindowRenderingSnapshot.value.windowFocused);
 defineExpose({ detailCoverRef });
 </script>
 
@@ -188,47 +235,63 @@ defineExpose({ detailCoverRef });
     <!-- Album Art -->
     <div 
       ref="detailCoverRef"
-      class="shared-cover absolute aspect-square ease-[cubic-bezier(0.22,1,0.36,1)] z-50 will-change-transform"
+      class="shared-cover absolute aspect-square z-50 will-change-transform"
+      role="button"
+      :tabindex="props.isExpanded ? 0 : -1"
+      :aria-hidden="!props.isExpanded"
+      :aria-pressed="!!props.isCoverFocused"
+      :aria-label="props.isCoverFocused ? '恢复封面与歌词布局' : '居中欣赏封面，隐藏歌词'"
+      :title="props.isCoverFocused ? '点击恢复歌词' : '点击居中欣赏封面'"
       :class="[
         usesLargeCoverLayout ? 'top-[45%] left-[calc(75px+18%)] -translate-x-1/2 -translate-y-1/2 w-[clamp(220px,45vh,580px)] rounded-2xl' : 'top-[calc(100vh-64px)] left-[16px] translate-x-0 translate-y-0 w-12 rounded-lg',
-        props.isExpanded ? 'pointer-events-auto' : 'pointer-events-none',
+        props.isExpanded ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none',
       ]"
-      :style="{ 
-        transitionProperty: mainHasCover ? 'top, left, width, height, translate, transform, border-radius, opacity, box-shadow' : 'opacity, box-shadow',
-        transitionDuration: (props.isResizingWindow && props.isExpanded) || (skipCoverTransition && !props.isExpanded) ? '0ms' : mainHasCover ? '700ms' : '300ms',
+      :style="[coverTransitionStyle, {
         left: !usesLargeCoverLayout && footerCoverAnchor ? `${footerCoverAnchor.x}px` : undefined,
         top: !usesLargeCoverLayout && footerCoverAnchor ? `${footerCoverAnchor.y}px` : undefined,
         width: !usesLargeCoverLayout && footerCoverAnchor ? `${footerCoverAnchor.width}px` : undefined,
-        boxShadow: props.isExpanded && isPlaying
-          ? `0 30px 60px -12px rgba(0,0,0,0.6), 0 18px 36px -18px rgba(0,0,0,0.7), 0 0 80px -20px ${dominantColors[0]}44` 
-          : (props.isExpanded ? `0 10px 20px -5px rgba(0,0,0,0.4)` : 'none'),
-        transform: props.isExpanded ? (isPlaying ? 'scale(1)' : 'scale(1)') : 'scale(1)',
+        transform: usesLargeCoverLayout && props.isCoverFocused
+          ? 'translate3d(calc(32vw - 75px), 0, 0)' : 'translate3d(0, 0, 0)',
+        zIndex: props.isCoverFocused || props.isFocusTransitioning ? 55 : undefined,
         opacity: props.isExpanded || (mainHasCover && footerCoverVisible) ? 1 : 0,
-      }"
+      }]"
+      @click.left.stop="toggleCoverFocus"
+      @keydown="handleCoverKeydown"
     >
-      <!-- Main Cover Container -->
-      <transition name="song-switch-cover" mode="out-in">
-        <div :key="currentSongPath" class="w-full h-full rounded-[inherit] overflow-hidden relative isolate z-20">
-          <img v-if="currentLocalCoverUrl" :key="`thumb:${currentSongPath}:${currentLocalCoverUrl}`" :src="currentLocalCoverUrl" class="absolute inset-0 w-full h-full object-cover select-none transition-[transform,filter,opacity] duration-[240ms] ease-out z-10" :class="props.isExpanded ? (fullCoverLoading ? 'scale-[1.03] blur-[10px] brightness-90' : 'scale-100 blur-0 brightness-100') : 'scale-125 blur-0 brightness-100'" draggable="false" decoding="async" />
-          <img v-if="currentBigCoverUrl" :key="`big:${currentSongPath}:${currentBigCoverUrl}`" :src="currentBigCoverUrl" @load="onBigCoverLoad" @error="onBigCoverError" class="absolute inset-0 w-full h-full object-cover select-none transition-opacity duration-[240ms] ease-out z-20" :class="[props.isExpanded ? 'scale-100' : 'scale-125', bigCoverLoaded ? 'opacity-100' : 'opacity-0']" draggable="false" decoding="async" />
-          <div v-if="!currentLocalCoverUrl && !currentBigCoverUrl" class="absolute inset-0 w-full h-full bg-white/5 flex items-center justify-center text-white/10 z-0">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-32 w-32" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+      <!-- Keep the hit area stationary; only this inner surface tilts. -->
+      <div
+        ref="tiltSurfaceRef"
+        class="cover-tilt-surface relative w-full h-full rounded-[inherit] pointer-events-none"
+        :style="{
+          boxShadow: props.isExpanded && isPlaying
+            ? `0 30px 60px -12px rgba(0,0,0,0.6), 0 18px 36px -18px rgba(0,0,0,0.7), 0 0 80px -20px ${dominantColors[0]}44`
+            : (props.isExpanded ? '0 10px 20px -5px rgba(0,0,0,0.4)' : 'none'),
+        }"
+      >
+        <!-- Main Cover Container -->
+        <transition name="song-switch-cover" mode="out-in">
+          <div :key="currentSongPath" class="w-full h-full rounded-[inherit] overflow-hidden relative isolate z-20">
+            <img v-if="currentLocalCoverUrl" :key="`thumb:${currentSongPath}:${currentLocalCoverUrl}`" :src="currentLocalCoverUrl" class="absolute inset-0 w-full h-full object-cover select-none transition-[transform,filter,opacity] duration-[240ms] ease-out z-10" :class="props.isExpanded ? (fullCoverLoading ? 'scale-[1.03] blur-[10px] brightness-90' : 'scale-100 blur-0 brightness-100') : 'scale-125 blur-0 brightness-100'" draggable="false" decoding="async" />
+            <img v-if="currentBigCoverUrl" :key="`big:${currentSongPath}:${currentBigCoverUrl}`" :src="currentBigCoverUrl" @load="onBigCoverLoad" @error="onBigCoverError" class="absolute inset-0 w-full h-full object-cover select-none transition-opacity duration-[240ms] ease-out z-20" :class="[props.isExpanded ? 'scale-100' : 'scale-125', bigCoverLoaded ? 'opacity-100' : 'opacity-0']" draggable="false" decoding="async" />
+            <div v-if="!currentLocalCoverUrl && !currentBigCoverUrl" class="absolute inset-0 w-full h-full bg-white/5 flex items-center justify-center text-white/10 z-0">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-32 w-32" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+            </div>
           </div>
-        </div>
-      </transition>
+        </transition>
 
-      <!-- Glass Table Reflection Layer -->
-      <transition name="reflection-reveal" appear>
-        <div v-if="props.isExpanded" class="absolute top-[calc(100%+2px)] left-0 w-full h-[65%] pointer-events-none z-10 reflection-wrapper rounded-[inherit] overflow-hidden">
-          <div class="absolute inset-0 reflection-glass rounded-[inherit] overflow-hidden">
-            <transition name="song-switch-cover" mode="out-in">
-              <div :key="currentSongPath" class="w-full h-full relative">
-                <img v-if="reflectionCoverUrl" :src="reflectionCoverUrl" class="absolute top-0 left-0 w-full aspect-square object-cover scale-y-[-1] transition-opacity duration-[240ms] ease-out" draggable="false" decoding="async" />
-              </div>
-            </transition>
+        <!-- Glass Table Reflection Layer -->
+        <transition name="reflection-reveal" appear>
+          <div v-if="props.isExpanded" class="absolute top-[calc(100%+2px)] left-0 w-full h-[65%] pointer-events-none z-10 reflection-wrapper rounded-[inherit] overflow-hidden">
+            <div class="absolute inset-0 reflection-glass rounded-[inherit] overflow-hidden">
+              <transition name="song-switch-cover" mode="out-in">
+                <div :key="currentSongPath" class="w-full h-full relative">
+                  <img v-if="reflectionCoverUrl" :src="reflectionCoverUrl" class="absolute top-0 left-0 w-full aspect-square object-cover scale-y-[-1] transition-opacity duration-[240ms] ease-out" draggable="false" decoding="async" />
+                </div>
+              </transition>
+            </div>
           </div>
-        </div>
-      </transition>
+        </transition>
+      </div>
     </div>
 
     <FooterContextMenu 
@@ -243,8 +306,35 @@ defineExpose({ detailCoverRef });
 </template>
 
 <style scoped>
+.shared-cover {
+  --cover-layout-easing: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Only transform changes when focusing; keep the existing thumbnail flight separate. */
+  transition:
+    top var(--cover-layout-duration) var(--cover-layout-easing),
+    left var(--cover-layout-duration) var(--cover-layout-easing),
+    width var(--cover-layout-duration) var(--cover-layout-easing),
+    height var(--cover-layout-duration) var(--cover-layout-easing),
+    translate var(--cover-layout-duration) var(--cover-layout-easing),
+    border-radius var(--cover-layout-duration) var(--cover-layout-easing),
+    opacity var(--cover-opacity-duration) var(--cover-layout-easing),
+    transform var(--cover-move-duration) var(--cover-move-easing);
+}
+
+.shared-cover:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 0.6);
+  outline-offset: 8px;
+}
+
+.cover-tilt-surface {
+  transform-origin: center;
+  transition-property: box-shadow;
+  transition-duration: var(--cover-opacity-duration);
+  transition-timing-function: var(--cover-layout-easing);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .shared-cover { transition-duration: 0ms !important; }
+  .shared-cover,
+  .cover-tilt-surface { transition-duration: 0ms !important; }
 }
 .reflection-wrapper {
   perspective: 1500px;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useLyrics } from '../../composables/lyrics';
 import { useSongDetailCache } from '../../composables/useSongDetailCache';
@@ -18,6 +19,7 @@ import ImmersiveTransitionOverlay from './ImmersiveTransitionOverlay.vue';
 import QueueList from './QueueList.vue';
 import { resolvePlayerDetailEscapeAction } from './playerDetailKeyboard';
 import { hideMainWindowToTray } from '../../composables/renderingPower';
+import { useUiStore } from '../../shared/stores/ui';
 
 const {
   showPlayerDetail,
@@ -47,6 +49,33 @@ const isImmersiveCursorHidden = ref(false);
 let immersiveCursorHideTimer: ReturnType<typeof setTimeout> | null = null;
 const currentSongDetail = ref<SongDetail | null>(null);
 let detailRequestId = 0;
+
+const { isPlayerCoverFocused: isCoverFocused } = storeToRefs(useUiStore());
+const isFocusContentMounted = ref(!isCoverFocused.value);
+const isFocusContentTransitioning = ref(false);
+const canInteractWithFocusContent = computed(() => showPlayerDetail.value
+  && !isCoverFocused.value && !isFocusContentTransitioning.value);
+
+watch(isCoverFocused, (focused) => {
+  isFocusContentTransitioning.value = true;
+  if (!focused) isFocusContentMounted.value = true;
+});
+
+const handleFocusContentHidden = () => {
+  if (!isCoverFocused.value) return;
+  // Dispose the hidden lyric renderer only after its fade, so it does no background work.
+  isFocusContentMounted.value = false;
+  isFocusContentTransitioning.value = false;
+};
+
+const handleFocusContentShown = () => {
+  if (!isCoverFocused.value) isFocusContentTransitioning.value = false;
+};
+
+// Opening a right-side tool should never leave it hidden behind the focused cover.
+watch([showQueue, showPlaylist, showLyricsPlayerSettingsPanel], (opened, previous) => {
+  if (opened.some((visible, index) => visible && !previous[index])) isCoverFocused.value = false;
+});
 
 const appWindow = getCurrentWindow();
 
@@ -220,6 +249,10 @@ watch(showPlayerDetail, async (visible) => {
   }
 
   isTopChromeVisible.value = false;
+  // Closing is not a layout change. Keep the preference and finish transient
+  // content state so even a quick reopen cannot flash partially faded lyrics.
+  isFocusContentTransitioning.value = false;
+  isFocusContentMounted.value = !isCoverFocused.value;
   currentSongDetail.value = null;
   clearSongDetailCache();
 
@@ -299,6 +332,11 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
 
     event.preventDefault();
     event.stopPropagation();
+
+    if (isCoverFocused.value) {
+      isCoverFocused.value = false;
+      return;
+    }
 
     const action = resolvePlayerDetailEscapeAction(
       isFullscreen.value,
@@ -428,7 +466,7 @@ const metaInfo = computed(() => {
 <template>
   <ImmersiveTransitionOverlay ref="immersiveTransition" :active="showPlayerDetail" />
   <div
-    class="fixed inset-x-0 bottom-0 z-[50] flex h-[100vh] flex-col overflow-visible font-sans select-none text-white"
+    class="player-detail fixed inset-x-0 bottom-0 z-[50] flex h-[100vh] flex-col overflow-visible font-sans select-none text-white"
     :class="[
       showPlayerDetail ? 'pointer-events-auto' : 'pointer-events-none',
       isImmersiveCursorHidden ? 'immersive-cursor-hidden' : '',
@@ -533,44 +571,62 @@ const metaInfo = computed(() => {
         </div>
       </div>
 
-      <PlayerDetailLeft :isExpanded="showPlayerDetail" :isResizingWindow="isFullscreenTransitioning" />
+      <PlayerDetailLeft
+        :isExpanded="showPlayerDetail"
+        :isResizingWindow="isFullscreenTransitioning"
+        :isCoverFocused="isCoverFocused"
+        :isFocusTransitioning="isFocusContentTransitioning"
+        @toggle-focus="isCoverFocused = !isCoverFocused"
+      />
 
-      <div class="relative z-50 flex min-h-0 flex-1 pl-8 pr-0 pb-22">
+      <!-- Let the left spacer pass pointer events through to the shared cover. -->
+      <div class="pointer-events-none relative z-50 flex min-h-0 flex-1 pl-8 pr-0 pb-22">
         <div class="pointer-events-none h-full w-[40%] min-w-[300px]"></div>
 
         <div
           class="flex h-full min-h-0 flex-1 flex-col justify-center pt-0 pb-0 pl-2 pr-8"
+          :class="canInteractWithFocusContent ? 'pointer-events-auto' : 'pointer-events-none'"
+          :inert="!canInteractWithFocusContent"
+          :aria-hidden="!showPlayerDetail || isCoverFocused"
           :style="staggerStyle(2, 'X', 20)"
         >
-          <transition name="fade-scale" mode="out-in">
-            <QueueList
-              v-if="showQueue"
-              class="h-full rounded-2xl border border-white/5 bg-black/10 p-4 shadow-xl backdrop-blur-sm"
-            />
+          <Transition
+            name="cover-focus-content"
+            @after-leave="handleFocusContentHidden"
+            @after-enter="handleFocusContentShown"
+          >
+            <div v-show="!isCoverFocused" class="h-full min-h-0 w-full">
+              <transition v-if="isFocusContentMounted" name="fade-scale" mode="out-in">
+                <QueueList
+                  v-if="showQueue"
+                  class="h-full rounded-2xl border border-white/5 bg-black/10 p-4 shadow-xl backdrop-blur-sm"
+                />
 
-            <LyricsView
-              v-else-if="showPlayerDetail && hasLyricsPresentation"
-              :appearance-preview="lyricsAppearancePreview"
-              class="h-full"
-            />
+                <LyricsView
+                  v-else-if="showPlayerDetail && hasLyricsPresentation"
+                  :appearance-preview="lyricsAppearancePreview"
+                  class="h-full"
+                />
 
-            <transition v-else name="song-switch-meta" mode="out-in">
-              <div
-                :key="currentSong?.path"
-                class="flex h-full flex-col items-center justify-center opacity-80"
-                style="text-shadow: 0 2px 10px rgba(0,0,0,0.4);"
-              >
-                <div
-                  v-for="(info, index) in metaInfo"
-                  :key="index"
-                  class="mb-4 flex items-center text-xl font-medium tracking-wider sm:text-2xl"
-                >
-                  <span class="mr-4 text-white/40">{{ info.label }}</span>
-                  <span class="text-white drop-shadow-md">{{ info.value }}</span>
-                </div>
-              </div>
-            </transition>
-          </transition>
+                <transition v-else name="song-switch-meta" mode="out-in">
+                  <div
+                    :key="currentSong?.path"
+                    class="flex h-full flex-col items-center justify-center opacity-80"
+                    style="text-shadow: 0 2px 10px rgba(0,0,0,0.4);"
+                  >
+                    <div
+                      v-for="(info, index) in metaInfo"
+                      :key="index"
+                      class="mb-4 flex items-center text-xl font-medium tracking-wider sm:text-2xl"
+                    >
+                      <span class="mr-4 text-white/40">{{ info.label }}</span>
+                      <span class="text-white drop-shadow-md">{{ info.value }}</span>
+                    </div>
+                  </div>
+                </transition>
+              </transition>
+            </div>
+          </Transition>
         </div>
       </div>
     </div>
@@ -578,6 +634,31 @@ const metaInfo = computed(() => {
 </template>
 
 <style scoped>
+.player-detail {
+  --player-cover-focus-duration: 600ms;
+  --player-cover-focus-easing: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cover-focus-content-enter-active {
+  transition: opacity 450ms ease-out 150ms;
+}
+
+.cover-focus-content-leave-active {
+  transition: opacity 450ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cover-focus-content-enter-from,
+.cover-focus-content-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover-focus-content-enter-active,
+  .cover-focus-content-leave-active {
+    transition: none;
+  }
+}
+
 .fade-scale-enter-active,
 .fade-scale-leave-active {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
