@@ -17,6 +17,8 @@ const TEXT = {
   dynamicHint: '\u8ddf\u968f\u5c01\u9762\u53d8\u5316',
   dynamicOff: '\u5173\u95ed',
   dynamicFlow: '\u6d41\u5149',
+  dynamicFlowGpuBadge: '高GPU',
+  dynamicFlowHint: '持续动画会增加 GPU 开销，实际占用取决于窗口大小和设备；低功耗设备可选择静态模糊。',
   dynamicBlur: '\u9759\u6001\u6a21\u7cca',
   dynamicDisabledHint: '\u81ea\u5b9a\u4e49\u76ae\u80a4\u6216\u7a97\u53e3\u6750\u8d28\u542f\u7528\u65f6\uff0c\u52a8\u6001\u80cc\u666f\u4f1a\u81ea\u52a8\u505c\u7528\u3002',
   windowMaterialTitle: '\u7a97\u53e3\u6750\u8d28',
@@ -193,9 +195,15 @@ const getWindowMaterialHint = (mode: Exclude<WindowMaterialMode, 'none'>) => {
               :class="theme.dynamicBgType === 'flow'
                 ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm'
                 : 'border-gray-200/70 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/10 dark:hover:bg-white/10'"
+              :title="TEXT.dynamicFlowHint"
               @click="setDynamicType('flow')"
             >
-              <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicFlow }}</div>
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicFlow }}</span>
+                <span class="shrink-0 rounded bg-red-100/60 px-1.5 py-0.5 text-[10px] font-medium text-[#EC4141] dark:bg-red-500/15">
+                  {{ TEXT.dynamicFlowGpuBadge }}
+                </span>
+              </div>
             </button>
 
             <button

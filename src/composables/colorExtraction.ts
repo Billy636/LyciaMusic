@@ -25,6 +25,7 @@ interface PaletteCandidate extends HslColor {
 interface ExtractColorOptions {
   colorBoost?: number;
   depth?: number;
+  preserveSourceColors?: boolean;
 }
 
 const FALLBACK_PALETTE = [
@@ -32,6 +33,12 @@ const FALLBACK_PALETTE = [
   'hsl(196, 58%, 56%)',
   'hsl(340, 52%, 58%)',
   'hsl(42, 72%, 60%)',
+];
+const SOURCE_FALLBACK_PALETTE = [
+  'hsl(0, 0%, 34%)',
+  'hsl(0, 0%, 52%)',
+  'hsl(0, 0%, 42%)',
+  'hsl(0, 0%, 62%)',
 ];
 
 const CANVAS_SIZE = 56;
@@ -48,8 +55,8 @@ export function clearPaletteCache() {
   paletteCache.clear();
 }
 
-function createFallbackPalette(count: number): string[] {
-  return FALLBACK_PALETTE.slice(0, count);
+function createFallbackPalette(count: number, preserveSourceColors = false): string[] {
+  return (preserveSourceColors ? SOURCE_FALLBACK_PALETTE : FALLBACK_PALETTE).slice(0, count);
 }
 
 function buildPaletteCacheKey(imageUrl: string, count: number, options: ExtractColorOptions): string {
@@ -58,6 +65,7 @@ function buildPaletteCacheKey(imageUrl: string, count: number, options: ExtractC
     count,
     colorBoost: options.colorBoost ?? 56,
     depth: options.depth ?? 58,
+    preserveSourceColors: options.preserveSourceColors ?? false,
   });
 }
 
@@ -246,6 +254,29 @@ function selectPalette(candidates: PaletteCandidate[], count: number): HslColor[
   return selected.slice(0, count);
 }
 
+function createSourcePalette(selected: HslColor[], count: number): string[] {
+  if (selected.length === 0) {
+    return createFallbackPalette(count, true);
+  }
+
+  const palette = [...selected];
+  while (palette.length < count) {
+    const role = palette.length;
+    const anchor = selected[role % selected.length];
+    const direction = anchor.l < 0.28 ? 1 : anchor.l > 0.72 ? -1 : role % 2 === 0 ? -1 : 1;
+
+    // Sparse/monochrome covers get lightness variants, never invented hues or saturation.
+    palette.push({
+      ...anchor,
+      l: clamp(anchor.l + direction * Math.min(0.24, 0.08 + role * 0.05), 0, 1),
+    });
+  }
+
+  return palette.slice(0, count).map(color => (
+    `hsl(${Math.round(normalizeHue(color.h))}, ${Math.round(color.s * 100)}%, ${Math.round(color.l * 100)}%)`
+  ));
+}
+
 export async function extractDominantColors(
   imageUrl: string,
   count: number = DEFAULT_COUNT,
@@ -260,6 +291,7 @@ export async function extractDominantColors(
   return new Promise(resolve => {
     const colorBoost = options.colorBoost ?? 56;
     const depth = options.depth ?? 58;
+    const preserveSourceColors = options.preserveSourceColors ?? false;
     const image = new Image();
     let canvas: HTMLCanvasElement | null = null;
     let settled = false;
@@ -292,7 +324,7 @@ export async function extractDominantColors(
         canvas = document.createElement('canvas');
         const context = canvas.getContext('2d', { willReadFrequently: true });
         if (!context) {
-          finish(createFallbackPalette(count));
+          finish(createFallbackPalette(count, preserveSourceColors));
           return;
         }
 
@@ -316,7 +348,7 @@ export async function extractDominantColors(
             const blue = imageData[offset + 2];
             const hsl = rgbToHsl(red, green, blue);
 
-            if (hsl.l < 0.02 || hsl.l > 0.98) {
+            if (!preserveSourceColors && (hsl.l < 0.02 || hsl.l > 0.98)) {
               continue;
             }
 
@@ -351,11 +383,16 @@ export async function extractDominantColors(
           .sort((a, b) => b.score - a.score);
 
         if (candidates.length === 0) {
-          finish(createFallbackPalette(count));
+          finish(createFallbackPalette(count, preserveSourceColors));
           return;
         }
 
         const selected = selectPalette(candidates, count);
+        if (preserveSourceColors) {
+          finish(createSourcePalette(selected, count));
+          return;
+        }
+
         const polished = selected.map((candidate, index) => polishColor(candidate, index, colorBoost, depth));
         const anchor = selected[0] ?? { h: 220, s: 0.35, l: 0.38 };
 
@@ -365,12 +402,12 @@ export async function extractDominantColors(
 
         finish(polished.slice(0, count));
       } catch {
-        finish(createFallbackPalette(count));
+        finish(createFallbackPalette(count, preserveSourceColors));
       }
     };
 
     image.onerror = () => {
-      finish(createFallbackPalette(count));
+      finish(createFallbackPalette(count, preserveSourceColors));
     };
 
     image.crossOrigin = 'Anonymous';
