@@ -83,9 +83,13 @@ export function useAppThemeSync() {
     );
   };
 
-  const syncThemeAndMaterial = async () => {
+  const syncThemeAndMaterial = async (refreshCapabilities = false) => {
     const gen = ++syncGeneration;
     try {
+      if (refreshCapabilities) {
+        await loadWindowMaterialCapabilities(true);
+        if (gen !== syncGeneration) return;
+      }
       await applyTheme();
       if (gen !== syncGeneration) return;
       await syncWindowMaterial();
@@ -107,7 +111,7 @@ export function useAppThemeSync() {
       restoreSyncTimer = null;
     }
 
-    void syncThemeAndMaterial();
+    void syncThemeAndMaterial(true);
 
     // DWM can finish restoring a blurred transparent window after the focus event.
     restoreSyncTimer = setTimeout(() => {

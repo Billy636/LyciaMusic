@@ -601,18 +601,20 @@ const staticMaskClass = computed(() => {
 const staticImageOpacity = computed(() => (isMicaWindowMaterial.value ? 0.35 : 1));
 
 const materialScrimStyle = computed(() => {
-  if (!hasWindowMaterial.value) {
+  // Mica already supplies an opaque, theme-aware wallpaper tint. Another
+  // full-window scrim washes it out; only translucent materials need one.
+  if (!hasWindowMaterial.value || isMicaWindowMaterial.value) {
     return null;
   }
 
   if (isDarkTheme.value) {
     return {
-      backgroundColor: isMicaWindowMaterial.value ? 'rgba(14, 16, 18, 0.42)' : 'rgba(12, 14, 16, 0.34)',
+      backgroundColor: 'rgba(12, 14, 16, 0.34)',
     };
   }
 
   return {
-    backgroundColor: isMicaWindowMaterial.value ? 'rgba(248, 249, 251, 0.62)' : 'rgba(250, 250, 252, 0.5)',
+    backgroundColor: 'rgba(250, 250, 252, 0.5)',
   };
 });
 
@@ -675,7 +677,7 @@ const customBgTransform = computed(() => {
     ]"
   >
     <div
-      v-if="hasWindowMaterial"
+      v-if="materialScrimStyle"
       class="absolute inset-0 z-[1] transition-colors duration-500"
       :style="materialScrimStyle"
     ></div>

@@ -21,7 +21,7 @@ fn platform_capabilities() -> WindowMaterialCapabilities {
     let build = query_windows_build_number();
     let supports_acrylic = matches!(build, Some(value) if value >= 17763);
     let supports_mica = matches!(build, Some(value) if value >= 22000);
-    let supports_blur = matches!(build, Some(value) if value >= 10240 && value < 22621);
+    let supports_blur = matches!(build, Some(value) if value >= 17763 && value < 22621);
 
     WindowMaterialCapabilities {
         is_windows: true,

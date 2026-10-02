@@ -7,7 +7,7 @@ const clampValue = (value: number, min: number, max: number) => (
   Math.min(max, Math.max(min, Math.round(value)))
 );
 type SelectableWindowMaterialMode = Exclude<WindowMaterialMode, 'none'>;
-type WindowMaterialDisabledReason = 'windows' | 'windows11' | 'transparency' | 'theme-conflict' | null;
+type WindowMaterialDisabledReason = 'windows' | 'windows11' | 'unsupported' | 'transparency' | 'theme-conflict' | null;
 
 export function useSettingsThemeControls() {
   const { theme, patchTheme, setThemeMode, setDynamicBackgroundType, setWindowMaterial } = useThemeSettings();
@@ -36,7 +36,7 @@ export function useSettingsThemeControls() {
   const hasWindowMaterialThemeConflict = computed(
     () => colorScheme.value === 'custom' || theme.value.dynamicBgType !== 'none',
   );
-  const windowMaterialSharedDisabledReason = computed<Exclude<WindowMaterialDisabledReason, 'windows' | 'windows11'>>(() => {
+  const windowMaterialSharedDisabledReason = computed<Exclude<WindowMaterialDisabledReason, 'windows' | 'windows11' | 'unsupported'>>(() => {
     if (capabilities.value.systemTransparencyEnabled === false) {
       return 'transparency';
     }
@@ -69,12 +69,21 @@ export function useSettingsThemeControls() {
   };
 
   const getWindowMaterialModeDisabledReason = (mode: SelectableWindowMaterialMode): WindowMaterialDisabledReason => {
+    if (!capabilities.value.isWindows) {
+      return 'windows';
+    }
+
     if ((mode === 'acrylic' || mode === 'mica') && !isWindows11.value) {
       return 'windows11';
     }
 
-    if (mode === 'blur' && (!capabilities.value.isWindows || !capabilities.value.supportsBlur)) {
-      return 'windows';
+    const supported = {
+      acrylic: capabilities.value.supportsAcrylic,
+      mica: capabilities.value.supportsMica,
+      blur: capabilities.value.supportsBlur,
+    }[mode];
+    if (!supported) {
+      return 'unsupported';
     }
 
     return windowMaterialSharedDisabledReason.value;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import CustomSkinModal from './CustomSkinModal.vue';
 import { useSettingsThemeControls } from '../../composables/useSettingsThemeControls';
+import type { WindowMaterialMode } from '../../composables/windowMaterial';
 
 const TEXT = {
   paletteTitle: '\u914d\u8272\u65b9\u6848',
@@ -19,7 +20,14 @@ const TEXT = {
   dynamicBlur: '\u9759\u6001\u6a21\u7cca',
   dynamicDisabledHint: '\u81ea\u5b9a\u4e49\u76ae\u80a4\u6216\u7a97\u53e3\u6750\u8d28\u542f\u7528\u65f6\uff0c\u52a8\u6001\u80cc\u666f\u4f1a\u81ea\u52a8\u505c\u7528\u3002',
   windowMaterialTitle: '\u7a97\u53e3\u6750\u8d28',
+  windowMaterialAcrylic: '亚克力',
+  windowMaterialMica: '云母',
   windowMaterialBlur: '\u6bdb\u73bb\u7483',
+  windowMaterialAcrylicHint: '模糊透出窗口背后的内容',
+  windowMaterialMicaHint: '取色于桌面壁纸，不透出其他窗口',
+  windowMaterialBlurHint: '传统半透明模糊，可调节遮罩浓度',
+  windowMaterialVersionHint: '当前 Windows 版本不支持此材质。',
+  windowMaterialBlurVersionHint: '支持 Windows 10 1809 起及 Windows 11 21H2；不支持 Windows 11 22H2 及更新版本。',
   windowMaterialUnsupportedHint: '\u4ec5 Windows 10 / 11 \u652f\u6301\u3002',
   windowMaterialTransparencyHint: '\u9700\u5728\u7cfb\u7edf\u8bbe\u7f6e\u4e2d\u5f00\u542f\u900f\u660e\u6548\u679c\u540e\u624d\u53ef\u7528\u3002',
   windowMaterialConflictHint: '\u5173\u95ed\u52a8\u6001\u80cc\u666f\u6216\u81ea\u5b9a\u4e49\u76ae\u80a4\u540e\u53ef\u7528\u3002',
@@ -53,6 +61,22 @@ const {
   setWindowBlurTint,
   toggleRetainMaterialOnUnfocus,
 } = useSettingsThemeControls();
+
+const getWindowMaterialHint = (mode: Exclude<WindowMaterialMode, 'none'>) => {
+  const reason = getWindowMaterialModeDisabledReason(mode);
+  if (reason === 'windows') return TEXT.windowMaterialUnsupportedHint;
+  if (reason === 'windows11') return TEXT.windowMaterialWin11Only;
+  if (reason === 'unsupported') {
+    return mode === 'blur' ? TEXT.windowMaterialBlurVersionHint : TEXT.windowMaterialVersionHint;
+  }
+  if (reason === 'transparency') return TEXT.windowMaterialTransparencyHint;
+  if (reason === 'theme-conflict') return TEXT.windowMaterialConflictHint;
+  return {
+    acrylic: TEXT.windowMaterialAcrylicHint,
+    mica: TEXT.windowMaterialMicaHint,
+    blur: TEXT.windowMaterialBlurHint,
+  }[mode];
+};
 </script>
 
 <template>
@@ -211,12 +235,14 @@ const {
             ]"
             :disabled="isWindowMaterialButtonDisabled('acrylic')"
             :aria-disabled="isWindowMaterialButtonDisabled('acrylic')"
-            :title="getWindowMaterialModeDisabledReason('acrylic') === 'windows11' ? TEXT.windowMaterialWin11Only : ''"
+            :aria-pressed="materialMode === 'acrylic'"
+            :title="getWindowMaterialHint('acrylic')"
             @click="toggleWindowMaterial('acrylic')"
           >
             <div class="flex items-center justify-between gap-3">
-              <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">Acrylic</span>
+              <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.windowMaterialAcrylic }}</span>
             </div>
+            <p class="mt-1 text-xs text-gray-500 dark:text-white/45">{{ TEXT.windowMaterialAcrylicHint }}</p>
           </button>
 
           <button
@@ -230,18 +256,20 @@ const {
             ]"
             :disabled="isWindowMaterialButtonDisabled('mica')"
             :aria-disabled="isWindowMaterialButtonDisabled('mica')"
-            :title="getWindowMaterialModeDisabledReason('mica') === 'windows11' ? TEXT.windowMaterialWin11Only : ''"
+            :aria-pressed="materialMode === 'mica'"
+            :title="getWindowMaterialHint('mica')"
             @click="toggleWindowMaterial('mica')"
           >
             <div class="flex items-center justify-between gap-3">
-              <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">Mica</span>
+              <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.windowMaterialMica }}</span>
             </div>
+            <p class="mt-1 text-xs text-gray-500 dark:text-white/45">{{ TEXT.windowMaterialMicaHint }}</p>
           </button>
 
           <div class="relative">
             <button
               type="button"
-              class="w-full rounded-xl border px-4 py-3 pr-12 text-left transition-all"
+              class="h-full w-full rounded-xl border px-4 py-3 pr-12 text-left transition-all"
               :class="[
                 materialMode === 'blur'
                   ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm'
@@ -250,18 +278,23 @@ const {
               ]"
               :disabled="isWindowMaterialButtonDisabled('blur')"
               :aria-disabled="isWindowMaterialButtonDisabled('blur')"
+              :aria-pressed="materialMode === 'blur'"
+              :title="getWindowMaterialHint('blur')"
               @click="toggleWindowMaterial('blur')"
             >
               <div class="flex items-center justify-between gap-3">
                 <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.windowMaterialBlur }}</span>
               </div>
+              <p class="mt-1 text-xs text-gray-500 dark:text-white/45">{{ TEXT.windowMaterialBlurHint }}</p>
             </button>
 
             <button
               type="button"
-              class="absolute bottom-3 right-3 rounded-full p-1 text-[#EC4141]/70 opacity-40 transition-all duration-300 hover:bg-[#EC4141]/10 hover:opacity-100"
+              class="absolute top-3 right-3 rounded-full p-1 text-[#EC4141]/70 opacity-40 transition-all duration-300 hover:bg-[#EC4141]/10 hover:opacity-100 disabled:cursor-not-allowed"
               :class="showBlurTuning && materialMode === 'blur' ? 'bg-[#EC4141]/10 opacity-100' : ''"
               :aria-label="BLUR_TEXT.toggleLabel"
+              :disabled="isWindowMaterialButtonDisabled('blur')"
+              :title="getWindowMaterialHint('blur')"
               @click.stop="toggleBlurTuning"
             >
               <svg

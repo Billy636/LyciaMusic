@@ -28,9 +28,17 @@ const activeWindowMaterial = ref<ResolvedWindowMaterial>('none');
 const isWindowMaterialReady = ref(false);
 
 let loadPromise: Promise<WindowMaterialCapabilities> | null = null;
+let materialOperation: Promise<unknown> = Promise.resolve();
 
+// Supported by Tauri's Rust WindowEffect enum, but missing from its JS enum.
 const MICA_DARK_EFFECT = 'micaDark' as Effect;
 const MICA_LIGHT_EFFECT = 'micaLight' as Effect;
+
+function enqueueMaterialOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const pending = materialOperation.then(operation, operation);
+  materialOperation = pending.then(() => undefined, () => undefined);
+  return pending;
+}
 
 function normalizeCapabilities(
   value: Partial<WindowMaterialCapabilities> | null | undefined,
@@ -96,8 +104,18 @@ function waitForCompositorFrame(): Promise<void> {
   }
 
   return new Promise(resolve => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => resolve());
+    const finish = () => {
+      clearTimeout(timeout);
+      if (typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(frame);
+      }
+      resolve();
+    };
+    // Hidden/minimized WebViews may suspend animation frames. Do not let a
+    // compositor rebuild block every later material operation indefinitely.
+    const timeout = setTimeout(finish, 100);
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(finish);
     });
   });
 }
@@ -125,12 +143,12 @@ async function trySetWindowShadow(enabled: boolean): Promise<void> {
 }
 
 export async function loadWindowMaterialCapabilities(force = false): Promise<WindowMaterialCapabilities> {
-  if (isWindowMaterialReady.value && !force) {
-    return capabilities.value;
+  if (loadPromise) {
+    return loadPromise;
   }
 
-  if (loadPromise && !force) {
-    return loadPromise;
+  if (isWindowMaterialReady.value && !force) {
+    return capabilities.value;
   }
 
   loadPromise = windowApi.getWindowMaterialCapabilities()
@@ -154,7 +172,7 @@ export async function loadWindowMaterialCapabilities(force = false): Promise<Win
   return loadPromise;
 }
 
-export async function applyWindowMaterial(
+async function applyWindowMaterialNow(
   mode: WindowMaterialMode,
   isDark: boolean,
   blurTint = 50,
@@ -164,6 +182,12 @@ export async function applyWindowMaterial(
   const appWindow = getCurrentWindow();
 
   try {
+    // Older Windows 11 builds use different native APIs for Mica and Acrylic.
+    // Setting the new effect alone does not remove the previous material.
+    if (resolved !== 'none' && resolved !== activeWindowMaterial.value) {
+      await appWindow.clearEffects();
+    }
+
     if (resolved === 'mica') {
       await trySetWindowBackgroundColor(getTransparentWindowColor());
       await appWindow.setEffects({
@@ -195,10 +219,25 @@ export async function applyWindowMaterial(
     activeWindowMaterial.value = resolved;
   } catch (error) {
     console.error('Failed to apply window material:', error);
+    try {
+      await appWindow.clearEffects();
+    } catch (clearError) {
+      console.warn('Failed to clear window material after an error:', clearError);
+    }
+    await trySetWindowBackgroundColor(getBaseWindowColor(isDark));
+    await trySetWindowShadow(true);
     activeWindowMaterial.value = 'none';
   }
 
   return activeWindowMaterial.value;
+}
+
+export function applyWindowMaterial(
+  mode: WindowMaterialMode,
+  isDark: boolean,
+  blurTint = 50,
+): Promise<ResolvedWindowMaterial> {
+  return enqueueMaterialOperation(() => applyWindowMaterialNow(mode, isDark, blurTint));
 }
 
 interface RebuildWindowMaterialDeps {
@@ -207,29 +246,31 @@ interface RebuildWindowMaterialDeps {
   applyMaterial: (mode: WindowMaterialMode, isDark: boolean, blurTint: number) => Promise<ResolvedWindowMaterial>;
 }
 
-export async function rebuildWindowMaterialForCompositor(
+export function rebuildWindowMaterialForCompositor(
   mode: WindowMaterialMode,
   isDark: boolean,
   blurTint = 50,
   deps?: Partial<RebuildWindowMaterialDeps>,
 ): Promise<ResolvedWindowMaterial> {
-  const clearEffects = deps?.clearEffects ?? (() => getCurrentWindow().clearEffects());
-  const waitForRepaint = deps?.waitForRepaint ?? waitForCompositorFrame;
-  const applyMaterial = deps?.applyMaterial ?? applyWindowMaterial;
+  return enqueueMaterialOperation(async () => {
+    const clearEffects = deps?.clearEffects ?? (() => getCurrentWindow().clearEffects());
+    const waitForRepaint = deps?.waitForRepaint ?? waitForCompositorFrame;
+    const applyMaterial = deps?.applyMaterial ?? applyWindowMaterialNow;
 
-  if (mode === 'none') {
+    if (mode === 'none') {
+      return applyMaterial(mode, isDark, blurTint);
+    }
+
+    try {
+      await clearEffects();
+      activeWindowMaterial.value = 'none';
+      await waitForRepaint();
+    } catch (error) {
+      console.warn('Failed to rebuild window material compositor:', error);
+    }
+
     return applyMaterial(mode, isDark, blurTint);
-  }
-
-  try {
-    await clearEffects();
-    activeWindowMaterial.value = 'none';
-    await waitForRepaint();
-  } catch (error) {
-    console.warn('Failed to rebuild window material compositor:', error);
-  }
-
-  return applyMaterial(mode, isDark, blurTint);
+  });
 }
 
 export function useWindowMaterial() {
