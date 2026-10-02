@@ -55,13 +55,6 @@ const handleFooterClick = (event: MouseEvent) => {
     && node.matches('button, a, input, select, textarea, [role="slider"], .footer-popup'))) return;
   handleOpenDetail();
 };
-const handleContextMenu = (event: MouseEvent) => {
-  if (!currentSong.value) return;
-  event.preventDefault();
-  contextMenuX.value = Math.max(8, Math.min(event.clientX, window.innerWidth - 230));
-  contextMenuY.value = event.clientY;
-  showContextMenu.value = true;
-};
 const handleProgressContextMenu = (event: MouseEvent) => {
   if (isProgressHidden.value || !currentSong.value || !progressBarRef.value || currentSong.value.duration <= 0) return;
   event.preventDefault();
@@ -211,8 +204,18 @@ const closePopup = (restoreFocus = false) => {
     void nextTick(() => { suppressVolumeFocus = false; });
   }
 };
+const openSongContextMenu = (x: number, y: number) => {
+  closePopup();
+  showProgressContextMenu.value = false;
+  showContextMenu.value = false;
+  if (!currentSong.value) return;
+  contextMenuX.value = Math.max(8, Math.min(x, window.innerWidth - 230));
+  contextMenuY.value = y;
+  showContextMenu.value = true;
+};
 const volumeEnter = (id: FooterMovableId, event: MouseEvent | FocusEvent) => {
-  if (suppressVolumeFocus || id !== 'volume' || popup.value && popup.value !== 'volume') return;
+  if (suppressVolumeFocus || showContextMenu.value || showProgressContextMenu.value
+    || id !== 'volume' || popup.value && popup.value !== 'volume') return;
   void openPopup('volume', event.currentTarget as HTMLElement);
 };
 const volumeLeave = () => {
@@ -284,21 +287,22 @@ const handlePopupKeydown = (event: KeyboardEvent) => {
   event.preventDefault(); event.stopImmediatePropagation(); closePopup(true);
 };
 const openFooterContextMenu = (event: MouseEvent) => {
-  // Song information and the seek bar retain their dedicated context menus.
-  if (event.defaultPrevented || !footerRef.value) return;
+  // The seek bar and highlight markers retain their dedicated context menus.
+  if (event.defaultPrevented) return;
   event.preventDefault(); event.stopPropagation();
-  showContextMenu.value = false; showProgressContextMenu.value = false;
-  void openPopup('more', footerRef.value, true);
-  popupLeft.value = Math.max(12, Math.min(event.clientX, window.innerWidth - 244));
+  openSongContextMenu(event.clientX, event.clientY);
 };
 const openFooterMenuFromKeyboard = (event: KeyboardEvent) => {
+  if (event.defaultPrevented) return;
   if (event.target === footerRef.value && (event.key === 'Enter' || event.key === ' ')) {
     event.preventDefault(); event.stopPropagation(); handleOpenDetail(); return;
   }
   if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
   event.preventDefault(); event.stopPropagation();
-  showContextMenu.value = false; showProgressContextMenu.value = false;
-  if (event.target instanceof HTMLElement) void openPopup('more', event.target, true);
+  const anchor = event.target instanceof HTMLElement ? event.target : footerRef.value;
+  if (!anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  openSongContextMenu(rect.left + rect.width / 2, rect.top);
 };
 // Unrelated audio patches also replace AppSettings; do not close the EQ while
 // its sliders are committing audio settings. Only layout changes dismiss it.
@@ -411,7 +415,7 @@ onUnmounted(() => {
         <FooterSongInfo :mode="behavior.info" :width="groups.infoWidth" :song="currentSong" :cover="currentCover"
           :current-time="currentTimeStr" :total-time="totalTimeStr" :expanded="showPlayerDetail"
           :download-label="isCurrentRemoteDownloadActive ? remoteDownloadText : ''"
-          @contextmenu="handleContextMenu" @toggle="handleOpenDetail" />
+          @toggle="handleOpenDetail" />
       </div>
       <FooterActionButton v-for="item in groups.bar" :id="item.id" :key="item.id" class="footer-free-button"
         :style="{ left: `${item.x}px`, width: `${item.width}px`, height: `${item.width}px` }"
