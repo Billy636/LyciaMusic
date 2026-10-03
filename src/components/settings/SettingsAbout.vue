@@ -1,18 +1,14 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { getVersion } from '@tauri-apps/api/app';
-import { openUrl } from '@tauri-apps/plugin-opener';
-import { invoke, isTauri } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import ModernModal from '../common/ModernModal.vue';
+import UpdateAvailableDialog from '../overlays/UpdateAvailableDialog.vue';
 import SponsorModal from './SponsorModal.vue';
-import { checkForUpdates } from '../../composables/useUpdateCheck';
+import { checkForUpdates, type UpdateCheckResult } from '../../composables/useUpdateCheck';
 
 const REPO_OWNER = 'Billy636';
 const REPO_NAME = 'LyciaMusic';
 const REPO_URL = `https://github.com/${REPO_OWNER}/${REPO_NAME}`;
-const RELEASES_URL = `${REPO_URL}/releases`;
-const GITHUB_LATEST_RELEASE_URL = `${RELEASES_URL}/latest`;
 
 const appVersion = ref('');
 const isCheckingUpdate = ref(false);
@@ -23,18 +19,8 @@ const dialogTitle = ref('');
 const dialogContent = ref('');
 const dialogConfirmText = ref('确定');
 const dialogCancelText = ref('取消');
-const dialogAction = ref<'close' | 'open-release'>('close');
-const dialogOpenUrl = ref(RELEASES_URL);
-const updateChoiceVisible = ref(false);
-const updateChoiceTitle = ref('');
-const updateChoiceContent = ref('');
-const updateOfficialUrl = ref('');
-const updateGithubUrl = ref(GITHUB_LATEST_RELEASE_URL);
-
-const isDownloading = ref(false);
-const downloadProgress = ref(0);
-const downloadSpeedText = ref('');
-const downloadStatusText = ref('');
+const updateVisible = ref(false);
+const availableUpdate = ref<UpdateCheckResult | null>(null);
 
 async function loadAppVersion() {
   try {
@@ -50,46 +36,12 @@ function showDialog(options: {
   content: string;
   confirmText: string;
   cancelText: string;
-  action?: 'close' | 'open-release';
 }) {
   dialogTitle.value = options.title;
   dialogContent.value = options.content;
   dialogConfirmText.value = options.confirmText;
   dialogCancelText.value = options.cancelText;
-  dialogAction.value = options.action ?? 'close';
-  dialogOpenUrl.value = RELEASES_URL;
   dialogVisible.value = true;
-}
-
-function formatPublishedDate(value?: string) {
-  if (!value) {
-    return '';
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(date);
-}
-
-function showUpdateChoice(options: {
-  title: string;
-  content: string;
-  officialUrl: string;
-  githubUrl?: string;
-}) {
-  updateChoiceTitle.value = options.title;
-  updateChoiceContent.value = options.content;
-  updateOfficialUrl.value = options.officialUrl;
-  updateGithubUrl.value = options.githubUrl ?? GITHUB_LATEST_RELEASE_URL;
-  updateChoiceVisible.value = true;
 }
 
 async function handleCheckUpdate() {
@@ -102,30 +54,11 @@ async function handleCheckUpdate() {
   try {
     const { currentVersion, release: latestRelease, comparison } = await checkForUpdates();
     appVersion.value = currentVersion;
-    const publishedDate = formatPublishedDate(latestRelease.publishedAt);
     const latestSourceText = latestRelease.source === 'official' ? '官网' : 'GitHub';
 
     if (comparison > 0) {
-      const publishedText = publishedDate ? `；发布时间：${publishedDate}` : '';
-
-      if (latestRelease.source === 'official') {
-        showUpdateChoice({
-          title: '发现新版本',
-          content: `当前版本：v${appVersion.value}；官网最新版本：v${latestRelease.version}${publishedText}。请选择下载来源。`,
-          officialUrl: latestRelease.downloadUrl ?? latestRelease.url,
-          githubUrl: `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/V${latestRelease.version}/Lycia.Player_${latestRelease.version}_x64-setup-portable.exe`
-        });
-        return;
-      }
-
-      showDialog({
-        title: '发现新版本',
-        content: `当前版本：v${appVersion.value}；GitHub 最新版本：v${latestRelease.version}${publishedText}。是否前往下载页面？`,
-        confirmText: '前往下载',
-        cancelText: '稍后',
-        action: 'open-release'
-      });
-      dialogOpenUrl.value = latestRelease.url;
+      availableUpdate.value = { currentVersion, release: latestRelease, comparison };
+      updateVisible.value = true;
       return;
     }
 
@@ -158,74 +91,6 @@ async function handleCheckUpdate() {
   }
 }
 
-async function handleDialogConfirm() {
-  dialogVisible.value = false;
-
-  if (dialogAction.value === 'open-release') {
-    await openUrl(dialogOpenUrl.value);
-  }
-}
-
-async function startDownload(url: string) {
-  isDownloading.value = true;
-  downloadProgress.value = 0;
-  downloadSpeedText.value = '0 KB/s';
-  downloadStatusText.value = '准备下载...';
-
-  let unlisten: (() => void) | null = null;
-  try {
-    unlisten = await listen<any>('update-download-progress', (event) => {
-      const payload = event.payload;
-      downloadProgress.value = Math.round(payload.progress);
-      
-      const speedInMB = payload.speed / (1024 * 1024);
-      if (speedInMB >= 1.0) {
-        downloadSpeedText.value = `${speedInMB.toFixed(2)} MB/s`;
-      } else {
-        downloadSpeedText.value = `${(payload.speed / 1024).toFixed(1)} KB/s`;
-      }
-
-      const downloadedMB = (payload.downloaded / (1024 * 1024)).toFixed(2);
-      const totalMB = (payload.total / (1024 * 1024)).toFixed(2);
-      downloadStatusText.value = `已下载: ${downloadedMB} MB / ${totalMB} MB`;
-    });
-
-    const filePath = await invoke<string>('download_update_file', { url });
-    
-    downloadStatusText.value = '下载完成，正在启动安装程序...';
-    await invoke('run_installer', { path: filePath });
-    await invoke('exit_app');
-  } catch (error) {
-    console.error('Download failed:', error);
-    showDialog({
-      title: '下载失败',
-      content: `无法在软件内完成下载。您可以前往浏览器下载。\n错误原因: ${error}`,
-      confirmText: '去浏览器下载',
-      cancelText: '取消',
-      action: 'open-release'
-    });
-    dialogOpenUrl.value = url;
-  } finally {
-    isDownloading.value = false;
-    if (unlisten) {
-      unlisten();
-    }
-  }
-}
-
-async function handleDownloadChoice(target: 'official' | 'github') {
-  updateChoiceVisible.value = false;
-  const targetUrl = target === 'official' ? updateOfficialUrl.value : updateGithubUrl.value;
-
-  if (targetUrl) {
-    if (isTauri() && (targetUrl.endsWith('.exe') || targetUrl.includes('/releases/download/'))) {
-      await startDownload(targetUrl);
-    } else {
-      await openUrl(targetUrl);
-    }
-  }
-}
-
 onMounted(() => {
   void loadAppVersion();
 });
@@ -247,8 +112,9 @@ onMounted(() => {
         <p class="text-xs sm:text-sm font-medium text-gray-600 dark:text-white/60">v{{ appVersion }}</p>
       </div>
 
-      <p class="max-w-xs sm:max-w-sm text-xs sm:text-sm text-gray-600 dark:text-gray-300">
-        一个现代化的本地音乐播放器，可以管理音乐标签、封面与歌词。
+      <p class="max-w-xs sm:max-w-sm text-xs sm:text-sm leading-relaxed text-gray-600 dark:text-gray-300">
+        <span class="block">一个现代化的本地音乐播放器，</span>
+        <span class="block">可以管理音乐标签、封面与<span class="whitespace-nowrap">歌词。</span></span>
       </p>
     </div>
 
@@ -311,83 +177,15 @@ onMounted(() => {
       :content="dialogContent"
       :confirm-text="dialogConfirmText"
       :cancel-text="dialogCancelText"
-      @confirm="handleDialogConfirm"
     />
 
     <SponsorModal
       v-model:visible="sponsorVisible"
     />
-
-    <Teleport to="body">
-      <div
-        v-if="updateChoiceVisible"
-        class="fixed inset-0 z-[10000] flex items-center justify-center p-4"
-      >
-        <button
-          type="button"
-          class="absolute inset-0 bg-black/40 backdrop-blur-sm"
-          aria-label="关闭下载选择"
-          @click="updateChoiceVisible = false"
-        ></button>
-
-        <div class="relative w-full max-w-sm overflow-hidden rounded-2xl border border-white/20 bg-white/85 shadow-2xl ring-1 ring-black/5 backdrop-blur-md dark:bg-gray-900/90">
-          <div class="px-6 pt-6 pb-2 text-center">
-            <h3 class="text-lg font-bold leading-6 text-gray-900 dark:text-white">{{ updateChoiceTitle }}</h3>
-          </div>
-
-          <div class="px-6 pb-6 text-center">
-            <p class="text-sm leading-relaxed text-gray-500 dark:text-gray-300">{{ updateChoiceContent }}</p>
-          </div>
-
-          <div class="grid grid-cols-1 gap-3 bg-gray-50/50 px-4 py-3 dark:bg-white/5 sm:grid-cols-2">
-            <button
-              type="button"
-              class="inline-flex w-full justify-center rounded-xl border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition-all duration-200 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:text-sm"
-              @click="handleDownloadChoice('official')"
-            >
-              从官网下载
-            </button>
-            <button
-              type="button"
-              class="inline-flex w-full justify-center rounded-xl border border-gray-300 bg-white px-4 py-2 text-base font-medium text-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 sm:text-sm"
-              @click="handleDownloadChoice('github')"
-            >
-              从 GitHub 下载
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <Teleport to="body">
-      <div
-        v-if="isDownloading"
-        class="fixed inset-0 z-[10000] flex items-center justify-center p-4"
-      >
-        <div class="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
-
-        <div class="relative w-full max-w-sm overflow-hidden rounded-2xl border border-white/20 bg-white/85 shadow-2xl ring-1 ring-black/5 backdrop-blur-md dark:bg-gray-900/90 p-6">
-          <div class="text-center space-y-4">
-            <h3 class="text-lg font-bold leading-6 text-gray-900 dark:text-white">正在下载更新...</h3>
-            
-            <!-- Progress Bar -->
-            <div class="w-full bg-gray-200 dark:bg-gray-700 h-2.5 rounded-full overflow-hidden">
-              <div
-                class="bg-blue-600 h-full transition-all duration-150 ease-out"
-                :style="{ width: `${downloadProgress}%` }"
-              ></div>
-            </div>
-
-            <!-- Stats -->
-            <div class="flex justify-between text-xs text-gray-500 dark:text-gray-400 font-medium">
-              <span>{{ downloadProgress }}%</span>
-              <span>{{ downloadSpeedText }}</span>
-            </div>
-
-            <p class="text-xs text-gray-400 dark:text-gray-500">{{ downloadStatusText }}</p>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <UpdateAvailableDialog
+      v-model:visible="updateVisible"
+      :current-version="availableUpdate?.currentVersion ?? ''"
+      :release="availableUpdate?.release ?? null"
+    />
   </div>
 </template>

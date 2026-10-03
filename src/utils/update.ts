@@ -2,6 +2,9 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 
 const VERSION_PATTERN = /\d+(?:\.\d+)+/;
 export const OFFICIAL_LATEST_RELEASE_URL = 'https://lycia.prettyboy.fun/latest.json';
+const OFFICIAL_DOWNLOAD_PAGE_URL = 'https://lycia.prettyboy.fun/download.html';
+const OFFICIAL_CHANGELOG_PAGE_URL = 'https://lycia.prettyboy.fun/changelog.html';
+const GITHUB_LATEST_RELEASE_PAGE_URL = 'https://github.com/Billy636/LyciaMusic/releases/latest';
 
 type ReleaseSource = 'official' | 'github';
 
@@ -13,6 +16,24 @@ export interface ReleaseInfo {
   publishedAt?: string;
   notes?: string;
   source?: ReleaseSource;
+}
+
+function securePageUrl(value: string | undefined, fallback: string): string {
+  try {
+    if (value && new URL(value).protocol === 'https:') return value;
+  } catch {
+    // Invalid optional metadata must not prevent opening the official pages.
+  }
+  return fallback;
+}
+
+/** Open download pages so users can choose a package; never guess an asset filename. */
+export function getUpdatePageLinks(release: ReleaseInfo) {
+  return {
+    official: OFFICIAL_DOWNLOAD_PAGE_URL,
+    github: securePageUrl(release.source === 'github' ? release.url : undefined, GITHUB_LATEST_RELEASE_PAGE_URL),
+    announcement: securePageUrl(release.changelogUrl, OFFICIAL_CHANGELOG_PAGE_URL),
+  };
 }
 
 export function extractVersion(value: string): string {
@@ -98,7 +119,14 @@ export async function fetchOfficialLatestRelease(endpoint = OFFICIAL_LATEST_RELE
     : typeof payload.changelog_url === 'string'
       ? payload.changelog_url
       : undefined;
-  const changelogUrl = rawChangelogUrl ? resolveReleaseUrl(rawChangelogUrl, endpoint) : undefined;
+  let changelogUrl: string | undefined;
+  if (rawChangelogUrl) {
+    try {
+      changelogUrl = securePageUrl(resolveReleaseUrl(rawChangelogUrl, endpoint), OFFICIAL_CHANGELOG_PAGE_URL);
+    } catch {
+      changelogUrl = OFFICIAL_CHANGELOG_PAGE_URL;
+    }
+  }
   const changelog = Array.isArray(payload.changelog)
     ? payload.changelog.filter((item: unknown): item is string => typeof item === 'string')
     : [];

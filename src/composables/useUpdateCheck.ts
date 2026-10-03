@@ -2,6 +2,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { readonly, shallowRef } from 'vue';
+import { localStore } from '../services/storage/localStore';
 import { compareVersions, fetchLatestRelease, fetchOfficialLatestRelease, type ReleaseInfo } from '../utils/update';
 
 export interface UpdateCheckResult {
@@ -14,10 +15,39 @@ const startupUpdate = shallowRef<UpdateCheckResult | null>(null);
 let inFlight: Promise<UpdateCheckResult> | null = null;
 let startupScheduled = false;
 let startupDismissed = false;
+const IGNORED_STARTUP_VERSIONS_KEY = 'ignored_startup_update_versions';
 
 function validateVersion(version: string) {
   if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(version)) {
     throw new Error('Invalid update version');
+  }
+}
+
+function readIgnoredStartupVersions(): string[] {
+  const stored = localStore.getJson<unknown>(IGNORED_STARTUP_VERSIONS_KEY);
+  return Array.isArray(stored) ? stored.filter((value): value is string => typeof value === 'string') : [];
+}
+
+function isStartupVersionIgnored(version: string): boolean {
+  try {
+    return readIgnoredStartupVersions().includes(version);
+  } catch (error) {
+    console.warn('Failed to read ignored update versions:', error);
+    return false;
+  }
+}
+
+/** Only an explicit choice suppresses this version across future app launches. */
+export function ignoreStartupUpdateVersion(version: string): boolean {
+  try {
+    validateVersion(version);
+    if (typeof localStorage === 'undefined') return false;
+    const versions = readIgnoredStartupVersions();
+    localStore.setJson(IGNORED_STARTUP_VERSIONS_KEY, [...new Set([...versions, version])]);
+    return true;
+  } catch (error) {
+    console.warn('Failed to save ignored update version:', error);
+    return false;
   }
 }
 
@@ -76,7 +106,8 @@ export function startStartupUpdateCheck(isEnabled: () => boolean): () => void {
   const timer = setTimeout(() => {
     if (disposed || startupDismissed || !isEnabled()) return;
     void sharedUpdateCheck().then(result => {
-      if (!disposed && !startupDismissed && isEnabled() && result.comparison > 0) {
+      if (!disposed && !startupDismissed && isEnabled() && result.comparison > 0
+        && !isStartupVersionIgnored(result.release.version)) {
         startupUpdate.value = result;
       }
     }).catch(error => {
