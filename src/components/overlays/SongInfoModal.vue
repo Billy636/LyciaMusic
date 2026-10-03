@@ -3,7 +3,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { SquarePen, Tag } from 'lucide-vue-next';
-import type { Song, SongDetail } from '../../types';
+import type { LyricsReadingOrder, Song, SongDetail } from '../../types';
+import LyricsEditor from './LyricsEditor.vue';
 import { useCoverCache } from '../../composables/useCoverCache';
 import { usePlayer } from '../../composables/player';
 import { ensureMusicTagPath } from '../../composables/musicTag';
@@ -11,6 +12,11 @@ import { useSongDetailCache } from '../../composables/useSongDetailCache';
 import { useThemeSettings } from '../../composables/useThemeSettings';
 import { useToast } from '../../composables/toast';
 import { useLibraryStore } from '../../features/library/store';
+import { useSettingsStore } from '../../features/settings/store';
+import {
+  createLyricsReadingOrderOverridePatch,
+  resolveLyricsReadingOrder,
+} from '../../composables/lyrics/readingOrder';
 import type { LyricsStorageSource } from '../../services/tauri/contracts';
 import { tauriInvoke } from '../../services/tauri/invoke';
 
@@ -27,6 +33,7 @@ const { openInFinder } = usePlayer();
 const { isDarkTheme } = useThemeSettings();
 const { showToast } = useToast();
 const libraryStore = useLibraryStore();
+const settingsStore = useSettingsStore();
 
 interface SongInfoEditForm {
   title: string;
@@ -137,6 +144,8 @@ watch(
     isSongInfoSaving.value = false;
     songInfoEditError.value = '';
     songInfoEditForm.value = createEmptySongInfoEditForm();
+    lyricsText.value = '';
+    originalLyricsText.value = '';
     isLyricsLoading.value = true;
     isLyricsSaving.value = false;
     lyricsSource.value = 'empty';
@@ -177,6 +186,19 @@ watch(
 );
 
 const hasLyricsChanged = computed(() => lyricsText.value !== originalLyricsText.value);
+const lyricsReadingOrder = computed(() => resolveLyricsReadingOrder(
+  settingsStore.settings.lyrics, props.song?.path,
+));
+const lyricsReadingOrderOverride = computed(() => (
+  settingsStore.settings.lyrics.readingOrderOverrides?.[props.song?.path ?? '']
+));
+const updateLyricsReadingOrder = (order: LyricsReadingOrder | null) => {
+  const path = props.song?.path;
+  if (!path || isLyricsLoading.value) return;
+  settingsStore.patchSettings({
+    lyrics: createLyricsReadingOrderOverridePatch(settingsStore.settings.lyrics, path, order),
+  });
+};
 const isSongInfoVisuallyExpanded = computed(
   () => pendingSongInfoExpanded.value ?? isSongInfoExpanded.value,
 );
@@ -185,6 +207,7 @@ const isLyricsEditorVisuallyExpanded = computed(
 );
 
 const handleKeydown = (e: KeyboardEvent) => {
+  if (e.defaultPrevented || e.isComposing) return;
   if (e.key === 'Escape' && props.visible) {
     handleClose();
   }
@@ -235,25 +258,31 @@ const handleOpenInMusicTag = async () => {
 };
 
 const handleSaveLyrics = async () => {
-  if (!props.song?.path || isLyricsSaving.value) return;
+  if (!props.song?.path || isLyricsLoading.value || isLyricsSaving.value) return;
+
+  const path = props.song.path;
+  const text = lyricsText.value;
+  const requestId = detailRequestId;
+  const isCurrentRequest = () => requestId === detailRequestId && props.visible && props.song?.path === path;
 
   isLyricsSaving.value = true;
   lyricsError.value = '';
 
   try {
     const savedLyrics = await tauriInvoke('save_song_lyrics', {
-      path: props.song.path,
-      lyrics: lyricsText.value,
+      path,
+      lyrics: text,
       source: lyricsSource.value,
       sourcePath: lyricsSourcePath.value,
     });
-    originalLyricsText.value = lyricsText.value;
+    if (!isCurrentRequest()) return;
+    originalLyricsText.value = text;
     lyricsSource.value = savedLyrics.source;
     lyricsSourcePath.value = savedLyrics.sourcePath;
   } catch (error) {
-    lyricsError.value = String(error);
+    if (isCurrentRequest()) lyricsError.value = String(error);
   } finally {
-    isLyricsSaving.value = false;
+    if (isCurrentRequest()) isLyricsSaving.value = false;
   }
 };
 
@@ -724,7 +753,7 @@ const formatTime = (timestampSeconds?: number) => {
           <div class="modal-external-header lyrics-editor-header">
             <div class="lyrics-editor-heading">
               <div class="lyrics-editor-title" :class="isLyricsEditorVisuallyExpanded ? 'lyrics-editor-title--expanded' : ''">
-                编辑歌词
+                歌词
               </div>
               <div
                 v-if="displaySong"
@@ -750,7 +779,8 @@ const formatTime = (timestampSeconds?: number) => {
             <button
               type="button"
               class="lyrics-editor-expand-button"
-              :title="isLyricsEditorVisuallyExpanded ? '还原歌词编辑器' : '放大歌词编辑器'"
+              :title="isLyricsEditorVisuallyExpanded ? '还原歌词面板' : '放大歌词面板'"
+              :aria-label="isLyricsEditorVisuallyExpanded ? '还原歌词面板' : '放大歌词面板'"
               @click="toggleLyricsEditorExpanded"
             >
               <svg v-if="!isLyricsEditorVisuallyExpanded" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -763,13 +793,16 @@ const formatTime = (timestampSeconds?: number) => {
           </div>
 
           <aside class="lyrics-editor-panel" :class="isLyricsEditorVisuallyExpanded ? 'lyrics-editor-panel--expanded' : ''">
-            <textarea
+            <LyricsEditor
+              :key="props.song?.path"
               v-model="lyricsText"
-              class="lyrics-editor-textarea custom-scrollbar"
-              :placeholder="isLyricsLoading ? '正在读取歌词...' : '[00:00.00] 在这里编辑 LRC 歌词'"
-              :disabled="isLyricsLoading"
-              spellcheck="false"
-            ></textarea>
+              :song-path="props.song?.path ?? ''"
+              :duration-ms="props.song?.duration ? props.song.duration * 1000 : undefined"
+              :loading="isLyricsLoading"
+              :reading-order="lyricsReadingOrder"
+              :reading-order-override="lyricsReadingOrderOverride"
+              @update:reading-order="updateLyricsReadingOrder"
+            />
 
             <div v-if="lyricsError" class="lyrics-editor-error">{{ lyricsError }}</div>
           </aside>
@@ -778,7 +811,7 @@ const formatTime = (timestampSeconds?: number) => {
             <button
               type="button"
               class="modal-action-button modal-action-button--primary"
-              :disabled="!hasLyricsChanged || isLyricsSaving"
+              :disabled="!hasLyricsChanged || isLyricsLoading || isLyricsSaving"
               @click="handleSaveLyrics"
             >
               {{ isLyricsSaving ? '保存中' : '保存' }}
@@ -811,6 +844,10 @@ const formatTime = (timestampSeconds?: number) => {
   --modal-external-header-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
   --lyrics-editor-title-color: rgb(17 24 39);
   --lyrics-editor-text-color: rgb(31 41 55);
+  --lyrics-reader-secondary: #526070;
+  --lyrics-reader-muted: #64748b;
+  --lyrics-reader-accent: #c93240;
+  --lyrics-reader-option-bg: #fff;
   --lyrics-editor-placeholder-color: rgb(156 163 175);
   --lyrics-editor-button-bg: rgba(255, 255, 255, 0.72);
   --lyrics-editor-button-border: rgba(148, 163, 184, 0.26);
@@ -844,6 +881,10 @@ const formatTime = (timestampSeconds?: number) => {
   --modal-external-header-shadow: 0 10px 28px rgba(0, 0, 0, 0.26);
   --lyrics-editor-title-color: rgb(248 250 252);
   --lyrics-editor-text-color: rgba(255, 255, 255, 0.86);
+  --lyrics-reader-secondary: #c1cad7;
+  --lyrics-reader-muted: #a5b3c6;
+  --lyrics-reader-accent: #ff8585;
+  --lyrics-reader-option-bg: #172033;
   --lyrics-editor-placeholder-color: rgba(148, 163, 184, 0.72);
   --lyrics-editor-button-bg: rgba(255, 255, 255, 0.06);
   --lyrics-editor-button-border: rgba(255, 255, 255, 0.1);
@@ -953,15 +994,19 @@ const formatTime = (timestampSeconds?: number) => {
   pointer-events: auto;
 }
 
-.song-info-stage--lyrics-expanding .lyrics-editor-textarea,
-.song-info-stage--lyrics-collapsing .lyrics-editor-textarea,
+.song-info-stage--lyrics-expanding :deep(.lyrics-reading-scroll),
+.song-info-stage--lyrics-collapsing :deep(.lyrics-reading-scroll),
+.song-info-stage--lyrics-expanding :deep(.lyrics-source-editor .cm-scroller),
+.song-info-stage--lyrics-collapsing :deep(.lyrics-source-editor .cm-scroller),
 .song-info-stage--song-expanding .song-info-content,
 .song-info-stage--song-collapsing .song-info-content {
   scrollbar-width: none;
 }
 
-.song-info-stage--lyrics-expanding .lyrics-editor-textarea::-webkit-scrollbar,
-.song-info-stage--lyrics-collapsing .lyrics-editor-textarea::-webkit-scrollbar,
+.song-info-stage--lyrics-expanding :deep(.lyrics-reading-scroll::-webkit-scrollbar),
+.song-info-stage--lyrics-collapsing :deep(.lyrics-reading-scroll::-webkit-scrollbar),
+.song-info-stage--lyrics-expanding :deep(.lyrics-source-editor .cm-scroller::-webkit-scrollbar),
+.song-info-stage--lyrics-collapsing :deep(.lyrics-source-editor .cm-scroller::-webkit-scrollbar),
 .song-info-stage--song-expanding .song-info-content::-webkit-scrollbar,
 .song-info-stage--song-collapsing .song-info-content::-webkit-scrollbar {
   width: 0;
@@ -1268,26 +1313,6 @@ const formatTime = (timestampSeconds?: number) => {
   object-fit: cover;
 }
 
-.lyrics-editor-textarea {
-  flex: 1;
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 420px;
-  resize: none;
-  border: 0;
-  background: transparent;
-  padding: 18px;
-  color: var(--lyrics-editor-text-color);
-  font-family: "Sarasa Gothic SC", "Sarasa Mono SC", "Sarasa Gothic", "Sarasa Mono", sans-serif;
-  font-size: 13px;
-  line-height: 1.7;
-  outline: none;
-}
-
-.lyrics-editor-panel--expanded .lyrics-editor-textarea {
-  min-height: 0;
-}
-
 .modal-action-button {
   display: inline-flex;
   align-items: center;
@@ -1359,11 +1384,10 @@ const formatTime = (timestampSeconds?: number) => {
   }
 }
 
-.lyrics-editor-textarea::placeholder {
-  color: var(--lyrics-editor-placeholder-color);
-}
-
 .lyrics-editor-error {
+  flex-shrink: 0;
+  max-height: 25%;
+  overflow: auto;
   margin: 0 18px 12px;
   border: 1px solid rgba(236, 65, 65, 0.22);
   border-radius: 12px;
@@ -1489,14 +1513,6 @@ const formatTime = (timestampSeconds?: number) => {
     height: calc(100dvh - var(--song-info-viewport-y));
   }
 
-  .lyrics-editor-textarea {
-    min-height: 280px;
-  }
-
-  .lyrics-editor-panel--expanded .lyrics-editor-textarea {
-    min-height: 0;
-  }
-
   .lyrics-editor-heading {
     gap: 12px;
   }
@@ -1596,11 +1612,6 @@ const formatTime = (timestampSeconds?: number) => {
   .modal-external-header {
     min-height: 48px;
     padding-block: 5px;
-  }
-
-  .lyrics-editor-textarea {
-    min-height: 220px;
-    padding-block: 14px;
   }
 
   .song-info-cover {
