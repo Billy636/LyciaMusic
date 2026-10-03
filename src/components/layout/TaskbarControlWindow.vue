@@ -39,7 +39,9 @@ const isDragging = ref(false);
 const backgroundOpacity = ref(0);
 const textColor = ref('#ffffff');
 const backgroundStyle = computed(() => ({
-  backgroundColor: `rgba(18, 18, 20, ${backgroundOpacity.value / 100})`,
+  // A fully transparent WebView2 surface can pass native mouse hit testing through.
+  // Keep an imperceptible painted surface even at the transparent setting.
+  backgroundColor: `rgba(18, 18, 20, ${Math.max(1 / 255, backgroundOpacity.value / 100)})`,
   '--taskbar-text-rgb': [1, 3, 5].map(offset => parseInt(textColor.value.slice(offset, offset + 2), 16)).join(' '),
 }));
 const parsedLyrics = shallowRef<LyricLine[]>([]);
@@ -56,6 +58,7 @@ const songTitle = computed(() => currentSong.value
   ? currentSong.value.title || currentSong.value.name
   : 'Lycia Player');
 const fallbackText = computed(() => currentSong.value?.artist || (currentSong.value ? '暂无歌词' : '享受音乐时光'));
+const songDetails = computed(() => [currentSong.value?.artist, currentSong.value?.album].filter(Boolean).join(' · ') || fallbackText.value);
 let lyricFrame = 0;
 let lastLyricFrameAt = 0;
 const LYRIC_FRAME_INTERVAL_MS = 1000 / 30;
@@ -63,6 +66,7 @@ let dragSafetyTimer: ReturnType<typeof setTimeout> | null = null;
 let cleanupDragListeners: (() => void) | null = null;
 let dragFrame = 0;
 let pendingDragPosition: LogicalPosition | null = null;
+let isFinishingDrag = false;
 
 interface DragBounds {
   minX: number;
@@ -74,14 +78,27 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 
 const finishDrag = async () => {
   if (!isDragging.value) return;
+  isFinishingDrag = true;
   isDragging.value = false;
   if (dragSafetyTimer) clearTimeout(dragSafetyTimer);
+  dragSafetyTimer = null;
   cleanupDragListeners?.();
   cleanupDragListeners = null;
-  void emitTo('main', TASKBAR_PLAYER_DRAG_EVENT, { dragging: false });
-  const factor = await appWindow.scaleFactor();
-  const position = (await appWindow.outerPosition()).toLogical(factor);
-  writeSavedTaskbarPositionX(position.x);
+  if (dragFrame !== 0) window.cancelAnimationFrame(dragFrame);
+  dragFrame = 0;
+  const finalPosition = pendingDragPosition;
+  pendingDragPosition = null;
+  try {
+    if (finalPosition) await appWindow.setPosition(finalPosition);
+    const factor = await appWindow.scaleFactor();
+    const position = (await appWindow.outerPosition()).toLogical(factor);
+    writeSavedTaskbarPositionX(position.x);
+  } catch (error) {
+    console.warn('Failed to save taskbar drag position:', error);
+  } finally {
+    isFinishingDrag = false;
+    void emitTo('main', TASKBAR_PLAYER_DRAG_EVENT, { dragging: false });
+  }
 };
 
 const scheduleDragPosition = (position: LogicalPosition) => {
@@ -93,7 +110,7 @@ const scheduleDragPosition = (position: LogicalPosition) => {
     const nextPosition = pendingDragPosition;
     pendingDragPosition = null;
     if (nextPosition) {
-      void appWindow.setPosition(nextPosition);
+      void appWindow.setPosition(nextPosition).catch(error => console.warn('Failed to move taskbar player:', error));
     }
   });
 };
@@ -126,7 +143,14 @@ const getTaskbarDragBounds = async (): Promise<DragBounds | null> => {
 };
 
 const startDrag = async (event: PointerEvent) => {
-  if (event.button !== 0) return;
+  if (event.button !== 0 || !event.isPrimary || isDragging.value || isFinishingDrag) return;
+  // Capture the target and install release handlers before the first await.
+  // currentTarget is cleared after dispatch; a quick release during IPC was lost.
+  const target = event.currentTarget as HTMLElement;
+  const pointerId = event.pointerId;
+  const startScreenX = event.screenX;
+  let startPosition: LogicalPosition | null = null;
+  let dragBounds: DragBounds | null = null;
 
   isDragging.value = true;
   void emitTo('main', TASKBAR_PLAYER_DRAG_EVENT, { dragging: true });
@@ -139,13 +163,10 @@ const startDrag = async (event: PointerEvent) => {
     }
   }, 30000);
 
-  const factor = await appWindow.scaleFactor();
-  const startPosition = (await appWindow.outerPosition()).toLogical(factor);
-  const dragBounds = await getTaskbarDragBounds();
-  const startScreenX = event.screenX;
-
   const handlePointerMove = (moveEvent: PointerEvent) => {
-    if (!isDragging.value || !dragBounds) return;
+    if (moveEvent.pointerId !== pointerId || !isDragging.value) return;
+    if (moveEvent.buttons === 0) { void finishDrag(); return; }
+    if (!dragBounds || !startPosition) return;
     const nextX = clamp(
       startPosition.x + moveEvent.screenX - startScreenX,
       dragBounds.minX,
@@ -154,21 +175,38 @@ const startDrag = async (event: PointerEvent) => {
     scheduleDragPosition(new LogicalPosition(Math.round(nextX), dragBounds.y));
   };
 
-  const handleDragEnd = () => {
+  const handleDragEnd = (endEvent: Event) => {
+    if (endEvent instanceof PointerEvent && endEvent.pointerId !== pointerId) return;
     void finishDrag();
   };
 
-  (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
   window.addEventListener('pointermove', handlePointerMove, true);
   window.addEventListener('pointerup', handleDragEnd, true);
   window.addEventListener('pointercancel', handleDragEnd, true);
   window.addEventListener('blur', handleDragEnd, true);
+  target.addEventListener('lostpointercapture', handleDragEnd);
   cleanupDragListeners = () => {
     window.removeEventListener('pointermove', handlePointerMove, true);
     window.removeEventListener('pointerup', handleDragEnd, true);
     window.removeEventListener('pointercancel', handleDragEnd, true);
     window.removeEventListener('blur', handleDragEnd, true);
+    target.removeEventListener('lostpointercapture', handleDragEnd);
+    if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
   };
+  const cleanup = cleanupDragListeners;
+  try {
+    target.setPointerCapture(pointerId);
+    const factor = await appWindow.scaleFactor();
+    const position = (await appWindow.outerPosition()).toLogical(factor);
+    const bounds = await getTaskbarDragBounds();
+    if (!isDragging.value || cleanupDragListeners !== cleanup) return;
+    startPosition = position;
+    dragBounds = bounds;
+    if (!bounds) void finishDrag();
+  } catch (error) {
+    console.warn('Failed to start taskbar drag:', error);
+    if (cleanupDragListeners === cleanup) void finishDrag();
+  }
 };
 
 let unlistenState: (() => void) | null = null;
@@ -299,6 +337,10 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (isDragging.value) {
+    isDragging.value = false;
+    void emitTo('main', TASKBAR_PLAYER_DRAG_EVENT, { dragging: false });
+  }
   unlistenState?.();
   unlistenPlayback?.();
   unlistenVisibility?.();
@@ -307,6 +349,8 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', refreshLyricClock);
   if (dragSafetyTimer) clearTimeout(dragSafetyTimer);
   cleanupDragListeners?.();
+  cleanupDragListeners = null;
+  pendingDragPosition = null;
   if (dragFrame !== 0) {
     window.cancelAnimationFrame(dragFrame);
     dragFrame = 0;
@@ -332,7 +376,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 左侧：封面与歌曲信息 -->
-    <div class="flex items-center gap-2.5 min-w-0 flex-1 mr-1 pointer-events-none">
+    <div class="taskbar-content flex items-center gap-2.5 min-w-0 flex-1 mr-1">
       <!-- 封面 -->
       <button
         type="button"
@@ -385,12 +429,13 @@ onUnmounted(() => {
         </div>
       </button>
 
-      <!-- 默认展示歌名与实时歌词；悬停/键盘聚焦时让出播控操作区。 -->
+      <!-- 默认展示歌词；宽窗口悬停保留歌名和歌手，窄窗口优先播控。 -->
       <div class="taskbar-song-info flex flex-col min-w-0 flex-1 leading-tight">
         <div class="taskbar-song-title text-[11px] leading-[14px] font-semibold truncate" :title="songTitle">
           {{ songTitle }}
         </div>
 
+        <div class="taskbar-hover-details text-[11px] leading-[17px] truncate" :title="songDetails">{{ songDetails }}</div>
         <div
           ref="lyricViewport"
           class="taskbar-lyric-viewport text-[13px] leading-[17px] font-semibold"
@@ -460,7 +505,7 @@ onUnmounted(() => {
 
     <!-- 右上角 x 退出按钮定位容器（跟随主面板悬停阴影同步显隐） -->
     <div 
-      class="absolute top-0 right-0 w-7 h-7 flex items-start justify-end pt-1 pr-1.5 pointer-events-none z-30 transition-opacity duration-300"
+      class="taskbar-close absolute top-0 right-0 w-7 h-7 flex items-start justify-end pt-1 pr-1.5 pointer-events-none z-30 transition-opacity duration-300"
       :class="[isDragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100']"
     >
       <button
@@ -489,6 +534,11 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.taskbar-player { pointer-events: auto; }
+.taskbar-hover-details { display: none; color: rgb(var(--taskbar-text-rgb, 255 255 255) / 65%); }
+.taskbar-controls button:focus-visible,
+.taskbar-close button:focus-visible { box-shadow: 0 0 0 2px rgb(255 255 255 / 65%); }
+
 .taskbar-song-info,
 .taskbar-controls {
   transition: opacity 150ms ease;
@@ -508,6 +558,18 @@ onUnmounted(() => {
 .taskbar-player:focus-within .taskbar-controls {
   opacity: 1;
   pointer-events: auto;
+}
+
+/* 68px cover/handle + 160px controls/spacing + at least 132px metadata. */
+@media (min-width: 360px) {
+  .taskbar-player:hover .taskbar-content,
+  .taskbar-player:focus-within .taskbar-content { padding-right: 150px; }
+  .taskbar-player:hover .taskbar-song-info,
+  .taskbar-player:focus-within .taskbar-song-info { opacity: 1; }
+  .taskbar-player:hover .taskbar-lyric-viewport,
+  .taskbar-player:focus-within .taskbar-lyric-viewport { display: none; }
+  .taskbar-player:hover .taskbar-hover-details,
+  .taskbar-player:focus-within .taskbar-hover-details { display: block; }
 }
 
 .taskbar-lyric-viewport {
