@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { Captions, ChevronRight, PaintRoller, PanelLeft, PanelBottom, PanelBottomDashed } from 'lucide-vue-next';
+import { Captions, ChevronRight, Copy, PaintRoller, PanelLeft, PanelBottom, PanelBottomDashed, Tags } from 'lucide-vue-next';
 import { useRoute } from 'vue-router';
 import {
   PERSONALIZATION_PAGE_LABELS,
   SETTINGS_SECTION_LABELS,
+  TOOLBOX_PAGE_LABELS,
   useSettingsNavigationStore,
   type PersonalizationPage,
   type SettingsSection,
+  type ToolboxPage,
 } from '../features/settings/navigation';
 import SettingsAbout from "../components/settings/SettingsAbout.vue";
 import SettingsDesktopLyrics from "../components/settings/SettingsDesktopLyrics.vue";
@@ -19,16 +21,20 @@ import SettingsShortcuts from "../components/settings/SettingsShortcuts.vue";
 import SettingsSidebar from "../components/settings/SettingsSidebar.vue";
 import SettingsTheme from "../components/settings/SettingsTheme.vue";
 import SettingsToolbox from "../components/settings/SettingsToolbox.vue";
+import SettingsDuplicateSongs from "../components/settings/SettingsDuplicateSongs.vue";
 import SettingsAudioOutput from "../components/settings/SettingsAudioOutput.vue";
 import SettingsFooter from '../components/settings/SettingsFooter.vue';
 import SettingsTaskbarPlayer from '../components/settings/SettingsTaskbarPlayer.vue';
 
 const navigation = useSettingsNavigationStore();
-const { activeSection, personalizationPage } = storeToRefs(navigation);
+const { activeSection, personalizationPage, toolboxPage } = storeToRefs(navigation);
 const contentRef = ref<HTMLElement | null>(null);
 const personalizationContentRef = ref<HTMLElement | null>(null);
+const toolboxContentRef = ref<HTMLElement | null>(null);
 const personalizationTransition = ref('personalization-forward');
+const toolboxTransition = ref('personalization-forward');
 const returnFocusPage = ref<PersonalizationPage | null>(null);
+const returnFocusToolboxPage = ref<ToolboxPage | null>(null);
 let isSidebarNavigation = false;
 
 // Navigation belongs to this visit, not to the user's persisted preferences.
@@ -58,6 +64,11 @@ const personalizationPages = [
   { id: 'taskbarPlayer', name: PERSONALIZATION_PAGE_LABELS.taskbarPlayer, icon: PanelBottomDashed },
 ] satisfies { id: PersonalizationPage; name: string; icon: typeof PaintRoller }[];
 
+const toolboxPages = [
+  { id: 'tags', name: TOOLBOX_PAGE_LABELS.tags, icon: Tags },
+  { id: 'duplicates', name: TOOLBOX_PAGE_LABELS.duplicates, icon: Copy },
+] satisfies { id: ToolboxPage; name: string; icon: typeof Tags }[];
+
 const resetContentScroll = () => {
   if (contentRef.value) contentRef.value.scrollTop = 0;
 };
@@ -65,6 +76,7 @@ const resetContentScroll = () => {
 const selectSection = (section: SettingsSection) => {
   isSidebarNavigation = true;
   returnFocusPage.value = null;
+  returnFocusToolboxPage.value = null;
   navigation.selectSection(section);
 };
 
@@ -82,10 +94,27 @@ const focusPersonalizationContent = (element: Element) => {
   }
 };
 
-watch([activeSection, personalizationPage], ([section, page], [previousSection, previousPage]) => {
+const focusToolboxContent = (element: Element) => {
+  if (activeSection.value !== 'toolbox' || element !== toolboxContentRef.value) return;
+
+  if (toolboxPage.value) {
+    toolboxContentRef.value?.focus({ preventScroll: true });
+  } else if (returnFocusToolboxPage.value) {
+    contentRef.value
+      ?.querySelector<HTMLButtonElement>(`[data-toolbox-page="${returnFocusToolboxPage.value}"]`)
+      ?.focus({ preventScroll: true });
+    returnFocusToolboxPage.value = null;
+  }
+};
+
+watch([activeSection, personalizationPage, toolboxPage], ([section, page, toolPage], [previousSection, previousPage, previousToolPage]) => {
   personalizationTransition.value = page ? 'personalization-forward' : 'personalization-back';
+  toolboxTransition.value = toolPage ? 'personalization-forward' : 'personalization-back';
   returnFocusPage.value = !isSidebarNavigation && section === 'personalization' && previousSection === 'personalization' && !page
     ? previousPage
+    : null;
+  returnFocusToolboxPage.value = !isSidebarNavigation && section === 'toolbox' && previousSection === 'toolbox' && !toolPage
+    ? previousToolPage
     : null;
   isSidebarNavigation = false;
 
@@ -126,7 +155,7 @@ watch([activeSection, personalizationPage], ([section, page], [previousSection, 
       <Transition name="settings-section" mode="out-in" @before-enter="resetContentScroll">
       <div :key="activeSection" :class="[
         activeSection === 'about' ? 'w-full min-h-full flex flex-col justify-center items-center py-4' : 'w-full pb-16',
-        activeSection !== 'personalization' ? 'sm:pt-6' : '',
+        activeSection !== 'personalization' && activeSection !== 'toolbox' ? 'sm:pt-6' : '',
       ]">
         <SettingsGeneral v-if="activeSection === 'general'" />
         <section v-else-if="activeSection === 'personalization'" aria-labelledby="settings-page-heading">
@@ -166,7 +195,39 @@ watch([activeSection, personalizationPage], ([section, page], [previousSection, 
           </Transition>
         </section>
         <SettingsAudioOutput v-else-if="activeSection === 'audioOutput'" />
-        <SettingsToolbox v-else-if="activeSection === 'toolbox'" />
+        <section v-else-if="activeSection === 'toolbox'" aria-labelledby="settings-page-heading">
+          <Transition
+            :name="toolboxTransition"
+            mode="out-in"
+            @before-enter="resetContentScroll"
+            @after-enter="focusToolboxContent"
+          >
+            <div
+              :key="toolboxPage ?? 'overview'"
+              ref="toolboxContentRef"
+              tabindex="-1"
+              :aria-label="navigation.toolboxTitle"
+              class="toolbox-content outline-none"
+            >
+              <div v-if="!toolboxPage" class="toolbox-list space-y-1">
+                <button
+                  v-for="page in toolboxPages"
+                  :key="page.id"
+                  type="button"
+                  :data-toolbox-page="page.id"
+                  class="group flex min-h-16 w-full cursor-pointer items-center gap-4 rounded-md px-4 py-4 text-left text-gray-800 transition-colors hover:bg-black/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#EC4141]/60 dark:text-gray-100 dark:hover:bg-white/5"
+                  @click="navigation.openToolboxPage(page.id)"
+                >
+                  <component :is="page.icon" class="h-5 w-5 shrink-0" :stroke-width="1.7" aria-hidden="true" />
+                  <span class="min-w-0 flex-1 text-base font-medium">{{ page.name }}</span>
+                  <ChevronRight class="h-4 w-4 shrink-0 text-gray-500 transition-transform group-hover:translate-x-0.5 dark:text-gray-400" :stroke-width="1.7" aria-hidden="true" />
+                </button>
+              </div>
+              <SettingsToolbox v-else-if="toolboxPage === 'tags'" />
+              <SettingsDuplicateSongs v-else-if="toolboxPage === 'duplicates'" />
+            </div>
+          </Transition>
+        </section>
         <SettingsLibrary v-else-if="activeSection === 'library'" />
         <SettingsRemoteLibrary v-else-if="activeSection === 'remoteLibrary'" />
         <SettingsShortcuts v-else-if="activeSection === 'shortcuts'" />

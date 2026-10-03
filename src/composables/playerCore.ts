@@ -3,6 +3,7 @@ import { storeToRefs } from 'pinia';
 import { useLyrics } from './lyrics';
 import { useToast } from './toast';
 import { createPlayerFileManager } from './playerFileManager';
+import { createDuplicateDeletion } from './duplicateDeletion';
 import { createPlayerFolderImport } from './playerFolderImport';
 import { createPlayerFolderTree } from './playerFolderTree';
 import { createPlayerHistoryFavorites } from './playerHistoryFavorites';
@@ -36,11 +37,13 @@ import { useNavigationStore } from '../shared/stores/navigation';
 import { usePlaybackStore } from '../features/playback/store';
 import { useUiStore } from '../shared/stores/ui';
 import type { HistoryItem, Song } from '../types';
+import type { DuplicateDeleteGroup, DuplicateDeleteResult } from '../features/duplicates/types';
 import { useSongDetailCache } from './useSongDetailCache';
 import { useLibrarySongResolver } from './useLibrarySongResolver';
 import {
   cleanupRemovedLibrarySongPaths,
   isPathInFolderScope,
+  normalizePathForScope,
 } from './libraryRemovalCleanup';
 
 interface PlaySongOptions {
@@ -231,6 +234,15 @@ function createPlayerCore() {
   let playerPlayback: ReturnType<typeof createPlayerPlayback>;
   let libraryRuntime: ReturnType<typeof createPlayerLibraryRuntime>;
   let metadataRefreshVersion = 0;
+  let duplicateDeletionPaths: Set<string> | null = null;
+  let activeFileOperations = 0;
+
+  const runFileOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (duplicateDeletionPaths) throw new Error('正在处理重复歌曲，请等待当前操作完成');
+    activeFileOperations += 1;
+    try { return await operation(); }
+    finally { activeFileOperations -= 1; }
+  };
 
   const addLibraryFolder = async (): Promise<void> => {
     await librarySync.addLibraryFolder();
@@ -390,7 +402,7 @@ function createPlayerCore() {
   const playbackActions = usePlaybackActions({
     currentSong,
     playMode,
-    getPlayerPlayback: () => playerPlayback,
+    getPlayerPlayback: () => ({ ...playerPlayback, playSong }),
     getPlayerQueue: () => playerQueue,
     playerUiShell,
   });
@@ -467,7 +479,7 @@ function createPlayerCore() {
   });
 
   playerQueue = createPlayerQueue({
-    playSong: (song, options) => playerPlayback.playSong(song, options),
+    playSong: (song, options) => playSong(song, options),
     stopPlaybackRuntime: () => playerPlayback.stopPlaybackRuntime(),
     showToast,
   });
@@ -482,6 +494,35 @@ function createPlayerCore() {
     onBeforePlay: (song, options) => {
       playerQueue.handleBeforePlay(song, options);
     },
+  });
+
+  const performDuplicateDeletion = createDuplicateDeletion({
+    stopPlayback: async () => {
+      await playbackApi.stopAudio();
+      playerPlayback.flushPlaySession();
+      playerPlayback.stopPlaybackRuntime();
+      isPlaying.value = false;
+      isSongLoaded.value = false;
+      playbackStore.currentPlaybackId = 0;
+      currentSong.value = null;
+      currentSongPath.value = null;
+      currentTime.value = 0;
+      playbackStore.clockRevision += 1;
+      playbackStore.seekRevision += 1;
+      currentCover.value = '';
+      playbackStore.currentCoverPath = '';
+      currentCoverFull.value = '';
+    },
+    clearMetadataCaches: () => {
+      clearCoverCaches();
+      clearSongDetailCache();
+      clearSongRuntimeMetadataCache();
+      clearResolvedSongCache();
+    },
+    clearLegacyHistory: () => playerStorage.remove(LEGACY_PLAYER_HISTORY_KEY),
+    resetShuffleState,
+    flushPersistedState,
+    expandFolderPath: path => playerFolderTree.expandFolderPath(path),
   });
 
   librarySync = useLibrarySync({
@@ -508,19 +549,19 @@ function createPlayerCore() {
   });
 
   async function deleteFolder(path: string) {
-    return playerFileManager.deleteFolder(path);
+    return runFileOperation(() => playerFileManager.deleteFolder(path));
   }
 
   async function moveFolderToFolder(sourcePath: string, targetFolder: string) {
-    return playerFileManager.moveFolderToFolder(sourcePath, targetFolder);
+    return runFileOperation(() => playerFileManager.moveFolderToFolder(sourcePath, targetFolder));
   }
 
   async function moveFilePhysical(sourcePath: string, targetFolderPath: string) {
-    return playerFileManager.moveFilePhysical(sourcePath, targetFolderPath);
+    return runFileOperation(() => playerFileManager.moveFilePhysical(sourcePath, targetFolderPath));
   }
 
   async function scanLibrary(options: ScanLibraryOptions = {}) {
-    return libraryRuntime.scanLibrary(options);
+    return runFileOperation(() => libraryRuntime.scanLibrary(options));
   }
 
   async function fetchFolderTree() {
@@ -532,7 +573,7 @@ function createPlayerCore() {
   }
 
   async function createFolder(parentPath: string, folderName: string) {
-    return playerFolderTree.createFolder(parentPath, folderName);
+    return runFileOperation(() => playerFolderTree.createFolder(parentPath, folderName));
   }
 
   async function toggleFolderNode(targetPath: string) {
@@ -548,11 +589,11 @@ function createPlayerCore() {
   }
 
   async function moveFilesToFolder(paths: string[], targetFolder: string) {
-    return playerFileManager.moveFilesToFolder(paths, targetFolder);
+    return runFileOperation(() => playerFileManager.moveFilesToFolder(paths, targetFolder));
   }
 
   async function refreshFolder(folderPath: string, forceMetadataRefresh = true) {
-    return playerFileManager.refreshFolder(folderPath, forceMetadataRefresh);
+    return runFileOperation(() => playerFileManager.refreshFolder(folderPath, forceMetadataRefresh));
   }
 
   function removeFolder(folderPath: string) {
@@ -576,7 +617,7 @@ function createPlayerCore() {
   }
 
   async function moveFile(song: Song, newPath: string) {
-    return playerFileManager.moveFile(song, newPath);
+    return runFileOperation(() => playerFileManager.moveFile(song, newPath));
   }
 
   async function openInFinder(path: string) {
@@ -584,7 +625,26 @@ function createPlayerCore() {
   }
 
   async function deleteFromDisk(song: Song) {
-    return playerFileManager.deleteFromDisk(song);
+    return runFileOperation(() => playerFileManager.deleteFromDisk(song));
+  }
+
+  async function deleteDuplicateSongs(groups: DuplicateDeleteGroup[]): Promise<DuplicateDeleteResult> {
+    const paths = groups.flatMap(group => group.delete_files.map(file => file.path));
+    if (paths.length === 0) return { deleted_paths: [], missing_paths: [], failures: [], warnings: [] };
+    const scan = libraryStore.libraryScanProgress;
+    if (scan && !scan.done && !scan.failed) throw new Error('音乐库正在扫描，请稍后再删除重复歌曲');
+    if (duplicateDeletionPaths || activeFileOperations > 0) throw new Error('正在执行其他文件操作，请稍后重试');
+
+    duplicateDeletionPaths = new Set(paths.map(normalizePathForScope));
+    try {
+      // Cancel a not-yet-started bootstrap scan so it cannot race the confirmed deletion.
+      // This runtime's dispose only clears its scheduled refresh timer/idle callback.
+      libraryRuntime.dispose();
+      flushBufferedLibraryScanBatch();
+      return await performDuplicateDeletion(groups);
+    } finally {
+      duplicateDeletionPaths = null;
+    }
   }
 
   const stopPlaybackForMissingSong = async () => {
@@ -608,7 +668,7 @@ function createPlayerCore() {
     const previousPathSet = new Set(previousPaths);
     const activeSongPath = currentSongPath.value;
 
-    await libraryRuntime.scanLibrary(options);
+    await scanLibrary(options);
 
     const currentPathSet = new Set(libraryStore.canonicalSongPaths);
     const removedPaths = previousPaths.filter(path => !currentPathSet.has(path));
@@ -662,6 +722,13 @@ function createPlayerCore() {
   };
 
   async function playSong(song: Song, options: PlaySongOptions = {}) {
+    const deletingPaths = duplicateDeletionPaths;
+    if (deletingPaths && [song.path, song.cue_source_path].some(
+      path => path && deletingPaths.has(normalizePathForScope(path)),
+    )) {
+      showToast('这首歌曲正在执行删除操作，请稍后再播放', 'info');
+      return;
+    }
     return playerPlayback.playSong(song, options);
   }
 
@@ -751,6 +818,7 @@ function createPlayerCore() {
     generateOrganizedPath,
     openInFinder,
     deleteFromDisk,
+    deleteDuplicateSongs,
     moveFilesToFolder,
     deleteFolder,
     moveFolderToFolder,

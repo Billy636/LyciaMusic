@@ -25,6 +25,11 @@ import type {
   SaveArtistAvatarResponse,
 } from '../../types';
 import type { AudioOutputMode } from '../../types';
+import type {
+  DuplicateDeleteGroup,
+  DuplicateDeleteResult,
+  DuplicateScanResult,
+} from '../../features/duplicates/types';
 
 export interface AudioDevice {
   id: string;
@@ -544,6 +549,14 @@ export interface TauriCommandMap {
   preview_toolbox: {
     payload: { rootPath: string; config: ToolboxPreviewConfig };
     response: ToolboxPreviewItem[];
+  };
+  scan_duplicate_songs: {
+    payload: { rootPaths: string[]; recursive: boolean };
+    response: DuplicateScanResult;
+  };
+  delete_duplicate_songs: {
+    payload: { groups: DuplicateDeleteGroup[] };
+    response: DuplicateDeleteResult;
   };
   apply_rename: {
     payload: { operations: RenameOperation[] };

@@ -28,7 +28,9 @@ const lastNonSettingsRoute = ref(route.path === '/settings' ? '/' : route.fullPa
 const isSettingsRoute = computed(() => route.path === '/settings');
 const isSettingsLayout = computed(() => props.settingsLayout ?? isSettingsRoute.value);
 const settingsPageTitle = ref(settingsNavigation.pageTitle);
-const settingsBackTitle = computed(() => settingsNavigation.canGoBack ? '返回个性化' : '返回音乐页面');
+const settingsBackTitle = computed(() => settingsNavigation.canGoBack
+  ? `返回${settingsNavigation.sectionTitle}`
+  : '返回音乐页面');
 const isPlaylistLibraryRoute = computed(() => route.path === '/playlists');
 const themeToggleTitle = computed(() => (isDarkTheme.value ? '切换浅色' : '切换深色'));
 const searchDraft = ref(searchQuery.value);
@@ -61,7 +63,7 @@ const leaveSettingsPage = async () => {
 
 const handleSettingsBack = async () => {
   if (settingsNavigation.canGoBack) {
-    settingsNavigation.backToPersonalization();
+    settingsNavigation.backToSection();
     return;
   }
   await leaveSettingsPage();

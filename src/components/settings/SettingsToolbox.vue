@@ -93,7 +93,7 @@ const handleReset = () => {
     <section class="w-full px-5 pt-1">
       <h2 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">
         <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
-        歌曲文件整理
+        歌曲标签管理
       </h2>
       <p class="mt-2 text-xs leading-6 app-text-secondary">
         选择下载目录，勾选清理规则和命名模板，预览确认后一键应用。缺标签的文件可以用 MusicTag 在线获取标签。

@@ -4,6 +4,7 @@ mod artist_images;
 mod custom_fonts;
 mod database;
 mod desktop_lyrics;
+mod duplicates;
 pub mod error;
 mod foreground_window;
 mod highlights;
@@ -26,6 +27,7 @@ use app_runtime::{
 use custom_background::prepare_custom_background_image;
 use custom_fonts::{import_lyrics_font, read_lyrics_font_data_url};
 use database::clear_all_app_data;
+use duplicates::{delete_duplicate_songs, scan_duplicate_songs};
 use foreground_window::get_foreground_fullscreen_state;
 use highlights::{
     add_song_highlight_marker, delete_song_highlight_marker, get_song_highlight_markers,
@@ -167,6 +169,8 @@ pub fn run() {
             update_loudness_settings,
             set_equalizer_settings,
             preview_toolbox,
+            scan_duplicate_songs,
+            delete_duplicate_songs,
             apply_rename,
             get_output_devices,
             get_current_output_device,

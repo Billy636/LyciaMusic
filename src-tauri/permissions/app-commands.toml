@@ -45,6 +45,8 @@ commands.allow = [
   "update_loudness_settings",
   "set_equalizer_settings",
   "preview_toolbox",
+  "scan_duplicate_songs",
+  "delete_duplicate_songs",
   "apply_rename",
   "get_output_devices",
   "get_current_output_device",
