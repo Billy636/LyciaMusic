@@ -11,6 +11,7 @@ import { useHomeNavigation } from '../composables/useHomeNavigation';
 import { useListScrollMemory } from '../composables/useListScrollMemory';
 import { useVisibleCoverUrls } from '../composables/useVisibleCoverUrls';
 import SortModeIcon from '../components/common/SortModeIcon.vue';
+import ArtistImageControl from '../components/headers/ArtistImageControl.vue';
 import { useArtistImages } from '../features/library/artistImages';
 import { useLibraryBrowse } from '../features/library/useLibraryBrowse';
 import type { ArtistListItem } from '../features/library/playerLibraryViewShared';
@@ -563,6 +564,7 @@ onUnmounted(() => {
         </div>
 
         <div class="relative z-50 flex items-center gap-2">
+          <ArtistImageControl :other-menu-open="showSortMenu" @open="showSortMenu = false" />
           <button
             title="排序方式"
             class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-7 h-7 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"

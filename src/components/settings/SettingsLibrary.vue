@@ -65,36 +65,6 @@
         </button>
       </div>
 
-      <div class="folder-scope-setting flex-wrap gap-3">
-        <div class="folder-scope-copy">
-          <div class="folder-scope-title">歌单默认排序</div>
-          <div id="playlist-sort-description" class="folder-scope-desc">用于选择“跟随默认”的歌单，不影响已单独设置的歌单。</div>
-        </div>
-        <div class="ml-auto w-[210px] shrink-0">
-          <SettingsSelect label="歌单默认排序" hide-label :model-value="collectionsStore.playlistSortMode"
-            :options="playlistSortOptions" described-by="playlist-sort-description" @update:model-value="setDefaultSort" />
-        </div>
-      </div>
-
-      <div class="folder-scope-setting flex-wrap">
-        <div class="folder-scope-copy flex-1">
-          <div class="folder-scope-title">本地歌手头像</div>
-          <div class="folder-scope-desc">选择存放“歌手名.jpg”的文件夹（如 .artist），支持 JPG、JPEG、PNG、WebP，仅读取当前层级。</div>
-          <div class="folder-scope-desc">手动设置的头像优先；未匹配时使用歌曲封面，不修改音乐文件。</div>
-          <div v-if="settings.artistImageFolder" class="folder-scope-desc break-all mt-2" :title="settings.artistImageFolder">{{ settings.artistImageFolder }}</div>
-          <div aria-live="polite" class="folder-scope-desc mt-1">
-            <span v-if="artistImages.loading">正在读取头像…</span>
-            <span v-else-if="artistImages.error" class="text-red-500">{{ artistImages.error }}</span>
-            <span v-else-if="settings.artistImageFolder">已读取 {{ artistImages.count }} 个歌手头像<span v-if="artistImages.skipped">，跳过 {{ artistImages.skipped }} 个重复或无效图片</span>。文件名须与歌手名一致（忽略大小写和首尾空格）。</span>
-          </div>
-        </div>
-        <div class="ml-auto flex shrink-0 flex-wrap items-center gap-2 text-xs">
-          <button type="button" class="rounded-lg px-3 py-2 bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 disabled:opacity-40" :disabled="artistImages.loading" @click="selectArtistImageFolder">{{ settings.artistImageFolder ? '更换文件夹' : '选择文件夹' }}</button>
-          <button v-if="settings.artistImageFolder" type="button" class="rounded-lg px-3 py-2 hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-40" :disabled="artistImages.loading" @click="artistImages.refresh()">重新读取</button>
-          <button v-if="settings.artistImageFolder" type="button" class="rounded-lg px-3 py-2 hover:bg-black/5 dark:hover:bg-white/10" @click="settings.artistImageFolder = ''">取消使用</button>
-        </div>
-      </div>
-
       <div v-if="libraryFolders.length > 0" class="library-list">
         <div v-for="folder in libraryFolders" :key="folder.path" class="library-item">
           <div class="folder-icon">
@@ -164,33 +134,12 @@ import {
   useSettingsStore,
 } from '../../features/settings/store';
 import ConfirmModal from '../overlays/ConfirmModal.vue';
-import SettingsSelect from './SettingsSelect.vue';
-import { useCollectionsStore } from '../../features/collections/store';
-import { isPlaylistSortMode, playlistSortOptions } from '../../features/collections/playlistSort';
-import { useArtistImages } from '../../features/library/artistImages';
-
-const collectionsStore = useCollectionsStore();
-const setDefaultSort = (value: string) => {
-  if (isPlaylistSortMode(value)) collectionsStore.playlistSortMode = value;
-};
 
 const { addLibraryFolderLinked, removeLibraryFolderLinked } = usePlayer();
 const libraryStore = useLibraryStore();
 const settingsStore = useSettingsStore();
 const { libraryFolders, libraryScanProgress, lastLibraryScanError } = storeToRefs(libraryStore);
 const { settings } = storeToRefs(settingsStore);
-const artistImages = useArtistImages();
-const selectArtistImageFolder = async () => {
-  try {
-    const selected = await open({ directory: true, multiple: false, title: '选择歌手头像文件夹' });
-    if (typeof selected === 'string') {
-      if (selected === settings.value.artistImageFolder) await artistImages.refresh();
-      else settings.value.artistImageFolder = selected;
-    }
-  } catch (error) {
-    artistImages.error = `无法选择文件夹：${String(error)}`;
-  }
-};
 const isScanning = computed(() =>
   !!libraryScanProgress.value && !libraryScanProgress.value.done && !libraryScanProgress.value.failed
 );

@@ -2,11 +2,12 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
-import { ArrowDownWideNarrow, Check, ChevronLeft, ChevronRight, LayoutGrid, List, ListChecks, ListMusic, ListPlus, LoaderCircle, MoreHorizontal, Pin, PinOff, Play, Plus, Search, Trash2, X } from 'lucide-vue-next';
+import { Check, ChevronLeft, ChevronRight, LayoutGrid, List, ListChecks, ListMusic, ListPlus, LoaderCircle, MoreHorizontal, Pin, PinOff, Play, Plus, Search, Trash2, X } from 'lucide-vue-next';
 import AppCheckbox from '../components/common/AppCheckbox.vue';
 import ModernInputModal from '../components/common/ModernInputModal.vue';
 import ModernModal from '../components/common/ModernModal.vue';
 import PlaylistCover from '../components/playlists/PlaylistCover.vue';
+import PlaylistSortControl from '../components/playlists/PlaylistSortControl.vue';
 import PlaylistActionsMenu, { type PlaylistMenuAction } from '../components/playlists/PlaylistActionsMenu.vue';
 import { usePlaylistLibraryStore, type PlaylistLibraryFilter } from '../features/collections/playlistLibrary';
 import { useLibraryCollections } from '../features/collections/useLibraryCollections';
@@ -157,7 +158,7 @@ const createFromModal = (name: string) => {
       </div>
       <div class="toolbar-controls">
         <div class="search-field"><Search :size="15" /><input v-model="searchQuery" type="search" aria-label="搜索歌单" placeholder="搜索歌单，支持拼音" @keydown.esc.stop="searchQuery = ''" /><button v-if="searchQuery" type="button" aria-label="清空歌单搜索" @click="searchQuery = ''"><X :size="14" /></button></div>
-        <label class="sort-field"><ArrowDownWideNarrow :size="15" /><select v-model="sortMode" aria-label="歌单排序"><option value="custom">默认排序</option><option value="newest">最近创建</option><option value="name">名称 A–Z</option><option value="count">歌曲数量</option></select></label>
+        <PlaylistSortControl />
         <div class="view-switch" role="group" aria-label="歌单显示方式"><button type="button" title="网格视图" aria-label="网格视图" :aria-pressed="viewMode === 'grid'" :class="{ active: viewMode === 'grid' }" @click="viewMode = 'grid'"><LayoutGrid :size="16" /></button><button type="button" title="列表视图" aria-label="列表视图" :aria-pressed="viewMode === 'list'" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'"><List :size="17" /></button></div>
       </div>
     </div>
@@ -230,10 +231,6 @@ h1 { display: flex; align-items: center; gap: 13px; font-size: 28px; font-weight
 .search-field input { min-width: 0; width: 100%; color: var(--ink); font-size: 11px; outline: none; background: transparent; }
 .search-field input::-webkit-search-cancel-button { display: none; }
 .search-field button { cursor: pointer; }
-.sort-field { display: flex; align-items: center; gap: 6px; color: var(--muted); }
-.sort-field select { background: transparent; color: var(--ink); font-size: 11px; padding: 7px 2px; outline: none; cursor: pointer; max-width: 105px; }
-.sort-field option { background: white; color: #29292f; }
-:global(.dark .playlist-page .sort-field option) { background: #28282d; color: #eeeef2; }
 .view-switch { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 8px; gap: 2px; }
 .view-switch button { display: flex; padding: 5px; border-radius: 5px; color: var(--muted); cursor: pointer; }
 .view-switch .active { background: #72727f13; color: var(--ink); }
