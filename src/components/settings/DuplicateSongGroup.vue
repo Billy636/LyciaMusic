@@ -124,7 +124,7 @@ const qualitySummary = (song: DuplicateSong) => [
 .size-heading { grid-column: 4; }
 .duration-heading { grid-column: 5; }
 .heading-actions { grid-column: 6; display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
-.file-row { min-height: 76px; border-top: 1px solid rgb(255 255 255 / .25); transition: background .15s; }
+.file-row { min-height: 76px; border-top: 1px solid var(--settings-divider); transition: background .15s; }
 .file-row:hover { background: rgb(255 255 255 / .2); }
 .file-row.is-selected { background: rgb(236 65 65 / .045); }
 .file-checkbox { grid-column: 1; }
@@ -153,7 +153,7 @@ button:focus-visible, .file-checkbox:focus-visible { box-shadow: 0 0 0 2px rgb(2
 .dark .group-heading { background: rgb(255 255 255 / .025); }
 .dark .group-disc { background: rgb(236 65 65 / .10); color: #ff9393; }
 .dark .version-count { background: rgb(255 255 255 / .065); }
-.dark .file-row { border-color: rgb(255 255 255 / .055); }
+.dark .file-row { border-color: var(--settings-divider); }
 .dark .file-row:hover { background: rgb(255 255 255 / .025); }
 .dark .file-row.is-selected { background: rgb(236 65 65 / .07); }
 .dark .recommended, .dark .retained { color: #72d9b2; }

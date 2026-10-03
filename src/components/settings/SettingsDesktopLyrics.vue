@@ -1659,7 +1659,6 @@ onUnmounted(() => {
 .desktop-font-menu,
 .desktop-custom-modal {
   /* 桌面歌词设置组件 - 浅色模式 CSS 变量 */
-  --desktop-divider: rgba(15, 23, 42, 0.07);
   --desktop-chip-bg: rgba(255, 255, 255, 0.72);
   --desktop-chip-border: rgba(15, 23, 42, 0.08);
   --desktop-chip-text: rgb(55 65 81);
@@ -1694,7 +1693,6 @@ onUnmounted(() => {
 
 .dark :is(.desktop-lyrics-settings, .desktop-font-menu, .desktop-custom-modal) {
   /* 桌面歌词设置组件 - 深色模式 CSS 变量重写 */
-  --desktop-divider: rgba(255, 255, 255, 0.05);
   --desktop-chip-bg: rgba(255, 255, 255, 0.04);
   --desktop-chip-border: rgba(255, 255, 255, 0.08);
   --desktop-chip-text: rgba(255, 255, 255, 0.82);
@@ -1733,7 +1731,7 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 16px;
   padding: 16px;
-  border-bottom: 1px solid var(--desktop-divider);
+  border-bottom: 1px solid var(--settings-divider);
   text-align: left;
   transition: background-color 160ms ease;
 }
@@ -1744,10 +1742,6 @@ onUnmounted(() => {
 
 .desktop-setting-row:hover {
   background: rgba(128, 128, 128, 0.04);
-}
-
-.dark .desktop-setting-row {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
 }
 
 .dark .desktop-setting-row:hover {
@@ -1765,20 +1759,16 @@ onUnmounted(() => {
 
 .desktop-setting-expand {
   overflow: hidden;
-  border-top: 1px solid var(--desktop-divider);
+  border-top: 1px solid var(--settings-divider);
 }
 
 .desktop-setting-expand-inner {
   padding: 16px;
 }
 
-.dark .desktop-setting-expand {
-  border-top-color: rgba(255, 255, 255, 0.05);
-}
-
 .desktop-typography-row {
   padding: 16px;
-  border-bottom: 1px solid var(--desktop-divider);
+  border-bottom: 1px solid var(--settings-divider);
   transition: background-color 160ms ease;
 }
 
@@ -1788,10 +1778,6 @@ onUnmounted(() => {
 
 .desktop-typography-row:hover {
   background: rgba(128, 128, 128, 0.04);
-}
-
-.dark .desktop-typography-row {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
 }
 
 .dark .desktop-typography-row:hover {

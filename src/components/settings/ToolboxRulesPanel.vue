@@ -34,7 +34,7 @@ const toggleRule = (key: keyof ToolboxRules, value: boolean) => {
       <div
         v-for="option in ruleOptions"
         :key="option.key"
-        class="flex items-start gap-3 rounded-lg border-b border-white/40 px-2 py-3 transition-colors last:border-0 hover:bg-white/25 dark:border-white/5 dark:hover:bg-white/[0.05]"
+        class="flex items-start gap-3 rounded-lg border-b border-[var(--settings-divider)] px-2 py-3 transition-colors last:border-0 hover:bg-white/25 dark:hover:bg-white/[0.05]"
       >
         <AppCheckbox
           class="mt-0.5"

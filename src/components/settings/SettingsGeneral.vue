@@ -264,7 +264,7 @@ onScopeDispose(() => {
         常规与启动
       </h2>
       <div class="flex flex-col rounded-xl overflow-hidden">
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">开机自动运行</div>
           </div>
@@ -273,7 +273,7 @@ onScopeDispose(() => {
           </button>
         </div>
 
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">GPU 加速</div>
           </div>
@@ -282,7 +282,7 @@ onScopeDispose(() => {
           </button>
         </div>
 
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">启动时自动扫描音乐库</div>
           </div>
@@ -308,7 +308,7 @@ onScopeDispose(() => {
           </div>
         </div>
 
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">启动时检查更新</div>
             <p class="mt-1 text-xs app-text-secondary">后台检查，仅发现新版本时提示，不会自动下载安装。</p>
@@ -326,7 +326,7 @@ onScopeDispose(() => {
           </button>
         </div>
 
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">关闭时最小化至托盘</div>
           </div>
@@ -335,7 +335,7 @@ onScopeDispose(() => {
           </button>
         </div>
 
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">显示音质标识</div>
           </div>
@@ -344,7 +344,7 @@ onScopeDispose(() => {
           </button>
         </div>
 
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">显示歌曲注释</div>
           </div>
@@ -353,7 +353,7 @@ onScopeDispose(() => {
           </button>
         </div>
 
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">打开一键回顶按钮</div>
           </div>
@@ -362,7 +362,7 @@ onScopeDispose(() => {
           </button>
         </div>
 
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">显示任务栏播控图标</div>
           </div>
@@ -371,7 +371,7 @@ onScopeDispose(() => {
           </button>
         </div>
 
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">修改歌手头像时同步写回音频标签</div>
             <div class="text-xs text-gray-400 mt-0.5 max-w-[500px]">开启后，手动修改歌手头像时会同步修改本地音频文件（注意：多歌手合作歌曲、远程歌曲、CUE分轨、只读文件会被自动跳过）</div>
@@ -390,7 +390,7 @@ onScopeDispose(() => {
         播放设置
       </h2>
       <div class="settings-playback-group flex flex-col rounded-xl">
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">自动播放</div>
           </div>
@@ -398,7 +398,7 @@ onScopeDispose(() => {
             <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="autoPlay ? 'translate-x-6' : 'translate-x-1'" />
           </button>
         </div>
-        <div class="p-4 flex items-center justify-between gap-4 border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between gap-4 border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">播放设备</div>
           </div>
@@ -455,7 +455,7 @@ onScopeDispose(() => {
             </div>
           </div>
         </div>
-        <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">WASAPI 独占模式</div>
           </div>
@@ -473,7 +473,7 @@ onScopeDispose(() => {
             </button>
           </div>
         </div>
-        <div class="border-t border-white/30 dark:border-white/5">
+        <div class="border-t border-[var(--settings-divider)]">
           <button
             type="button"
             @click="showLyricsSyncOffsetPanel = !showLyricsSyncOffsetPanel"
@@ -547,7 +547,7 @@ onScopeDispose(() => {
         存储空间
       </h2>
       <div class="flex flex-col rounded-xl overflow-hidden">
-         <div class="p-4 flex items-center justify-between border-b border-white/30 dark:border-white/5 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+         <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">清除缓存</div>
           </div>
@@ -595,7 +595,7 @@ onScopeDispose(() => {
 <style scoped>
 .settings-expand-panel {
   margin-top: 2px;
-  border-top: 1px solid rgba(255, 255, 255, 0.3);
+  border-top: 1px solid var(--settings-divider);
   padding: 18px 16px 0;
 }
 
@@ -874,7 +874,7 @@ onScopeDispose(() => {
 }
 
 :global(.dark) .settings-expand-panel {
-  border-top-color: rgba(255, 255, 255, 0.08);
+  border-top-color: var(--settings-divider);
 }
 
 :global(.dark) .settings-side-effect-tip {

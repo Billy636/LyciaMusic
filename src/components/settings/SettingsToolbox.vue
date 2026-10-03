@@ -103,7 +103,7 @@ const handleReset = () => {
     <!-- 顶部配置：目标文件夹 + 外部工具 -->
     <section class="mx-5">
       <div
-        class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-white/40 py-4 dark:border-white/5"
+        class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-[var(--settings-divider)] py-4"
       >
         <div class="min-w-0">
           <h3 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">

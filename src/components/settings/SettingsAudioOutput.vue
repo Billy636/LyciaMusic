@@ -32,9 +32,9 @@ const toggleEqualizer = () => {
         <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
         音频处理
       </h2>
-      <div class="flex flex-col rounded-xl bg-white/20 dark:bg-black/10 border border-gray-200/40 dark:border-gray-800/40">
+      <div class="flex flex-col rounded-xl bg-white/20 dark:bg-black/10 border border-[var(--settings-divider)]">
         <!-- 音量平衡主开关行 -->
-        <div 
+        <div
           class="desktop-setting-row"
           :class="settings.audio.volumeBalance.enabled ? 'rounded-t-xl' : 'rounded-xl'"
         >
@@ -67,10 +67,10 @@ const toggleEqualizer = () => {
         <!-- 高级音量平衡配置子区域 -->
         <div
           v-if="settings.audio.volumeBalance.enabled"
-          class="flex flex-col border-t border-gray-200/20 dark:border-gray-800/20 bg-gray-50/10 dark:bg-gray-900/10 transition-all duration-300 animate-in fade-in rounded-b-xl"
+          class="flex flex-col border-t border-[var(--settings-divider)] bg-gray-50/10 dark:bg-gray-900/10 transition-all duration-300 animate-in fade-in rounded-b-xl"
         >
           <!-- 整体增益偏移设置 -->
-          <div class="desktop-setting-row border-b border-gray-200/20 dark:border-gray-800/20 pl-8">
+          <div class="desktop-setting-row border-b border-[var(--settings-divider)] pl-8">
             <div class="flex-1 space-y-1">
               <div class="text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-2">
                 整体增益偏移
@@ -128,10 +128,10 @@ const toggleEqualizer = () => {
         <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
         均衡器 (EQ)
       </h2>
-      <div class="flex flex-col rounded-xl bg-white/20 dark:bg-black/10 border border-gray-200/40 dark:border-gray-800/40">
+      <div class="flex flex-col rounded-xl bg-white/20 dark:bg-black/10 border border-[var(--settings-divider)]">
         <!-- 底栏入口显示统一由个性化设置管理 -->
-        <div 
-          class="desktop-setting-row rounded-t-xl border-b border-gray-200/20 dark:border-gray-800/20"
+        <div
+          class="desktop-setting-row rounded-t-xl border-b border-[var(--settings-divider)]"
         >
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">底栏快捷入口</div>
@@ -151,9 +151,9 @@ const toggleEqualizer = () => {
         </div>
 
         <!-- 启用均衡器主开关行 -->
-        <div 
+        <div
           class="desktop-setting-row"
-          :class="settings.audio.equalizer.enabled ? 'border-b border-gray-200/20 dark:border-gray-800/20' : 'rounded-b-xl'"
+          :class="settings.audio.equalizer.enabled ? 'border-b border-[var(--settings-divider)]' : 'rounded-b-xl'"
         >
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">启用均衡器</div>
@@ -179,7 +179,7 @@ const toggleEqualizer = () => {
         <!-- 均衡器调节板高级配置子区域 -->
         <div
           v-if="settings.audio.equalizer.enabled"
-          class="flex flex-col border-t border-gray-200/20 dark:border-gray-800/20 bg-gray-50/10 dark:bg-gray-900/10 transition-all duration-300 animate-in fade-in rounded-b-xl p-6"
+          class="flex flex-col border-t border-[var(--settings-divider)] bg-gray-50/10 dark:bg-gray-900/10 transition-all duration-300 animate-in fade-in rounded-b-xl p-6"
         >
           <EqualizerPanel :embedded="true" />
         </div>
@@ -195,7 +195,7 @@ const toggleEqualizer = () => {
   justify-content: space-between;
   gap: 16px;
   padding: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom: 1px solid var(--settings-divider);
   text-align: left;
   transition: background-color 160ms ease;
 }
@@ -209,7 +209,7 @@ const toggleEqualizer = () => {
 }
 
 :global(.dark) .desktop-setting-row {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: var(--settings-divider);
 }
 
 :global(.dark) .desktop-setting-row:hover {

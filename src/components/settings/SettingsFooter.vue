@@ -171,9 +171,8 @@ const confirmation = computed(() => pending.value === 'link'
 </template>
 
 <style scoped>
-.display-rows { --display-divider:rgb(15 23 42 / .07); --display-muted:var(--app-text-secondary); position:relative; z-index:1; container-type:inline-size; }
-.dark .display-rows { --display-divider:rgb(255 255 255 / .05); }
-.display-row { display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:66px; padding:14px 2px; border-bottom:1px solid var(--display-divider); }
+.display-rows { --display-muted:var(--app-text-secondary); position:relative; z-index:1; container-type:inline-size; }
+.display-row { display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:66px; padding:14px 2px; border-bottom:1px solid var(--settings-divider); }
 .display-row:last-child { border-bottom:0; }
 .display-label { font-size:13px; font-weight:500; }
 .display-info-select { width:224px; max-width:100%; flex-shrink:0; }
@@ -201,7 +200,7 @@ const confirmation = computed(() => pending.value === 'link'
 .color-presets { display:flex; justify-content:space-between; gap:8px; }
 .color-presets button { display:flex; align-items:center; justify-content:center; width:26px; height:26px; border:1px solid rgb(0 0 0 / .08); border-radius:50%; color:#111827; }
 .color-presets button[aria-pressed="true"] { outline:2px solid rgb(128 128 128 / .45); outline-offset:2px; }
-.custom-color-row { display:flex; align-items:center; justify-content:space-between; margin-top:14px; padding-top:12px; border-top:1px solid var(--display-divider); font-size:12px; }
+.custom-color-row { display:flex; align-items:center; justify-content:space-between; margin-top:14px; padding-top:12px; border-top:1px solid var(--settings-divider); font-size:12px; }
 .color-reset { display:flex; align-items:center; justify-content:center; gap:6px; width:100%; margin-top:10px; padding:6px; border-radius:6px; font-size:12px; color:var(--display-muted); }
 .color-reset:hover:not(:disabled) { color:#ec4141; background:rgb(236 65 65 / .06); }
 .color-reset:disabled { opacity:.4; cursor:default; }

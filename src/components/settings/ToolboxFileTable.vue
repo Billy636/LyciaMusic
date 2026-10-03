@@ -18,7 +18,7 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
   <div>
     <!-- 工具行：全选 + 统计 + 重新扫描 -->
     <div
-      class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-white/40 pb-3 dark:border-white/5"
+      class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-[var(--settings-divider)] pb-3"
     >
       <div class="flex items-center gap-3">
         <AppCheckbox
@@ -79,7 +79,7 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
 
     <!-- 表头 -->
     <div
-      class="grid grid-cols-[28px_minmax(0,1fr)_20px_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/40 py-2 text-xs font-semibold app-text-secondary dark:border-white/5"
+      class="grid grid-cols-[28px_minmax(0,1fr)_20px_minmax(0,1fr)_auto] items-center gap-2 border-b border-[var(--settings-divider)] py-2 text-xs font-semibold app-text-secondary"
     >
       <span></span>
       <span>当前文件名</span>
@@ -138,7 +138,7 @@ const rowError = (path: string) => store.applyFailures[path] ?? '';
       <div
         v-for="item in store.previewItems"
         :key="item.original_path"
-        class="grid grid-cols-[28px_minmax(0,1fr)_20px_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/30 px-4 py-2.5 text-sm transition-colors last:border-0 hover:bg-white/30 dark:border-white/5 dark:hover:bg-white/[0.06]"
+        class="grid grid-cols-[28px_minmax(0,1fr)_20px_minmax(0,1fr)_auto] items-center gap-2 border-b border-[var(--settings-divider)] px-4 py-2.5 text-sm transition-colors last:border-0 hover:bg-white/30 dark:hover:bg-white/[0.06]"
       >
         <AppCheckbox
           :checked="isRowSelected(item.original_path)"

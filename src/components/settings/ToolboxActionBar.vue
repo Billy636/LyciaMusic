@@ -59,7 +59,7 @@ const store = useToolboxStore();
 
     <!-- 底部操作条 -->
     <div
-      class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-white/40 pt-4 dark:border-white/5"
+      class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-[var(--settings-divider)] pt-4"
     >
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
         <span class="text-sm app-text-secondary">

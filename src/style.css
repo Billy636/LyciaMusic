@@ -4,6 +4,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
+  /* Audio-output separators: the same translucent slate works on light and dark surfaces. */
+  --settings-divider: rgba(148, 163, 184, 0.14);
   --app-text-secondary: #4b5563;
   --app-text-muted: #64748b;
   font-family: "Inter", system-ui, sans-serif;

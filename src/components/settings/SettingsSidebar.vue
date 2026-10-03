@@ -142,7 +142,7 @@ onDeactivated(cancelDrag);
           v-for="(item, index) in items"
           :key="item.id"
           :data-navigation-id="item.id"
-          class="navigation-setting-row relative p-4 flex items-center gap-3 border-b border-white/30 dark:border-white/5 last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors rounded-lg"
+          class="navigation-setting-row relative p-4 flex items-center gap-3 border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors rounded-lg"
           :class="{
             'bg-red-100/40 dark:bg-red-500/10 opacity-60': drag?.active && drag.id === item.id,
             'drop-before': drag?.order && drag.beforeId === item.id,

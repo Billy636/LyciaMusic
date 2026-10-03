@@ -40,7 +40,7 @@ function onInput(event: Event) {
     <h2 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">
       <span class="h-4 w-1 rounded-full bg-[#EC4141]" aria-hidden="true" />窗口样式
     </h2>
-    <div class="flex flex-wrap items-center justify-between gap-6 border-b border-black/5 pb-6 dark:border-white/5">
+    <div class="flex flex-wrap items-center justify-between gap-6 border-b border-[var(--settings-divider)] pb-6">
       <div>
         <label for="taskbar-background-transparency" class="text-sm font-medium text-gray-800 dark:text-gray-100">背景透明度</label>
       </div>
@@ -53,7 +53,7 @@ function onInput(event: Event) {
         <button type="button" aria-label="恢复默认透明度" title="恢复默认" :disabled="opacity === 0" class="p-2 app-text-secondary disabled:opacity-30" @click="setTransparency(100)"><RotateCcw :size="16" /></button>
       </div>
     </div>
-    <div class="flex flex-wrap items-center justify-between gap-6 border-b border-black/5 pb-6 dark:border-white/5">
+    <div class="flex flex-wrap items-center justify-between gap-6 border-b border-[var(--settings-divider)] pb-6">
       <div>
         <label for="taskbar-window-width" class="text-sm font-medium text-gray-800 dark:text-gray-100">窗口长度</label>
       </div>
@@ -66,7 +66,7 @@ function onInput(event: Event) {
         <button type="button" aria-label="恢复默认窗口长度" title="恢复默认" :disabled="width === TASKBAR_PLAYER_WINDOW_WIDTH" class="p-2 app-text-secondary disabled:opacity-30" @click="setWidth(TASKBAR_PLAYER_WINDOW_WIDTH)"><RotateCcw :size="16" /></button>
       </div>
     </div>
-    <div class="flex flex-wrap items-center justify-between gap-6 border-b border-black/5 pb-6 dark:border-white/5">
+    <div class="flex flex-wrap items-center justify-between gap-6 border-b border-[var(--settings-divider)] pb-6">
       <div>
         <label for="taskbar-text-color" class="text-sm font-medium text-gray-800 dark:text-gray-100">字体颜色</label>
       </div>
