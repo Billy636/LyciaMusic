@@ -9,6 +9,7 @@ const props = defineProps<{
   hideLabel?: boolean;
   triggerId?: string;
   describedBy?: string;
+  menuZIndex?: number;
 }>();
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 const id = useId();
@@ -104,7 +105,8 @@ onBeforeUnmount(() => {
     </button>
     <Teleport to="body">
       <div v-if="opened" :id="`${id}-listbox`" ref="menu" role="listbox" :aria-labelledby="`${id}-label`"
-        class="settings-select-surface settings-select-menu custom-scrollbar" :style="menuStyle" @pointerdown.prevent>
+        class="settings-select-surface settings-select-menu custom-scrollbar"
+        :style="[menuStyle, { zIndex: menuZIndex }]" @pointerdown.prevent>
         <div v-for="(option, index) in options" :id="`${id}-option-${index}`" :key="option.value"
           role="option" :aria-selected="modelValue === option.value" :data-option-index="index"
           class="settings-select-option" :class="{ 'is-active': activeIndex === index, 'is-selected': modelValue === option.value }"
