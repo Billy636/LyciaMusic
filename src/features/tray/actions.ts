@@ -11,7 +11,7 @@ export const TRAY_MENU_PANEL_WIDTH = 190;
 export const TRAY_MENU_SUBMENU_WIDTH = 132;
 export const TRAY_MENU_SUBMENU_GAP = 8;
 export const TRAY_MENU_WINDOW_WIDTH = TRAY_MENU_PANEL_WIDTH + TRAY_MENU_SUBMENU_WIDTH + TRAY_MENU_SUBMENU_GAP;
-export const TRAY_MENU_WINDOW_HEIGHT = 273;
+export const TRAY_MENU_WINDOW_HEIGHT = 303;
 
 export type TrayMenuSubmenuPlacement = 'left' | 'right';
 
@@ -24,6 +24,7 @@ export type TrayMenuAction =
   | 'play-mode-shuffle'
   | 'toggle-mini-player'
   | 'toggle-desktop-lyrics'
+  | 'toggle-taskbar-player'
   | 'open-settings'
   | 'quit';
 
@@ -39,6 +40,7 @@ export interface TrayMenuStatePayload {
   playMode: number;
   isMiniMode: boolean;
   showDesktopLyrics: boolean;
+  showTaskbarPlayer: boolean;
   submenuPlacement: TrayMenuSubmenuPlacement;
 }
 
@@ -49,6 +51,7 @@ export interface TrayMenuActionDeps {
   playMode: Ref<number>;
   isMiniMode: Ref<boolean>;
   showDesktopLyrics: Ref<boolean>;
+  showTaskbarPlayer: Ref<boolean>;
   revealMainWindow: () => Promise<unknown>;
   openSettings: () => Promise<unknown>;
   quitApp: () => Promise<unknown>;
@@ -90,6 +93,9 @@ export async function handleTrayMenuAction(action: TrayMenuAction, deps: TrayMen
     }
     case 'toggle-desktop-lyrics':
       deps.showDesktopLyrics.value = !deps.showDesktopLyrics.value;
+      break;
+    case 'toggle-taskbar-player':
+      deps.showTaskbarPlayer.value = !deps.showTaskbarPlayer.value;
       break;
     case 'open-settings':
       deps.isMiniMode.value = false;

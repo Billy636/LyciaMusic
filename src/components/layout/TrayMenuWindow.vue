@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Minimize2,
   Music2,
+  PanelBottom,
   Pause,
   Play,
   Power,
@@ -16,7 +17,7 @@ import {
 } from 'lucide-vue-next';
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { computed, onMounted, onUnmounted, ref, type Component } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, type Component } from 'vue';
 
 import {
   APP_TRAY_MENU_EVENT,
@@ -40,7 +41,10 @@ const isDarkTheme = ref(true);
 const playMode = ref(0);
 const isMiniMode = ref(false);
 const showDesktopLyrics = ref(false);
+const showTaskbarPlayer = ref(false);
 const isPlayModeMenuOpen = ref(false);
+const playModeTrigger = ref<HTMLButtonElement | null>(null);
+const playModePopover = ref<HTMLElement | null>(null);
 const submenuPlacement = ref<'left' | 'right'>('left');
 let unlistenState: UnlistenFn | null = null;
 let unlistenFocus: UnlistenFn | null = null;
@@ -155,13 +159,45 @@ const closePlayModeMenu = () => {
   isPlayModeMenuOpen.value = false;
 };
 
+const focusPlayModeMenu = async () => {
+  openPlayModeMenu();
+  await nextTick();
+  const selectedIndex = playModeOptions.findIndex(option => option.value === playMode.value);
+  playModePopover.value?.querySelectorAll<HTMLButtonElement>('button')[Math.max(0, selectedIndex)]?.focus();
+};
+
+const closePlayModeMenuAndFocus = () => {
+  playModeTrigger.value?.focus();
+  closePlayModeMenu();
+};
+
+const handlePlayModeKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'ArrowLeft') {
+    event.preventDefault();
+    closePlayModeMenuAndFocus();
+    return;
+  }
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+  event.preventDefault();
+  const buttons = Array.from(playModePopover.value?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+  if (!buttons.length) return;
+  const currentIndex = buttons.findIndex(button => button === document.activeElement);
+  const direction = event.key === 'ArrowDown' ? 1 : -1;
+  buttons[(currentIndex + direction + buttons.length) % buttons.length]?.focus();
+};
+
 const hideWindow = () => {
   void appWindow.hide();
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Escape') {
-    hideWindow();
+    event.preventDefault();
+    if (isPlayModeMenuOpen.value) {
+      closePlayModeMenuAndFocus();
+    } else {
+      hideWindow();
+    }
   }
 };
 
@@ -182,6 +218,7 @@ onMounted(async () => {
     playMode.value = event.payload.playMode;
     isMiniMode.value = event.payload.isMiniMode;
     showDesktopLyrics.value = event.payload.showDesktopLyrics;
+    showTaskbarPlayer.value = event.payload.showTaskbarPlayer;
     submenuPlacement.value = event.payload.submenuPlacement;
     isPlayModeMenuOpen.value = false;
     armFocusFallback();
@@ -239,7 +276,7 @@ onUnmounted(() => {
 
       <div class="menu-divider" />
 
-      <section class="transport" aria-label="播放控制" @mouseenter="closePlayModeMenu">
+      <section class="transport" aria-label="播放控制" @mouseenter="closePlayModeMenu" @focusin="closePlayModeMenu">
         <button class="transport-button" title="上一首" @click="sendAction('prev-song', { hide: false })">
           <SkipBack :size="22" :stroke-width="2.35" />
         </button>
@@ -255,10 +292,18 @@ onUnmounted(() => {
       <div class="menu-divider" />
 
       <button
+        ref="playModeTrigger"
+        type="button"
         class="menu-row"
         :class="{ 'menu-row--open': isPlayModeMenuOpen }"
+        aria-haspopup="menu"
+        aria-controls="tray-play-mode-menu"
+        :aria-expanded="isPlayModeMenuOpen"
         @mouseenter="openPlayModeMenu"
         @focus="openPlayModeMenu"
+        @keydown.right.prevent="focusPlayModeMenu"
+        @keydown.enter.prevent="focusPlayModeMenu"
+        @keydown.space.prevent="focusPlayModeMenu"
       >
         <span class="row-icon">
           <component :is="playModeConfig.icon" :size="18" :stroke-width="2.15" />
@@ -267,7 +312,7 @@ onUnmounted(() => {
         <ChevronRight class="row-chevron" :size="18" :stroke-width="2.2" />
       </button>
 
-      <button class="menu-row" @mouseenter="closePlayModeMenu" @click="sendAction('toggle-mini-player')">
+      <button class="menu-row" @mouseenter="closePlayModeMenu" @focus="closePlayModeMenu" @click="sendAction('toggle-mini-player')">
         <span class="row-icon">
           <Minimize2 :size="18" :stroke-width="2.15" />
         </span>
@@ -277,15 +322,30 @@ onUnmounted(() => {
 
       <div class="menu-divider" />
 
-      <button class="menu-row" @mouseenter="closePlayModeMenu" @click="sendAction('toggle-desktop-lyrics')">
+      <button class="menu-row" @mouseenter="closePlayModeMenu" @focus="closePlayModeMenu" @click="sendAction('toggle-desktop-lyrics')">
         <span class="row-icon row-icon--text">词</span>
         <span class="row-label">桌面歌词</span>
         <Check v-if="showDesktopLyrics" class="row-check" :size="16" :stroke-width="2.3" />
       </button>
 
+      <button
+        type="button"
+        class="menu-row"
+        :aria-pressed="showTaskbarPlayer"
+        @mouseenter="closePlayModeMenu"
+        @focus="closePlayModeMenu"
+        @click="sendAction('toggle-taskbar-player')"
+      >
+        <span class="row-icon">
+          <PanelBottom :size="18" :stroke-width="2.15" />
+        </span>
+        <span class="row-label">任务栏播控</span>
+        <Check v-if="showTaskbarPlayer" class="row-check" :size="16" :stroke-width="2.3" />
+      </button>
+
       <div class="menu-divider" />
 
-      <button class="menu-row" @mouseenter="closePlayModeMenu" @click="sendAction('open-settings')">
+      <button class="menu-row" @mouseenter="closePlayModeMenu" @focus="closePlayModeMenu" @click="sendAction('open-settings')">
         <span class="row-icon">
           <Settings :size="18" :stroke-width="2.15" />
         </span>
@@ -294,7 +354,7 @@ onUnmounted(() => {
 
       <div class="menu-divider" />
 
-      <button class="menu-row" @mouseenter="closePlayModeMenu" @click="sendAction('quit')">
+      <button class="menu-row" @mouseenter="closePlayModeMenu" @focus="closePlayModeMenu" @click="sendAction('quit')">
         <span class="row-icon">
           <Power :size="18" :stroke-width="2.15" />
         </span>
@@ -302,10 +362,13 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <div v-if="isPlayModeMenuOpen" class="play-mode-popover">
+    <div v-if="isPlayModeMenuOpen" id="tray-play-mode-menu" ref="playModePopover" class="play-mode-popover" role="menu" aria-label="播放模式" @keydown="handlePlayModeKeydown">
       <button
         v-for="option in playModeOptions"
         :key="option.action"
+        type="button"
+        role="menuitemradio"
+        :aria-checked="playMode === option.value"
         class="play-mode-option"
         @click="sendAction(option.action)"
       >
@@ -459,6 +522,12 @@ onUnmounted(() => {
   color: var(--text-main);
 }
 
+.menu-row:focus-visible {
+  background: var(--hover-bg);
+  color: var(--text-main);
+  box-shadow: inset 0 0 0 1px var(--text-muted);
+}
+
 .row-icon {
   display: grid;
   place-items: center;
@@ -533,8 +602,13 @@ onUnmounted(() => {
   text-align: left;
 }
 
-.play-mode-option:hover {
+.play-mode-option:hover,
+.play-mode-option:focus-visible {
   background: var(--hover-bg);
   color: var(--text-main);
+}
+
+.play-mode-option:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--text-muted);
 }
 </style>

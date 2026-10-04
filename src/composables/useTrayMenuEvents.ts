@@ -4,7 +4,7 @@ import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { storeToRefs } from 'pinia';
-import { nextTick, onMounted, onUnmounted, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import type { Router } from 'vue-router';
 
 import { useLyrics } from './lyrics';
@@ -12,6 +12,7 @@ import { useThemeSettings } from './useThemeSettings';
 import { usePlaybackController } from '../features/playback/usePlaybackController';
 import { usePlaybackStore } from '../features/playback/store';
 import { useUiStore } from '../shared/stores/ui';
+import { useSettings } from '../features/settings/useSettings';
 import {
   APP_TRAY_MENU_EVENT,
   APP_TRAY_MENU_OPEN_EVENT,
@@ -157,6 +158,13 @@ export function useTrayMenuEvents(router: Router) {
   const { currentSong, isPlaying, prevSong, togglePlay, nextSong } = usePlaybackController();
   const { showDesktopLyrics } = useLyrics();
   const { isDarkTheme } = useThemeSettings();
+  const { settings } = useSettings();
+  const showTaskbarPlayer = computed({
+    get: () => settings.value.showTaskbarPlayer,
+    set: (enabled: boolean) => {
+      settings.value.showTaskbarPlayer = enabled;
+    },
+  });
   const playbackStore = usePlaybackStore();
   const uiStore = useUiStore();
   const { playMode } = storeToRefs(playbackStore);
@@ -173,6 +181,7 @@ export function useTrayMenuEvents(router: Router) {
     playMode: playMode.value,
     isMiniMode: isMiniMode.value,
     showDesktopLyrics: showDesktopLyrics.value,
+    showTaskbarPlayer: showTaskbarPlayer.value,
     submenuPlacement: trayMenuSubmenuPlacement,
   });
 
@@ -185,6 +194,10 @@ export function useTrayMenuEvents(router: Router) {
       createTrayMenuState(),
     );
   };
+
+  watch(showTaskbarPlayer, () => {
+    void emitTrayMenuState();
+  });
 
   const revealMainWindow = async () => {
     await mainWindow.unminimize();
@@ -258,6 +271,7 @@ export function useTrayMenuEvents(router: Router) {
           playMode,
           isMiniMode,
           showDesktopLyrics,
+          showTaskbarPlayer,
           revealMainWindow,
           openSettings,
           quitApp,

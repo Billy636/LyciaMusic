@@ -29,11 +29,11 @@ describe('resolveTrayMenuPosition', () => {
     ]);
 
     // Tray click inside taskbar (y = 1056)
-    // preferAboveY = 1056 - 273 - 6 = 777, clamped to maxY = 1032 - 273 - 6 = 753
+    // Clamp the menu to workArea bottom - menu height - 6px.
     // so the menu bottom (1026) stays 6px above the taskbar instead of covering it
     const result = await resolveTrayMenuPosition({ x: 1800, y: 1056 });
 
-    expect(result.position.y).toBe(753);
+    expect(result.position.y).toBe(1026 - TRAY_MENU_WINDOW_HEIGHT);
     expect(result.position.y + TRAY_MENU_WINDOW_HEIGHT).toBe(1026);
   });
 
@@ -52,10 +52,10 @@ describe('resolveTrayMenuPosition', () => {
     ]);
 
     // Physical click inside taskbar: y = 1584 -> clickY = 1056 logical px
-    // preferAboveY = 777, clamped to logical maxY = 1548/1.5 - 273 - 6 = 753
+    // Clamp in logical pixels: 1548/1.5 - menu height - 6px.
     const result = await resolveTrayMenuPosition({ x: 2700, y: 1584 });
 
-    expect(result.position.y).toBe(753);
+    expect(result.position.y).toBe(1026 - TRAY_MENU_WINDOW_HEIGHT);
     expect(result.position.y + TRAY_MENU_WINDOW_HEIGHT).toBe(1026);
   });
 

@@ -10,6 +10,7 @@ const createDeps = (): TrayMenuActionDeps => ({
   playMode: ref(0),
   isMiniMode: ref(false),
   showDesktopLyrics: ref(false),
+  showTaskbarPlayer: ref(false),
   revealMainWindow: vi.fn().mockResolvedValue(undefined),
   openSettings: vi.fn().mockResolvedValue(undefined),
   quitApp: vi.fn().mockResolvedValue(undefined),
