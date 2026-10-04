@@ -48,7 +48,7 @@ use music::{
     get_song_lyrics_for_edit, get_song_lyrics_source, get_song_runtime_metadata,
     is_directory, move_file_to_folder, move_folder_to_folder, move_music_file, parse_audio_files, remove_library_folder,
     remove_sidebar_folder, save_artist_avatar, save_song_info, save_song_lyrics,
-    scan_folder_as_playlists, scan_library, scan_music_folder, show_in_folder,
+    scan_folder_as_playlists, scan_library, scan_music_folder, scan_music_folder_paths, show_in_folder,
     upsert_search_index_batch,
 };
 use player::{
@@ -131,6 +131,7 @@ pub fn run() {
             desktop_lyrics::native_desktop_lyrics_reveal,
             desktop_lyrics::native_desktop_lyrics_close,
             scan_music_folder,
+            scan_music_folder_paths,
             parse_audio_files,
             scan_folder_as_playlists,
             get_song_cover_thumbnail,

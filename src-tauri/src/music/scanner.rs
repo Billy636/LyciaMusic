@@ -20,7 +20,7 @@ mod repository;
 pub(crate) use orchestrator::scan_single_directory_summary_internal;
 pub use orchestrator::{
     get_folder_first_song, parse_audio_files, scan_folder_as_playlists, scan_folder_recursive,
-    scan_music_folder, scan_single_directory_internal,
+    scan_music_folder, scan_music_folder_paths, scan_single_directory_internal,
 };
 pub(crate) use parser::parse_song_from_file;
 pub(crate) use repository::apply_scan_changes;

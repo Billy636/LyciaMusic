@@ -164,7 +164,7 @@ function createPlayerCore() {
   const { showToast } = useToast();
   const { clearCoverCaches, loadCover, loadFullCover, loadFullCoverPath } = useCoverCache();
   const { clearSongDetailCache } = useSongDetailCache();
-  const { clearResolvedSongCache } = useLibrarySongResolver();
+  const { loadSong, clearResolvedSongCache } = useLibrarySongResolver();
   const { resolveSongForPlayback, clearSongRuntimeMetadataCache } = useSongRuntimeMetadata();
 
   const collectionsStore = useCollectionsStore();
@@ -323,9 +323,17 @@ function createPlayerCore() {
       const refreshCurrentMetadata = async () => {
         if (!song || !folderPaths.some(path => isPathInFolderScope(path, song.path))) return;
 
+        const freshSong = await loadSong(song.path);
+        if (!isCurrentRefresh()) return;
+        const retainedSong = freshSong && libraryStore.getSongByPath(freshSong.path);
+        if (freshSong && retainedSong && libraryStore.refreshRetainedSongRecords([
+          { previousSong: retainedSong, song: freshSong },
+        ])) {
+          libraryStore.notifyLibraryMetadataRefreshed();
+        }
         const coverPath = song.cue_source_path || song.path;
         const [refreshedSong, cover, fullCover, fullCoverPath] = await Promise.all([
-          resolveSongForPlayback({ ...song }),
+          resolveSongForPlayback({ ...song, ...freshSong }),
           loadCover(coverPath),
           loadFullCover(coverPath),
           loadFullCoverPath(coverPath),

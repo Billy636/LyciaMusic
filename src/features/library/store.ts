@@ -348,6 +348,33 @@ export const useLibraryStore = defineStore('library', () => {
     }
   };
 
+  // A folder refresh only hydrates records already held by the library. Keep
+  // their identity, including when Windows canonicalizes the spelling of a path.
+  const refreshRetainedSongRecords = (
+    updates: Array<{ previousSong: LibrarySong; song: LibrarySong }>,
+  ) => {
+    let changed = false;
+    for (const { previousSong, song } of updates) {
+      const previousPath = previousSong.path;
+      const target = songPool.get(song.path) ?? previousSong;
+      if (previousPath !== song.path && songPool.get(previousPath) === previousSong) {
+        songPool.delete(previousPath);
+        changed = true;
+      }
+      if (syncSongRecord(target, normalizeSongRecord(song)) || !songPool.has(song.path)) {
+        changed = true;
+      }
+      songPool.set(song.path, target);
+    }
+    return changed;
+  };
+
+  const notifyLibraryMetadataRefreshed = () => {
+    rebuildInternPools();
+    songCatalogVersion.value += 1;
+    libraryDataVersion.value += 1;
+  };
+
   const getSongByPath = (path: string | null | undefined, fallback?: Song | null) => {
     if (!path) {
       return fallback ?? null;
@@ -602,6 +629,8 @@ export const useLibraryStore = defineStore('library', () => {
     getSongByPath,
     resolveSongsByPaths,
     setSongRecord,
+    refreshRetainedSongRecords,
+    notifyLibraryMetadataRefreshed,
     libraryFolders,
     libraryHierarchy,
     artistCatalog,

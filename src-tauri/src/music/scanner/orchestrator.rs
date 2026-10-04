@@ -17,7 +17,15 @@ use tauri::{AppHandle, State};
 
 struct ScanDirectoryOutcome {
     songs: Option<Vec<Song>>,
+    paths: Option<Vec<String>>,
     song_count: usize,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ScanResultMode {
+    Songs,
+    Paths,
+    Summary,
 }
 
 pub fn scan_single_directory_internal(
@@ -35,7 +43,7 @@ pub fn scan_single_directory_internal(
         folder_index,
         folder_total,
         options,
-        true,
+        ScanResultMode::Songs,
     )
     .map(|outcome| outcome.songs.unwrap_or_default())
 }
@@ -55,7 +63,7 @@ pub(crate) fn scan_single_directory_summary_internal(
         folder_index,
         folder_total,
         options,
-        false,
+        ScanResultMode::Summary,
     )
     .map(|outcome| outcome.song_count)
 }
@@ -67,7 +75,7 @@ fn scan_single_directory_with_mode(
     folder_index: usize,
     folder_total: usize,
     options: ScanOptions,
-    return_songs: bool,
+    result_mode: ScanResultMode,
 ) -> Result<ScanDirectoryOutcome, String> {
     #[cfg(debug_assertions)]
     let start_time = std::time::Instant::now();
@@ -94,8 +102,15 @@ fn scan_single_directory_with_mode(
         let conn = db_conn.lock().map_err(|error| error.to_string())?;
         let snapshot = load_db_snapshot_for_folder(&conn, &normalized_folder)?;
         let song_count = snapshot.len();
-        let songs = return_songs.then(|| snapshot.into_values().map(|entry| entry.song).collect());
-        Ok(ScanDirectoryOutcome { songs, song_count })
+        let paths =
+            (result_mode == ScanResultMode::Paths).then(|| snapshot.keys().cloned().collect());
+        let songs = (result_mode == ScanResultMode::Songs)
+            .then(|| snapshot.into_values().map(|entry| entry.song).collect());
+        Ok(ScanDirectoryOutcome {
+            songs,
+            paths,
+            song_count,
+        })
     };
 
     // Check before traversing, and once more before writing. No failure should
@@ -119,7 +134,14 @@ fn scan_single_directory_with_mode(
             Err(error) => return retain_existing(error),
         };
     let song_count = scan_diff.songs.len();
-    if !return_songs {
+    let paths = (result_mode == ScanResultMode::Paths).then(|| {
+        scan_diff
+            .songs
+            .iter()
+            .map(|song| song.path.clone())
+            .collect()
+    });
+    if result_mode != ScanResultMode::Songs {
         scan_diff.songs = Vec::new();
     }
 
@@ -213,11 +235,12 @@ fn scan_single_directory_with_mode(
     }
 
     Ok(ScanDirectoryOutcome {
-        songs: if return_songs {
+        songs: if result_mode == ScanResultMode::Songs {
             Some(scan_diff.songs)
         } else {
             None
         },
+        paths,
         song_count,
     })
 }
@@ -240,6 +263,37 @@ pub async fn scan_music_folder(
 
     tauri::async_runtime::spawn_blocking(move || {
         scan_single_directory_internal(folder_path, db_conn, Some(app), 1, 1, options)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Folder refreshes only need membership; metadata stays in the database and is
+/// fetched separately for records that are already materialized by the UI.
+#[tauri::command]
+pub async fn scan_music_folder_paths(
+    folder_path: String,
+    minimum_duration_seconds: Option<u32>,
+    force_metadata_refresh: Option<bool>,
+    app: AppHandle,
+    db_state: State<'_, DbState>,
+) -> Result<Vec<String>, String> {
+    let db_conn = db_state.conn.clone();
+    let options = ScanOptions {
+        force_metadata_refresh: force_metadata_refresh.unwrap_or(false),
+        ..ScanOptions::from_minimum_duration_seconds(minimum_duration_seconds)
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        scan_single_directory_with_mode(
+            folder_path,
+            db_conn,
+            Some(app),
+            1,
+            1,
+            options,
+            ScanResultMode::Paths,
+        )
+        .map(|outcome| outcome.paths.unwrap_or_default())
     })
     .await
     .map_err(|error| error.to_string())?

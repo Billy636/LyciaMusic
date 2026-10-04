@@ -2,7 +2,7 @@ import { computed, ref, shallowRef } from 'vue';
 import { defineStore } from 'pinia';
 
 import { useLibraryStore } from '../library/store';
-import type { Song } from '../../types';
+import type { LibrarySong, Song } from '../../types';
 
 const areSamePaths = (left: string[], right: string[]) =>
   left.length === right.length && left.every((path, index) => path === right[index]);
@@ -149,6 +149,27 @@ export const usePlaybackStore = defineStore('playback', () => {
     ?? tempQueueFallbackSongs.get(path)
     ?? (currentSongFallback.value?.path === path ? currentSongFallback.value : null);
 
+  const getRetainedFallbackSongPaths = () =>
+    Array.from(new Set([...queueFallbackSongs.keys(), ...tempQueueFallbackSongs.keys()]));
+
+  const refreshRetainedFallbackSongs = (songs: LibrarySong[]) => {
+    const normalizePath = (path: string) => path.replace(/\\/g, '/').toLowerCase();
+    const refreshedByPath = new Map(songs.map(song => [normalizePath(song.path), song]));
+    for (const fallbackMap of [queueFallbackSongs, tempQueueFallbackSongs]) {
+      for (const [path, fallback] of fallbackMap) {
+        const song = refreshedByPath.get(normalizePath(path));
+        if (!song) continue;
+        // LibrarySong does not contain runtime/CUE fields, so updating the
+        // existing fallback keeps those fields and any external object references.
+        Object.assign(fallback, song);
+        if (path !== song.path) {
+          fallbackMap.delete(path);
+          fallbackMap.set(song.path, fallback);
+        }
+      }
+    }
+  };
+
   const resetPlaybackState = () => {
     isPlaying.value = false;
     currentTime.value = 0;
@@ -204,6 +225,8 @@ export const usePlaybackStore = defineStore('playback', () => {
     currentSong,
     currentSongPath,
     getKnownSongByPath,
+    getRetainedFallbackSongPaths,
+    refreshRetainedFallbackSongs,
     currentCover,
     currentCoverPath,
     currentCoverFull,

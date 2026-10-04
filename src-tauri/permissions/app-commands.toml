@@ -8,6 +8,7 @@ commands.allow = [
   "native_desktop_lyrics_reveal",
   "native_desktop_lyrics_close",
   "scan_music_folder",
+  "scan_music_folder_paths",
   "parse_audio_files",
   "scan_folder_as_playlists",
   "get_song_cover_thumbnail",

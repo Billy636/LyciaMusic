@@ -324,6 +324,10 @@ export interface TauriCommandMap {
     payload: { folderPath: string; minimumDurationSeconds?: number; forceMetadataRefresh?: boolean };
     response: Song[];
   };
+  scan_music_folder_paths: {
+    payload: { folderPath: string; minimumDurationSeconds?: number; forceMetadataRefresh?: boolean };
+    response: string[];
+  };
   move_music_file: { payload: { oldPath: string; newPath: string }; response: void };
   show_in_folder: { payload: { path: string }; response: void };
   delete_music_file: { payload: { path: string }; response: void };

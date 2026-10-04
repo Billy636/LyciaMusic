@@ -1,5 +1,5 @@
 import { storeToRefs } from 'pinia';
-import type { FolderNode, Song } from '../types';
+import type { FolderNode, LibrarySong, Song } from '../types';
 
 import { fileApi } from '../services/tauri/fileApi';
 import { useCollectionsStore } from '../features/collections/store';
@@ -12,6 +12,7 @@ import { useLibraryAllSongPathCache } from './useLibraryAllSongPathCache';
 import { useLibraryCollectionSongPathCache } from './useLibraryCollectionSongPathCache';
 import { useLibraryDetailSongPathCache } from './useLibraryDetailSongPathCache';
 import { useLibraryFolderSongPathCache } from './useLibraryFolderSongPathCache';
+import { useLibrarySongResolver } from './useLibrarySongResolver';
 import { removeSongPathsFromPlaybackState } from './playbackCleanup';
 import { remapFolderPath } from '../utils/folderMove';
 
@@ -70,6 +71,7 @@ export const createPlayerFileManager = ({
   const { clearLibraryCollectionSongPathCache } = useLibraryCollectionSongPathCache();
   const { clearLibraryDetailSongPathCache } = useLibraryDetailSongPathCache();
   const { clearLibraryFolderSongPathCache } = useLibraryFolderSongPathCache();
+  const { loadSongs, clearResolvedSongCache } = useLibrarySongResolver();
   const { canonicalSongPaths, libraryHierarchy, sourceSongPaths, watchedFolders } = storeToRefs(libraryStore);
   const { favoritePaths, playlists, recentSongs } = storeToRefs(collectionsStore);
   const { currentSong, currentCoverPath, playQueuePaths, tempQueuePaths } = storeToRefs(playbackStore);
@@ -217,32 +219,70 @@ export const createPlayerFileManager = ({
     // Capture membership before scan events can apply additions and deletions.
     const previousScopedPaths = canonicalSongPaths.value
       .filter(path => isSongInFolderScope(folderPath, path));
+    const retainedLibrarySongs = new Map<string, LibrarySong>();
+    for (const song of libraryStore.songLookup.values()) {
+      if (isSongInFolderScope(folderPath, song.path)) {
+        retainedLibrarySongs.set(normalizePathForMatch(song.path), song);
+      }
+    }
+    const retainedPaths = new Set(retainedLibrarySongs.keys());
+    for (const path of playbackStore.getRetainedFallbackSongPaths()) {
+      if (isSongInFolderScope(folderPath, path)) retainedPaths.add(normalizePathForMatch(path));
+    }
+    const activeSong = currentSong.value;
+    const activePathKey = activeSong ? normalizePathForMatch(activeSong.path) : null;
+    const activePlaybackId = playbackStore.currentPlaybackId;
+    if (activeSong && isSongInFolderScope(folderPath, activeSong.path)) {
+      retainedPaths.add(normalizePathForMatch(activeSong.path));
+    }
     if (forceMetadataRefresh) libraryStore.setLastLibraryScanError(null);
-    const newSongs = await fileApi.scanMusicFolder(
+    const newPaths = await fileApi.scanMusicFolderPaths(
       folderPath,
       settingsStore.settings.libraryMinDurationSeconds,
       forceMetadataRefresh,
     );
-    const normalizedNewPaths = new Set(newSongs.map(song => normalizePathForMatch(song.path)));
+    const normalizedNewPaths = new Map(newPaths.map(path => [normalizePathForMatch(path), path]));
     const normalizedOldPaths = new Set(previousScopedPaths.map(path => normalizePathForMatch(path)));
 
     const removedPaths = previousScopedPaths
       .filter(path => !normalizedNewPaths.has(normalizePathForMatch(path)));
-    const addedPaths = newSongs
-      .filter(song => !normalizedOldPaths.has(normalizePathForMatch(song.path)))
-      .map(song => song.path);
+    const addedPaths = newPaths.filter(path => !normalizedOldPaths.has(normalizePathForMatch(path)));
 
     const keepPath = (path: string) => !isSongInFolderScope(folderPath, path);
-    const newPaths = newSongs.map(song => song.path);
-
-    newSongs.forEach(song => {
-      libraryStore.setSongRecord(song);
-    });
+    const pathsToRefresh = newPaths.filter(path => retainedPaths.has(normalizePathForMatch(path)));
+    clearResolvedSongCache();
+    // Bound the temporary hydration result as well as the resolver cache. New
+    // directory entries stay path-only until a viewport or playback needs them.
+    let hydrationFailure: { error: unknown } | null = null;
+    try {
+      for (let offset = 0; offset < pathsToRefresh.length; offset += 256) {
+        const songs = await loadSongs(pathsToRefresh.slice(offset, offset + 256));
+        libraryStore.refreshRetainedSongRecords(songs.flatMap(song => {
+          const previousSong = retainedLibrarySongs.get(normalizePathForMatch(song.path));
+          return previousSong ? [{ previousSong, song }] : [];
+        }));
+        playbackStore.refreshRetainedFallbackSongs(songs);
+        const refreshedActiveSong = songs.find(song => normalizePathForMatch(song.path) === activePathKey);
+        if (refreshedActiveSong
+          && currentSong.value
+          && normalizePathForMatch(currentSong.value.path) === activePathKey
+          && playbackStore.currentPlaybackId === activePlaybackId) {
+          currentSong.value = { ...currentSong.value, ...refreshedActiveSong };
+        }
+      }
+    } catch (error) {
+      // The scan already succeeded. Reconcile its paths and invalidate views
+      // even if the optional hydration of retained metadata could not finish.
+      hydrationFailure = { error };
+    }
 
     libraryStore.setSourceSongOrder([...sourceSongPaths.value.filter(keepPath), ...newPaths]);
     libraryStore.setCanonicalSongOrder([...canonicalSongPaths.value.filter(keepPath), ...newPaths]);
     libraryStore.pruneSongPool();
+    // Same-path tag edits still need new metadata pages and updated sorting.
+    libraryStore.notifyLibraryMetadataRefreshed();
     clearLibraryPathCaches();
+    navigationStore.refreshSearch();
 
     if (removedPaths.length > 0) {
       const removedPathSet = new Set(removedPaths.map(normalizePathForMatch));
@@ -259,12 +299,15 @@ export const createPlayerFileManager = ({
       }
     }
 
-    if (forceMetadataRefresh) {
-      await onFolderMetadataRefreshed?.([folderPath]);
-    }
+    const canonicalQueuePath = (path: string) => normalizedNewPaths.get(normalizePathForMatch(path)) ?? path;
+    playQueuePaths.value = playQueuePaths.value.map(canonicalQueuePath);
+    tempQueuePaths.value = tempQueuePaths.value.map(canonicalQueuePath);
+
     if (removedPaths.length > 0) {
       await removeFromHistory(removedPaths);
     }
+    await onFolderMetadataRefreshed?.([folderPath]);
+    if (hydrationFailure) throw hydrationFailure.error;
 
     return {
       removedCount: removedPaths.length,
