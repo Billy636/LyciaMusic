@@ -1,7 +1,47 @@
+import { readonly, shallowRef } from 'vue';
 import { tauriInvoke } from '../services/tauri/invoke';
 import type { PreparedCustomBackgroundImage } from '../services/tauri/contracts';
 
 export type CustomBackgroundMediaType = 'image' | 'video';
+export type CustomBackgroundPreparationConsumer = 'global-background' | 'custom-skin-preview';
+
+const backgroundCacheResetVersion = shallowRef(0);
+export const customBackgroundCacheResetVersion = readonly(backgroundCacheResetVersion);
+export const notifyCustomBackgroundCacheCleared = () => {
+  backgroundCacheResetVersion.value += 1;
+};
+
+const preparationRequestIds = new Map<CustomBackgroundPreparationConsumer, number>();
+
+// Keep ordering across component remounts and WebView reloads. Only two small
+// sequence values are retained; the backend owns and bounds the pending work.
+const nextPreparationRequestId = (consumer: CustomBackgroundPreparationConsumer) => {
+  const storageKey = `lycia.custom-background.request.${consumer}`;
+  let previous = preparationRequestIds.get(consumer) ?? 0;
+  try {
+    const stored = Number(sessionStorage.getItem(storageKey));
+    if (Number.isSafeInteger(stored) && stored > previous) previous = stored;
+  } catch {
+    // The in-memory counter still works when session storage is unavailable.
+  }
+  const requestId = Math.max(previous + 1, Date.now() * 1024);
+  preparationRequestIds.set(consumer, requestId);
+  try {
+    sessionStorage.setItem(storageKey, String(requestId));
+  } catch {
+    // Storage is optional, including in non-browser callers.
+  }
+  return requestId;
+};
+
+export const isCustomBackgroundRequestSuperseded = (error: unknown) =>
+  (error instanceof Error ? error.message : String(error)) === 'CUSTOM_BACKGROUND_REQUEST_SUPERSEDED';
+
+export const cancelCustomBackgroundImage = (consumerId: CustomBackgroundPreparationConsumer) =>
+  tauriInvoke('cancel_custom_background_image', {
+    consumerId,
+    requestId: nextPreparationRequestId(consumerId),
+  });
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'webm']);
 export const CUSTOM_BACKGROUND_VIDEO_MAX_PIXELS = 3840 * 2160;
@@ -43,7 +83,11 @@ export function getCustomBackgroundRenderTarget(): CustomBackgroundRenderTarget 
 
 export function prepareCustomBackgroundImage(
   path: string,
-  options: { target?: CustomBackgroundRenderTarget; blurCssPixels?: number } = {},
+  options: {
+    target?: CustomBackgroundRenderTarget;
+    blurCssPixels?: number;
+    consumerId?: CustomBackgroundPreparationConsumer;
+  } = {},
 ): Promise<PreparedCustomBackgroundImage> {
   const blurCssPixels = Math.max(0, options.blurCssPixels ?? 0);
   const target = optimizeCustomBackgroundRenderTarget(
@@ -55,6 +99,10 @@ export function prepareCustomBackgroundImage(
     targetWidth: target.width,
     targetHeight: target.height,
     blurRadius: blurCssPixels * target.devicePixelRatio,
+    ...(options.consumerId ? {
+      consumerId: options.consumerId,
+      requestId: nextPreparationRequestId(options.consumerId),
+    } : {}),
   });
 }
 

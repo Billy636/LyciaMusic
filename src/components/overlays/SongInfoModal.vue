@@ -19,6 +19,7 @@ import {
 } from '../../composables/lyrics/readingOrder';
 import type { LyricsStorageSource } from '../../services/tauri/contracts';
 import { tauriInvoke } from '../../services/tauri/invoke';
+import { appApi } from '../../services/tauri/appApi';
 
 const props = defineProps<{
   visible: boolean;
@@ -438,7 +439,7 @@ const handleSaveSongInfo = async () => {
     libraryStore.setSongRecord(result.song);
 
     if (songInfoEditForm.value.coverPath) {
-      await tauriInvoke('clear_cover_cache');
+      await appApi.clearCoverCache();
       clearCoverCaches();
       coverUrl.value = (await loadCover(songPath)) || '';
     }

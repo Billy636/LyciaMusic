@@ -152,6 +152,22 @@ export const usePlaybackStore = defineStore('playback', () => {
   const getRetainedFallbackSongPaths = () =>
     Array.from(new Set([...queueFallbackSongs.keys(), ...tempQueueFallbackSongs.keys()]));
 
+  const remapQueueSongPaths = (resolvePath: (path: string) => string) => {
+    for (const fallbackMap of [queueFallbackSongs, tempQueueFallbackSongs]) {
+      for (const [path, song] of Array.from(fallbackMap)) {
+        const nextPath = resolvePath(path);
+        if (nextPath === path) continue;
+        fallbackMap.delete(path);
+        song.path = nextPath;
+        fallbackMap.set(nextPath, song);
+      }
+    }
+    const queuePaths = playQueuePaths.value.map(resolvePath);
+    const temporaryPaths = tempQueuePaths.value.map(resolvePath);
+    if (!areSamePaths(playQueuePaths.value, queuePaths)) playQueuePaths.value = queuePaths;
+    if (!areSamePaths(tempQueuePaths.value, temporaryPaths)) tempQueuePaths.value = temporaryPaths;
+  };
+
   const refreshRetainedFallbackSongs = (songs: LibrarySong[]) => {
     const normalizePath = (path: string) => path.replace(/\\/g, '/').toLowerCase();
     const refreshedByPath = new Map(songs.map(song => [normalizePath(song.path), song]));
@@ -226,6 +242,7 @@ export const usePlaybackStore = defineStore('playback', () => {
     currentSongPath,
     getKnownSongByPath,
     getRetainedFallbackSongPaths,
+    remapQueueSongPaths,
     refreshRetainedFallbackSongs,
     currentCover,
     currentCoverPath,

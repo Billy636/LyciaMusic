@@ -363,8 +363,14 @@ export interface TauriCommandMap {
       targetWidth: number;
       targetHeight: number;
       blurRadius: number;
+      consumerId?: string;
+      requestId?: number;
     };
     response: PreparedCustomBackgroundImage;
+  };
+  cancel_custom_background_image: {
+    payload: { consumerId: string; requestId: number };
+    response: void;
   };
   get_song_lyrics: { payload: { path: string }; response: string };
   get_song_lyrics_source: { payload: { path: string }; response: SongLyricsSource };

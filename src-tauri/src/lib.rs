@@ -24,7 +24,7 @@ mod window_z_order;
 use app_runtime::{
     consume_pending_open_paths, exit_app, handle_single_instance, setup_app, update_tray_tooltip,
 };
-use custom_background::prepare_custom_background_image;
+use custom_background::{cancel_custom_background_image, prepare_custom_background_image};
 use custom_fonts::{import_lyrics_font, read_lyrics_font_data_url};
 use database::clear_all_app_data;
 use duplicates::{delete_duplicate_songs, scan_duplicate_songs};
@@ -138,6 +138,7 @@ pub fn run() {
             get_song_cover,
             clear_cover_cache,
             prepare_custom_background_image,
+            cancel_custom_background_image,
             get_song_lyrics,
             get_song_lyrics_source,
             get_song_lyrics_for_edit,

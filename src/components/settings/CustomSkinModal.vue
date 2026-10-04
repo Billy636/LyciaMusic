@@ -4,7 +4,10 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 
 import { useCustomThemeModal } from '../../composables/useCustomThemeModal';
 import {
+  cancelCustomBackgroundImage,
+  customBackgroundCacheResetVersion,
   getCustomBackgroundRenderTarget,
+  isCustomBackgroundRequestSuperseded,
   loadCustomBackgroundMediaMetadata,
   prepareCustomBackgroundImage,
   resolveCustomBackgroundMediaType,
@@ -27,8 +30,12 @@ const mediaError = ref('');
 const isPreparingMedia = ref(false);
 const showPreparingMediaStatus = ref(false);
 const previewDisplayPath = ref('');
+const previewImageRevision = ref(0);
 const previewVideoRef = ref<HTMLVideoElement | null>(null);
 let preparingMediaStatusTimer: ReturnType<typeof setTimeout> | null = null;
+let disposed = false;
+let mediaOperationId = 0;
+const isCurrentMediaOperation = (operationId: number) => !disposed && operationId === mediaOperationId;
 
 const clearPreparingMediaStatusTimer = () => {
   if (preparingMediaStatusTimer === null) return;
@@ -37,18 +44,22 @@ const clearPreparingMediaStatusTimer = () => {
 };
 
 const beginPreparingMedia = () => {
+  const operationId = ++mediaOperationId;
   clearPreparingMediaStatusTimer();
   isPreparingMedia.value = true;
   showPreparingMediaStatus.value = false;
   preparingMediaStatusTimer = setTimeout(() => {
+    if (!isCurrentMediaOperation(operationId)) return;
     preparingMediaStatusTimer = null;
     if (isPreparingMedia.value) {
       showPreparingMediaStatus.value = true;
     }
   }, 300);
+  return operationId;
 };
 
-const finishPreparingMedia = () => {
+const finishPreparingMedia = (operationId: number) => {
+  if (!isCurrentMediaOperation(operationId)) return;
   clearPreparingMediaStatusTimer();
   isPreparingMedia.value = false;
   showPreparingMediaStatus.value = false;
@@ -326,28 +337,59 @@ watch(
 
 // --- 挂载与销毁生命周期生命体征 ---
 let resizeObserver: ResizeObserver | null = null;
+let mediaRequestId = 0;
 
-const applyMediaMetadata = async (path: string, mediaType: CustomBackgroundMediaType) => {
+const applyMediaMetadata = async (path: string, mediaType: CustomBackgroundMediaType): Promise<boolean> => {
+  const requestId = ++mediaRequestId;
+  const isCurrentRequest = () => !disposed && requestId === mediaRequestId;
   if (mediaType === 'image') {
+    const cacheVersion = customBackgroundCacheResetVersion.value;
     const prepared = await prepareCustomBackgroundImage(path, {
       target: getCustomBackgroundRenderTarget(),
       blurCssPixels: 0,
+      consumerId: 'custom-skin-preview',
     });
+    if (!isCurrentRequest()) return false;
+    // A clear can finish while IPC is delivering an earlier image result.
+    // Re-prepare the same selection before publishing a deleted cache path.
+    if (cacheVersion !== customBackgroundCacheResetVersion.value) {
+      return applyMediaMetadata(path, mediaType);
+    }
     previewDisplayPath.value = prepared.displayPath;
+    previewImageRevision.value = cacheVersion;
     imageNaturalWidth.value = prepared.sourceWidth;
     imageNaturalHeight.value = prepared.sourceHeight;
     preview.value.imageWidth = prepared.sourceWidth;
     preview.value.imageHeight = prepared.sourceHeight;
-    return;
+    return true;
   }
 
+  void cancelCustomBackgroundImage('custom-skin-preview').catch(() => {});
   const metadata = await loadCustomBackgroundMediaMetadata(convertFileSrc(path), mediaType);
+  if (!isCurrentRequest()) return false;
   previewDisplayPath.value = path;
   imageNaturalWidth.value = metadata.width;
   imageNaturalHeight.value = metadata.height;
   preview.value.imageWidth = metadata.width;
   preview.value.imageHeight = metadata.height;
+  return true;
 };
+
+watch(customBackgroundCacheResetVersion, async () => {
+  if (disposed || isPreparingMedia.value || !preview.value.imagePath || previewMediaType.value !== 'image') return;
+  const operationId = beginPreparingMedia();
+  try {
+    if (await applyMediaMetadata(preview.value.imagePath, 'image') && isCurrentMediaOperation(operationId)) {
+      mediaError.value = '';
+    }
+  } catch (error) {
+    if (isCurrentMediaOperation(operationId) && !isCustomBackgroundRequestSuperseded(error)) {
+      mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
+    }
+  } finally {
+    finishPreparingMedia(operationId);
+  }
+});
 
 onMounted(async () => {
   setCustomBackgroundPreviewOpen(true);
@@ -363,18 +405,24 @@ onMounted(async () => {
 
   // 旧皮肤配置的异步尺寸补齐，以及已保存媒体的可用性检查。
   if (preview.value.imagePath) {
-    beginPreparingMedia();
+    const operationId = beginPreparingMedia();
     try {
       await applyMediaMetadata(preview.value.imagePath, previewMediaType.value);
     } catch (error) {
-      mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
+      if (isCurrentMediaOperation(operationId) && !isCustomBackgroundRequestSuperseded(error)) {
+        mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
+      }
     } finally {
-      finishPreparingMedia();
+      finishPreparingMedia(operationId);
     }
   }
 });
 
 onUnmounted(() => {
+  disposed = true;
+  mediaOperationId += 1;
+  mediaRequestId += 1;
+  void cancelCustomBackgroundImage('custom-skin-preview').catch(() => {});
   clearPreparingMediaStatusTimer();
   setCustomBackgroundPreviewOpen(false);
   window.removeEventListener('resize', updateViewportSize);
@@ -392,21 +440,23 @@ onUnmounted(() => {
 
 const handleSelectNewMedia = async () => {
   const selected = await handleSelectMedia();
-  if (!selected) return;
+  if (!selected || disposed) return;
 
   mediaError.value = '';
-  beginPreparingMedia();
+  const operationId = beginPreparingMedia();
   try {
-    await applyMediaMetadata(selected.path, selected.mediaType);
+    if (!await applyMediaMetadata(selected.path, selected.mediaType) || !isCurrentMediaOperation(operationId)) return;
     preview.value.imagePath = selected.path;
     preview.value.mediaType = selected.mediaType;
     preview.value.scale = 1.0;
     preview.value.translateX = 0;
     preview.value.translateY = 0;
   } catch (error) {
-    mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
+    if (isCurrentMediaOperation(operationId) && !isCustomBackgroundRequestSuperseded(error)) {
+      mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
+    }
   } finally {
-    finishPreparingMedia();
+    finishPreparingMedia(operationId);
   }
 };
 </script>
@@ -498,6 +548,7 @@ const handleSelectNewMedia = async () => {
                     />
                     <img
                       v-else
+                      :key="previewImageRevision"
                       :src="previewMediaSrc"
                       class="absolute block max-w-none max-h-none select-none pointer-events-none"
                       :style="{

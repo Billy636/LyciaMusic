@@ -97,10 +97,14 @@ fn remove_cache_dir_contents(cache_dir: &Path) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn clear_cover_cache(app: AppHandle) -> Result<(), String> {
-    let cache_dir = get_cover_cache_dir(&app);
-    remove_cache_dir_contents(&cache_dir)?;
-    crate::custom_background::clear_custom_background_cache(&app)
+pub async fn clear_cover_cache(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cache_dir = get_cover_cache_dir(&app);
+        remove_cache_dir_contents(&cache_dir)?;
+        crate::custom_background::clear_custom_background_cache(&app)
+    })
+    .await
+    .map_err(|error| format!("缓存清理任务失败：{error}"))?
 }
 
 fn generate_source_hash(path: &Path) -> String {

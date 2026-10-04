@@ -249,6 +249,10 @@ export const createPlayerFileManager = ({
     const addedPaths = newPaths.filter(path => !normalizedOldPaths.has(normalizePathForMatch(path)));
 
     const keepPath = (path: string) => !isSongInFolderScope(folderPath, path);
+    const canonicalQueuePath = (path: string) => normalizedNewPaths.get(normalizePathForMatch(path)) ?? path;
+    // Align fallback keys and queue membership before updating the active song:
+    // its setter prunes fallbacks, which must already use the same spelling.
+    playbackStore.remapQueueSongPaths(canonicalQueuePath);
     const pathsToRefresh = newPaths.filter(path => retainedPaths.has(normalizePathForMatch(path)));
     clearResolvedSongCache();
     // Bound the temporary hydration result as well as the resolver cache. New
@@ -298,10 +302,6 @@ export const createPlayerFileManager = ({
         currentSong.value = null;
       }
     }
-
-    const canonicalQueuePath = (path: string) => normalizedNewPaths.get(normalizePathForMatch(path)) ?? path;
-    playQueuePaths.value = playQueuePaths.value.map(canonicalQueuePath);
-    tempQueuePaths.value = tempQueuePaths.value.map(canonicalQueuePath);
 
     if (removedPaths.length > 0) {
       await removeFromHistory(removedPaths);

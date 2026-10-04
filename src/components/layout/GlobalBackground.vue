@@ -11,7 +11,10 @@ import { getPreblurredBackgroundUrl } from '../../composables/preblurredBackgrou
 import { useRenderingPower } from '../../composables/renderingPower';
 import { calculateCoverGeometry } from '../../composables/useThemeBackgroundGeometry';
 import {
+  cancelCustomBackgroundImage,
+  customBackgroundCacheResetVersion,
   getCustomBackgroundRenderTarget,
+  isCustomBackgroundRequestSuperseded,
   loadCustomBackgroundMediaMetadata,
   prepareCustomBackgroundImage,
   resolveCustomBackgroundMediaType,
@@ -60,6 +63,7 @@ interface RenderedCustomMedia {
   path: string;
   displayPath: string;
   mediaType: CustomBackgroundMediaType;
+  cacheResetVersion: number;
 }
 
 const renderedCustomMedia = ref<RenderedCustomMedia | null>(null);
@@ -82,31 +86,48 @@ watch(
     () => theme.value.customBackground?.blur,
     () => customRenderTarget.value.width,
     () => customRenderTarget.value.height,
+    isBackgroundPreparationSuspended,
+    customBackgroundCacheResetVersion,
   ],
   async ([mode, path, configuredMediaType, blur]) => {
     const requestId = ++customMediaRequestId;
+    const cacheResetVersion = customBackgroundCacheResetVersion.value;
     if (mode !== 'custom' || !path) {
+      void cancelCustomBackgroundImage('global-background').catch(() => {});
       renderedCustomMedia.value = null;
       customMediaReady.value = false;
       return;
     }
+    if (isBackgroundPreparationSuspended.value) {
+      void cancelCustomBackgroundImage('global-background').catch(() => {});
+      return;
+    }
 
     const mediaType = resolveCustomBackgroundMediaType(path, configuredMediaType);
+    if (mediaType === 'video') {
+      void cancelCustomBackgroundImage('global-background').catch(() => {});
+    }
     try {
       const prepared = mediaType === 'image'
         ? await prepareCustomBackgroundImage(path, {
             target: customRenderTarget.value,
             blurCssPixels: Number(blur) || 0,
+            consumerId: 'global-background',
           })
         : await loadCustomBackgroundMediaMetadata(convertFileSrc(path), mediaType);
-      if (requestId !== customMediaRequestId) return;
+      if (
+        requestId !== customMediaRequestId
+        || isBackgroundPreparationSuspended.value
+        || cacheResetVersion !== customBackgroundCacheResetVersion.value
+      ) return;
 
       const sourceWidth = 'sourceWidth' in prepared ? prepared.sourceWidth : prepared.width;
       const sourceHeight = 'sourceHeight' in prepared ? prepared.sourceHeight : prepared.height;
       const displayPath = 'displayPath' in prepared ? prepared.displayPath : path;
       const isPathChanged =
         renderedCustomMedia.value?.displayPath !== displayPath ||
-        renderedCustomMedia.value?.mediaType !== mediaType;
+        renderedCustomMedia.value?.mediaType !== mediaType ||
+        (mediaType === 'image' && renderedCustomMedia.value?.cacheResetVersion !== cacheResetVersion);
 
       imageNaturalWidth.value = sourceWidth;
       imageNaturalHeight.value = sourceHeight;
@@ -117,6 +138,7 @@ watch(
         path,
         displayPath,
         mediaType,
+        cacheResetVersion,
       };
 
       if (
@@ -134,7 +156,7 @@ watch(
         });
       }
     } catch (err) {
-      if (requestId === customMediaRequestId) {
+      if (requestId === customMediaRequestId && !isCustomBackgroundRequestSuperseded(err)) {
         console.error('Failed to load custom theme background media', err);
       }
     }
@@ -363,6 +385,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', updateContainerSize);
   fullCoverRequestId += 1;
   preblurRequestId += 1;
+  customMediaRequestId += 1;
+  void cancelCustomBackgroundImage('global-background').catch(() => {});
   const video = customVideoRef.value;
   if (video) {
     video.pause();
@@ -547,6 +571,7 @@ const customBgTransform = computed(() => {
         />
         <img
           v-else-if="customBgGeometry"
+          :key="renderedCustomMedia?.cacheResetVersion"
           :src="customMediaSrc"
           class="absolute block max-w-none max-h-none select-none pointer-events-none transition-opacity duration-700"
           :style="{
