@@ -57,6 +57,7 @@ const isOutputDeviceMenuOpen = ref(false);
 const isChangingOutputDevice = ref(false);
 const wasapiExclusiveSideEffectTip = '开启后会独占播放设备：其他软件可能无声；设备断开或被占用时会自动回退默认播放。';
 const autoScanLibraryOnStartupTip = '每次启动时会自动扫描音乐库变化，会增加启动短时内的CPU占用，若启动卡顿建议关闭，若经常歌曲变动且cpu较好则可开启。';
+const writeArtistAvatarToTagsTip = '开启后，手动修改歌手头像时会同步修改本地音频文件（注意：多歌手合作歌曲、远程歌曲、CUE分轨、只读文件会被自动跳过）';
 let unlistenAudioOutput: UnlistenFn | null = null;
 const { clearCoverCaches } = useCoverCache();
 
@@ -263,7 +264,7 @@ onScopeDispose(() => {
         <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
         常规与启动
       </h2>
-      <div class="flex flex-col rounded-xl overflow-hidden">
+      <div class="flex flex-col rounded-xl">
         <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">开机自动运行</div>
@@ -311,7 +312,6 @@ onScopeDispose(() => {
         <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">启动时检查更新</div>
-            <p class="mt-1 text-xs app-text-secondary">后台检查，仅发现新版本时提示，不会自动下载安装。</p>
           </div>
           <button
             type="button"
@@ -374,11 +374,20 @@ onScopeDispose(() => {
         <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">修改歌手头像时同步写回音频标签</div>
-            <div class="text-xs text-gray-400 mt-0.5 max-w-[500px]">开启后，手动修改歌手头像时会同步修改本地音频文件（注意：多歌手合作歌曲、远程歌曲、CUE分轨、只读文件会被自动跳过）</div>
           </div>
-          <button @click="settings.writeArtistAvatarToTags = !settings.writeArtistAvatarToTags" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none shrink-0" :class="settings.writeArtistAvatarToTags ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.writeArtistAvatarToTags ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
+          <div class="flex items-center gap-3 shrink-0">
+            <span
+              class="settings-side-effect-tip"
+              :aria-label="writeArtistAvatarToTagsTip"
+              tabindex="0"
+            >
+              <CircleAlert class="h-4 w-4" aria-hidden="true" />
+              <span class="settings-side-effect-tip-popover" role="tooltip">{{ writeArtistAvatarToTagsTip }}</span>
+            </span>
+            <button @click="settings.writeArtistAvatarToTags = !settings.writeArtistAvatarToTags" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none shrink-0" :class="settings.writeArtistAvatarToTags ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
+              <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.writeArtistAvatarToTags ? 'translate-x-6' : 'translate-x-1'" />
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -873,76 +882,76 @@ onScopeDispose(() => {
   transform: translateY(0) scale(1);
 }
 
-:global(.dark) .settings-expand-panel {
+.dark .settings-expand-panel {
   border-top-color: var(--settings-divider);
 }
 
-:global(.dark) .settings-side-effect-tip {
+.dark .settings-side-effect-tip {
   color: #fcd34d;
 }
 
-:global(.dark) .settings-side-effect-tip-popover {
+.dark .settings-side-effect-tip-popover {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(31, 31, 31, 0.96);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
   color: rgba(255, 255, 255, 0.92);
 }
 
-:global(.dark) .settings-number-input {
+.dark .settings-number-input {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.92);
 }
 
-:global(.dark) .settings-number-input:focus {
+.dark .settings-number-input:focus {
   border-color: rgba(236, 65, 65, 0.34);
   box-shadow: 0 0 0 3px rgba(236, 65, 65, 0.12);
 }
 
-:global(.dark) .settings-device-select__trigger {
+.dark .settings-device-select__trigger {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.92);
 }
 
-:global(.dark) .settings-device-select__trigger:hover:not(:disabled),
-:global(.dark) .settings-device-select__trigger--open {
+.dark .settings-device-select__trigger:hover:not(:disabled),
+.dark .settings-device-select__trigger--open {
   border-color: rgba(236, 65, 65, 0.34);
   background: rgba(255, 255, 255, 0.08);
 }
 
-:global(.dark) .settings-device-select__trigger:focus-visible,
-:global(.dark) .settings-device-select__trigger--open {
+.dark .settings-device-select__trigger:focus-visible,
+.dark .settings-device-select__trigger--open {
   border-color: rgba(236, 65, 65, 0.34);
   box-shadow: 0 0 0 3px rgba(236, 65, 65, 0.12);
 }
 
-:global(.dark) .settings-device-select__icon {
+.dark .settings-device-select__icon {
   color: rgba(255, 255, 255, 0.72);
 }
 
-:global(.dark) .settings-device-select__menu {
+.dark .settings-device-select__menu {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(31, 31, 31, 0.94);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.3);
 }
 
-:global(.dark) .settings-device-select__option {
+.dark .settings-device-select__option {
   color: rgba(255, 255, 255, 0.88);
 }
 
-:global(.dark) .settings-device-select__option:hover,
-:global(.dark) .settings-device-select__option:focus-visible {
+.dark .settings-device-select__option:hover,
+.dark .settings-device-select__option:focus-visible {
   background: rgba(236, 65, 65, 0.16);
   color: rgba(255, 255, 255, 0.96);
 }
 
-:global(.dark) .settings-device-select__option--selected {
+.dark .settings-device-select__option--selected {
   background: rgba(236, 65, 65, 0.22);
   color: #fff;
 }
 
-:global(.dark) .settings-action-button--disabled {
+.dark .settings-action-button--disabled {
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.45);
