@@ -14,6 +14,7 @@ export function useSettingsThemeControls() {
   const { capabilities, loadWindowMaterialCapabilities } = useWindowMaterial();
   const showCustomModal = ref(false);
   const showBlurTuning = ref(false);
+  const showTransparentTuning = ref(false);
 
   const colorScheme = computed({
     get: () => theme.value.mode,
@@ -36,22 +37,22 @@ export function useSettingsThemeControls() {
   const hasWindowMaterialThemeConflict = computed(
     () => colorScheme.value === 'custom' || theme.value.dynamicBgType !== 'none',
   );
-  const windowMaterialSharedDisabledReason = computed<Exclude<WindowMaterialDisabledReason, 'windows' | 'windows11' | 'unsupported'>>(() => {
-    if (capabilities.value.systemTransparencyEnabled === false) {
-      return 'transparency';
-    }
-
+  const windowMaterialSharedDisabledReason = computed<'theme-conflict' | null>(() => {
     if (hasWindowMaterialThemeConflict.value) {
       return 'theme-conflict';
     }
 
     return null;
   });
-  const windowMaterialDisabledReason = computed<WindowMaterialDisabledReason>(() => (
-    windowMaterialSharedDisabledReason.value
-      ?? (capabilities.value.isWindows ? null : 'windows')
-  ));
-  const isWindowMaterialDisabled = computed(() => windowMaterialDisabledReason.value !== null);
+  const windowMaterialDisabledReason = computed<WindowMaterialDisabledReason>(() => {
+    if (!capabilities.value.isWindows) return 'windows';
+    if (windowMaterialSharedDisabledReason.value) return windowMaterialSharedDisabledReason.value;
+    if (capabilities.value.systemTransparencyEnabled === false) return 'transparency';
+    return null;
+  });
+  const isWindowMaterialDisabled = computed(
+    () => !capabilities.value.isWindows || hasWindowMaterialThemeConflict.value,
+  );
   const isDynamicBgDisabled = computed(
     () => colorScheme.value === 'custom' || hasWindowMaterialSelected.value,
   );
@@ -81,9 +82,14 @@ export function useSettingsThemeControls() {
       acrylic: capabilities.value.supportsAcrylic,
       mica: capabilities.value.supportsMica,
       blur: capabilities.value.supportsBlur,
+      transparent: capabilities.value.isWindows,
     }[mode];
     if (!supported) {
       return 'unsupported';
+    }
+
+    if (mode !== 'transparent' && capabilities.value.systemTransparencyEnabled === false) {
+      return 'transparency';
     }
 
     return windowMaterialSharedDisabledReason.value;
@@ -103,6 +109,9 @@ export function useSettingsThemeControls() {
       if (mode === 'blur') {
         showBlurTuning.value = false;
       }
+      if (mode === 'transparent') {
+        showTransparentTuning.value = false;
+      }
       return;
     }
 
@@ -113,6 +122,9 @@ export function useSettingsThemeControls() {
     materialMode.value = mode;
     if (mode !== 'blur') {
       showBlurTuning.value = false;
+    }
+    if (mode !== 'transparent') {
+      showTransparentTuning.value = false;
     }
   };
 
@@ -128,6 +140,7 @@ export function useSettingsThemeControls() {
 
       materialMode.value = 'blur';
       showBlurTuning.value = true;
+      showTransparentTuning.value = false;
       return;
     }
 
@@ -136,6 +149,25 @@ export function useSettingsThemeControls() {
 
   const setWindowBlurTint = (value: number) => {
     patchTheme({ windowBlurTint: clampValue(value, 0, 100) });
+  };
+
+  const toggleTransparentTuning = () => {
+    if (materialMode.value !== 'transparent') {
+      if (isWindowMaterialModeDisabled('transparent')) {
+        return;
+      }
+
+      materialMode.value = 'transparent';
+      showTransparentTuning.value = true;
+      showBlurTuning.value = false;
+      return;
+    }
+
+    showTransparentTuning.value = !showTransparentTuning.value;
+  };
+
+  const setWindowTransparentOpacity = (value: number) => {
+    patchTheme({ windowTransparentOpacity: clampValue(value, 0, 100) });
   };
 
   const toggleRetainMaterialOnUnfocus = () => {
@@ -159,12 +191,15 @@ export function useSettingsThemeControls() {
     windowMaterialDisabledReason,
     isDynamicBgDisabled,
     showBlurTuning,
+    showTransparentTuning,
     setColorScheme,
     setDynamicType,
     toggleWindowMaterial,
     openCustomModal,
     toggleBlurTuning,
     setWindowBlurTint,
+    toggleTransparentTuning,
+    setWindowTransparentOpacity,
     toggleRetainMaterialOnUnfocus,
   };
 }

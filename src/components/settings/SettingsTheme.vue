@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed, ref, useId, watch } from 'vue';
+import { ChevronDown, Minus, Plus, RotateCcw } from 'lucide-vue-next';
 import CustomSkinModal from './CustomSkinModal.vue';
 import { useSettingsThemeControls } from '../../composables/useSettingsThemeControls';
 import type { WindowMaterialMode } from '../../composables/windowMaterial';
@@ -25,23 +27,26 @@ const TEXT = {
   windowMaterialAcrylic: '亚克力',
   windowMaterialMica: '云母',
   windowMaterialBlur: '\u6bdb\u73bb\u7483',
+  windowMaterialTransparent: '透明',
   windowMaterialAcrylicHint: '模糊透出窗口背后的内容',
   windowMaterialMicaHint: '取色于桌面壁纸，不透出其他窗口',
   windowMaterialBlurHint: '传统半透明模糊，可调节遮罩浓度',
+  windowMaterialTransparentHint: '清晰透出窗口背后的内容，可调节背景不透明度',
   windowMaterialVersionHint: '当前 Windows 版本不支持此材质。',
   windowMaterialBlurVersionHint: '支持 Windows 10 1809 起及 Windows 11 21H2；不支持 Windows 11 22H2 及更新版本。',
   windowMaterialUnsupportedHint: '\u4ec5 Windows 10 / 11 \u652f\u6301\u3002',
   windowMaterialTransparencyHint: '\u9700\u5728\u7cfb\u7edf\u8bbe\u7f6e\u4e2d\u5f00\u542f\u900f\u660e\u6548\u679c\u540e\u624d\u53ef\u7528\u3002',
+  windowMaterialTransparencyGroupHint: '亚克力、云母和毛玻璃需要开启系统透明效果；透明模式可直接使用。',
   windowMaterialConflictHint: '\u5173\u95ed\u52a8\u6001\u80cc\u666f\u6216\u81ea\u5b9a\u4e49\u76ae\u80a4\u540e\u53ef\u7528\u3002',
   windowMaterialWin11Only: '\u4ec5 Windows 11 \u652f\u6301',
 };
 
 const BLUR_TEXT = {
   panelTitle: '\u906e\u7f69\u6d53\u5ea6',
-  tint: '\u906e\u7f69\u6d53\u6de1',
-  clear: '\u901a\u900f',
-  solid: '\u5b9e\u8272',
-  toggleLabel: '\u5c55\u5f00\u6216\u6536\u8d77\u6bdb\u73bb\u7483\u5fae\u8c03',
+};
+
+const TRANSPARENT_TEXT = {
+  panelTitle: '背景不透明度',
 };
 
 const {
@@ -55,14 +60,56 @@ const {
   windowMaterialDisabledReason,
   isDynamicBgDisabled,
   showBlurTuning,
+  showTransparentTuning,
   setColorScheme,
   setDynamicType,
   toggleWindowMaterial,
   openCustomModal,
   toggleBlurTuning,
   setWindowBlurTint,
+  toggleTransparentTuning,
+  setWindowTransparentOpacity,
   toggleRetainMaterialOnUnfocus,
 } = useSettingsThemeControls();
+
+type SelectableWindowMaterialMode = Exclude<WindowMaterialMode, 'none'>;
+const materialOptions: readonly { mode: SelectableWindowMaterialMode; label: string; tunable: boolean }[] = [
+  { mode: 'acrylic', label: TEXT.windowMaterialAcrylic, tunable: false },
+  { mode: 'mica', label: TEXT.windowMaterialMica, tunable: false },
+  { mode: 'blur', label: TEXT.windowMaterialBlur, tunable: true },
+  { mode: 'transparent', label: TEXT.windowMaterialTransparent, tunable: true },
+];
+const materialControlId = useId();
+const materialTuningPanelId = `${materialControlId}-tuning`;
+const materialTuningSliderId = `${materialControlId}-slider`;
+const isMaterialTuningExpanded = (mode: SelectableWindowMaterialMode) => (
+  materialMode.value === mode && (mode === 'blur' ? showBlurTuning.value : mode === 'transparent' && showTransparentTuning.value)
+);
+const showMaterialTuning = computed(() => (
+  isMaterialTuningExpanded('blur') || isMaterialTuningExpanded('transparent')
+));
+const materialTuningMode = ref<'blur' | 'transparent'>('blur');
+watch(
+  () => showMaterialTuning.value ? materialMode.value : null,
+  (mode) => {
+    if (mode === 'blur' || mode === 'transparent') materialTuningMode.value = mode;
+  },
+  { immediate: true },
+);
+const materialTuningTitle = computed(() => (
+  materialTuningMode.value === 'transparent' ? TRANSPARENT_TEXT.panelTitle : BLUR_TEXT.panelTitle
+));
+const materialTuningValue = computed(() => (
+  materialTuningMode.value === 'transparent' ? theme.value.windowTransparentOpacity : theme.value.windowBlurTint
+));
+const toggleMaterialTuning = (mode: SelectableWindowMaterialMode) => {
+  if (mode === 'blur') toggleBlurTuning();
+  else if (mode === 'transparent') toggleTransparentTuning();
+};
+const setMaterialTuningValue = (value: number) => {
+  if (materialMode.value === 'transparent') setWindowTransparentOpacity(value);
+  else if (materialMode.value === 'blur') setWindowBlurTint(value);
+};
 
 const getWindowMaterialHint = (mode: Exclude<WindowMaterialMode, 'none'>) => {
   const reason = getWindowMaterialModeDisabledReason(mode);
@@ -77,6 +124,7 @@ const getWindowMaterialHint = (mode: Exclude<WindowMaterialMode, 'none'>) => {
     acrylic: TEXT.windowMaterialAcrylicHint,
     mica: TEXT.windowMaterialMicaHint,
     blur: TEXT.windowMaterialBlurHint,
+    transparent: TEXT.windowMaterialTransparentHint,
   }[mode];
 };
 </script>
@@ -231,127 +279,92 @@ const getWindowMaterialHint = (mode: Exclude<WindowMaterialMode, 'none'>) => {
         class=""
         :class="isWindowMaterialDisabled ? 'opacity-50' : ''"
       >
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <button
-            type="button"
-            class="rounded-xl border px-4 py-3 text-left transition-all"
-            :class="[
-              materialMode === 'acrylic'
-                ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm'
-                : 'border-gray-200/70 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/10 dark:hover:bg-white/10',
-              isWindowMaterialButtonDisabled('acrylic') ? 'cursor-not-allowed opacity-45' : '',
-            ]"
-            :disabled="isWindowMaterialButtonDisabled('acrylic')"
-            :aria-disabled="isWindowMaterialButtonDisabled('acrylic')"
-            :aria-pressed="materialMode === 'acrylic'"
-            :title="getWindowMaterialHint('acrylic')"
-            @click="toggleWindowMaterial('acrylic')"
+        <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div
+            v-for="option in materialOptions"
+            :key="option.mode"
+            class="material-option"
+            :class="{
+              'is-selected': materialMode === option.mode,
+              'is-disabled': isWindowMaterialButtonDisabled(option.mode),
+            }"
           >
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.windowMaterialAcrylic }}</span>
-            </div>
-            <p class="mt-1 text-xs text-gray-500 dark:text-white/45">{{ TEXT.windowMaterialAcrylicHint }}</p>
-          </button>
-
-          <button
-            type="button"
-            class="rounded-xl border px-4 py-3 text-left transition-all"
-            :class="[
-              materialMode === 'mica'
-                ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm'
-                : 'border-gray-200/70 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/10 dark:hover:bg-white/10',
-              isWindowMaterialButtonDisabled('mica') ? 'cursor-not-allowed opacity-45' : '',
-            ]"
-            :disabled="isWindowMaterialButtonDisabled('mica')"
-            :aria-disabled="isWindowMaterialButtonDisabled('mica')"
-            :aria-pressed="materialMode === 'mica'"
-            :title="getWindowMaterialHint('mica')"
-            @click="toggleWindowMaterial('mica')"
-          >
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.windowMaterialMica }}</span>
-            </div>
-            <p class="mt-1 text-xs text-gray-500 dark:text-white/45">{{ TEXT.windowMaterialMicaHint }}</p>
-          </button>
-
-          <div class="relative">
             <button
               type="button"
-              class="h-full w-full rounded-xl border px-4 py-3 pr-12 text-left transition-all"
-              :class="[
-                materialMode === 'blur'
-                  ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm'
-                  : 'border-gray-200/70 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/10 dark:hover:bg-white/10',
-                isWindowMaterialButtonDisabled('blur') ? 'cursor-not-allowed opacity-45' : '',
-              ]"
-              :disabled="isWindowMaterialButtonDisabled('blur')"
-              :aria-disabled="isWindowMaterialButtonDisabled('blur')"
-              :aria-pressed="materialMode === 'blur'"
-              :title="getWindowMaterialHint('blur')"
-              @click="toggleWindowMaterial('blur')"
+              class="material-choice"
+              :disabled="isWindowMaterialButtonDisabled(option.mode)"
+              :aria-pressed="materialMode === option.mode"
+              :title="getWindowMaterialHint(option.mode)"
+              @click="toggleWindowMaterial(option.mode)"
             >
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.windowMaterialBlur }}</span>
-              </div>
-              <p class="mt-1 text-xs text-gray-500 dark:text-white/45">{{ TEXT.windowMaterialBlurHint }}</p>
+              {{ option.label }}
             </button>
-
             <button
+              v-if="option.tunable"
               type="button"
-              class="absolute top-3 right-3 rounded-full p-1 text-[#EC4141]/70 opacity-40 transition-all duration-300 hover:bg-[#EC4141]/10 hover:opacity-100 disabled:cursor-not-allowed"
-              :class="showBlurTuning && materialMode === 'blur' ? 'bg-[#EC4141]/10 opacity-100' : ''"
-              :aria-label="BLUR_TEXT.toggleLabel"
-              :disabled="isWindowMaterialButtonDisabled('blur')"
-              :title="getWindowMaterialHint('blur')"
-              @click.stop="toggleBlurTuning"
+              class="material-tuning-trigger"
+              :class="{ 'is-expanded': isMaterialTuningExpanded(option.mode) }"
+              :disabled="isWindowMaterialButtonDisabled(option.mode)"
+              :aria-label="`${isMaterialTuningExpanded(option.mode) ? '收起' : '展开'}${option.label}调节`"
+              :aria-expanded="isMaterialTuningExpanded(option.mode)"
+              :aria-controls="materialTuningPanelId"
+              :title="isWindowMaterialButtonDisabled(option.mode)
+                ? getWindowMaterialHint(option.mode)
+                : `${isMaterialTuningExpanded(option.mode) ? '收起' : '展开'}调节`"
+              @click="toggleMaterialTuning(option.mode)"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-4 w-4 transition-transform duration-300"
-                :class="showBlurTuning && materialMode === 'blur' ? 'rotate-180' : ''"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-              </svg>
+              <ChevronDown :size="16" aria-hidden="true" />
             </button>
           </div>
         </div>
 
-        <transition name="flow-panel">
-          <div
-            v-if="materialMode === 'blur' && showBlurTuning"
-            class="mt-4 rounded-2xl border border-[#EC4141]/15 bg-white/50 p-4 shadow-sm dark:border-white/8 dark:bg-black/25"
-          >
-            <div class="mb-4 flex items-center justify-between gap-3">
-              <div class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ BLUR_TEXT.panelTitle }}</div>
-              <div class="rounded-full bg-[#EC4141]/10 px-2.5 py-1 text-[11px] font-medium text-[#EC4141]">
-                {{ theme.windowBlurTint }}
+        <transition name="material-expand">
+          <div v-show="showMaterialTuning" :id="materialTuningPanelId" class="material-tuning-panel">
+            <div class="material-tuning-panel-inner">
+              <div class="material-tuning-row">
+                <label :for="materialTuningSliderId" class="material-tuning-label text-sm font-medium text-gray-800 dark:text-gray-100">
+                  {{ materialTuningTitle }}
+                </label>
+                <div class="material-slider-controls">
+                  <button type="button" class="material-adjust-button app-text-secondary"
+                    :aria-label="`降低${materialTuningTitle}`" :disabled="materialTuningValue === 0"
+                    @click="setMaterialTuningValue(materialTuningValue - 5)">
+                    <Minus :size="16" aria-hidden="true" />
+                  </button>
+                  <input
+                    :id="materialTuningSliderId"
+                    :value="materialTuningValue"
+                    :aria-valuetext="`${materialTuningValue}%`"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    class="material-slider"
+                    :style="{ '--fill': `${materialTuningValue}%` }"
+                    @input="setMaterialTuningValue(Number(($event.target as HTMLInputElement).value))"
+                  />
+                  <button type="button" class="material-adjust-button app-text-secondary"
+                    :aria-label="`提高${materialTuningTitle}`" :disabled="materialTuningValue === 100"
+                    @click="setMaterialTuningValue(materialTuningValue + 5)">
+                    <Plus :size="16" aria-hidden="true" />
+                  </button>
+                  <output :for="materialTuningSliderId" class="text-right text-sm tabular-nums text-gray-800 dark:text-gray-100">
+                    {{ materialTuningValue }}%
+                  </output>
+                  <button type="button" class="material-adjust-button app-text-secondary"
+                    :aria-label="`恢复默认${materialTuningTitle}`" title="恢复默认" :disabled="materialTuningValue === 50"
+                    @click="setMaterialTuningValue(50)">
+                    <RotateCcw :size="15" aria-hidden="true" />
+                  </button>
+                </div>
               </div>
             </div>
-
-            <label class="block">
-              <input
-                :value="theme.windowBlurTint"
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                class="flow-slider"
-                @input="setWindowBlurTint(Number(($event.target as HTMLInputElement).value))"
-              />
-              <div class="mt-1 flex items-center justify-between text-[11px] text-gray-500 dark:text-white/50">
-                <span>{{ BLUR_TEXT.clear }}</span>
-                <span>{{ BLUR_TEXT.solid }}</span>
-              </div>
-            </label>
           </div>
         </transition>
 
         <transition name="flow-panel">
           <div
-            v-if="materialMode !== 'none'"
+            v-if="materialMode !== 'none' && materialMode !== 'transparent'"
             class="mt-4 flex items-center justify-between rounded-xl border border-gray-200/50 bg-white/20 px-4 py-3 shadow-xs dark:border-white/5 dark:bg-white/5"
           >
             <div class="space-y-0.5">
@@ -380,7 +393,7 @@ const getWindowMaterialHint = (mode: Exclude<WindowMaterialMode, 'none'>) => {
         {{ TEXT.windowMaterialUnsupportedHint }}
       </p>
       <p v-else-if="windowMaterialDisabledReason === 'transparency'" class="text-xs text-amber-600 dark:text-amber-400">
-        {{ TEXT.windowMaterialTransparencyHint }}
+        {{ TEXT.windowMaterialTransparencyGroupHint }}
       </p>
       <p v-else-if="windowMaterialDisabledReason === 'theme-conflict'" class="text-xs text-amber-600 dark:text-amber-400">
         {{ TEXT.windowMaterialConflictHint }}
@@ -403,33 +416,145 @@ const getWindowMaterialHint = (mode: Exclude<WindowMaterialMode, 'none'>) => {
   transform: translateY(-8px);
 }
 
-.flow-slider {
+.material-option {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgb(148 163 184 / .22);
+  border-radius: 12px;
+  color: #1f2937;
+  transition: border-color 180ms, background-color 180ms;
+}
+.dark .material-option {
+  border-color: rgb(255 255 255 / .1);
+  color: #e5e7eb;
+}
+.material-option:not(.is-selected):not(.is-disabled):hover {
+  border-color: rgb(236 65 65 / .4);
+  background: rgb(236 65 65 / .03);
+}
+.material-option.is-selected {
+  border-color: #ec4141;
+  background: rgb(236 65 65 / .08);
+  color: #ec4141;
+}
+.material-option.is-disabled { opacity: .45; }
+.material-choice {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  padding: 12px 16px;
+  border-radius: 11px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.material-choice:disabled,
+.material-tuning-trigger:disabled { cursor: not-allowed; }
+.material-tuning-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 40px;
+  height: 36px;
+  margin-right: 6px;
+  border-left: 1px solid var(--settings-divider);
+  border-radius: 0 6px 6px 0;
+  color: var(--app-text-secondary);
+  cursor: pointer;
+  transition: color 180ms, background-color 180ms;
+}
+.material-tuning-trigger:not(:disabled):hover,
+.material-tuning-trigger.is-expanded {
+  color: #ec4141;
+  background: rgb(236 65 65 / .08);
+}
+.material-tuning-trigger svg { transition: transform 220ms ease; }
+.material-tuning-trigger.is-expanded svg { transform: rotate(180deg); }
+.material-choice:focus-visible,
+.material-tuning-trigger:focus-visible { box-shadow: inset 0 0 0 2px rgb(236 65 65 / .65); }
+
+.material-tuning-panel { display: grid; grid-template-rows: 1fr; }
+.material-tuning-panel-inner { min-height: 0; overflow: hidden; }
+.material-expand-enter-active,
+.material-expand-leave-active {
+  transition: grid-template-rows 220ms ease, opacity 180ms ease;
+}
+.material-expand-enter-from,
+.material-expand-leave-to { grid-template-rows: 0fr; opacity: 0; }
+.material-tuning-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 24px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--settings-divider);
+}
+.material-tuning-label { flex: 1 1 160px; }
+.material-slider-controls {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 32px 46px 32px;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 420px);
+  min-width: 0;
+}
+.material-adjust-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 160ms, background-color 160ms;
+}
+.material-adjust-button:not(:disabled):hover { color: #ec4141; background: rgb(236 65 65 / .08); }
+.material-adjust-button:disabled { cursor: default; opacity: .3; }
+.material-adjust-button:focus-visible { box-shadow: inset 0 0 0 2px rgb(236 65 65 / .65); }
+.material-slider {
   width: 100%;
-  height: 6px;
-  border-radius: 9999px;
+  min-width: 0;
+  height: 24px;
   appearance: none;
-  background: linear-gradient(90deg, rgba(236, 65, 65, 0.18), rgba(236, 65, 65, 0.62));
-  outline: none;
-}
-
-.flow-slider::-webkit-slider-thumb {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.95);
-  border-radius: 9999px;
-  appearance: none;
-  background: #ec4141;
-  box-shadow: 0 4px 10px rgba(236, 65, 65, 0.35);
+  background: transparent;
   cursor: pointer;
 }
-
-.flow-slider::-moz-range-thumb {
+.material-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #ec4141 var(--fill), rgb(128 128 128 / .2) var(--fill));
+}
+.material-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #ec4141 var(--fill), rgb(128 128 128 / .2) var(--fill));
+}
+.material-slider::-webkit-slider-thumb {
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.95);
-  border-radius: 9999px;
-  background: #ec4141;
-  box-shadow: 0 4px 10px rgba(236, 65, 65, 0.35);
-  cursor: pointer;
+  margin-top: -5.5px;
+  border: 0;
+  border-radius: 50%;
+  appearance: none;
+  background: #fff;
+  box-shadow: 0 1px 5px rgb(0 0 0 / .2);
+}
+.material-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 5px rgb(0 0 0 / .2);
+}
+.material-slider:focus-visible { outline: 2px solid #ec4141; outline-offset: 3px; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) {
+  .material-expand-enter-active,
+  .material-expand-leave-active,
+  .material-tuning-trigger svg { transition: none; }
 }
 </style>

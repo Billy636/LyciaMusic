@@ -2,8 +2,8 @@ import { Effect, getCurrentWindow, type Color } from '@tauri-apps/api/window';
 import { ref } from 'vue';
 import { windowApi, type WindowMaterialCapabilities as TauriWindowMaterialCapabilities } from '../services/tauri/windowApi';
 
-export type WindowMaterialMode = 'none' | 'mica' | 'acrylic' | 'blur';
-export type ResolvedWindowMaterial = 'none' | 'mica' | 'acrylic' | 'blur';
+export type WindowMaterialMode = 'none' | 'mica' | 'acrylic' | 'blur' | 'transparent';
+export type ResolvedWindowMaterial = WindowMaterialMode;
 
 export interface WindowMaterialCapabilities {
   isWindows: boolean;
@@ -55,6 +55,10 @@ export function resolveWindowMaterial(
 ): ResolvedWindowMaterial {
   const isWindows11 = value.isWindows && value.windowsBuildNumber !== null && value.windowsBuildNumber >= 22000;
 
+  if (mode === 'transparent') {
+    return value.isWindows ? 'transparent' : 'none';
+  }
+
   if (value.systemTransparencyEnabled === false) {
     return 'none';
   }
@@ -84,8 +88,10 @@ function normalizeTintValue(value = 50): number {
 
 function getBlurTint(isDark: boolean, tintValue = 50): Color {
   const value = normalizeTintValue(tintValue);
+  // Dark blur uses this native tint as its only visible mask. Keep the
+  // midpoint, but allow a lighter low end and a stronger high end.
   const alpha = isDark
-    ? 50 + Math.round(value * 1.2)
+    ? 20 + Math.round(value * 1.8)
     : 40 + value;
   return isDark ? [18, 18, 18, alpha] : [248, 248, 248, alpha];
 }
@@ -184,32 +190,36 @@ async function applyWindowMaterialNow(
   try {
     // Older Windows 11 builds use different native APIs for Mica and Acrylic.
     // Setting the new effect alone does not remove the previous material.
-    if (resolved !== 'none' && resolved !== activeWindowMaterial.value) {
+    if (resolved !== 'none' && resolved !== 'transparent' && resolved !== activeWindowMaterial.value) {
       await appWindow.clearEffects();
     }
 
     if (resolved === 'mica') {
       await trySetWindowBackgroundColor(getTransparentWindowColor());
+      await trySetWindowShadow(true);
       await appWindow.setEffects({
         effects: [isDark ? MICA_DARK_EFFECT : MICA_LIGHT_EFFECT],
       });
-      await trySetWindowShadow(true);
     } else if (resolved === 'acrylic') {
       await trySetWindowBackgroundColor(getTransparentWindowColor());
       await windowApi.setDarkModeForWindow(isDark);
+      await trySetWindowShadow(true);
       await appWindow.setEffects({
         effects: [Effect.Acrylic],
         color: getAcrylicTint(isDark),
       });
-      await trySetWindowShadow(true);
     } else if (resolved === 'blur') {
       await trySetWindowBackgroundColor(getTransparentWindowColor());
       await windowApi.setDarkModeForWindow(isDark);
+      await trySetWindowShadow(false);
       await appWindow.setEffects({
         effects: [Effect.Blur],
         color: getBlurTint(isDark, blurTint),
       });
+    } else if (resolved === 'transparent') {
+      await appWindow.clearEffects();
       await trySetWindowShadow(false);
+      await windowApi.applyTransparentWindow();
     } else {
       await appWindow.clearEffects();
       await trySetWindowBackgroundColor(getBaseWindowColor(isDark));

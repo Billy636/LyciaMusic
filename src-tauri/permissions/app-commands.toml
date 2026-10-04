@@ -122,6 +122,7 @@ commands.allow = [
   "set_mini_boundary_enabled",
   "set_retain_material_on_unfocus",
   "get_window_material_capabilities",
+  "apply_transparent_window",
   "get_foreground_fullscreen_state",
   "set_immersive_fullscreen",
   "set_dark_mode_for_window",

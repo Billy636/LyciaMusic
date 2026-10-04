@@ -85,7 +85,7 @@ use toolbox::{
 use toolbox::{append_webview2_browser_arg, should_disable_gpu_for_startup};
 use window_boundary::{set_mini_boundary_enabled, set_retain_material_on_unfocus};
 use window_fullscreen::set_immersive_fullscreen;
-use window_material::get_window_material_capabilities;
+use window_material::{apply_transparent_window, get_window_material_capabilities};
 use window_theme::set_dark_mode_for_window;
 use window_z_order::{refresh_current_window_topmost, start_topmost_guard, stop_topmost_guard};
 
@@ -248,6 +248,7 @@ pub fn run() {
             set_mini_boundary_enabled,
             set_retain_material_on_unfocus,
             get_window_material_capabilities,
+            apply_transparent_window,
             get_foreground_fullscreen_state,
             set_immersive_fullscreen,
             set_dark_mode_for_window,

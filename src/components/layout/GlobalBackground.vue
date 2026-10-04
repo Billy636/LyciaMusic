@@ -371,7 +371,26 @@ const materialScrimStyle = computed(() => {
     return null;
   }
 
+  if (activeWindowMaterial.value === 'transparent') {
+    // A barely painted surface keeps WebView2 hit testing working at 0%.
+    const opacity = Math.max(1 / 255, theme.value.windowTransparentOpacity / 100);
+    return {
+      backgroundColor: isDarkTheme.value
+        ? `rgba(18, 18, 18, ${opacity})`
+        : `rgba(250, 250, 250, ${opacity})`,
+    };
+  }
+
   if (isDarkTheme.value) {
+    if (activeWindowMaterial.value === 'blur') {
+      // Native blur already supplies the adjustable dark tint. A second
+      // fixed mask hides the backdrop even at the slider's lowest value.
+      // Keep a barely painted surface for WebView2 hit testing.
+      return {
+        backgroundColor: `rgba(18, 18, 18, ${1 / 255})`,
+      };
+    }
+
     return {
       backgroundColor: 'rgba(12, 14, 16, 0.34)',
     };

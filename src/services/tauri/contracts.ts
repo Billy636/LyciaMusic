@@ -509,6 +509,7 @@ export interface TauriCommandMap {
     payload: undefined;
     response: WindowMaterialCapabilities;
   };
+  apply_transparent_window: { payload: undefined; response: void };
   get_foreground_fullscreen_state: {
     payload: undefined;
     response: ForegroundFullscreenState;

@@ -297,13 +297,14 @@ export interface LibraryScanSession {
 export interface ThemeSettings {
   mode: 'system' | 'light' | 'dark' | 'custom';
   dynamicBgType: 'none' | 'flow' | 'blur';
-  windowMaterial: 'none' | 'mica' | 'acrylic' | 'blur';
+  windowMaterial: 'none' | 'mica' | 'acrylic' | 'blur' | 'transparent';
   retainMaterialOnUnfocus: boolean;
   flowColorBoost: number;
   flowDepth: number;
   flowSpeed: number;
   flowTexture: number;
   windowBlurTint: number;
+  windowTransparentOpacity: number;
   customBgPath: string; // Legacy field, keeping for compatibility if needed, but we'll use customBackground
   opacity: number;      // Legacy field
   blur: number;         // Legacy field

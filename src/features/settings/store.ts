@@ -87,6 +87,7 @@ export const defaultThemeSettings: ThemeSettings = {
   flowSpeed: 52,
   flowTexture: 34,
   windowBlurTint: 50,
+  windowTransparentOpacity: 50,
   customBgPath: '',
   opacity: 0.8,
   blur: 20,
@@ -221,11 +222,15 @@ export const mergeThemeSettings = (
   };
 
   const mediaType = mergedCustomBackground.mediaType === 'video' ? 'video' : 'image';
+  const transparentOpacity = patch.windowTransparentOpacity ?? base.windowTransparentOpacity;
 
   return {
     ...base,
     ...patch,
     mode: normalizeThemeMode(patch.mode, base.mode),
+    windowTransparentOpacity: Number.isFinite(transparentOpacity)
+      ? Math.min(100, Math.max(0, Math.round(transparentOpacity)))
+      : defaultThemeSettings.windowTransparentOpacity,
     customBackground: {
       ...mergedCustomBackground,
       mediaType,
@@ -370,8 +375,8 @@ export const useSettingsStore = defineStore('settings', () => {
     settings.value = createDefaultAppSettings();
   };
 
-  const replaceTheme = (nextTheme: ThemeSettings) => {
-    theme.value = nextTheme;
+  const replaceTheme = (nextTheme: ThemeSettingsPatch) => {
+    theme.value = mergeThemeSettings(createDefaultThemeSettings(), nextTheme);
   };
 
   const patchTheme = (partialTheme: ThemeSettingsPatch) => {

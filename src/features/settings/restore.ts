@@ -86,7 +86,7 @@ export function restorePersistedAppSettings(
     }
 
     const savedWindowMaterial = typeof savedTheme.windowMaterial === 'string'
-      && ['none', 'mica', 'acrylic', 'blur'].includes(savedTheme.windowMaterial)
+      && ['none', 'mica', 'acrylic', 'blur', 'transparent'].includes(savedTheme.windowMaterial)
       ? savedTheme.windowMaterial as typeof currentSettings.theme.windowMaterial
       : currentSettings.theme.windowMaterial;
 
