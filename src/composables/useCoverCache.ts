@@ -23,7 +23,7 @@ const fullCoverPathCache = new Map<string, string>();
 const thumbnailCacheExpiry = new Map<string, number>();
 const fullCoverCacheExpiry = new Map<string, number>();
 const loadingSet = reactive(new Set<string>());
-const inFlightRequests = new Map<string, Promise<string>>();
+const inFlightRequests = new Map<string, { epoch: number; promise: Promise<string> }>();
 const requestTokens = new Map<string, symbol>();
 const coverCacheResetVersion = shallowRef(0);
 const readonlyCoverCacheResetVersion = readonly(coverCacheResetVersion);
@@ -281,11 +281,11 @@ const loadCoverInternal = (path: string, kind: CoverKind): Promise<string> => {
     return Promise.resolve('');
   }
 
-  const existingRequest = inFlightRequests.get(requestKey);
-  if (existingRequest) {
-    return existingRequest;
-  }
   const requestEpoch = getCacheEpoch(kind);
+  const existingRequest = inFlightRequests.get(requestKey);
+  if (existingRequest?.epoch === requestEpoch) {
+    return existingRequest.promise;
+  }
   const requestToken = Symbol(requestKey);
   requestTokens.set(requestKey, requestToken);
   const isCurrentRequest = () => requestEpoch === getCacheEpoch(kind)
@@ -324,7 +324,7 @@ const loadCoverInternal = (path: string, kind: CoverKind): Promise<string> => {
 
   // invoke can throw synchronously; do not register an already-finished request.
   if (requestTokens.get(requestKey) === requestToken) {
-    inFlightRequests.set(requestKey, request);
+    inFlightRequests.set(requestKey, { epoch: requestEpoch, promise: request });
   }
   return request;
 };

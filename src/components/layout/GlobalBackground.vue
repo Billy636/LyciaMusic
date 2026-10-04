@@ -29,6 +29,7 @@ const { isMainWindowLowPower } = useRenderingPower();
 const { isCustomBackgroundPreviewOpen } = useCustomBackgroundPreviewState();
 const playbackStore = usePlaybackStore();
 const { currentSongPath } = storeToRefs(playbackStore);
+const isBackgroundPreparationSuspended = computed(() => isMainWindowLowPower.value || isMiniMode.value);
 
 // --- 大背景物理尺寸动态测量 ---
 const containerWidth = ref(window.innerWidth);
@@ -249,40 +250,45 @@ watch(
 
 const preblurredStaticBgSrc = ref('');
 const isStaticBgPreblurred = ref(false);
+// Keep the last displayed bitmap while hidden and until its replacement is
+// ready. Background song changes must not recreate an invisible image layer.
+const staticBackgroundSource = ref('');
+const staticBackgroundDisplaySrc = computed(() => preblurredStaticBgSrc.value || staticBackgroundSource.value);
 let fullCoverRequestId = 0;
 let preblurRequestId = 0;
 
 watch(
-  [() => activeBackgroundInfo.value?.type, currentSongPath],
-  async ([backgroundType, path]) => {
-    if (backgroundType !== 'blur' || !path) {
-      fullCoverRequestId += 1;
+  [() => activeBackgroundInfo.value?.type, currentSongPath, isBackgroundPreparationSuspended],
+  async ([backgroundType, path, suspended]) => {
+    const requestId = ++fullCoverRequestId;
+    if (suspended || backgroundType !== 'blur' || !path) {
       return;
     }
-
-    const requestId = ++fullCoverRequestId;
 
     try {
       const fullCoverUrl = await loadFullCover(path);
       if (
         requestId !== fullCoverRequestId
+        || isBackgroundPreparationSuspended.value
         || currentSongPath.value !== path
         || activeBackgroundInfo.value?.type !== 'blur'
       ) {
         return;
       }
 
-      playbackStore.currentCoverFull = fullCoverUrl || playbackStore.currentCover;
+      if (fullCoverUrl) playbackStore.currentCoverFull = fullCoverUrl;
     } catch {
       if (
         requestId !== fullCoverRequestId
+        || isBackgroundPreparationSuspended.value
         || currentSongPath.value !== path
         || activeBackgroundInfo.value?.type !== 'blur'
       ) {
         return;
       }
 
-      playbackStore.currentCoverFull = playbackStore.currentCover;
+      // The playback/detail chain owns the thumbnail fallback. A background
+      // failure must not overwrite a full cover another consumer has loaded.
     }
   },
   { immediate: true },
@@ -303,14 +309,20 @@ const staticBrightness = computed(() => {
 });
 
 watch(
-  [() => activeBackgroundInfo.value?.type, bgImageSrc, staticBlurAmount, staticBrightness],
-  async ([backgroundType, src, blur, brightness]) => {
+  [() => activeBackgroundInfo.value?.type, bgImageSrc, staticBlurAmount, staticBrightness, isBackgroundPreparationSuspended],
+  async ([backgroundType, src, blur, brightness, suspended]) => {
     const requestId = ++preblurRequestId;
-    preblurredStaticBgSrc.value = '';
-    isStaticBgPreblurred.value = false;
+    if (suspended) return;
 
     if (backgroundType !== 'blur' || !src) {
+      staticBackgroundSource.value = '';
+      preblurredStaticBgSrc.value = '';
+      isStaticBgPreblurred.value = false;
       return;
+    }
+
+    if (!staticBackgroundSource.value) {
+      staticBackgroundSource.value = src;
     }
 
     const preblurredUrl = await getPreblurredBackgroundUrl(src, {
@@ -320,13 +332,15 @@ watch(
 
     if (
       requestId !== preblurRequestId
+      || isBackgroundPreparationSuspended.value
       || activeBackgroundInfo.value?.type !== 'blur'
       || bgImageSrc.value !== src
     ) {
       return;
     }
 
-    preblurredStaticBgSrc.value = preblurredUrl;
+    staticBackgroundSource.value = src;
+    preblurredStaticBgSrc.value = preblurredUrl !== src ? preblurredUrl : '';
     isStaticBgPreblurred.value = preblurredUrl !== src;
   },
   { immediate: true },
@@ -476,13 +490,13 @@ const customBgTransform = computed(() => {
 
     <transition name="fade-fast">
       <div
-        v-if="activeBackgroundInfo?.type === 'blur' && bgImageSrc"
-        :key="bgImageSrc"
+        v-if="activeBackgroundInfo?.type === 'blur' && staticBackgroundDisplaySrc"
+        :key="staticBackgroundSource"
         class="absolute inset-0"
       >
         <div class="absolute inset-0 z-10 transition-colors duration-500" :class="staticMaskClass"></div>
         <img
-          :src="preblurredStaticBgSrc || bgImageSrc"
+          :src="staticBackgroundDisplaySrc"
           class="w-full h-full object-cover transition-opacity duration-1000 z-0"
           :style="{
             filter: isStaticBgPreblurred ? 'none' : `blur(${staticBlurAmount}px) brightness(${staticBrightness})`,
