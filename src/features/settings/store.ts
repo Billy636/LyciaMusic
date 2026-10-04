@@ -26,7 +26,7 @@ import {
 } from './shortcuts';
 import { playerStorage } from '../../services/storage/playerStorage';
 import { normalizeFooterSettings } from './footer';
-import { normalizeSidebarNavigationOrder } from './sidebarNavigation';
+import { getSidebarHomepageId, normalizeSidebarNavigationOrder } from './sidebarNavigation';
 
 const createUserPresetId = (): string =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -107,6 +107,7 @@ export const defaultThemeSettings: ThemeSettings = {
 
 export const defaultSidebarSettings: SidebarSettings = {
   navigationOrder: normalizeSidebarNavigationOrder(undefined),
+  homepageId: 'localMusic',
   showLocalMusic: true,
   showPlaylistLibrary: true,
   showArtists: true,
@@ -242,11 +243,14 @@ export const mergeThemeSettings = (
 export const mergeSidebarSettings = (
   base: SidebarSettings,
   patch: SidebarSettingsPatch,
-): SidebarSettings => ({
-  ...base,
-  ...patch,
-  navigationOrder: normalizeSidebarNavigationOrder(patch.navigationOrder ?? base.navigationOrder),
-});
+): SidebarSettings => {
+  const merged = {
+    ...base,
+    ...patch,
+    navigationOrder: normalizeSidebarNavigationOrder(patch.navigationOrder ?? base.navigationOrder),
+  };
+  return { ...merged, homepageId: getSidebarHomepageId(merged) };
+};
 
 export const mergeAudioSettings = (
   base: AudioSettings,

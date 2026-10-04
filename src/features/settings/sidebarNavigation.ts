@@ -5,7 +5,7 @@ export type { SidebarNavigationId } from '../../types';
 interface SidebarNavigationItem {
   id: SidebarNavigationId;
   label: string;
-  visibilityKey: Exclude<keyof SidebarSettings, 'navigationOrder' | 'showPlaylists'>;
+  visibilityKey: Exclude<keyof SidebarSettings, 'navigationOrder' | 'homepageId' | 'showPlaylists'>;
 }
 
 export const sidebarNavigationItems: readonly SidebarNavigationItem[] = [
@@ -40,3 +40,11 @@ export const getVisibleSidebarNavigation = (sidebar: SidebarSettings) =>
       ? sidebar.showPlaylistLibrary !== false
       : sidebar[item.visibilityKey],
   );
+
+export const getSidebarHomepageId = (sidebar: SidebarSettings): SidebarNavigationId => {
+  const visibleItems = getVisibleSidebarNavigation(sidebar);
+  return visibleItems.find(item => item.id === sidebar.homepageId)?.id
+    ?? visibleItems.find(item => item.id === 'localMusic')?.id
+    ?? visibleItems[0]?.id
+    ?? 'localMusic';
+};

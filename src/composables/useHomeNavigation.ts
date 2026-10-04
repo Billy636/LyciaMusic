@@ -1,6 +1,6 @@
 import type { RouteLocationRaw, Router } from 'vue-router';
 import type { SidebarNavigationId, SidebarSettings } from '../types';
-import { getVisibleSidebarNavigation } from '../features/settings/sidebarNavigation';
+import { getSidebarHomepageId } from '../features/settings/sidebarNavigation';
 
 type HomeNavigationTarget =
   | { view: 'all' }
@@ -92,9 +92,7 @@ const sidebarTargets: Record<SidebarNavigationId, AppNavigationTarget> = {
 };
 
 export const buildDefaultHomeLocation = (sidebar: SidebarSettings): RouteLocationRaw => {
-  const firstItem = getVisibleSidebarNavigation(sidebar)[0];
-  // Keep a usable music page if every navigation item has been hidden.
-  return buildAppLocation(sidebarTargets[firstItem?.id ?? 'localMusic']);
+  return buildAppLocation(sidebarTargets[getSidebarHomepageId(sidebar)]);
 };
 
 export function useHomeNavigation(router: Router) {

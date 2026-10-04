@@ -1,17 +1,25 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onDeactivated, ref } from 'vue';
-import { ChevronDown, ChevronUp, GripVertical } from 'lucide-vue-next';
+import { GripVertical, House } from 'lucide-vue-next';
 import {
   getOrderedSidebarNavigation,
+  getSidebarHomepageId,
   getVisibleSidebarNavigation,
   type SidebarNavigationId,
 } from '../../features/settings/sidebarNavigation';
 import { useSettings } from '../../features/settings/useSettings';
 import SidebarNavigationIcon from '../layout/SidebarNavigationIcon.vue';
+import SettingsSelect from './SettingsSelect.vue';
 
-const { settings } = useSettings();
+const { settings, patchSidebar } = useSettings();
 const items = computed(() => getOrderedSidebarNavigation(settings.value.sidebar));
-const homepageId = computed(() => getVisibleSidebarNavigation(settings.value.sidebar)[0]?.id);
+const visibleItems = computed(() => getVisibleSidebarNavigation(settings.value.sidebar));
+const homepageId = computed(() => getSidebarHomepageId(settings.value.sidebar));
+const homepageOptions = computed<{ value: SidebarNavigationId; label: string }[]>(() =>
+  visibleItems.value.length
+    ? visibleItems.value.map(item => ({ value: item.id, label: item.label }))
+    : [{ value: 'localMusic', label: '本地音乐' }],
+);
 const list = ref<HTMLOListElement | null>(null);
 const announcement = ref('');
 const drag = ref<{
@@ -33,7 +41,16 @@ function isVisible(item: (typeof items.value)[number]) {
 
 function toggleItem(item: (typeof items.value)[number]) {
   if (drag.value) return;
-  settings.value.sidebar[item.visibilityKey] = !isVisible(item);
+  const nextSidebar = { ...settings.value.sidebar, [item.visibilityKey]: !isVisible(item) };
+  patchSidebar({
+    [item.visibilityKey]: nextSidebar[item.visibilityKey],
+    homepageId: getSidebarHomepageId(nextSidebar),
+  });
+}
+
+function changeHomepage(value: string) {
+  const option = homepageOptions.value.find(option => option.value === value);
+  if (option) patchSidebar({ homepageId: option.value });
 }
 
 function announcePosition(id: SidebarNavigationId) {
@@ -124,9 +141,25 @@ onDeactivated(cancelDrag);
     <section class="space-y-3">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
         <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
+        首页
+      </h2>
+      <div class="p-4 flex items-center justify-between gap-3 rounded-xl hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+        <div class="min-w-0 flex items-center gap-3">
+          <span class="w-8 h-8 rounded-full text-[#EC4141] bg-red-100/50 dark:bg-red-500/15 flex items-center justify-center shrink-0">
+            <House :size="18" aria-hidden="true" />
+          </span>
+          <span class="text-sm font-medium text-gray-800 dark:text-gray-200">启动页面</span>
+        </div>
+        <SettingsSelect class="w-48 max-w-[50%] shrink-0" label="启动页面" hide-label
+          :model-value="homepageId" :options="homepageOptions" @update:model-value="changeHomepage" />
+      </div>
+    </section>
+
+    <section class="space-y-3">
+      <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+        <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
         导航项目
       </h2>
-      <p class="text-xs app-text-secondary">拖动左侧手柄或使用箭头调整顺序，第一个开启的栏目即为首页。</p>
       <ol
         ref="list"
         class="flex flex-col rounded-xl"
@@ -169,14 +202,6 @@ onDeactivated(cancelDrag);
             <span class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ item.label }}</span>
             <span v-if="homepageId === item.id" class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-[#EC4141] bg-red-100/60 dark:bg-red-500/15">首页</span>
           </button>
-          <div class="flex shrink-0 items-center gap-1 mr-2">
-            <button type="button" class="order-button" :disabled="index === 0 || !!drag" :aria-label="`上移${item.label}`" title="上移" @click.stop="moveItem(item.id, -1)">
-              <ChevronUp :size="16" aria-hidden="true" />
-            </button>
-            <button type="button" class="order-button" :disabled="index === items.length - 1 || !!drag" :aria-label="`下移${item.label}`" title="下移" @click.stop="moveItem(item.id, 1)">
-              <ChevronDown :size="16" aria-hidden="true" />
-            </button>
-          </div>
           <button
             type="button"
             role="switch"
@@ -190,7 +215,7 @@ onDeactivated(cancelDrag);
           </button>
         </li>
       </ol>
-      <p v-if="!homepageId" class="text-xs app-text-secondary">未开启导航栏目，首页将显示本地音乐。</p>
+      <p v-if="!visibleItems.length" class="text-xs app-text-secondary">未开启导航栏目，首页将显示本地音乐。</p>
       <p class="sr-only" role="status" aria-live="polite">{{ announcement }}</p>
     </section>
 
@@ -225,31 +250,6 @@ onDeactivated(cancelDrag);
 
 .reorder-handle:active {
   cursor: grabbing;
-}
-
-.order-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 0.375rem;
-  color: var(--text-secondary, #6b7280);
-  transition: background-color 100ms, opacity 100ms;
-}
-
-.order-button:hover:not(:disabled) {
-  background-color: rgb(127 127 127 / 12%);
-}
-
-.order-button:disabled {
-  opacity: 0.25;
-  cursor: default;
-}
-
-.order-button:focus-visible {
-  outline: 2px solid #ec4141;
-  outline-offset: 2px;
 }
 
 .drop-before::before,

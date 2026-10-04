@@ -336,6 +336,7 @@ export type SidebarNavigationId =
 
 export interface SidebarSettings {
   navigationOrder?: SidebarNavigationId[];
+  homepageId?: SidebarNavigationId;
   showLocalMusic: boolean;
   showPlaylistLibrary: boolean;
   showArtists: boolean;
