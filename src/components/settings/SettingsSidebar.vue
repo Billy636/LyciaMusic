@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onDeactivated, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { GripVertical, House } from 'lucide-vue-next';
 import {
   getOrderedSidebarNavigation,
@@ -8,6 +8,7 @@ import {
   type SidebarNavigationId,
 } from '../../features/settings/sidebarNavigation';
 import { useSettings } from '../../features/settings/useSettings';
+import { useSidebarNavigationReorder } from '../../features/settings/useSidebarNavigationReorder';
 import SidebarNavigationIcon from '../layout/SidebarNavigationIcon.vue';
 import SettingsSelect from './SettingsSelect.vue';
 
@@ -22,16 +23,15 @@ const homepageOptions = computed<{ value: SidebarNavigationId; label: string }[]
 );
 const list = ref<HTMLOListElement | null>(null);
 const announcement = ref('');
-const drag = ref<{
-  id: SidebarNavigationId;
-  pointerId: number;
-  startX: number;
-  startY: number;
-  handle: HTMLButtonElement;
-  active: boolean;
-  beforeId: SidebarNavigationId | null;
-  order: SidebarNavigationId[] | null;
-} | null>(null);
+const { drag, placeholderStyle, getRowStyle, beginDrag, cancelDrag, handleLostPointerCapture } = useSidebarNavigationReorder(
+  list,
+  () => items.value.map(item => item.id),
+  (order, id) => {
+    settings.value.sidebar.navigationOrder = order;
+    announcePosition(id);
+    focusHandle(id);
+  },
+);
 
 function isVisible(item: (typeof items.value)[number]) {
   return item.visibilityKey === 'showPlaylistLibrary'
@@ -49,6 +49,7 @@ function toggleItem(item: (typeof items.value)[number]) {
 }
 
 function changeHomepage(value: string) {
+  if (drag.value) return;
   const option = homepageOptions.value.find(option => option.value === value);
   if (option) patchSidebar({ homepageId: option.value });
 }
@@ -75,65 +76,6 @@ function moveItem(id: SidebarNavigationId, direction: -1 | 1) {
   focusHandle(id);
 }
 
-function beginDrag(event: PointerEvent, id: SidebarNavigationId) {
-  if (event.button !== 0 || drag.value) return;
-  const handle = event.currentTarget as HTMLButtonElement;
-  handle.focus({ preventScroll: true });
-  handle.setPointerCapture(event.pointerId);
-  drag.value = {
-    id,
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    handle,
-    active: false,
-    beforeId: null,
-    order: null,
-  };
-}
-
-function moveDrag(event: PointerEvent) {
-  const current = drag.value;
-  if (!current || event.pointerId !== current.pointerId) return;
-  if (!current.active && Math.hypot(event.clientX - current.startX, event.clientY - current.startY) < 6) return;
-  current.active = true;
-  const rows = Array.from(list.value?.querySelectorAll<HTMLElement>('[data-navigation-id]') ?? [])
-    .filter(row => row.dataset.navigationId !== current.id);
-  const target = rows.find(row => {
-    const rect = row.getBoundingClientRect();
-    return event.clientY < rect.top + rect.height / 2;
-  });
-  const beforeId = target?.dataset.navigationId as SidebarNavigationId | undefined;
-  const order = items.value.map(item => item.id).filter(id => id !== current.id);
-  order.splice(beforeId ? order.indexOf(beforeId) : order.length, 0, current.id);
-  current.beforeId = beforeId ?? null;
-  current.order = order.some((id, index) => items.value[index].id !== id) ? order : null;
-}
-
-function clearDrag() {
-  const current = drag.value;
-  drag.value = null;
-  if (current?.handle.hasPointerCapture(current.pointerId)) {
-    current.handle.releasePointerCapture(current.pointerId);
-  }
-  return current;
-}
-
-function finishDrag(event: PointerEvent) {
-  if (event.pointerId !== drag.value?.pointerId) return;
-  const current = clearDrag();
-  if (!current?.order) return;
-  settings.value.sidebar.navigationOrder = current.order;
-  announcePosition(current.id);
-  focusHandle(current.id);
-}
-
-function cancelDrag() {
-  clearDrag();
-}
-
-onBeforeUnmount(cancelDrag);
-onDeactivated(cancelDrag);
 </script>
 
 <template>
@@ -162,25 +104,23 @@ onDeactivated(cancelDrag);
       </h2>
       <ol
         ref="list"
-        class="flex flex-col rounded-xl"
+        class="navigation-list relative flex flex-col rounded-xl"
+        :class="{ 'is-reordering': drag?.active }"
         aria-label="侧边栏导航顺序"
-        @pointermove="moveDrag"
-        @pointerup="finishDrag"
-        @pointercancel="cancelDrag"
-        @lostpointercapture="cancelDrag"
         @keydown.esc.prevent.stop="cancelDrag"
         @dragstart.prevent
       >
+        <li v-if="placeholderStyle" class="navigation-drop-slot" :style="placeholderStyle" aria-hidden="true"></li>
         <li
-          v-for="(item, index) in items"
+          v-for="item in items"
           :key="item.id"
           :data-navigation-id="item.id"
-          class="navigation-setting-row relative p-4 flex items-center gap-3 border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors rounded-lg"
+          class="navigation-setting-row relative p-4 flex items-center gap-3 border-b border-[var(--settings-divider)] hover:bg-white/40 dark:hover:bg-white/10 rounded-lg"
           :class="{
-            'bg-red-100/40 dark:bg-red-500/10 opacity-60': drag?.active && drag.id === item.id,
-            'drop-before': drag?.order && drag.beforeId === item.id,
-            'drop-after': drag?.order && !drag.beforeId && index === items.length - 1,
+            'is-dragged': drag?.active && drag.id === item.id,
+            'is-shifting': drag?.active && drag.id !== item.id,
           }"
+          :style="getRowStyle(item.id)"
         >
           <button
             type="button"
@@ -189,6 +129,7 @@ onDeactivated(cancelDrag);
             title="拖动排序，或使用上下方向键"
             class="reorder-handle shrink-0 p-1.5 -ml-1.5 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#EC4141]"
             @pointerdown.prevent.stop="beginDrag($event, item.id)"
+            @lostpointercapture="handleLostPointerCapture"
             @keydown.up.prevent.stop="moveItem(item.id, -1)"
             @keydown.down.prevent.stop="moveItem(item.id, 1)"
             @click.stop
@@ -199,7 +140,7 @@ onDeactivated(cancelDrag);
             <span class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="isVisible(item) ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
               <SidebarNavigationIcon :id="item.id" />
             </span>
-            <span class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ item.label }}</span>
+            <span class="navigation-item-label text-sm font-medium text-gray-800 dark:text-gray-200">{{ item.label }}</span>
             <span v-if="homepageId === item.id" class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-[#EC4141] bg-red-100/60 dark:bg-red-500/15">首页</span>
           </button>
           <button
@@ -207,6 +148,7 @@ onDeactivated(cancelDrag);
             role="switch"
             :aria-label="`显示${item.label}导航入口`"
             :aria-checked="isVisible(item)"
+            :disabled="!!drag"
             class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#EC4141]"
             :class="isVisible(item) ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'"
             @click.stop="toggleItem(item)"
@@ -243,6 +185,72 @@ onDeactivated(cancelDrag);
 </template>
 
 <style scoped>
+.navigation-list {
+  isolation: isolate;
+  overflow-anchor: none;
+}
+
+.navigation-list.is-reordering {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.navigation-setting-row {
+  z-index: 1;
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.navigation-setting-row:last-child {
+  border-bottom-color: transparent;
+}
+
+.navigation-setting-row.is-shifting {
+  pointer-events: none;
+  will-change: transform;
+}
+
+.navigation-setting-row.is-dragged {
+  --drag-text: #27272a;
+  --drag-handle: #71717a;
+  z-index: 3;
+  pointer-events: none;
+  will-change: transform;
+  border-bottom-color: transparent;
+  background: rgb(244 244 245 / .98);
+  box-shadow: 0 8px 24px rgb(15 23 42 / .09), 0 2px 6px rgb(15 23 42 / .04), inset 0 0 0 1px rgb(236 65 65 / .18);
+}
+
+.dark .navigation-setting-row.is-dragged {
+  --drag-text: #f4f4f5;
+  --drag-handle: #a1a1aa;
+  background: rgb(41 41 44 / .98);
+  box-shadow: 0 8px 24px rgb(0 0 0 / .22), 0 2px 6px rgb(0 0 0 / .12), inset 0 0 0 1px rgb(236 65 65 / .18);
+}
+
+.navigation-setting-row.is-dragged .navigation-item-label {
+  color: var(--drag-text);
+}
+
+.navigation-setting-row.is-dragged .reorder-handle {
+  color: var(--drag-handle);
+}
+
+.navigation-drop-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 0;
+  pointer-events: none;
+  list-style: none;
+  border: 1px dashed rgb(236 65 65 / .3);
+  border-radius: 8px;
+  background: rgb(236 65 65 / .04);
+}
+
+.dark .navigation-drop-slot {
+  background: rgb(236 65 65 / .06);
+}
+
 .reorder-handle {
   cursor: grab;
   touch-action: none;
@@ -252,23 +260,9 @@ onDeactivated(cancelDrag);
   cursor: grabbing;
 }
 
-.drop-before::before,
-.drop-after::after {
-  content: '';
-  position: absolute;
-  left: 0.75rem;
-  right: 0.75rem;
-  height: 2px;
-  border-radius: 1px;
-  background: #ec4141;
-  pointer-events: none;
-}
-
-.drop-before::before {
-  top: -1px;
-}
-
-.drop-after::after {
-  bottom: -1px;
+@media (prefers-reduced-motion: reduce) {
+  .navigation-setting-row {
+    transition: none;
+  }
 }
 </style>
