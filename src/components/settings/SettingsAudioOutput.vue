@@ -2,10 +2,8 @@
 import { CircleAlert } from 'lucide-vue-next';
 import { useSettings } from '../../features/settings/useSettings';
 import EqualizerPanel from '../player/EqualizerPanel.vue';
-import { useSettingsNavigationStore } from '../../features/settings/navigation';
 
 const { settings, patchSettings } = useSettings();
-const navigation = useSettingsNavigationStore();
 
 const volumeBalanceTip = '音量平衡会读取歌曲内置 ReplayGain 标签，在切歌时自动平衡音量。默认完全按标签播放，不改变歌曲内部动态。不存在标签时则无变化。';
 
@@ -32,12 +30,9 @@ const toggleEqualizer = () => {
         <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
         音频处理
       </h2>
-      <div class="flex flex-col rounded-xl bg-white/20 dark:bg-black/10 border border-[var(--settings-divider)]">
+      <div class="flex flex-col">
         <!-- 音量平衡主开关行 -->
-        <div
-          class="desktop-setting-row"
-          :class="settings.audio.volumeBalance.enabled ? 'rounded-t-xl' : 'rounded-xl'"
-        >
+        <div class="desktop-setting-row">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">音量平衡</div>
           </div>
@@ -67,10 +62,10 @@ const toggleEqualizer = () => {
         <!-- 高级音量平衡配置子区域 -->
         <div
           v-if="settings.audio.volumeBalance.enabled"
-          class="flex flex-col border-t border-[var(--settings-divider)] bg-gray-50/10 dark:bg-gray-900/10 transition-all duration-300 animate-in fade-in rounded-b-xl"
+          class="flex flex-col transition-all duration-300 animate-in fade-in"
         >
           <!-- 整体增益偏移设置 -->
-          <div class="desktop-setting-row border-b border-[var(--settings-divider)] pl-8">
+          <div class="desktop-setting-row pl-8">
             <div class="flex-1 space-y-1">
               <div class="text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-2">
                 整体增益偏移
@@ -95,7 +90,7 @@ const toggleEqualizer = () => {
           </div>
 
           <!-- 防削波保护开关 -->
-          <div class="desktop-setting-row pl-8 rounded-b-xl">
+          <div class="desktop-setting-row pl-8">
             <div class="flex-1 space-y-1">
               <div class="text-sm font-medium text-gray-800 dark:text-gray-200">
                 防削波破音保护
@@ -128,38 +123,11 @@ const toggleEqualizer = () => {
         <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
         均衡器 (EQ)
       </h2>
-      <div class="flex flex-col rounded-xl bg-white/20 dark:bg-black/10 border border-[var(--settings-divider)]">
-        <!-- 底栏入口显示统一由个性化设置管理 -->
-        <div
-          class="desktop-setting-row rounded-t-xl border-b border-[var(--settings-divider)]"
-        >
-          <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">底栏快捷入口</div>
-            <div class="text-xs app-text-secondary mt-1">
-              均衡器按钮的显示与位置已统一在“个性化 → 播放底栏”中管理，不影响音效是否启用。
-            </div>
-          </div>
-          <div class="flex items-center gap-3">
-            <button
-              type="button"
-              class="shrink-0 rounded-lg px-3 py-2 text-sm text-[#EC4141] hover:bg-[#EC4141]/5"
-              @click="navigation.openPersonalizationPage('footer')"
-            >
-              管理播放底栏
-            </button>
-          </div>
-        </div>
-
+      <div class="flex flex-col">
         <!-- 启用均衡器主开关行 -->
-        <div
-          class="desktop-setting-row"
-          :class="settings.audio.equalizer.enabled ? 'border-b border-[var(--settings-divider)]' : 'rounded-b-xl'"
-        >
+        <div class="desktop-setting-row">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">启用均衡器</div>
-            <div class="text-xs app-text-secondary mt-1">
-              通过调整不同频段的增益，改善音乐在不同音频设备上的表现。
-            </div>
           </div>
           <div class="flex items-center gap-3">
             <button
@@ -179,7 +147,7 @@ const toggleEqualizer = () => {
         <!-- 均衡器调节板高级配置子区域 -->
         <div
           v-if="settings.audio.equalizer.enabled"
-          class="flex flex-col border-t border-[var(--settings-divider)] bg-gray-50/10 dark:bg-gray-900/10 transition-all duration-300 animate-in fade-in rounded-b-xl p-6"
+          class="flex flex-col transition-all duration-300 animate-in fade-in p-6"
         >
           <EqualizerPanel :embedded="true" />
         </div>
@@ -197,23 +165,14 @@ const toggleEqualizer = () => {
   padding: 16px;
   border-bottom: 1px solid var(--settings-divider);
   text-align: left;
-  transition: background-color 160ms ease;
 }
 
 .desktop-setting-row:last-child {
   border-bottom: 0;
 }
 
-.desktop-setting-row:hover {
-  background: rgba(255, 255, 255, 0.4);
-}
-
 :global(.dark) .desktop-setting-row {
   border-bottom-color: var(--settings-divider);
-}
-
-:global(.dark) .desktop-setting-row:hover {
-  background: rgba(255, 255, 255, 0.08);
 }
 
 .audio-tip {
