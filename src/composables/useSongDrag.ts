@@ -35,7 +35,7 @@ export function useSongDrag(
     const ROW_HEIGHT = 72;
     const reorderViews = ['folder', 'playlist', 'all', 'artist', 'album', 'genre', 'year'];
     let pending: {
-        pointerId: number; song: Song; index: number; batch: boolean; shift: boolean;
+        pointerId: number; song: Song; index: number;
         selection: boolean; selectionAction: 'select' | 'deselect'; selectionIndex: number;
         x: number; y: number; lastX: number; lastY: number; moved: boolean;
     } | null = null;
@@ -176,7 +176,7 @@ export function useSongDrag(
         const playlistId = playlist?.dataset.playlistId;
         dragSession.targetPlaylist = playlistId
             ? { id: playlistId, name: playlist?.dataset.playlistName || playlistId } : null;
-        if (folder || playlist || pending.batch || !reorderViews.includes(currentViewMode.value)) {
+        if (folder || playlist || !reorderViews.includes(currentViewMode.value)) {
             dragSession.insertIndex = -1;
             return;
         }
@@ -264,22 +264,13 @@ export function useSongDrag(
     };
 
     const activateDrag = () => {
-        if (!pending || !ownsDrag()) return;
-        const { song, batch, shift, index } = pending;
-        if (batch) {
-            if (shift) toggleSelection(song.path, index, true);
-            selectedPaths.value.add(song.path);
-        }
-        // Paths are authoritative; metadata is only loaded for the visible virtual window.
-        const paths = batch
-            ? [...new Set([...getVisualPaths().filter(path => selectedPaths.value.has(path)), ...selectedPaths.value])]
-            : [song.path];
-        const movingSet = new Set(paths);
-        dragSession.songs = [song, ...displaySongList.value.filter(item => item.path !== song.path && movingSet.has(item.path))];
-        dragSession.songPaths = paths;
+        if (!pending || !ownsDrag() || pending.selection || isBatchMode.value) return;
+        const { song, index } = pending;
+        dragSession.songs = [song];
+        dragSession.songPaths = [song.path];
         dragSession.active = true;
         dragSession.showGhost = true;
-        dragSession.insertIndex = !batch && reorderViews.includes(currentViewMode.value) ? index : -1;
+        dragSession.insertIndex = reorderViews.includes(currentViewMode.value) ? index : -1;
     };
 
     const pointerMove = (event: PointerEvent) => {
@@ -305,13 +296,10 @@ export function useSongDrag(
         if (!ownsDrag()) { reset(); return; }
         pending.lastX = event.clientX;
         pending.lastY = event.clientY;
-        const wasDragging = dragSession.active;
-        const batch = pending.batch;
+        const wasDragging = !pending.selection && dragSession.active;
         if (wasDragging) updateTarget();
-        else if (batch && !pending.selection && !pending.moved) {
-            toggleSelection(pending.song.path, pending.index, pending.shift);
-        }
-        if (wasDragging || batch || pending.moved) {
+        else if (pending.selection) updateSelection();
+        if (wasDragging || pending.selection || pending.moved) {
             event.preventDefault();
             markClickSuppressed();
         }
@@ -319,7 +307,7 @@ export function useSongDrag(
         const folder = wasDragging && canDropToFolder() && dragSession.targetFolder
             ? { ...dragSession.targetFolder } : null;
         const playlist = wasDragging && dragSession.targetPlaylist ? { ...dragSession.targetPlaylist } : null;
-        const insertIndex = wasDragging && !batch ? dragSession.insertIndex : -1;
+        const insertIndex = wasDragging ? dragSession.insertIndex : -1;
         // Confirmation owns an immutable snapshot, never the live global drag session.
         reset();
         if (!paths.length) return;
@@ -340,8 +328,10 @@ export function useSongDrag(
         if (event.isPrimary === false || (event.pointerType === 'mouse' && event.button !== 0)
             || activeSongDragOwner || dragSession.active) return;
         const target = event.target instanceof Element ? event.target : null;
-        const selection = isBatchMode.value && !!target?.closest('[data-selection-control], input[type="checkbox"], [role="checkbox"]');
-        if (!selection && target?.closest('button, a, input, select, textarea, [contenteditable="true"]')) return;
+        // Every row area selects in batch mode, including blank space around the checkbox.
+        const selection = isBatchMode.value;
+        const selectionControl = selection && !!target?.closest('[data-selection-control], input[type="checkbox"], [role="checkbox"]');
+        if (!selectionControl && target?.closest('button, a, input, select, textarea, [contenteditable="true"]')) return;
         activeSongDragOwner = owner;
         Object.assign(dragSession, {
             type: 'song', active: false, showGhost: false, songs: [], songPaths: undefined, data: null,
@@ -349,7 +339,7 @@ export function useSongDrag(
             mouseX: event.clientX, mouseY: event.clientY,
         });
         pending = {
-            pointerId: event.pointerId, song, index, batch: isBatchMode.value, shift: event.shiftKey,
+            pointerId: event.pointerId, song, index,
             selection, selectionAction: 'select', selectionIndex: index, moved: false,
             x: event.clientX, y: event.clientY, lastX: event.clientX, lastY: event.clientY,
         };
