@@ -25,6 +25,8 @@ export type {
 export interface LyricLine {
   time: number;
   endTime: number;
+  /** Missing source endpoint filled from the next cue or song duration. */
+  endTimeInferred?: 'line' | 'word';
   text: string;
   translation: string;
   romaji: string;

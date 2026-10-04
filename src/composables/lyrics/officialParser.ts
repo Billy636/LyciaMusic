@@ -152,6 +152,7 @@ function resolveLrcEnds(entries: LrcEntry[], durationMs: number | undefined): vo
         : lastWord.startTime + (entry.inferredEnd === 'word' ? 1000 : 5000);
     lastWord.endTime = end;
     line.endTime = line.words.reduce((latest, word) => Math.max(latest, word.endTime), end);
+    if (line.words.some((word) => word.word.trim())) line.endTimeInferred = entry.inferredEnd;
   }
 }
 

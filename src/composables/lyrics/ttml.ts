@@ -30,6 +30,8 @@ export type NativeAmlLyricWord = CoreAmlLyricWord & {
 
 export type NativeAmlLyricLine = Omit<CoreAmlLyricLine, 'words'> & {
   words: NativeAmlLyricWord[];
+  /** Missing source endpoint filled from the next cue or song duration. */
+  endTimeInferred?: 'line' | 'word';
   /** Rendering-only seek anchor, before the official player's lead-in layout. */
   sourceStartTimeMs?: number;
   /** Original explicitly labelled romanization, with its own timing grid. */
@@ -380,6 +382,7 @@ export function amlLineToLegacyLyricLine(line: NativeAmlLyricLine): LyricLine {
   return {
     time: line.startTime / 1000,
     endTime: line.endTime / 1000,
+    ...(line.endTimeInferred ? { endTimeInferred: line.endTimeInferred } : {}),
     text: words.map((word) => word.text).join(''),
     translation: line.translatedLyric || line.translationWords?.map((word) => word.word).join('') || '',
     translationWords: line.translationWords?.map((word) => ({

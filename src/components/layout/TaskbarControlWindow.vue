@@ -21,6 +21,7 @@ import {
   type TaskbarPlayerAction,
 } from '../../features/taskbarPlayer/shared';
 import {
+  createTaskbarLyricDisplayLines,
   getTaskbarLyricWordProgress,
   projectTaskbarPlaybackTime,
   resolveTaskbarLyricLine,
@@ -51,9 +52,13 @@ const playbackAnchor = shallowRef<TaskbarPlayerPlaybackPayload | null>(null);
 const lyricViewport = ref<HTMLElement | null>(null);
 const lyricContent = ref<HTMLElement | null>(null);
 const lyricTime = computed(() => playbackTime.value - (playbackAnchor.value?.audioDelay ?? 0));
-const currentLyric = computed(() => currentSong.value && lyricsStatus.value === 'ready'
-  ? resolveTaskbarLyricLine(parsedLyrics.value, lyricTime.value)
-  : null);
+const taskbarLyrics = computed(() => createTaskbarLyricDisplayLines(parsedLyrics.value));
+const currentLyric = computed(() => {
+  if (!currentSong.value || lyricsStatus.value !== 'ready') return null;
+  // Keep selection on source cues so finishing the highlight does not clear the line.
+  const sourceLine = resolveTaskbarLyricLine(parsedLyrics.value, lyricTime.value);
+  return sourceLine ? taskbarLyrics.value[parsedLyrics.value.indexOf(sourceLine)] : null;
+});
 const songTitle = computed(() => currentSong.value
   ? currentSong.value.title || currentSong.value.name
   : 'Lycia Player');
