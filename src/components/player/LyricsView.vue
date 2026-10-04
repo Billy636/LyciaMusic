@@ -182,6 +182,20 @@ async function handleLightLineClick(line: LyricLine) {
   transform-origin: var(--lyrics-line-transform-origin, 0%) center;
 }
 
+/* A full-width row lets AMLL measure away its horizontal duet offset while
+   preserving the native vertical, scale and opacity animations. */
+.lyrics-align-center .amll-host :deep(.amll-lyric-player [class*="_interludeDots"]),
+.lyrics-align-right .amll-host :deep(.amll-lyric-player [class*="_interludeDots"]) {
+  box-sizing: border-box;
+  width: 100%;
+  justify-content: center;
+  transform-origin: var(--lyrics-line-transform-origin, 50%) center;
+}
+
+.lyrics-align-right .amll-host :deep(.amll-lyric-player [class*="_interludeDots"]) {
+  justify-content: flex-end;
+}
+
 .lyrics-align-left {
   --lyrics-text-align: left;
   --lyrics-line-transform-origin: 0%;
