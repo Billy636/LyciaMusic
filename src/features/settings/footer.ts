@@ -30,7 +30,7 @@ export function createDefaultFooterSettings(): FooterSettings {
   const main = FOOTER_ACTIONS.filter(action => !action.detailOnly).map(({ id, position }) => ({ id, position }));
   const detailExtras = FOOTER_ACTIONS.filter(action => action.detailOnly).map(({ id, position }) => ({ id, position }));
   return {
-    version: 1, linked: true, main, detail: main.map(item => ({ ...item })),
+    version: 1, linked: true, coverShape: 'square', main, detail: main.map(item => ({ ...item })),
     detailExtras,
     detailOrder: legacyDetailOrder(main, detailExtras),
     spacing: { main: { controls: 24, utilities: 8 }, detail: { controls: 24, utilities: 8 } },
@@ -116,7 +116,7 @@ export function normalizeFooterSettings(value: unknown): FooterSettings {
     return { controls: clamp(entry.controls, 24, 8, 40), utilities: clamp(entry.utilities, 8, 0, 24) };
   };
   const normalized: FooterSettings = {
-    version: 1, linked, main, detail, detailExtras, detailOrder,
+    version: 1, linked, coverShape: raw.coverShape === 'circle' ? 'circle' : defaults.coverShape, main, detail, detailExtras, detailOrder,
     spacing: { main: normalizeSpacing(spacing.main), detail: normalizeSpacing(spacing.detail) },
     placement: { main: normalizePlacement(placement.main, normalizedBehavior.main.info), detail: normalizePlacement(placement.detail, normalizedBehavior.detail.info) },
     behavior: normalizedBehavior,

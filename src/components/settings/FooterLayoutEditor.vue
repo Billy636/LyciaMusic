@@ -226,7 +226,7 @@ onBeforeUnmount(() => {
         :style="{ width: `${width}px`, height: `${footerViewport.height}px`, transform: `translateX(-50%) scale(${previewScale})` }">
       <div v-if="behavior.progress !== 'hidden'" class="preview-progress" :class="{ 'hover-only': behavior.progress === 'hover' }"><div class="preview-progress-track"><span :style="{ width: `${live.progress}%`, backgroundColor: behavior.progressColor || 'rgb(212 212 216 / .3)' }"></span></div></div>
       <div class="preview-song" :style="{ width: `${layout.infoWidth}px` }">
-        <FooterSongInfo preview :mode="behavior.info" :width="layout.infoWidth" :song="live.song" :cover="live.cover" :expanded="live.expanded"
+        <FooterSongInfo preview :mode="behavior.info" :width="layout.infoWidth" :song="live.song" :cover="live.cover" :expanded="live.expanded" :cover-shape="footer.coverShape"
           :current-time="live.currentTime" :total-time="live.totalTime" :download-label="live.downloadLabel" />
       </div>
       <FooterActionButton v-for="item in layout.bar" :key="item.id" :id="item.id" editing class="preview-button" :class="{ moving: drag?.active && drag.id === item.id }"

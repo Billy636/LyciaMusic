@@ -7,7 +7,7 @@ import FooterLayoutEditor from './FooterLayoutEditor.vue';
 import ModernModal from '../common/ModernModal.vue';
 import SettingsSelect from './SettingsSelect.vue';
 
-const { footer, setBehavior, setLinked, resetScene } = useFooterSettings();
+const { footer, setBehavior, setCoverShape, setLinked, resetScene } = useFooterSettings();
 const scene = ref<FooterScene>('main');
 const behavior = computed(() => footer.value.behavior[scene.value]);
 const pending = ref<'link' | 'reset' | null>(null);
@@ -22,6 +22,7 @@ const mainInfoOptions = [
   { value: 'cover', label: '封面' }, { value: 'song', label: '封面与歌曲' },
   { value: 'time', label: '播放时间' }, { value: 'both', label: '歌曲与时间' }, { value: 'none', label: '不显示' },
 ];
+const coverShapeOptions = [{ value: 'square', label: '方形' }, { value: 'circle', label: '圆形' }];
 const infoOptions = computed(() => scene.value === 'detail'
   ? mainInfoOptions.filter(option => option.value === 'time' || option.value === 'none')
   : mainInfoOptions);
@@ -156,6 +157,23 @@ const confirmation = computed(() => pending.value === 'link'
             class="display-switch" :class="{ 'is-on': behavior.visualizer }" @click="setBehavior(scene, { visualizer: !behavior.visualizer })">
             <span aria-hidden="true"></span>
           </button>
+        </div>
+      </div>
+    </section>
+    <section class="space-y-3">
+      <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+        <span class="w-1 h-4 bg-[#EC4141] rounded-full" aria-hidden="true"></span>
+        封面样式
+      </h2>
+      <div class="display-rows">
+        <div class="display-row">
+          <div>
+            <label for="footer-cover-shape" class="display-label">封面形状</label>
+            <p class="mt-1 text-xs app-text-secondary">圆形封面在播放时缓慢旋转</p>
+          </div>
+          <SettingsSelect class="display-info-select" label="封面形状" hide-label trigger-id="footer-cover-shape"
+            :model-value="footer.coverShape" :options="coverShapeOptions"
+            @update:model-value="setCoverShape($event === 'circle' ? 'circle' : 'square')" />
         </div>
       </div>
     </section>

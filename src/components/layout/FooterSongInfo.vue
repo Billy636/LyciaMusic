@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { Song } from '../../types';
-import type { FooterBehavior } from '../../types/footer';
+import type { FooterBehavior, FooterCoverShape } from '../../types/footer';
 
 const props = defineProps<{
   mode: FooterBehavior['info']; width: number; song: Song | null; cover: string;
   currentTime: string; totalTime: string; expanded: boolean;
-  downloadLabel?: string; preview?: boolean;
+  downloadLabel?: string; preview?: boolean; coverShape?: FooterCoverShape;
 }>();
 defineEmits<{ toggle: [] }>();
 const hasCover = computed(() => ['cover', 'song', 'both'].includes(props.mode) && props.width >= 48);
@@ -26,8 +26,8 @@ watch([() => props.width, textKind], ([width, kind]) => {
     :style="{ width: `${Math.max(width, retainedWidth)}px` }">
     <!-- This anchor stays mounted; the shared large cover owns its own motion. -->
     <button type="button" :data-footer-cover="preview ? undefined : ''" title="切换播放页"
-      class="absolute left-0 top-1/2 h-12 w-12 -translate-y-1/2 overflow-hidden rounded-lg"
-      :class="hasCover && !preview ? 'pointer-events-auto' : 'pointer-events-none'"
+      class="absolute left-0 top-1/2 h-12 w-12 -translate-y-1/2 overflow-hidden"
+      :class="[hasCover && !preview ? 'pointer-events-auto' : 'pointer-events-none', coverShape === 'circle' ? 'rounded-[50%]' : 'rounded-lg']"
       :style="{ opacity: hasCover ? 1 : 0 }" :inert="!hasCover || preview || undefined" :aria-hidden="!hasCover || preview" @click.stop="$emit('toggle')">
       <img v-if="(expanded || preview) && cover && hasCover" :src="cover" class="h-full w-full object-cover" alt="" draggable="false" />
     </button>

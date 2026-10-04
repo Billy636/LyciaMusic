@@ -1,4 +1,5 @@
 export type FooterScene = 'main' | 'detail';
+export type FooterCoverShape = 'square' | 'circle';
 export type FooterActionId = 'favorite' | 'mode' | 'queue' | 'volume' | 'desktopLyrics'
   | 'equalizer' | 'pin' | 'progress' | 'lyricsStyle' | 'visualizer' | 'more';
 export type FooterMovableId = FooterActionId | 'previous' | 'play' | 'next';
@@ -24,6 +25,7 @@ export interface FooterBehavior {
 export interface FooterSettings {
   version: 1;
   linked: boolean;
+  coverShape: FooterCoverShape;
   main: FooterLayoutItem[];
   detail: FooterLayoutItem[];
   detailExtras: FooterLayoutItem[];

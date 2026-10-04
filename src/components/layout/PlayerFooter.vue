@@ -412,7 +412,7 @@ onUnmounted(() => {
     </div>
     <div class="footer-content h-full" :class="{ 'is-idle': isIdle }" :inert="isIdle || undefined">
       <div class="footer-info-area" :style="{ width: `${groups.infoWidth}px` }">
-        <FooterSongInfo :mode="behavior.info" :width="groups.infoWidth" :song="currentSong" :cover="currentCover"
+        <FooterSongInfo :mode="behavior.info" :width="groups.infoWidth" :song="currentSong" :cover="currentCover" :cover-shape="footer.coverShape"
           :current-time="currentTimeStr" :total-time="totalTimeStr" :expanded="showPlayerDetail"
           :download-label="isCurrentRemoteDownloadActive ? remoteDownloadText : ''"
           @toggle="handleOpenDetail" />

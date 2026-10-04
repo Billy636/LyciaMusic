@@ -10,6 +10,7 @@ import { useFooterSettings } from '../../features/settings/useFooterSettings';
 import { resolveFreeFooterLayout } from '../../features/settings/freeFooterLayout';
 import { useRenderingPower } from '../../composables/renderingPower';
 import { useCoverTilt } from './useCoverTilt';
+import { useCoverRotation } from './useCoverRotation';
 
 const props = defineProps<{
   isExpanded?: boolean;
@@ -20,6 +21,7 @@ const props = defineProps<{
 const emit = defineEmits<{ (event: 'toggle-focus'): void }>();
 
 const { footer } = useFooterSettings();
+const isCircleCover = computed(() => footer.value.coverShape === 'circle');
 const mainHasCover = computed(() => ['cover', 'song', 'both'].includes(footer.value.behavior.main.info)
   && (!footerViewport.value.width || resolveFreeFooterLayout(footer.value, 'main', footerViewport.value.width).infoWidth >= 48));
 // Without a main-page thumbnail, keep the cover at its large-cover geometry
@@ -220,7 +222,13 @@ const onBigCoverError = () => {
 
 const detailCoverRef = ref<HTMLElement | null>(null);
 const tiltSurfaceRef = ref<HTMLElement | null>(null);
+const rotationSurfaceRef = ref<HTMLElement | null>(null);
+const reflectionRotationRef = ref<HTMLElement | null>(null);
 const { isMainWindowLowPower, mainWindowRenderingSnapshot } = useRenderingPower();
+useCoverRotation(rotationSurfaceRef, reflectionRotationRef,
+  () => isCircleCover.value && !!currentSong.value,
+  () => isPlaying.value && !isMainWindowLowPower.value
+    && (!!props.isExpanded || (mainHasCover.value && footerCoverVisible.value)));
 useCoverTilt(detailCoverRef, tiltSurfaceRef, () => !!props.isExpanded
   && !props.isResizingWindow
   && !showContextMenu.value
@@ -243,7 +251,8 @@ defineExpose({ detailCoverRef });
       :aria-label="props.isCoverFocused ? '恢复封面与歌词布局' : '居中欣赏封面，隐藏歌词'"
       :title="props.isCoverFocused ? '点击恢复歌词' : '点击居中欣赏封面'"
       :class="[
-        usesLargeCoverLayout ? 'top-[45%] left-[calc(75px+18%)] -translate-x-1/2 -translate-y-1/2 w-[clamp(220px,45vh,580px)] rounded-2xl' : 'top-[calc(100vh-64px)] left-[16px] translate-x-0 translate-y-0 w-12 rounded-lg',
+        usesLargeCoverLayout ? 'top-[45%] left-[calc(75px+18%)] -translate-x-1/2 -translate-y-1/2 w-[clamp(220px,45vh,580px)]' : 'top-[calc(100vh-64px)] left-[16px] translate-x-0 translate-y-0 w-12',
+        isCircleCover ? 'rounded-[50%]' : usesLargeCoverLayout ? 'rounded-2xl' : 'rounded-lg',
         props.isExpanded ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none',
       ]"
       :style="[coverTransitionStyle, {
@@ -269,21 +278,32 @@ defineExpose({ detailCoverRef });
         }"
       >
         <!-- Main Cover Container -->
-        <transition name="song-switch-cover" mode="out-in">
-          <div :key="currentSongPath" class="w-full h-full rounded-[inherit] overflow-hidden relative isolate z-20">
-            <img v-if="currentLocalCoverUrl" :key="`thumb:${currentSongPath}:${currentLocalCoverUrl}`" :src="currentLocalCoverUrl" class="absolute inset-0 w-full h-full object-cover select-none transition-[transform,filter,opacity] duration-[240ms] ease-out z-10" :class="props.isExpanded ? (fullCoverLoading ? 'scale-[1.03] blur-[10px] brightness-90' : 'scale-100 blur-0 brightness-100') : 'scale-125 blur-0 brightness-100'" draggable="false" decoding="async" />
-            <img v-if="currentBigCoverUrl" :key="`big:${currentSongPath}:${currentBigCoverUrl}`" :src="currentBigCoverUrl" @load="onBigCoverLoad" @error="onBigCoverError" class="absolute inset-0 w-full h-full object-cover select-none transition-opacity duration-[240ms] ease-out z-20" :class="[props.isExpanded ? 'scale-100' : 'scale-125', bigCoverLoaded ? 'opacity-100' : 'opacity-0']" draggable="false" decoding="async" />
-            <div v-if="!currentLocalCoverUrl && !currentBigCoverUrl" class="absolute inset-0 w-full h-full bg-white/5 flex items-center justify-center text-white/10 z-0">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-32 w-32" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+        <div ref="rotationSurfaceRef" class="cover-rotation-surface relative z-20 w-full h-full rounded-[inherit]">
+          <transition name="song-switch-cover" mode="out-in">
+            <div :key="currentSongPath" class="w-full h-full rounded-[inherit] overflow-hidden relative isolate z-20">
+              <img v-if="currentLocalCoverUrl" :key="`thumb:${currentSongPath}:${currentLocalCoverUrl}`" :src="currentLocalCoverUrl" class="absolute inset-0 w-full h-full object-cover select-none transition-[transform,filter,opacity] duration-[240ms] ease-out z-10" :class="props.isExpanded ? (fullCoverLoading ? 'scale-[1.03] blur-[10px] brightness-90' : 'scale-100 blur-0 brightness-100') : 'scale-125 blur-0 brightness-100'" draggable="false" decoding="async" />
+              <img v-if="currentBigCoverUrl" :key="`big:${currentSongPath}:${currentBigCoverUrl}`" :src="currentBigCoverUrl" @load="onBigCoverLoad" @error="onBigCoverError" class="absolute inset-0 w-full h-full object-cover select-none transition-opacity duration-[240ms] ease-out z-20" :class="[props.isExpanded ? 'scale-100' : 'scale-125', bigCoverLoaded ? 'opacity-100' : 'opacity-0']" draggable="false" decoding="async" />
+              <div v-if="!currentLocalCoverUrl && !currentBigCoverUrl" class="absolute inset-0 w-full h-full bg-white/5 flex items-center justify-center text-white/10 z-0">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-32 w-32" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+              </div>
             </div>
-          </div>
-        </transition>
+          </transition>
+        </div>
 
         <!-- Glass Table Reflection Layer -->
         <transition name="reflection-reveal" appear>
-          <div v-if="props.isExpanded" class="absolute top-[calc(100%+2px)] left-0 w-full h-[65%] pointer-events-none z-10 reflection-wrapper rounded-[inherit] overflow-hidden">
-            <div class="absolute inset-0 reflection-glass rounded-[inherit] overflow-hidden">
-              <transition name="song-switch-cover" mode="out-in">
+          <div v-if="props.isExpanded" class="absolute top-[calc(100%+2px)] left-0 w-full h-[65%] pointer-events-none z-10 reflection-wrapper overflow-hidden" :class="isCircleCover ? 'rounded-none' : 'rounded-[inherit]'">
+            <div class="absolute inset-0 reflection-glass overflow-hidden" :class="isCircleCover ? 'rounded-none' : 'rounded-[inherit]'">
+              <div v-if="isCircleCover" class="absolute top-0 left-0 w-full aspect-square scale-y-[-1] rounded-[50%]">
+                <div ref="reflectionRotationRef" class="cover-rotation-surface w-full h-full rounded-[inherit] overflow-hidden">
+                  <transition name="song-switch-cover" mode="out-in">
+                    <div :key="currentSongPath" class="w-full h-full relative">
+                      <img v-if="reflectionCoverUrl" :src="reflectionCoverUrl" class="absolute top-0 left-0 w-full aspect-square object-cover transition-opacity duration-[240ms] ease-out" draggable="false" decoding="async" />
+                    </div>
+                  </transition>
+                </div>
+              </div>
+              <transition v-else name="song-switch-cover" mode="out-in">
                 <div :key="currentSongPath" class="w-full h-full relative">
                   <img v-if="reflectionCoverUrl" :src="reflectionCoverUrl" class="absolute top-0 left-0 w-full aspect-square object-cover scale-y-[-1] transition-opacity duration-[240ms] ease-out" draggable="false" decoding="async" />
                 </div>
@@ -331,6 +351,8 @@ defineExpose({ detailCoverRef });
   transition-duration: var(--cover-opacity-duration);
   transition-timing-function: var(--cover-layout-easing);
 }
+
+.cover-rotation-surface { transform-origin: center; }
 
 @media (prefers-reduced-motion: reduce) {
   .shared-cover,

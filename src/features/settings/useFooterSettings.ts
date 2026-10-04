@@ -2,7 +2,7 @@ import { computed } from 'vue';
 import { playerStorage } from '../../services/storage/playerStorage';
 import { useSettings } from './useSettings';
 import { allowedFooterPositions, createDefaultFooterSettings, effectiveFooterLayout, footerAction, migrateFooterSettings, normalizeFooterSettings, syncFooterBehavior } from './footer';
-import type { FooterActionId, FooterBehavior, FooterMovableId, FooterPlacement, FooterPosition, FooterScene, FooterSettings, FooterSpacing } from '../../types/footer';
+import type { FooterActionId, FooterBehavior, FooterCoverShape, FooterMovableId, FooterPlacement, FooterPosition, FooterScene, FooterSettings, FooterSpacing } from '../../types/footer';
 import { footerAlignedPositions, placementScene, reflowFooterSpacing, resolveFreeFooterLayout, snapshotFooterPositions, type FooterAlignment } from './freeFooterLayout';
 
 export function useFooterSettings() {
@@ -24,6 +24,9 @@ export function useFooterSettings() {
     Object.assign(draft.behavior[scene], patch);
     if (patch.progress && patch.progress !== 'hidden') draft.behavior[scene].lastVisibleProgress = patch.progress;
     if (draft.linked) syncFooterBehavior(draft, scene);
+  });
+  const setCoverShape = (shape: FooterCoverShape) => update(draft => {
+    draft.coverShape = shape;
   });
   const setPosition = (scene: FooterScene, id: FooterActionId, position: FooterPosition) => update(draft => {
     const list = footerAction(id).detailOnly ? draft.detailExtras : draft[draft.linked ? 'main' : scene];
@@ -103,6 +106,6 @@ export function useFooterSettings() {
     const behavior = footer.value.behavior[scene];
     setBehavior(scene, { progress: behavior.progress === 'hidden' ? behavior.lastVisibleProgress : 'hidden' });
   };
-  return { footer, update, setBehavior, setPosition, place, move, setSpacing, setPlacement, alignButtons, setLinked, resetScene, toggleProgress,
+  return { footer, update, setBehavior, setCoverShape, setPosition, place, move, setSpacing, setPlacement, alignButtons, setLinked, resetScene, toggleProgress,
     layout: (scene: FooterScene) => effectiveFooterLayout(footer.value, scene) };
 }
