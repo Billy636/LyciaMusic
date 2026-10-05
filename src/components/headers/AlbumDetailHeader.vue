@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { albumHeaderCache } from '../../caches/imageCaches';
 import { useCoverCache } from '../../composables/useCoverCache';
+import { useHomeNavigation } from '../../composables/useHomeNavigation';
 import { usePlayerViewState } from '../../composables/usePlayerViewState';
 import SortModeIcon from '../common/SortModeIcon.vue';
 
@@ -44,9 +46,14 @@ const sortMenuIsRightAligned = ref(false);
 const coverUrl = ref('');
 const isLoading = ref(false);
 const artistName = computed(() => props.albumArtist || '未知歌手');
+const { openHomeArtist } = useHomeNavigation(useRouter());
 const albumCacheKey = computed(() => `${props.albumName}::${props.albumArtist || '未知歌手'}`);
 const { loadCover, peekCoverUrl, coverCacheResetVersion, coverCacheResumeVersion } = useCoverCache();
 let coverRequestId = 0;
+
+const handleArtistClick = () => {
+  void openHomeArtist(artistName.value);
+};
 
 const handleSortClick = (e: MouseEvent) => {
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -175,8 +182,13 @@ const getGradientForAlbum = (name: string) => {
             {{ albumName }}
           </h1>
           <p class="text-[14px] app-text-secondary mt-2 truncate w-full flex items-center gap-2">
-            <span>专辑艺人:</span>
-            <span class="text-[#507DAF] dark:text-[#6a9adb]">{{ artistName }}</span>
+            <span class="shrink-0">专辑艺人:</span>
+            <button
+              type="button"
+              class="min-w-0 truncate rounded-sm text-left text-[#507DAF] dark:text-[#6a9adb] hover:text-[#3d6593] dark:hover:text-[#89b1e4] hover:underline underline-offset-4 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#507DAF]"
+              :title="`查看 ${artistName} 的歌曲`"
+              @click.stop="handleArtistClick"
+            >{{ artistName }}</button>
           </p>
         </div>
 
