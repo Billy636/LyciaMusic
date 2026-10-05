@@ -21,6 +21,7 @@ commands.allow = [
   "get_song_lyrics_for_edit",
   "save_song_lyrics",
   "save_song_info",
+  "refresh_song_metadata",
   "get_song_detail",
   "get_song_runtime_metadata",
   "get_song_highlight_markers",

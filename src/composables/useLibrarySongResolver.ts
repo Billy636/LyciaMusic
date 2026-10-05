@@ -11,6 +11,7 @@ const resolvedSongCache = new MemoryCache<string, Song>({
   ttlMs: RESOLVED_SONG_CACHE_TTL_MS,
 });
 const inFlightSongs = new Map<string, Promise<Song | null>>();
+const inFlightBatches = new Set<{ invalidatedPaths: Set<string> }>();
 let cacheGeneration = 0;
 
 const rememberSongs = (songs: Song[]) => {
@@ -37,7 +38,7 @@ const loadSong = (path: string): Promise<Song | null> => {
   const requestGeneration = cacheGeneration;
   const request = tauriInvoke('get_library_songs_by_paths', { paths: [path] })
     .then((songs) => {
-      if (requestGeneration !== cacheGeneration) {
+      if (requestGeneration !== cacheGeneration || inFlightSongs.get(path) !== request) {
         return null;
       }
       const song = songs[0] ?? null;
@@ -57,6 +58,7 @@ const loadSong = (path: string): Promise<Song | null> => {
 
 const loadSongs = async (paths: string[]): Promise<LibrarySong[]> => {
   const requestGeneration = cacheGeneration;
+  const batch = { invalidatedPaths: new Set<string>() };
   const result = new Map<string, LibrarySong>();
   const missingPaths: string[] = [];
   const missingPathSet = new Set<string>();
@@ -70,21 +72,44 @@ const loadSongs = async (paths: string[]): Promise<LibrarySong[]> => {
     }
   });
 
-  for (let offset = 0; offset < missingPaths.length; offset += SONG_BATCH_SIZE) {
-    const chunk = missingPaths.slice(offset, offset + SONG_BATCH_SIZE);
-    const loaded = await tauriInvoke('get_library_songs_by_paths', { paths: chunk });
+  inFlightBatches.add(batch);
+  try {
+    for (let offset = 0; offset < missingPaths.length; offset += SONG_BATCH_SIZE) {
+      const chunk = missingPaths.slice(offset, offset + SONG_BATCH_SIZE);
+      const loaded = await tauriInvoke('get_library_songs_by_paths', { paths: chunk });
+      if (requestGeneration !== cacheGeneration) {
+        return [];
+      }
+      loaded.forEach((song) => {
+        if (batch.invalidatedPaths.has(song.path)) {
+          return;
+        }
+        resolvedSongCache.set(song.path, song);
+        result.set(song.path, song);
+      });
+    }
+
+    // A single-song refresh can invalidate part of a batch without changing
+    // the library version (for example, replacing only artwork or lyrics).
+    // Recover those records instead of publishing a permanently incomplete list.
+    const invalidatedSongs = new Map(await Promise.all(
+      [...batch.invalidatedPaths]
+        .filter(path => result.has(path) || missingPathSet.has(path))
+        .map(async path => [path, await loadSong(path)] as const),
+    ));
     if (requestGeneration !== cacheGeneration) {
       return [];
     }
-    loaded.forEach((song) => {
-      resolvedSongCache.set(song.path, song);
-      result.set(song.path, song);
-    });
-  }
 
-  return paths
-    .map(path => result.get(path))
-    .filter((song): song is LibrarySong => !!song);
+    return paths
+      .map(path => batch.invalidatedPaths.has(path)
+        // A newer refresh may have published another snapshot during recovery.
+        ? resolvedSongCache.get(path) ?? invalidatedSongs.get(path)
+        : result.get(path))
+      .filter((song): song is LibrarySong => !!song);
+  } finally {
+    inFlightBatches.delete(batch);
+  }
 };
 
 export function useLibrarySongResolver() {
@@ -93,7 +118,17 @@ export function useLibrarySongResolver() {
     loadSongs,
     rememberSongs,
     peekSong: (path: string) => resolvedSongCache.get(path) ?? null,
-    clearResolvedSongCache: () => {
+    clearResolvedSongCache: (path?: string) => {
+      if (path !== undefined) {
+        resolvedSongCache.delete(path);
+        inFlightSongs.delete(path);
+        // Batch loads also cache songs; keep their other paths usable while
+        // preventing an old response from restoring this song after refresh.
+        for (const batch of inFlightBatches) {
+          batch.invalidatedPaths.add(path);
+        }
+        return;
+      }
       cacheGeneration += 1;
       resolvedSongCache.clear();
       inFlightSongs.clear();

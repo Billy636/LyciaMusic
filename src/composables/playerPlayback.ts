@@ -386,7 +386,7 @@ export const createPlayerPlayback = ({
         if (normalizedCover) {
           currentCover.value = normalizedCover;
           currentCoverPath.value = song.path;
-        } else if (!immediateCover) {
+        } else if (!immediateCover && currentCoverPath.value !== song.path) {
           currentCoverPath.value = '';
         }
         if (!currentCoverFull.value) {
@@ -467,16 +467,16 @@ export const createPlayerPlayback = ({
           if (requestId !== playRequestId || currentSong.value?.path !== song.path) {
             return;
           }
-          if (fullCoverPath) {
-            await playbackApi.updatePlaybackMetadata({
-              title: getSmtcTitle(song),
-              artist: song.artist || 'Unknown Artist',
-              album: song.album || 'Unknown Album',
-              cover: fullCoverPath,
-              duration: Math.floor(song.duration),
-              isPlaying: isPlaying.value,
-            }).catch(() => {});
-          }
+          // Tags may have been refreshed while the audio or artwork was loading.
+          const latestSong = currentSong.value;
+          await playbackApi.updatePlaybackMetadata({
+            title: getSmtcTitle(latestSong),
+            artist: latestSong.artist || 'Unknown Artist',
+            album: latestSong.album || 'Unknown Album',
+            cover: fullCoverPath || peekCoverPath(coverLookupPath) || '',
+            duration: Math.floor(latestSong.duration),
+            isPlaying: isPlaying.value,
+          }).catch(() => {});
         })
         .catch(() => {});
     } catch (error) {
@@ -627,6 +627,7 @@ export const createPlayerPlayback = ({
   });
 
   return {
+    getPlayRequestId: () => playRequestId,
     flushPlaySession,
     playSong,
     pauseSong,

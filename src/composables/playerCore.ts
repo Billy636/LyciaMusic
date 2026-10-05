@@ -3,6 +3,7 @@ import { storeToRefs } from 'pinia';
 import { useLyrics } from './lyrics';
 import { useToast } from './toast';
 import { createPlayerFileManager } from './playerFileManager';
+import { createPlayerExternalSongEdits } from './playerExternalSongEdits';
 import { createDuplicateDeletion } from './duplicateDeletion';
 import { createPlayerFolderImport } from './playerFolderImport';
 import { createPlayerFolderTree } from './playerFolderTree';
@@ -40,6 +41,13 @@ import type { HistoryItem, Song } from '../types';
 import type { DuplicateDeleteGroup, DuplicateDeleteResult } from '../features/duplicates/types';
 import { useSongDetailCache } from './useSongDetailCache';
 import { useLibrarySongResolver } from './useLibrarySongResolver';
+import { useLibraryAllSongPathCache } from './useLibraryAllSongPathCache';
+import { useLibraryCollectionSongPathCache } from './useLibraryCollectionSongPathCache';
+import { useLibraryDetailSongPathCache } from './useLibraryDetailSongPathCache';
+import { useLibraryFolderSongPathCache } from './useLibraryFolderSongPathCache';
+import { useSongInfoDialog } from './useSongInfoDialog';
+import type { SaveSongInfoResponse } from '../services/tauri/contracts';
+import { isRemoteSong } from '../utils/remoteSong';
 import {
   cleanupRemovedLibrarySongPaths,
   isPathInFolderScope,
@@ -162,10 +170,15 @@ const formatTimeAgo = (timestamp: number) => {
 function createPlayerCore() {
   const { loadLyrics } = useLyrics();
   const { showToast } = useToast();
-  const { clearCoverCaches, loadCover, loadFullCover, loadFullCoverPath } = useCoverCache();
+  const { clearCoverCaches, invalidateSongCover, loadCover, loadFullCover, loadFullCoverPath } = useCoverCache();
   const { clearSongDetailCache } = useSongDetailCache();
-  const { loadSong, clearResolvedSongCache } = useLibrarySongResolver();
+  const { loadSong, rememberSongs, clearResolvedSongCache } = useLibrarySongResolver();
   const { resolveSongForPlayback, clearSongRuntimeMetadataCache } = useSongRuntimeMetadata();
+  const { updateSongInfo } = useSongInfoDialog();
+  const { clearLibraryAllSongPathCache } = useLibraryAllSongPathCache();
+  const { clearLibraryCollectionSongPathCache } = useLibraryCollectionSongPathCache();
+  const { clearLibraryDetailSongPathCache } = useLibraryDetailSongPathCache();
+  const { clearLibraryFolderSongPathCache } = useLibraryFolderSongPathCache();
 
   const collectionsStore = useCollectionsStore();
   const libraryStore = useLibraryStore();
@@ -236,6 +249,7 @@ function createPlayerCore() {
   let metadataRefreshVersion = 0;
   let duplicateDeletionPaths: Set<string> | null = null;
   let activeFileOperations = 0;
+  const songMetadataRequests = new Map<string, Promise<SaveSongInfoResponse>>();
 
   const runFileOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
     if (duplicateDeletionPaths) throw new Error('正在处理重复歌曲，请等待当前操作完成');
@@ -243,6 +257,115 @@ function createPlayerCore() {
     try { return await operation(); }
     finally { activeFileOperations -= 1; }
   };
+
+  const refreshSongMetadata = (path: string): Promise<SaveSongInfoResponse> => {
+    const pathKey = normalizePathForScope(path);
+    const pending = songMetadataRequests.get(pathKey);
+    if (pending) return pending;
+    if (!path || isRemoteSong({ path })) {
+      return Promise.reject(new Error('仅支持刷新本地歌曲信息'));
+    }
+    const scan = libraryStore.libraryScanProgress;
+    if (scan && !scan.done && !scan.failed) {
+      return Promise.reject(new Error('音乐库正在扫描，请稍后刷新歌曲信息'));
+    }
+    if (activeFileOperations > 0) {
+      return Promise.reject(new Error('正在执行文件操作，请稍后刷新歌曲信息'));
+    }
+
+    const request = runFileOperation(async () => {
+      const result = await fileApi.refreshSongMetadata(path);
+      flushBufferedLibraryScanBatch();
+      const retainedSong = libraryStore.getSongByPath(path);
+      const activeSong = currentSong.value;
+      const isTargetSong = (songPath: string | null | undefined) => normalizePathForScope(songPath) === pathKey;
+      const previousSong = isTargetSong(activeSong?.path) ? activeSong : retainedSong;
+      const refreshedSong: Song = {
+        ...previousSong,
+        ...result.song,
+        path: retainedSong?.path || path,
+        genre: result.detail.genre,
+        year: result.detail.year,
+      };
+      const response = { ...result, song: refreshedSong };
+      const previousLibraryVersion = libraryStore.libraryDataVersion;
+
+      for (const cachePath of new Set([path, result.song.path, refreshedSong.path])) {
+        clearSongDetailCache(cachePath);
+        clearSongRuntimeMetadataCache(cachePath);
+        clearResolvedSongCache(cachePath);
+        invalidateSongCover(cachePath);
+      }
+      rememberSongs([refreshedSong]);
+      if (refreshedSong.id != null || retainedSong) {
+        libraryStore.setSongRecord(refreshedSong);
+      } else {
+        // External files remain outside the library; update their queue snapshots.
+        playbackStore.playQueue = playbackStore.playQueue.map(song => isTargetSong(song.path) ? refreshedSong : song);
+        playbackStore.tempQueue = playbackStore.tempQueue.map(song => isTargetSong(song.path) ? refreshedSong : song);
+      }
+      updateSongInfo({ ...refreshedSong, path });
+
+      const metadataChanged = libraryStore.libraryDataVersion !== previousLibraryVersion;
+      if (metadataChanged) {
+        clearLibraryAllSongPathCache();
+        clearLibraryCollectionSongPathCache();
+        clearLibraryDetailSongPathCache();
+        clearLibraryFolderSongPathCache();
+        navigationStore.refreshSearch();
+      }
+      const refreshCatalogs = metadataChanged
+        ? libraryRuntime.loadLibraryCatalogsFromCache()
+        : Promise.resolve();
+
+      if (isTargetSong(currentSong.value?.path)) {
+        const refreshVersion = ++metadataRefreshVersion;
+        const playbackId = playbackStore.currentPlaybackId;
+        const playbackRequestId = playerPlayback.getPlayRequestId();
+        const isCurrentRefresh = () => refreshVersion === metadataRefreshVersion
+          && isTargetSong(currentSong.value?.path)
+          && playerPlayback.getPlayRequestId() === playbackRequestId
+          && (playbackId === 0 || playbackStore.currentPlaybackId === playbackId);
+        currentSong.value = { ...currentSong.value, ...refreshedSong };
+        const [cover, fullCover, fullCoverPath] = await Promise.all([
+          loadCover(refreshedSong.path),
+          loadFullCover(refreshedSong.path),
+          loadFullCoverPath(refreshedSong.path),
+        ]);
+        if (isCurrentRefresh()) {
+          // Metadata refresh never reloads the decoder or changes its position.
+          currentCover.value = cover || '';
+          playbackStore.currentCoverPath = cover ? refreshedSong.path : '';
+          currentCoverFull.value = fullCover || cover || '';
+          await Promise.all([
+            loadLyrics(),
+            playbackApi.updatePlaybackMetadata({
+              title: refreshedSong.title?.trim() || refreshedSong.name.replace(/\.[^/.]+$/, ''),
+              artist: refreshedSong.artist,
+              album: refreshedSong.album,
+              cover: fullCoverPath || '',
+              duration: refreshedSong.duration,
+              isPlaying: isPlaying.value,
+            }).catch(error => console.warn('Failed to refresh system playback metadata:', error)),
+          ]);
+        }
+      }
+      await refreshCatalogs;
+      return response;
+    }).finally(() => {
+      if (songMetadataRequests.get(pathKey) === request) songMetadataRequests.delete(pathKey);
+    });
+    songMetadataRequests.set(pathKey, request);
+    return request;
+  };
+
+  const externalSongEdits = createPlayerExternalSongEdits({
+    refreshSongMetadata,
+    onRefreshError: error => {
+      console.warn('Failed to refresh an externally edited song:', error);
+      showToast('自动刷新歌曲信息失败，可在底栏右键手动刷新', 'info');
+    },
+  });
 
   const addLibraryFolder = async (): Promise<void> => {
     await librarySync.addLibraryFolder();
@@ -482,6 +605,8 @@ function createPlayerCore() {
     disposeLibraryRuntime: () => libraryRuntime.dispose(),
     disposePlayerPersistence,
     disposeLibraryBatch,
+    initExternalSongEdits: externalSongEdits.init,
+    disposeExternalSongEdits: externalSongEdits.dispose,
     lastSongPathKey: PLAYER_LAST_SONG_PATH_KEY,
     legacyLastSongKey: LEGACY_PLAYER_LAST_SONG_KEY,
   });
@@ -825,6 +950,8 @@ function createPlayerCore() {
     moveFile,
     generateOrganizedPath,
     openInFinder,
+    refreshSongMetadata,
+    trackExternalSongEdit: externalSongEdits.trackExternalSongEdit,
     deleteFromDisk,
     deleteDuplicateSongs,
     moveFilesToFolder,

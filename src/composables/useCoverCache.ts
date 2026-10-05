@@ -778,6 +778,43 @@ export function useCoverCache() {
     );
   };
 
+  const invalidateSongCover = (path: string) => {
+    if (!path) {
+      return;
+    }
+
+    for (const kind of Object.keys(cacheConfigs) as CoverKind[]) {
+      const config = cacheConfigs[kind];
+      const requestKey = buildCacheKey(path, kind);
+      deleteCacheEntry(config.cache, config.expiry, config.paths, path);
+      // Removing the token makes any older response stale without invalidating
+      // requests or cached artwork belonging to other songs.
+      requestTokens.delete(requestKey);
+      inFlightRequests.delete(requestKey);
+      loadingSet.delete(requestKey);
+      recentFailureCache.delete(requestKey);
+      queuedPathPriority.delete(requestKey);
+    }
+
+    for (const queue of [priorityPreloadQueue, backgroundPreloadQueue]) {
+      for (let index = queue.length - 1; index >= 0; index -= 1) {
+        if (queue[index]?.path === path) {
+          queue.splice(index, 1);
+        }
+      }
+    }
+    for (let index = backgroundFullPreloadQueue.length - 1; index >= 0; index -= 1) {
+      if (backgroundFullPreloadQueue[index] === path) {
+        backgroundFullPreloadQueue.splice(index, 1);
+      }
+    }
+    queuedBackgroundFullPaths.delete(path);
+    scheduleCachePrune();
+    // Visible owners retain URLs beyond the shared LRU, so also tell them to
+    // discard the old image and request it again after all stale work is removed.
+    coverCacheResetVersion.value += 1;
+  };
+
   const clearCoverCaches = () => {
     bumpCacheEpoch();
     clearCacheEntries(thumbnailCache, thumbnailCacheExpiry, thumbnailPathCache);
@@ -824,6 +861,7 @@ export function useCoverCache() {
     preloadPriorityCovers: (paths: string[], kind: PreviewKind = 'thumbnail') => preloadCovers(paths, 'priority', kind),
     preloadFullCovers,
     retainFullCoverPaths,
+    invalidateSongCover,
     clearCoverCaches,
   };
 }

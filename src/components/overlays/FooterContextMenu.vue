@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, computed, watch, nextTick, type Component } from 'vue';
 import { useRouter } from 'vue-router';
-import { Disc3, Folder, Info, Plus, UserRound } from 'lucide-vue-next';
+import { Disc3, Folder, Info, Plus, RefreshCw, UserRound } from 'lucide-vue-next';
 
 import { usePlayer } from '../../composables/player';
 import { useHomeNavigation } from '../../composables/useHomeNavigation';
@@ -10,13 +10,15 @@ import { useToast } from '../../composables/toast';
 import { useAddToPlaylistDialog } from '../../features/collections/addToPlaylistDialog';
 import { getSongAlbumKey, getSongArtistNames } from '../../features/library/playerLibraryViewShared';
 import type { Song } from '../../types';
+import { isRemoteSong } from '../../utils/remoteSong';
 
 type FooterMenuAction =
   | 'addToPlaylist'
   | 'viewArtist'
   | 'viewAlbum'
   | 'openFolder'
-  | 'viewSongInfo';
+  | 'viewSongInfo'
+  | 'refreshSongInfo';
 
 type FooterMenuEntry =
   | { type: 'divider'; key: string }
@@ -31,13 +33,14 @@ const props = defineProps<{
 
 const emit = defineEmits(['close']);
 
-const { openInFinder } = usePlayer();
+const { openInFinder, refreshSongMetadata } = usePlayer();
 const { openAddToPlaylistDialog } = useAddToPlaylistDialog();
 const { openSongInfo } = useSongInfoDialog();
 const { showToast } = useToast();
 const router = useRouter();
 const { openHomeArtist, openHomeAlbum } = useHomeNavigation(router);
 const menuRef = ref<HTMLElement | null>(null);
+const isRefreshingSongInfo = ref(false);
 
 // 存储菜单尺寸
 const menuSize = ref({ width: 0, height: 0 });
@@ -49,6 +52,7 @@ const menuEntries: FooterMenuEntry[] = [
   { type: 'divider', key: 'divider-file' },
   { type: 'action', key: 'openFolder', label: '打开文件所在目录', icon: Folder },
   { type: 'action', key: 'viewSongInfo', label: '查看歌曲信息', icon: Info },
+  { type: 'action', key: 'refreshSongInfo', label: '刷新歌曲信息', icon: RefreshCw },
 ];
 
 // 当菜单显示时，立即测量其尺寸
@@ -117,6 +121,24 @@ const hasAlbumMetadata = (song: Song) =>
     && !song.album_key.trim().toLowerCase().startsWith('unknown::')
   );
 
+const handleRefreshSongInfo = async (song: Song) => {
+  if (isRefreshingSongInfo.value) return;
+  if (isRemoteSong(song)) {
+    showToast('远程歌曲暂不支持刷新本地标签', 'info');
+    return;
+  }
+
+  isRefreshingSongInfo.value = true;
+  try {
+    await refreshSongMetadata(song.path);
+    showToast('歌曲信息已刷新', 'success');
+  } catch (error) {
+    showToast(`刷新歌曲信息失败: ${String(error)}`, 'error');
+  } finally {
+    isRefreshingSongInfo.value = false;
+  }
+};
+
 const handleAction = (action: FooterMenuAction) => {
   if (!props.song) {
     return;
@@ -150,6 +172,9 @@ const handleAction = (action: FooterMenuAction) => {
     case 'viewSongInfo':
       openSongInfo(props.song);
       break;
+    case 'refreshSongInfo':
+      void handleRefreshSongInfo(props.song);
+      break;
   }
 
   emit('close');
@@ -174,6 +199,8 @@ const handleAction = (action: FooterMenuAction) => {
           v-else
           @click="handleAction(entry.key)"
           class="px-4 py-2.5 hover:bg-gray-100 cursor-pointer flex items-center group transition-colors"
+          :class="entry.key === 'refreshSongInfo' && isRefreshingSongInfo ? 'pointer-events-none opacity-50' : ''"
+          :aria-disabled="entry.key === 'refreshSongInfo' && isRefreshingSongInfo"
         >
           <div class="w-5 h-5 mr-3 flex items-center justify-center text-gray-500 group-hover:text-gray-800">
             <component :is="entry.icon" class="w-5 h-5" :stroke-width="1.8" />

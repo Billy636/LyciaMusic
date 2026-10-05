@@ -1,7 +1,10 @@
 import type { Song } from '../../types';
+import type { SaveSongInfoResponse } from './contracts';
 import { tauriInvoke } from './invoke';
 
 export const fileApi = {
+  refreshSongMetadata: (path: string): Promise<SaveSongInfoResponse> =>
+    tauriInvoke('refresh_song_metadata', { path }),
   deleteFolder: (path: string): Promise<void> => tauriInvoke('delete_folder', { path }),
   moveFolderToFolder: (sourcePath: string, targetFolder: string) =>
     tauriInvoke('move_folder_to_folder', { sourcePath, targetFolder }),

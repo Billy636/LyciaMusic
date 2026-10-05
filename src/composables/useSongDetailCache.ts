@@ -32,7 +32,7 @@ export function useSongDetailCache() {
     const requestGeneration = cacheGeneration;
     const request = tauriInvoke('get_song_detail', { path })
       .then((detail) => {
-        if (requestGeneration !== cacheGeneration) {
+        if (requestGeneration !== cacheGeneration || inFlightRequests.get(path) !== request) {
           return null;
         }
         songDetailCache.set(path, detail);
@@ -50,7 +50,12 @@ export function useSongDetailCache() {
 
   return {
     loadSongDetail,
-    clearSongDetailCache: () => {
+    clearSongDetailCache: (path?: string) => {
+      if (path !== undefined) {
+        songDetailCache.delete(path);
+        inFlightRequests.delete(path);
+        return;
+      }
       cacheGeneration += 1;
       songDetailCache.clear();
       inFlightRequests.clear();

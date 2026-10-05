@@ -68,6 +68,8 @@ interface CreatePlayerLifecycleDeps {
   disposeLibraryRuntime: () => void;
   disposePlayerPersistence: () => void;
   disposeLibraryBatch: () => void;
+  initExternalSongEdits?: () => void;
+  disposeExternalSongEdits?: () => void;
   lastSongPathKey: string;
   legacyLastSongKey: string;
 }
@@ -193,6 +195,8 @@ export const createPlayerLifecycle = ({
   disposeLibraryRuntime,
   disposePlayerPersistence,
   disposeLibraryBatch,
+  initExternalSongEdits,
+  disposeExternalSongEdits,
   lastSongPathKey,
   legacyLastSongKey,
 }: CreatePlayerLifecycleDeps) => {
@@ -282,6 +286,7 @@ export const createPlayerLifecycle = ({
       return;
     }
     lifecycleInitDone = true;
+    initExternalSongEdits?.();
 
     const listenerRegistrations = [
       listen('player:play', () => {
@@ -633,6 +638,7 @@ export const createPlayerLifecycle = ({
       disposeLibraryRuntime();
       disposePlayerPersistence();
       disposeLibraryBatch();
+      disposeExternalSongEdits?.();
     });
   };
 

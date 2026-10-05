@@ -47,7 +47,7 @@ use music::{
     get_song_cover, get_song_cover_thumbnail, get_song_detail, get_song_lyrics,
     get_song_lyrics_for_edit, get_song_lyrics_source, get_song_runtime_metadata,
     is_directory, move_file_to_folder, move_folder_to_folder, move_music_file, parse_audio_files, remove_library_folder,
-    remove_sidebar_folder, save_artist_avatar, save_song_info, save_song_lyrics,
+    refresh_song_metadata, remove_sidebar_folder, save_artist_avatar, save_song_info, save_song_lyrics,
     scan_folder_as_playlists, scan_library, scan_music_folder, scan_music_folder_paths, show_in_folder,
     upsert_search_index_batch,
 };
@@ -144,6 +144,7 @@ pub fn run() {
             get_song_lyrics_for_edit,
             save_song_lyrics,
             save_song_info,
+            refresh_song_metadata,
             get_song_detail,
             get_song_runtime_metadata,
             get_song_highlight_markers,

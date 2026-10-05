@@ -392,6 +392,7 @@ export interface TauriCommandMap {
     response: SaveSongInfoResponse;
   };
   get_song_detail: { payload: { path: string }; response: SongDetail };
+  refresh_song_metadata: { payload: { path: string }; response: SaveSongInfoResponse };
   get_song_runtime_metadata: { payload: { path: string }; response: SongRuntimeMetadata | null };
   get_library_song_page: {
     payload: {

@@ -895,6 +895,190 @@ pub fn save_song_info(
     Ok(SaveSongInfoResponse { song, detail })
 }
 
+#[tauri::command]
+pub async fn refresh_song_metadata(
+    app: tauri::AppHandle,
+    path: String,
+    db_state: State<'_, DbState>,
+) -> Result<SaveSongInfoResponse, String> {
+    if is_remote_uri(&path) {
+        return Err("远程歌曲暂不支持从本地文件刷新标签".to_string());
+    }
+    if path.to_ascii_lowercase().contains(".cue::track") {
+        return Err("CUE 分轨请在本地音乐中刷新所属文件夹，以保留完整的轨道信息".to_string());
+    }
+
+    let db_conn = db_state.conn.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let normalized_path = normalize_path(&path);
+        let existing = {
+            let conn = db_conn.lock().map_err(|error| error.to_string())?;
+            conn.query_row(
+                "SELECT path, id, cue_source_path, cue_start_offset, cue_end_offset, added_at,
+                        album, album_artist, album_key, is_various_artists_album, collapse_artist_credits
+                 FROM songs WHERE path = ?1 OR path = ?2
+                 ORDER BY path = ?1 DESC LIMIT 1",
+                params![&path, &normalized_path],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                        row.get::<_, Option<i64>>(5)?,
+                        (
+                            row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                            row.get::<_, Option<String>>(7)?.unwrap_or_default(),
+                            row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                            row.get::<_, Option<i64>>(9)?.unwrap_or(0) != 0,
+                            row.get::<_, Option<i64>>(10)?.unwrap_or(0) != 0,
+                        ),
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| error.to_string())?
+        };
+        if existing.as_ref().is_some_and(|record| record.2.is_some()) {
+            return Err("CUE 分轨请在本地音乐中刷新所属文件夹，以保留完整的轨道信息".to_string());
+        }
+
+        let path_obj = Path::new(&normalized_path);
+        let extension = path_obj
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .unwrap_or_default();
+        if extension == "cue" {
+            return Err("CUE 分轨请在本地音乐中刷新所属文件夹，以保留完整的轨道信息".to_string());
+        }
+        if !is_supported_library_extension(&extension) {
+            return Err("当前文件格式暂不支持刷新歌曲标签".to_string());
+        }
+        let before = fs::metadata(path_obj)
+            .map_err(|error| format!("无法读取歌曲文件，已保留原有信息：{error}"))?;
+        if !before.is_file() || before.len() == 0 {
+            return Err("歌曲文件不存在或尚未保存完成，已保留原有信息".to_string());
+        }
+
+        // Tag reads must succeed before using the scanner's audio-property fallback.
+        // Derive every editable field from this successful read, so a later
+        // permissive scanner read cannot replace existing tags with placeholders.
+        let tagged_file = read_tagged_file_from_path(path_obj)
+            .map_err(|error| format!("读取歌曲标签失败，已保留原有信息：{error}"))?;
+        let retained_path = existing
+            .as_ref()
+            .map(|record| record.0.as_str())
+            .unwrap_or(&path);
+        let mut song = parse_song_from_file(path_obj, retained_path, &extension)
+            .ok_or_else(|| "无法完整读取歌曲信息，已保留原有信息".to_string())?;
+        if song.duration == 0 || song.sample_rate == 0 {
+            return Err("歌曲文件尚未保存完成或无法读取音频信息，已保留原有信息".to_string());
+        }
+        song.title.clear();
+        song.artist = super::scanner::UNKNOWN_ARTIST.to_string();
+        song.album = super::scanner::UNKNOWN_ALBUM.to_string();
+        song.album_artist.clear();
+        super::scanner::fill_text_fields_from_tags(
+            &tagged_file,
+            &mut song.artist,
+            &mut song.album,
+            &mut song.title,
+            &mut song.album_artist,
+        );
+        if song.title.trim().is_empty() {
+            song.title = path_obj
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+        }
+        let tagged_album_artist = song.album_artist.clone();
+        if song.album_artist.trim().is_empty() {
+            song.album_artist = song.artist.clone();
+        }
+        song.artist_names = super::scanner::split_artist_names(&song.artist);
+        song.effective_artist_names = song.artist_names.clone();
+        song.album_key = super::scanner::build_album_key(&song.album, &song.album_artist);
+        let tag_detail = extract_detail_metadata(&tagged_file);
+        song.track_number = tag_detail.track_number.clone();
+        song.disc_number = tag_detail.disc_number.clone();
+        song.comment = tag_detail.comment.clone();
+        if let Some((_, id, source, start, end, added_at, group)) = existing.as_ref() {
+            song.id = Some(*id);
+            song.cue_source_path = source.clone();
+            song.cue_start_offset = start.map(|value| value as u32);
+            song.cue_end_offset = end.map(|value| value as u32);
+            song.added_at = added_at
+                .filter(|value| *value >= 0)
+                .map(|value| value as u64);
+
+            // Album grouping is derived from every track in the folder. A
+            // one-file refresh must retain it unless the file changes its album
+            // or explicitly chooses a different group artist. Album artist tags
+            // equal to the track artist are ignored by the folder grouping too.
+            let (album, album_artist, album_key, is_various, collapse) = group;
+            if song.album.trim().eq_ignore_ascii_case(album.trim())
+                && !album_artist.trim().is_empty()
+                && !album_key.trim().is_empty()
+                && (tagged_album_artist.is_empty()
+                    || tagged_album_artist.eq_ignore_ascii_case(&song.artist)
+                    || tagged_album_artist.eq_ignore_ascii_case(album_artist))
+            {
+                song.album_artist = album_artist.clone();
+                song.album_key = album_key.clone();
+                song.is_various_artists_album = *is_various;
+                song.collapse_artist_credits = *collapse;
+                song.effective_artist_names = if *collapse {
+                    vec![super::scanner::VARIOUS_ARTISTS.to_string()]
+                } else {
+                    song.artist_names.clone()
+                };
+            }
+        }
+        let detail = SongDetail {
+            path: song.path.clone(),
+            genre: tag_detail.genre,
+            year: tag_detail.year,
+            track_number: tag_detail.track_number,
+            disc_number: tag_detail.disc_number,
+            comment: tag_detail.comment,
+            container: song.container.clone(),
+            codec: song.codec.clone(),
+            file_size: Some(song.file_size),
+            bitrate: Some(song.bitrate),
+            sample_rate: Some(song.sample_rate),
+            bit_depth: song.bit_depth,
+            format: Some(song.format.clone()),
+        };
+
+        let after = fs::metadata(path_obj)
+            .map_err(|error| format!("歌曲文件正在保存，请稍后重试：{error}"))?;
+        if !after.is_file()
+            || before.len() != after.len()
+            || before.modified().ok() != after.modified().ok()
+        {
+            return Err("歌曲文件正在保存，请稍后重试，已保留原有信息".to_string());
+        }
+        super::covers::invalidate_song_cover_cache(path_obj, &app)?;
+
+        if song.id.is_some() {
+            let mut conn = db_conn.lock().map_err(|error| error.to_string())?;
+            if load_song_id(&conn, &song.path)? != song.id {
+                return Err("歌曲位置已变化，请重新打开歌曲信息后刷新".to_string());
+            }
+            // Refresh only retained rows. Opening an external file must not import
+            // it into the library; remote-source/cache columns remain untouched.
+            apply_scan_changes(&mut conn, &[], std::slice::from_ref(&song), &[], None)?;
+        }
+
+        Ok(SaveSongInfoResponse { song, detail })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 fn load_song_runtime_metadata(
     conn: &rusqlite::Connection,
     normalized_path: &str,
