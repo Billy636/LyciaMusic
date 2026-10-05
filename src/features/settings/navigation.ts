@@ -27,7 +27,7 @@ export const SETTINGS_SECTION_LABELS = {
 
 export const PERSONALIZATION_PAGE_LABELS = {
   theme: '外观',
-  sidebar: '侧边栏管理',
+  sidebar: '界面与导航',
   footer: '播放底栏',
   desktopLyrics: '桌面歌词',
   taskbarPlayer: '任务栏播控',

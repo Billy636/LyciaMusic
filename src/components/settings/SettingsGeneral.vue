@@ -337,42 +337,6 @@ onScopeDispose(() => {
 
         <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">显示音质标识</div>
-          </div>
-          <button @click="settings.showQualityBadges = !settings.showQualityBadges" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.showQualityBadges ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.showQualityBadges ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-
-        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
-          <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">显示歌曲注释</div>
-          </div>
-          <button @click="settings.showSongComments = !settings.showSongComments" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.showSongComments ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.showSongComments ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-
-        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
-          <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">打开一键回顶按钮</div>
-          </div>
-          <button @click="settings.enableScrollToTopButton = !settings.enableScrollToTopButton" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.enableScrollToTopButton ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.enableScrollToTopButton ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-
-        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
-          <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">显示任务栏播控图标</div>
-          </div>
-          <button @click="settings.showTaskbarPlayerIcon = !settings.showTaskbarPlayerIcon" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none" :class="settings.showTaskbarPlayerIcon ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'">
-            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.showTaskbarPlayerIcon ? 'translate-x-6' : 'translate-x-1'" />
-          </button>
-        </div>
-
-        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
-          <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">修改歌手头像时同步写回音频标签</div>
           </div>
           <div class="flex items-center gap-3 shrink-0">

@@ -79,7 +79,7 @@ function moveItem(id: SidebarNavigationId, direction: -1 | 1) {
 </script>
 
 <template>
-  <div class="w-full space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+  <div class="interface-navigation-settings w-full space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
     <section class="space-y-3">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
         <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
@@ -100,7 +100,7 @@ function moveItem(id: SidebarNavigationId, direction: -1 | 1) {
     <section class="space-y-3">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
         <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
-        导航项目
+        侧边栏
       </h2>
       <ol
         ref="list"
@@ -159,13 +159,6 @@ function moveItem(id: SidebarNavigationId, direction: -1 | 1) {
       </ol>
       <p v-if="!visibleItems.length" class="text-xs app-text-secondary">未开启导航栏目，首页将显示本地音乐。</p>
       <p class="sr-only" role="status" aria-live="polite">{{ announcement }}</p>
-    </section>
-
-    <section class="space-y-3">
-      <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
-        <span class="w-1 h-4 bg-[#EC4141] rounded-full"></span>
-        附加区域
-      </h2>
       <div class="p-4 flex items-center justify-between gap-3 rounded-xl hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
         <button type="button" class="flex flex-1 items-center gap-3 text-left rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#EC4141]" :aria-label="`${settings.sidebar.showPlaylists ? '隐藏' : '显示'}歌单快捷列表`" @click="settings.sidebar.showPlaylists = !settings.sidebar.showPlaylists">
           <span class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center shrink-0" :class="settings.sidebar.showPlaylists ? 'text-[#EC4141] bg-red-100/50' : 'text-gray-500'">
@@ -181,10 +174,95 @@ function moveItem(id: SidebarNavigationId, direction: -1 | 1) {
         </button>
       </div>
     </section>
+
+    <section class="space-y-3">
+      <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+        <span class="w-1 h-4 bg-[#EC4141] rounded-full" aria-hidden="true"></span>
+        显示元素
+      </h2>
+      <div class="display-elements-grid">
+        <label class="display-element-option">
+          <input v-model="settings.showQualityBadges" type="checkbox" />
+          <span>音质标识</span>
+        </label>
+        <label class="display-element-option">
+          <input v-model="settings.showSongComments" type="checkbox" />
+          <span>歌曲注释</span>
+        </label>
+        <label class="display-element-option">
+          <input v-model="settings.enableScrollToTopButton" type="checkbox" />
+          <span>回到顶部按钮</span>
+        </label>
+        <label class="display-element-option">
+          <input v-model="settings.showTaskbarPlayerIcon" type="checkbox" />
+          <span>任务栏播控入口</span>
+        </label>
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
+.interface-navigation-settings {
+  container-type: inline-size;
+}
+
+.display-elements-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 16px;
+}
+
+.display-element-option {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 6px;
+  color: #1f2937;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 160ms;
+}
+
+.display-element-option:hover {
+  background: rgb(255 255 255 / .4);
+}
+
+.dark .display-element-option {
+  color: #e5e7eb;
+}
+
+.dark .display-element-option:hover {
+  background: rgb(255 255 255 / .06);
+}
+
+.display-element-option input {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #ec4141;
+  cursor: pointer;
+}
+
+.dark .display-element-option input {
+  color-scheme: dark;
+}
+
+.display-element-option input:focus-visible {
+  outline: 2px solid rgb(236 65 65 / .65);
+  outline-offset: 3px;
+}
+
+@container (max-width: 420px) {
+  .display-elements-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .navigation-list {
   isolation: isolate;
   overflow-anchor: none;
@@ -261,7 +339,8 @@ function moveItem(id: SidebarNavigationId, direction: -1 | 1) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .navigation-setting-row {
+  .navigation-setting-row,
+  .display-element-option {
     transition: none;
   }
 }
