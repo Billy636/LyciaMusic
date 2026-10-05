@@ -9,12 +9,12 @@ describe('library list cover ownership', () => {
     ['Artists.vue', artistsSource, 'visibleArtistCoverPaths'],
     ['Albums.vue', albumsSource, 'visibleAlbumCoverPaths'],
   ])('%s retains its visible covers through the shared cover owner', (filename, source, visiblePaths) => {
-    expect(source).toContain(`useVisibleCoverUrls(${visiblePaths})`);
+    expect(source).toContain(`useVisibleCoverUrls(${visiblePaths}${filename === 'Albums.vue' ? ", 'card'" : ''})`);
     expect(source).not.toContain('coverCache.get(');
     expect(source).not.toContain('syncVisibleCoverUrls');
     expect(source).not.toContain('displayedCoverUrls.clear()');
     expect(source.indexOf('restoreViewportCoverSnapshot();'))
-      .toBeGreaterThan(source.indexOf(`useVisibleCoverUrls(${visiblePaths})`));
+      .toBeGreaterThan(source.indexOf(`useVisibleCoverUrls(${visiblePaths}${filename === 'Albums.vue' ? ", 'card'" : ''})`));
 
     const { descriptor, errors } = parse(source, { filename });
     expect(errors).toEqual([]);
@@ -36,7 +36,7 @@ describe('library list cover ownership', () => {
   it('preserves album path-only viewport snapshots', () => {
     expect(albumsSource).toContain('const snapshot: string[] = [];');
     expect(albumsSource).toContain('snapshot.push(path);');
-    expect(albumsSource).toContain('preloadPriorityCovers(snapshot);');
+    expect(albumsSource).toContain("preloadPriorityCovers(snapshot, 'card');");
   });
 
   it('continues preferring custom artist avatars over embedded covers', () => {

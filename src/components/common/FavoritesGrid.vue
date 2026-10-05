@@ -128,6 +128,7 @@ const { getDisplayedCoverUrl } = useVisibleCoverUrls(() =>
   virtualGridState.value.items
     .filter(item => item.type !== 'artist' || !item.artist.avatarPath)
     .map(item => item.firstSongPath),
+  'card',
 );
 
 const findScrollParent = (element: HTMLElement | null) => {

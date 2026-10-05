@@ -18,7 +18,7 @@ interface Props {
 const props = defineProps<Props>();
 const containerRef = shallowRef<HTMLElement | null>(null);
 const visibleCoverPaths = shallowRef<string[]>([]);
-const { getDisplayedCoverUrl, isCoverLoading } = useVisibleCoverUrls(visibleCoverPaths);
+const { getDisplayedCoverUrl, isCoverLoading } = useVisibleCoverUrls(visibleCoverPaths, 'card');
 let coverObserver: IntersectionObserver | null = null;
 let observerRevision = 0;
 let observedElements = new Map<HTMLElement, string>();

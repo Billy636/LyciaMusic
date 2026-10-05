@@ -1,11 +1,12 @@
 import { onScopeDispose, reactive, shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue';
-import { useCoverCache } from './useCoverCache';
+import { useCoverCache, type CoverKind } from './useCoverCache';
 
 const VISIBLE_COVER_CONCURRENCY = 4;
 
 /** Keep rendered covers alive independently of the shared URL cache's LRU/TTL. */
-export function useVisibleCoverUrls(paths: MaybeRefOrGetter<readonly string[]>) {
-  const { coverCache, loadCover, isCoverLoading, coverCacheResetVersion } = useCoverCache();
+export function useVisibleCoverUrls(paths: MaybeRefOrGetter<readonly string[]>, kind: CoverKind = 'thumbnail') {
+  const { coverCache, cardCoverCache, fullCoverCache, loadCover, isCoverLoading, coverCacheResetVersion } = useCoverCache();
+  const selectedCache = kind === 'card' ? cardCoverCache : kind === 'full' ? fullCoverCache : coverCache;
   const displayedCoverUrls = reactive(new Map<string, string>());
   const visiblePaths = shallowRef<string[]>([]);
   const pendingPaths = new Set<string>();
@@ -32,7 +33,7 @@ export function useVisibleCoverUrls(paths: MaybeRefOrGetter<readonly string[]>) 
       attemptedPaths.add(path);
       pendingPaths.add(path);
       const requestResetVersion = resetVersion;
-      void loadCover(path).then(url => {
+      void loadCover(path, kind).then(url => {
         if (!disposed && requestResetVersion === resetVersion && visiblePathSet.has(path) && url) {
           displayedCoverUrls.set(path, url);
         }
@@ -47,7 +48,7 @@ export function useVisibleCoverUrls(paths: MaybeRefOrGetter<readonly string[]>) 
   };
 
   watch(
-    () => visiblePaths.value.map(path => [path, coverCache.get(path)] as const),
+    () => visiblePaths.value.map(path => [path, selectedCache.get(path)] as const),
     entries => {
       for (const [path, url] of entries) {
         if (url) {
@@ -114,6 +115,6 @@ export function useVisibleCoverUrls(paths: MaybeRefOrGetter<readonly string[]>) 
   return {
     displayedCoverUrls,
     getDisplayedCoverUrl: (path: string | undefined) => path ? displayedCoverUrls.get(path) ?? '' : '',
-    isCoverLoading,
+    isCoverLoading: (path: string | undefined) => isCoverLoading(path, kind),
   };
 }

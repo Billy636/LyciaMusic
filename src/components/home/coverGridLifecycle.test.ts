@@ -22,7 +22,7 @@ describe('artist and album grid cover lifecycle', () => {
   });
 
   it('loads and retains artist album covers only within the observed viewport', () => {
-    expect(artistAlbumsSource).toContain('useVisibleCoverUrls(visibleCoverPaths)');
+    expect(artistAlbumsSource).toContain("useVisibleCoverUrls(visibleCoverPaths, 'card')");
     expect(artistAlbumsSource).toContain("rootMargin: '200px 0px'");
     expect(artistAlbumsSource).toContain(':data-cover-path="album.firstSongPath"');
     expect(artistAlbumsSource).toContain('getDisplayedCoverUrl(album.firstSongPath)');

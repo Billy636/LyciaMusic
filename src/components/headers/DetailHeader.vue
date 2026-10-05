@@ -107,58 +107,45 @@ const emit = defineEmits([
 
 const headerCover = ref('');
 let coverRequestId = 0;
-const { loadCover, loadFullCover } = useCoverCache();
+let headerCoverPath = '';
+let headerCoverResetVersion = -1;
+const { loadCover, peekCoverUrl, coverCacheResetVersion, coverCacheResumeVersion } = useCoverCache();
 
 const updateHeaderCover = async () => {
   const requestId = ++coverRequestId;
 
-  if (currentViewMode.value === 'playlist') {
-      const pl = playlists.value.find(p => p.id === filterCondition.value);
-      if (pl && pl.songPaths.length > 0) {
-        const firstSongPath = pl.songPaths[0];
-        try {
-          const fullCover = await loadFullCover(firstSongPath);
-          if (requestId !== coverRequestId) return;
-          if (fullCover) {
-            headerCover.value = fullCover;
-            return;
-          }
-
-          const thumbnailCover = await loadCover(firstSongPath);
-          if (requestId !== coverRequestId) return;
-          headerCover.value = thumbnailCover || '';
-        } catch {
-          if (requestId !== coverRequestId) return;
-          headerCover.value = '';
-        }
-      } else {
-        if (requestId !== coverRequestId) return;
-        headerCover.value = '';
-      }
-  } else if (props.songs.length > 0) {
-    const firstSongPath = props.songs[0].path;
-    try {
-      const fullCover = await loadFullCover(firstSongPath);
-      if (requestId !== coverRequestId) return;
-      if (fullCover) {
-        headerCover.value = fullCover;
-        return;
-      }
-
-      const thumbnailCover = await loadCover(firstSongPath);
-      if (requestId !== coverRequestId) return;
-      headerCover.value = thumbnailCover || '';
-    } catch {
-      if (requestId !== coverRequestId) return;
-      headerCover.value = '';
-    }
-  } else {
-    if (requestId !== coverRequestId) return;
+  const firstSongPath = currentViewMode.value === 'playlist'
+    ? playlists.value.find(playlist => playlist.id === filterCondition.value)?.songPaths[0]
+    : props.songs[0]?.path;
+  if (!firstSongPath) {
+    headerCoverPath = '';
     headerCover.value = '';
+    return;
+  }
+
+  if (headerCoverPath !== firstSongPath || headerCoverResetVersion !== coverCacheResetVersion.value) {
+    headerCoverPath = firstSongPath;
+    headerCoverResetVersion = coverCacheResetVersion.value;
+    headerCover.value = peekCoverUrl(firstSongPath, 'card') || peekCoverUrl(firstSongPath) || '';
+  }
+
+  try {
+    const cardCover = await loadCover(firstSongPath, 'card');
+    if (requestId !== coverRequestId) return;
+    if (cardCover) {
+      headerCover.value = cardCover;
+      return;
+    }
+
+    const thumbnailCover = await loadCover(firstSongPath);
+    if (requestId !== coverRequestId) return;
+    headerCover.value = thumbnailCover || headerCover.value;
+  } catch {
+    // Keep the current source's placeholder until the next load or window restore.
   }
 };
 
-watch(() => props.songs, updateHeaderCover, { immediate: true });
+watch([() => props.songs, currentViewMode, filterCondition, coverCacheResetVersion, coverCacheResumeVersion], updateHeaderCover, { immediate: true });
 
 const handlePlayAll = () => {
   emit('playAll');

@@ -45,7 +45,7 @@ const coverUrl = ref('');
 const isLoading = ref(false);
 const artistName = computed(() => props.albumArtist || '未知歌手');
 const albumCacheKey = computed(() => `${props.albumName}::${props.albumArtist || '未知歌手'}`);
-const { loadCover, peekCoverUrl } = useCoverCache();
+const { loadCover, peekCoverUrl, coverCacheResetVersion, coverCacheResumeVersion } = useCoverCache();
 let coverRequestId = 0;
 
 const handleSortClick = (e: MouseEvent) => {
@@ -74,7 +74,7 @@ const handleGlobalClick = (e: MouseEvent) => {
 onMounted(() => window.addEventListener('click', handleGlobalClick));
 onUnmounted(() => window.removeEventListener('click', handleGlobalClick));
 
-watch([albumCacheKey, () => props.songPaths, () => props.songs], async ([cacheKey, songPaths, newSongs]) => {
+watch([albumCacheKey, () => props.songPaths, () => props.songs, coverCacheResetVersion, coverCacheResumeVersion], async ([albumIdentity, songPaths, newSongs, cacheVersion]) => {
   const requestId = ++coverRequestId;
 
   const firstSongPath = songPaths?.[0] ?? newSongs?.[0]?.path;
@@ -84,6 +84,7 @@ watch([albumCacheKey, () => props.songPaths, () => props.songs], async ([cacheKe
     return;
   }
 
+  const cacheKey = `${albumIdentity}::${firstSongPath}::card:${cacheVersion}`;
   const cachedCover = albumHeaderCache.get(cacheKey);
   if (cachedCover) {
     coverUrl.value = cachedCover;
@@ -91,28 +92,26 @@ watch([albumCacheKey, () => props.songPaths, () => props.songs], async ([cacheKe
     return;
   }
 
-  const cachedThumbnail = peekCoverUrl(firstSongPath);
-  if (cachedThumbnail) {
-    coverUrl.value = cachedThumbnail;
-    albumHeaderCache.set(cacheKey, cachedThumbnail);
+  const cachedCardCover = peekCoverUrl(firstSongPath, 'card');
+  if (cachedCardCover) {
+    coverUrl.value = cachedCardCover;
+    albumHeaderCache.set(cacheKey, cachedCardCover);
     isLoading.value = false;
     return;
   }
 
-  isLoading.value = true;
+  coverUrl.value = peekCoverUrl(firstSongPath) || '';
+  isLoading.value = !coverUrl.value;
   try {
-    const resolvedCover = await loadCover(firstSongPath);
+    const resolvedCover = await loadCover(firstSongPath, 'card');
     if (requestId !== coverRequestId) return;
 
     if (resolvedCover) {
       coverUrl.value = resolvedCover;
       albumHeaderCache.set(cacheKey, resolvedCover);
-    } else {
-      coverUrl.value = '';
     }
   } catch {
     if (requestId !== coverRequestId) return;
-    coverUrl.value = '';
   } finally {
     if (requestId === coverRequestId) {
       isLoading.value = false;

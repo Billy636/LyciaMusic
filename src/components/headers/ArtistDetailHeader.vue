@@ -345,10 +345,10 @@ onUnmounted(() => {
 
 const coverUrl = ref<string>('');
 const isLoading = ref<boolean>(false);
-const { loadCover, peekCoverUrl } = useCoverCache();
+const { loadCover, peekCoverUrl, coverCacheResetVersion, coverCacheResumeVersion } = useCoverCache();
 let coverRequestId = 0;
 
-watch([() => props.artistName, () => props.songPaths, () => props.songs], async ([artistName, songPaths, newSongs]) => {
+watch([() => props.artistName, () => props.songPaths, () => props.songs, coverCacheResetVersion, coverCacheResumeVersion], async ([artistName, songPaths, newSongs, cacheVersion]) => {
   const requestId = ++coverRequestId;
 
   const firstSongPath = songPaths?.[0] ?? newSongs?.[0]?.path;
@@ -359,35 +359,34 @@ watch([() => props.artistName, () => props.songPaths, () => props.songs], async 
     return;
   }
 
-  const cachedHeaderCover = artistHeaderCache.get(artistName);
+  const cacheKey = `${artistName}::${firstSongPath}::card:${cacheVersion}`;
+  const cachedHeaderCover = artistHeaderCache.get(cacheKey);
   if (cachedHeaderCover) {
     coverUrl.value = cachedHeaderCover;
     isLoading.value = false;
     return;
   }
 
-  const cachedThumbnail = peekCoverUrl(firstSongPath);
-  if (cachedThumbnail) {
-    coverUrl.value = cachedThumbnail;
-    artistHeaderCache.set(artistName, cachedThumbnail);
+  const cachedCardCover = peekCoverUrl(firstSongPath, 'card');
+  if (cachedCardCover) {
+    coverUrl.value = cachedCardCover;
+    artistHeaderCache.set(cacheKey, cachedCardCover);
     isLoading.value = false;
     return;
   }
 
-  isLoading.value = true;
+  coverUrl.value = peekCoverUrl(firstSongPath) || '';
+  isLoading.value = !coverUrl.value;
   try {
-    const resolvedCover = await loadCover(firstSongPath);
+    const resolvedCover = await loadCover(firstSongPath, 'card');
     if (requestId !== coverRequestId) return;
 
     if (resolvedCover) {
       coverUrl.value = resolvedCover;
-      artistHeaderCache.set(artistName, resolvedCover);
-    } else {
-      coverUrl.value = '';
+      artistHeaderCache.set(cacheKey, resolvedCover);
     }
   } catch {
     if (requestId !== coverRequestId) return;
-    coverUrl.value = '';
   } finally {
     if (requestId === coverRequestId) {
       isLoading.value = false;

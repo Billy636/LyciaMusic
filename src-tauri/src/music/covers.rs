@@ -5,7 +5,7 @@ use super::types::{FullCoverImageConcurrencyLimit, ThumbnailImageConcurrencyLimi
 use super::utils::normalize_path;
 use crate::database::DbState;
 use crate::remote::cache::{ensure_cached_path, is_remote_uri};
-use image::{DynamicImage, ImageFormat};
+use image::{codecs::jpeg::JpegEncoder, DynamicImage, ImageFormat};
 use lofty::picture::MimeType;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -16,6 +16,9 @@ use tauri::{AppHandle, Manager, State};
 
 const COVER_CACHE_MAX_SIZE_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4 GB
 const THUMBNAIL_EDGE_PX: u32 = 150;
+const THUMBNAIL_EDGES_PX: [u32; 4] = [150, 256, 384, 512];
+const THUMBNAIL_CACHE_VERSION: &str = "v2";
+const THUMBNAIL_JPEG_QUALITY: u8 = 90;
 const FULL_COVER_EDGE_PX: u32 = 800;
 const FULL_COVER_CACHE_VERSION: &str = "v3";
 const FULL_COVER_FALLBACK_EXT: &str = "png";
@@ -192,7 +195,13 @@ fn persist_image_atomically(
     let file = fs::File::create(&temp_path).ok()?;
     let mut writer = BufWriter::new(file);
 
-    if img.write_to(&mut writer, format).is_err() || writer.flush().is_err() {
+    let encoded = if format == ImageFormat::Jpeg {
+        JpegEncoder::new_with_quality(&mut writer, THUMBNAIL_JPEG_QUALITY)
+            .encode_image(&img.to_rgb8())
+    } else {
+        img.write_to(&mut writer, format)
+    };
+    if encoded.is_err() || writer.flush().is_err() {
         let _ = fs::remove_file(&temp_path);
         return None;
     }
@@ -221,13 +230,22 @@ fn full_cover_cache_stem(hash: &str) -> String {
     format!("{hash}_full_{FULL_COVER_CACHE_VERSION}")
 }
 
-fn thumbnail_cache_stem(hash: &str) -> String {
-    format!("{hash}_thumb_{THUMBNAIL_EDGE_PX}")
+fn normalized_thumbnail_edge(edge: Option<u32>) -> u32 {
+    let requested = edge.unwrap_or(THUMBNAIL_EDGE_PX);
+    THUMBNAIL_EDGES_PX
+        .into_iter()
+        .find(|&candidate| requested <= candidate)
+        .unwrap_or(512)
 }
 
-fn thumbnail_alias_path(cache_dir: &Path, source_hash: &str) -> PathBuf {
+fn thumbnail_cache_stem(hash: &str, edge: u32) -> String {
+    format!("{hash}_thumb_{edge}_{THUMBNAIL_CACHE_VERSION}")
+}
+
+fn thumbnail_alias_path(cache_dir: &Path, source_hash: &str, edge: u32) -> PathBuf {
     cache_dir.join(format!(
-        "{source_hash}_thumb_{THUMBNAIL_EDGE_PX}.{CACHE_ALIAS_EXT}"
+        "{}.{CACHE_ALIAS_EXT}",
+        thumbnail_cache_stem(source_hash, edge)
     ))
 }
 
@@ -243,10 +261,15 @@ pub(crate) fn invalidate_song_cover_cache(path: &Path, app: &AppHandle) -> Resul
 
     // Only discard source aliases. Their content-addressed targets may also be
     // used by other songs or artist avatars and must remain untouched.
-    for alias_path in [
-        thumbnail_alias_path(&cache_dir, &source_hash),
+    let thumbnail_aliases = THUMBNAIL_EDGES_PX
+        .into_iter()
+        .map(|edge| thumbnail_alias_path(&cache_dir, &source_hash, edge));
+    for alias_path in thumbnail_aliases.chain([
+        cache_dir.join(format!(
+            "{source_hash}_thumb_{THUMBNAIL_EDGE_PX}.{CACHE_ALIAS_EXT}"
+        )),
         full_cover_alias_path(&cache_dir, &source_hash),
-    ] {
+    ]) {
         if let Err(error) = fs::remove_file(&alias_path) {
             if error.kind() != std::io::ErrorKind::NotFound {
                 return Err(format!("刷新歌曲封面缓存失败：{}；{error}", path.display()));
@@ -349,9 +372,43 @@ fn read_sidecar_image(path: &Path) -> Option<(DynamicImage, String)> {
 }
 
 pub fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
+    get_or_create_thumbnail_for_edge(path, app, THUMBNAIL_EDGE_PX)
+}
+
+fn cache_thumbnail_from_bytes(
+    bytes: &[u8],
+    cache_dir: &Path,
+    alias_path: &Path,
+    edge: u32,
+) -> Option<String> {
+    let content_hash = generate_content_hash(bytes);
+    let cache_path = cache_dir.join(format!("{}.jpg", thumbnail_cache_stem(&content_hash, edge)));
+
+    // Albums often embed identical artwork in every track. Reuse each size
+    // before decoding the source image or generating another thumbnail.
+    if is_cached_cover_valid(&cache_path) {
+        let _ = persist_alias_target(alias_path, &cache_path);
+        return Some(cache_path.to_string_lossy().into_owned());
+    }
+    if cache_path.exists() {
+        let _ = fs::remove_file(&cache_path);
+    }
+
+    let img = image::load_from_memory(bytes).ok()?;
+    let thumbnail = if img.width() > edge || img.height() > edge {
+        img.resize(edge, edge, image::imageops::FilterType::Lanczos3)
+    } else {
+        img
+    };
+    let persisted = persist_image_atomically(&thumbnail, ImageFormat::Jpeg, &cache_path)?;
+    let _ = persist_alias_target(alias_path, &cache_path);
+    Some(persisted)
+}
+
+fn get_or_create_thumbnail_for_edge(path: &Path, app: &AppHandle, edge: u32) -> Option<String> {
     let source_hash = generate_source_hash(path);
     let cache_dir = get_cover_cache_dir(app);
-    let alias_path = thumbnail_alias_path(&cache_dir, &source_hash);
+    let alias_path = thumbnail_alias_path(&cache_dir, &source_hash, edge);
 
     if let Some(existing) = resolve_alias_target(&cache_dir, &alias_path) {
         return Some(existing);
@@ -359,43 +416,17 @@ pub fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
 
     if let Ok(tagged_file) = read_tagged_file_from_path(path) {
         if let Some(pic) = find_embedded_picture(&tagged_file) {
-            let shared_hash = generate_content_hash(pic.data());
-            let cache_path = cache_dir.join(format!("{}.jpg", thumbnail_cache_stem(&shared_hash)));
-
-            if is_cached_cover_valid(&cache_path) {
-                let _ = persist_alias_target(&alias_path, &cache_path);
-                return Some(cache_path.to_string_lossy().into_owned());
-            }
-            if cache_path.exists() {
-                let _ = fs::remove_file(&cache_path);
-            }
-
-            if let Ok(img) = image::load_from_memory(pic.data()) {
-                let resized = img.resize(
-                    THUMBNAIL_EDGE_PX,
-                    THUMBNAIL_EDGE_PX,
-                    image::imageops::FilterType::Triangle,
-                );
-                let persisted = persist_image_atomically(&resized, ImageFormat::Jpeg, &cache_path)?;
-                let _ = persist_alias_target(&alias_path, &cache_path);
+            if let Some(persisted) =
+                cache_thumbnail_from_bytes(pic.data(), &cache_dir, &alias_path, edge)
+            {
                 return Some(persisted);
             }
         }
     }
 
     // 内嵌封面缺失时回退到同名外部图片（如 song.mp3 旁的 song.jpg）
-    if let Some((img, content_hash)) = read_sidecar_image(path) {
-        let resized = img.resize(
-            THUMBNAIL_EDGE_PX,
-            THUMBNAIL_EDGE_PX,
-            image::imageops::FilterType::Triangle,
-        );
-        let cache_path = cache_dir.join(format!("{}.jpg", thumbnail_cache_stem(&content_hash)));
-        if let Some(persisted) = persist_image_atomically(&resized, ImageFormat::Jpeg, &cache_path)
-        {
-            let _ = persist_alias_target(&alias_path, &cache_path);
-            return Some(persisted);
-        }
+    if let Some(bytes) = find_sidecar_image(path).and_then(|sidecar| fs::read(sidecar).ok()) {
+        return cache_thumbnail_from_bytes(&bytes, &cache_dir, &alias_path, edge);
     }
     None
 }
@@ -491,10 +522,12 @@ pub fn get_or_create_full_cover(path: &Path, app: &AppHandle) -> Option<String> 
 #[tauri::command]
 pub async fn get_song_cover_thumbnail(
     path: String,
+    edge: Option<u32>,
     app: AppHandle,
     semaphore: State<'_, ThumbnailImageConcurrencyLimit>,
     db_state: State<'_, DbState>,
 ) -> Result<String, String> {
+    let edge = normalized_thumbnail_edge(edge);
     let _permit = semaphore.0.acquire().await.map_err(|e| e.to_string())?;
     let source_path = if is_remote_uri(&path) {
         ensure_cached_path(&app, &db_state, &path).await?
@@ -506,13 +539,18 @@ pub async fn get_song_cover_thumbnail(
     let app_clone = app.clone();
     let p_buf = p.to_path_buf();
 
-    let result =
-        tauri::async_runtime::spawn_blocking(move || get_or_create_thumbnail(&p_buf, &app_clone))
-            .await
-            .map_err(|e| e.to_string())?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        if edge == THUMBNAIL_EDGE_PX {
+            get_or_create_thumbnail(&p_buf, &app_clone)
+        } else {
+            get_or_create_thumbnail_for_edge(&p_buf, &app_clone, edge)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     if let Some(cache_path_str) = result {
-        if !cache_path_str.is_empty() {
+        if edge == THUMBNAIL_EDGE_PX && !cache_path_str.is_empty() {
             if let Ok(conn) = db_state.conn.lock() {
                 let _ = conn.execute(
                     "UPDATE songs SET cover_thumb_path = ?1 WHERE path = ?2",

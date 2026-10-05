@@ -129,7 +129,7 @@ const restoreViewportCoverSnapshot = () => {
     return;
   }
 
-  preloadPriorityCovers(snapshot);
+  preloadPriorityCovers(snapshot, 'card');
 };
 
 const saveViewportCoverSnapshot = () => {
@@ -371,7 +371,7 @@ const visibleAlbumCoverPaths = computed(() => {
     .filter((path): path is string => !!path);
 });
 
-const { getDisplayedCoverUrl, isCoverLoading } = useVisibleCoverUrls(visibleAlbumCoverPaths);
+const { getDisplayedCoverUrl, isCoverLoading } = useVisibleCoverUrls(visibleAlbumCoverPaths, 'card');
 
 restoreViewportCoverSnapshot();
 
@@ -393,7 +393,7 @@ const initCoverObserver = async () => {
           const target = entry.target as HTMLElement;
           const path = target.dataset.coverPath;
           if (path) {
-            preloadPriorityCovers([path]);
+            preloadPriorityCovers([path], 'card');
           }
           coverObserver?.unobserve(target);
         });
