@@ -19,8 +19,11 @@ function changeSelection(key: keyof FooterBehavior, value: string) {
   setBehavior(scene.value, { [key]: key === 'autoHide' || key === 'visualizer' ? value === 'true' : value });
 }
 const mainInfoOptions = [
-  { value: 'cover', label: '封面' }, { value: 'song', label: '封面与歌曲' },
-  { value: 'time', label: '播放时间' }, { value: 'both', label: '歌曲与时间' }, { value: 'none', label: '不显示' },
+  { value: 'cover', label: '仅封面' },
+  { value: 'song', label: '封面、标题与艺术家' },
+  { value: 'time', label: '仅播放时间' },
+  { value: 'both', label: '封面、标题与播放时间' },
+  { value: 'none', label: '不显示' },
 ];
 const coverShapeOptions = [{ value: 'square', label: '方形' }, { value: 'circle', label: '圆形' }];
 const infoOptions = computed(() => scene.value === 'detail'
