@@ -249,7 +249,6 @@ defineExpose({ detailCoverRef });
       :aria-hidden="!props.isExpanded"
       :aria-pressed="!!props.isCoverFocused"
       :aria-label="props.isCoverFocused ? '恢复封面与歌词布局' : '居中欣赏封面，隐藏歌词'"
-      :title="props.isCoverFocused ? '点击恢复歌词' : '点击居中欣赏封面'"
       :class="[
         usesLargeCoverLayout ? 'top-[45%] left-[calc(75px+18%)] -translate-x-1/2 -translate-y-1/2 w-[clamp(220px,45vh,580px)]' : 'top-[calc(100vh-64px)] left-[16px] translate-x-0 translate-y-0 w-12',
         isCircleCover ? 'rounded-[50%]' : usesLargeCoverLayout ? 'rounded-2xl' : 'rounded-lg',
