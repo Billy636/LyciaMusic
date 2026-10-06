@@ -38,6 +38,7 @@ const isHovering = ref(false);
 const isCoverHovering = ref(false);
 const showLyrics = ref(false);
 const isDraggingVolume = ref(false);
+const miniContentRef = ref<HTMLElement | null>(null);
 const volumeBarRef = ref<HTMLElement | null>(null);
 const volumeButtonRef = ref<HTMLElement | null>(null);
 const volumePopoverRef = ref<HTMLElement | null>(null);
@@ -50,6 +51,11 @@ let unlistenWindowMoved: (() => void) | null = null;
 let unlistenCloseRequested: (() => void) | null = null;
 let unlistenState: (() => void) | null = null;
 let unlistenVisibility: (() => void) | null = null;
+let unlistenScaleChanged: (() => void) | null = null;
+let contentResizeObserver: ResizeObserver | null = null;
+let isApplyingWindowHeight = false;
+let windowHeightPending = false;
+let isDisposed = false;
 
 const VOLUME_POPOVER_WIDTH = 160;
 const VOLUME_POPOVER_GAP = 8;
@@ -132,17 +138,49 @@ const resetIdleTimer = () => {
 };
 
 const applyWindowHeight = async () => {
-  let height = MINI_PLAYER_WINDOW_BASE_HEIGHT;
-  if (showMiniPlaylist.value) {
-    height = MINI_PLAYER_WINDOW_EXPANDED_HEIGHT;
-  } else if (showVolumePopover.value || isDraggingVolume.value) {
-    height = MINI_PLAYER_WINDOW_VOLUME_HEIGHT;
-  }
+  windowHeightPending = true;
+  if (isApplyingWindowHeight) return;
+  isApplyingWindowHeight = true;
 
-  const size = new LogicalSize(MINI_PLAYER_WINDOW_WIDTH, height);
-  await appWindow.setMinSize(size);
-  await appWindow.setMaxSize(size);
-  await appWindow.setSize(size);
+  try {
+    while (windowHeightPending && !isDisposed) {
+      windowHeightPending = false;
+      await nextTick();
+      const [physicalSize, factor] = await Promise.all([appWindow.innerSize(), appWindow.scaleFactor()]);
+      if (isDisposed) return;
+      const currentSize = physicalSize.toLogical(factor);
+
+      // WebView text/page scaling can make CSS pixels larger than the window's
+      // DPI-based logical pixels. Use width so changing height cannot feed back.
+      const viewportWidth = document.documentElement.getBoundingClientRect().width || window.innerWidth;
+      const contentScale = currentSize.width / Math.max(1, viewportWidth);
+      const contentHeight = Math.max(MINI_PLAYER_WINDOW_BASE_HEIGHT, (miniContentRef.value?.scrollHeight ?? 0) + 4);
+      let height = Math.ceil(contentHeight * contentScale);
+      if (showMiniPlaylist.value) {
+        // The queue scrolls within available space; retain its native height
+        // used when restoring the window within the monitor's work area.
+        height = Math.max(height, MINI_PLAYER_WINDOW_EXPANDED_HEIGHT);
+      } else if (showVolumePopover.value || isDraggingVolume.value) {
+        height = Math.max(height, Math.ceil(MINI_PLAYER_WINDOW_VOLUME_HEIGHT * contentScale));
+      }
+      const size = new LogicalSize(MINI_PLAYER_WINDOW_WIDTH, height);
+      if (Math.abs(size.width - currentSize.width) < 1 && Math.abs(size.height - currentSize.height) < 1) continue;
+
+      // Keep minimum <= maximum throughout both expansion and collapse.
+      if (size.height >= currentSize.height) {
+        await appWindow.setMaxSize(size);
+        await appWindow.setMinSize(size);
+      } else {
+        await appWindow.setMinSize(size);
+        await appWindow.setMaxSize(size);
+      }
+      await appWindow.setSize(size);
+    }
+  } catch (error) {
+    console.warn('Failed to resize mini player window:', error);
+  } finally {
+    isApplyingWindowHeight = false;
+  }
 };
 
 const updateVolumePopoverPosition = () => {
@@ -235,6 +273,7 @@ const onGlobalMouseDown = (event: MouseEvent) => {
 };
 
 const onGlobalResize = () => {
+  void applyWindowHeight();
   if (isWindowVisible.value && showVolumePopover.value) {
     updateVolumePopoverPosition();
   }
@@ -267,6 +306,9 @@ onMounted(async () => {
 
   await appWindow.setAlwaysOnTop(true);
   await applyWindowHeight();
+  contentResizeObserver = new ResizeObserver(() => { void applyWindowHeight(); });
+  if (miniContentRef.value) contentResizeObserver.observe(miniContentRef.value);
+  unlistenScaleChanged = await appWindow.onScaleChanged(() => { void applyWindowHeight(); });
   resetIdleTimer();
 
   window.addEventListener('pointermove', onGlobalPointerMove);
@@ -327,6 +369,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  isDisposed = true;
+  contentResizeObserver?.disconnect();
   stopIdleTimer();
   window.removeEventListener('pointermove', onGlobalPointerMove);
   window.removeEventListener('pointerup', onGlobalPointerEnd);
@@ -338,16 +382,17 @@ onUnmounted(() => {
   unlistenCloseRequested?.();
   unlistenState?.();
   unlistenVisibility?.();
+  unlistenScaleChanged?.();
 });
 </script>
 
 <template>
   <div
-    class="w-[300px] h-full relative select-none overflow-hidden bg-transparent !border-none !outline-none !ring-0 !shadow-none"
+    class="w-full h-full relative select-none overflow-hidden bg-transparent !border-none !outline-none !ring-0 !shadow-none"
     @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave"
   >
-    <div class="h-[75px] shrink-0 relative overflow-hidden border-0 border-transparent">
+    <div ref="miniContentRef" class="shrink-0 relative border-0 border-transparent">
       <div
         class="h-[45px] w-full bg-white dark:bg-gray-900 flex relative border-0"
         :class="[isDarkTheme ? 'dark !bg-gray-900' : '!bg-white']"
@@ -362,7 +407,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="flex-1 flex items-center justify-center overflow-hidden px-4 relative" data-tauri-drag-region>
+        <div class="mini-controls-region min-w-0 flex-1 flex items-center justify-center overflow-hidden px-4 relative" data-tauri-drag-region>
           <transition name="fade">
             <div v-if="showLyrics" class="absolute inset-0 flex items-center justify-center px-4 overflow-hidden pointer-events-none" data-tauri-drag-region>
               <div class="text-xs whitespace-nowrap text-[#EC4141] font-medium" :class="{ 'marquee': lyricText && lyricText.length > 20 }">
@@ -372,17 +417,17 @@ onUnmounted(() => {
           </transition>
 
           <transition name="fade">
-            <div v-show="!showLyrics" class="flex flex-1 items-center justify-center gap-4 h-full pointer-events-none" data-tauri-drag-region>
-              <button @click.stop="sendAction({ type: 'prev-song' })" class="text-gray-700 dark:text-white/80 hover:text-[#EC4141] transition-colors pointer-events-auto">
+            <div v-show="!showLyrics" class="mini-playback-controls flex flex-1 items-center justify-center gap-4 h-full pointer-events-none" data-tauri-drag-region>
+              <button @click.stop="sendAction({ type: 'prev-song' })" class="shrink-0 text-gray-700 dark:text-white/80 hover:text-[#EC4141] transition-colors pointer-events-auto">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6V6zm3.5 6l8.5 6V6l-8.5 6z" /></svg>
               </button>
 
-              <button @click.stop="sendAction({ type: 'toggle-play' })" class="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-800 dark:text-white hover:text-[#EC4141] pointer-events-auto">
+              <button @click.stop="sendAction({ type: 'toggle-play' })" class="w-8 h-8 shrink-0 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-800 dark:text-white hover:text-[#EC4141] pointer-events-auto">
                 <svg v-if="isPlaying" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
                 <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
               </button>
 
-              <button @click.stop="sendAction({ type: 'next-song' })" class="text-gray-700 dark:text-white/80 hover:text-[#EC4141] transition-colors pointer-events-auto">
+              <button @click.stop="sendAction({ type: 'next-song' })" class="shrink-0 text-gray-700 dark:text-white/80 hover:text-[#EC4141] transition-colors pointer-events-auto">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg>
               </button>
             </div>
@@ -506,6 +551,16 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+@media (max-width: 260px) {
+  .mini-controls-region { padding-inline: 8px; }
+  .mini-playback-controls { gap: 8px; }
+}
+
+@media (max-width: 220px) {
+  .mini-controls-region { padding-inline: 0; }
+  .mini-playback-controls { gap: 4px; }
+}
+
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.3s ease;
