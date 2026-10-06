@@ -29,9 +29,8 @@ export function useAppShellTheme({
       return blur <= 0 ? 'none' : `blur(${blur}px)`;
     }
 
-    // Flow color boundaries are already soft; blurring the entire
-    // moving surface again flattens the colors and adds a full-window GPU pass.
-    if (dynamicBgType === 'flow') {
+    // These color fields already have soft boundaries and need no extra blur pass.
+    if (dynamicBgType === 'flow' || dynamicBgType === 'mist') {
       return 'none';
     }
 
@@ -51,7 +50,7 @@ export function useAppShellTheme({
       return 'bg-transparent';
     }
 
-    return theme.value.dynamicBgType === 'flow'
+    return theme.value.dynamicBgType === 'flow' || theme.value.dynamicBgType === 'mist'
       ? 'bg-white/10 dark:bg-black/10'
       : 'bg-white/30 dark:bg-black/60';
   });

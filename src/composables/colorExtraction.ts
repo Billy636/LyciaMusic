@@ -28,6 +28,18 @@ interface ExtractColorOptions {
   preserveSourceColors?: boolean;
 }
 
+export interface CoverColorProfile {
+  colors: { color: string; weight: number }[];
+}
+
+interface CoverColorBucket {
+  count: number;
+  sSum: number;
+  lSum: number;
+  hxSum: number;
+  hySum: number;
+}
+
 const FALLBACK_PALETTE = [
   'hsl(220, 28%, 34%)',
   'hsl(196, 58%, 56%)',
@@ -50,9 +62,18 @@ const paletteCache = new MemoryCache<string, string[]>({
   maxEntries: PALETTE_CACHE_LIMIT,
   ttlMs: PALETTE_CACHE_TTL_MS,
 });
+const coverProfileCache = new MemoryCache<string, CoverColorProfile>({
+  maxEntries: PALETTE_CACHE_LIMIT,
+  ttlMs: PALETTE_CACHE_TTL_MS,
+});
+const coverProfileRequests = new Map<string, Promise<CoverColorProfile>>();
+let coverProfileGeneration = 0;
 
 export function clearPaletteCache() {
   paletteCache.clear();
+  coverProfileCache.clear();
+  coverProfileGeneration += 1;
+  coverProfileRequests.clear();
 }
 
 function createFallbackPalette(count: number, preserveSourceColors = false): string[] {
@@ -413,4 +434,193 @@ export async function extractDominantColors(
     image.crossOrigin = 'Anonymous';
     image.src = imageUrl;
   });
+}
+
+function cloneCoverColorProfile(profile: CoverColorProfile): CoverColorProfile {
+  return { colors: profile.colors.map(color => ({ ...color })) };
+}
+
+function createNeutralCoverProfile(): CoverColorProfile {
+  return { colors: [{ color: 'hsl(0, 0%, 50%)', weight: 1 }] };
+}
+
+function getCoverBucketHue(bucket: CoverColorBucket): number {
+  return normalizeHue((Math.atan2(bucket.hySum, bucket.hxSum) * 180) / Math.PI);
+}
+
+function mergeCoverHueBuckets(buckets: CoverColorBucket[]): CoverColorBucket[] {
+  const merged = buckets.map(bucket => ({ ...bucket }));
+
+  // Merge neighboring hues across brightness/saturation and across the 0°/360° boundary.
+  // Counts, rather than saturation, determine both the merged hue and its area.
+  while (merged.length > 1) {
+    let closestDistance = 24;
+    let closestPair: [number, number] | undefined;
+    for (let first = 0; first < merged.length - 1; first += 1) {
+      for (let second = first + 1; second < merged.length; second += 1) {
+        const distance = angularDistance(getCoverBucketHue(merged[first]), getCoverBucketHue(merged[second]));
+        if (distance <= closestDistance) {
+          closestDistance = distance;
+          closestPair = [first, second];
+        }
+      }
+    }
+
+    if (!closestPair) {
+      break;
+    }
+
+    const [first, second] = closestPair;
+    const target = merged[first];
+    const source = merged[second];
+    target.count += source.count;
+    target.sSum += source.sSum;
+    target.lSum += source.lSum;
+    target.hxSum += source.hxSum;
+    target.hySum += source.hySum;
+    merged.splice(second, 1);
+  }
+
+  return merged;
+}
+
+function createCoverColorProfile(pixels: Uint8ClampedArray): CoverColorProfile {
+  const hueBuckets = new Map<number, CoverColorBucket>();
+  const neutral: CoverColorBucket = { count: 0, sSum: 0, lSum: 0, hxSum: 0, hySum: 0 };
+  let neutralRedSum = 0;
+  let neutralGreenSum = 0;
+  let neutralBlueSum = 0;
+  let sampleCount = 0;
+
+  for (let y = 0; y < CANVAS_SIZE; y += SAMPLE_STEP) {
+    for (let x = 0; x < CANVAS_SIZE; x += SAMPLE_STEP) {
+      const offset = (y * CANVAS_SIZE + x) * 4;
+      if (pixels[offset + 3] < 160) {
+        continue;
+      }
+
+      const red = pixels[offset];
+      const green = pixels[offset + 1];
+      const blue = pixels[offset + 2];
+      const color = rgbToHsl(red, green, blue);
+      const chroma = Math.max(red, green, blue) - Math.min(red, green, blue);
+      sampleCount += 1;
+
+      // Near-black/white hue noise should stay neutral even when HSL saturation is high.
+      const nearBlackOrWhite = color.l < 0.08 || color.l > 0.94;
+      if (color.s < 0.12 || chroma < 10 || (nearBlackOrWhite && chroma < 24)) {
+        neutral.count += 1;
+        neutralRedSum += red;
+        neutralGreenSum += green;
+        neutralBlueSum += blue;
+        continue;
+      }
+
+      const key = Math.round(color.h / 18) % 20;
+      const bucket = hueBuckets.get(key) ?? { count: 0, sSum: 0, lSum: 0, hxSum: 0, hySum: 0 };
+      bucket.count += 1;
+      bucket.sSum += color.s;
+      bucket.lSum += color.l;
+      bucket.hxSum += Math.cos((color.h * Math.PI) / 180);
+      bucket.hySum += Math.sin((color.h * Math.PI) / 180);
+      hueBuckets.set(key, bucket);
+    }
+  }
+
+  if (sampleCount === 0) {
+    return createNeutralCoverProfile();
+  }
+
+  const groups = mergeCoverHueBuckets([...hueBuckets.values()]);
+  const colors = groups.map(bucket => ({
+    color: `hsl(${Math.round(getCoverBucketHue(bucket))}, ${Math.round(bucket.sSum / bucket.count * 100)}%, ${Math.round(bucket.lSum / bucket.count * 100)}%)`,
+    weight: bucket.count / sampleCount,
+  }));
+  if (neutral.count > 0) {
+    const neutralColor = rgbToHsl(
+      neutralRedSum / neutral.count,
+      neutralGreenSum / neutral.count,
+      neutralBlueSum / neutral.count,
+    );
+    colors.push({
+      color: `hsl(${Math.round(neutralColor.h)}, ${Math.round(Math.min(neutralColor.s, 0.11) * 100)}%, ${Math.round(neutralColor.l * 100)}%)`,
+      weight: neutral.count / sampleCount,
+    });
+  }
+
+  return { colors: colors.sort((first, second) => second.weight - first.weight) };
+}
+
+/** Extract actual cover area shares without the contrast/accent scoring used by other backgrounds. */
+export async function extractCoverColorProfile(imageUrl: string): Promise<CoverColorProfile> {
+  if (!imageUrl) {
+    return createNeutralCoverProfile();
+  }
+
+  const cached = coverProfileCache.get(imageUrl);
+  if (cached) {
+    return cloneCoverColorProfile(cached);
+  }
+
+  const existingRequest = coverProfileRequests.get(imageUrl);
+  if (existingRequest) {
+    return cloneCoverColorProfile(await existingRequest);
+  }
+
+  const generation = coverProfileGeneration;
+  const request = new Promise<CoverColorProfile>(resolve => {
+    const image = new Image();
+    let canvas: HTMLCanvasElement | null = null;
+    let settled = false;
+
+    const finish = (profile: CoverColorProfile) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      if (generation === coverProfileGeneration) {
+        coverProfileCache.set(imageUrl, cloneCoverColorProfile(profile));
+      }
+      image.onload = null;
+      image.onerror = null;
+      image.src = '';
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+        canvas = null;
+      }
+      resolve(profile);
+    };
+
+    image.onload = () => {
+      try {
+        canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        if (!context) {
+          finish(createNeutralCoverProfile());
+          return;
+        }
+
+        canvas.width = CANVAS_SIZE;
+        canvas.height = CANVAS_SIZE;
+        context.drawImage(image, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        finish(createCoverColorProfile(context.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE).data));
+      } catch {
+        finish(createNeutralCoverProfile());
+      }
+    };
+    image.onerror = () => finish(createNeutralCoverProfile());
+    image.crossOrigin = 'Anonymous';
+    image.src = imageUrl;
+  });
+
+  coverProfileRequests.set(imageUrl, request);
+  try {
+    return cloneCoverColorProfile(await request);
+  } finally {
+    if (coverProfileRequests.get(imageUrl) === request) {
+      coverProfileRequests.delete(imageUrl);
+    }
+  }
 }

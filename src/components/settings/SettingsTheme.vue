@@ -22,6 +22,7 @@ const TEXT = {
   dynamicFlowGpuBadge: '高GPU',
   dynamicFlowHint: '持续动画会增加 GPU 开销，实际占用取决于窗口大小和设备；低功耗设备可选择静态模糊。',
   dynamicBlur: '\u9759\u6001\u6a21\u7cca',
+  dynamicMist: '雾染',
   dynamicDisabledHint: '\u81ea\u5b9a\u4e49\u76ae\u80a4\u6216\u7a97\u53e3\u6750\u8d28\u542f\u7528\u65f6\uff0c\u52a8\u6001\u80cc\u666f\u4f1a\u81ea\u52a8\u505c\u7528\u3002',
   windowMaterialTitle: '\u7a97\u53e3\u6750\u8d28',
   windowMaterialAcrylic: '亚克力',
@@ -225,7 +226,7 @@ const getWindowMaterialHint = (mode: Exclude<WindowMaterialMode, 'none'>) => {
         </div>
 
         <div :class="isDynamicBgDisabled ? 'pointer-events-none opacity-50' : ''">
-          <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <button
               type="button"
               class="rounded-xl border px-4 py-3 text-left transition-all"
@@ -263,6 +264,18 @@ const getWindowMaterialHint = (mode: Exclude<WindowMaterialMode, 'none'>) => {
               @click="setDynamicType('blur')"
             >
               <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicBlur }}</div>
+            </button>
+
+            <button
+              type="button"
+              class="rounded-xl border px-4 py-3 text-left transition-all"
+              :class="theme.dynamicBgType === 'mist'
+                ? 'border-[#EC4141] bg-[#EC4141]/8 shadow-sm'
+                : 'border-gray-200/70 hover:border-[#EC4141]/40 hover:bg-white/40 dark:border-white/10 dark:hover:bg-white/10'"
+              :aria-pressed="theme.dynamicBgType === 'mist'"
+              @click="setDynamicType('mist')"
+            >
+              <div class="text-sm font-semibold text-gray-800 dark:text-gray-200">{{ TEXT.dynamicMist }}</div>
             </button>
           </div>
 

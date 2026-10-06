@@ -2,6 +2,7 @@ import { computed, onMounted, ref } from 'vue';
 
 import { useThemeSettings } from './useThemeSettings';
 import { useWindowMaterial, type WindowMaterialMode } from './windowMaterial';
+import type { ThemeSettings } from '../types';
 
 const clampValue = (value: number, min: number, max: number) => (
   Math.min(max, Math.max(min, Math.round(value)))
@@ -61,7 +62,7 @@ export function useSettingsThemeControls() {
     colorScheme.value = mode;
   };
 
-  const setDynamicType = (type: 'none' | 'flow' | 'blur') => {
+  const setDynamicType = (type: ThemeSettings['dynamicBgType']) => {
     if (isDynamicBgDisabled.value) {
       return;
     }

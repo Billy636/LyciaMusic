@@ -296,7 +296,7 @@ export interface LibraryScanSession {
 
 export interface ThemeSettings {
   mode: 'system' | 'light' | 'dark' | 'custom';
-  dynamicBgType: 'none' | 'flow' | 'blur';
+  dynamicBgType: 'none' | 'flow' | 'blur' | 'mist';
   windowMaterial: 'none' | 'mica' | 'acrylic' | 'blur' | 'transparent';
   retainMaterialOnUnfocus: boolean;
   flowColorBoost: number;

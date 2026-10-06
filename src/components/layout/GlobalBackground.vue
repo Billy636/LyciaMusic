@@ -23,8 +23,9 @@ import {
 } from '../../composables/customBackgroundMedia';
 import { useCustomBackgroundPreviewState } from '../../composables/customBackgroundPreviewState';
 import FlowBackground from './FlowBackground.vue';
+import MistBackground from './MistBackground.vue';
 
-const { currentCover, currentCoverFull, showPlayerDetail, isMiniMode } = usePlayer();
+const { currentSong, currentCover, currentCoverPath, currentCoverFull, showPlayerDetail, isMiniMode } = usePlayer();
 const { theme, isDarkTheme, patchTheme } = useThemeSettings();
 const { activeWindowMaterial } = useWindowMaterial();
 const { loadFullCover } = useCoverCache();
@@ -167,6 +168,14 @@ watch(
 const hasWindowMaterial = computed(() => activeWindowMaterial.value !== 'none');
 const isMicaWindowMaterial = computed(() => activeWindowMaterial.value === 'mica');
 const reduceDynamicEffects = computed(() => showPlayerDetail.value || isMainWindowLowPower.value);
+// The artwork view can retain the previous thumbnail while the new song loads.
+// Only let a cover belonging to the current song supply its background color.
+const mistCoverSrc = computed(() => {
+  const song = currentSong.value;
+  return song && currentCoverPath.value
+    && (currentCoverPath.value === song.path || currentCoverPath.value === song.cue_source_path)
+    ? currentCover.value : '';
+});
 
 const activeBackgroundInfo = computed(() => {
   const currentTheme = theme.value;
@@ -208,6 +217,13 @@ const activeBackgroundInfo = computed(() => {
       scale: 1.25,
       isDynamic: false,
       type: 'blur' as const,
+    };
+  }
+
+  if (currentTheme.dynamicBgType === 'mist') {
+    return {
+      src: mistCoverSrc.value,
+      type: 'mist' as const,
     };
   }
 
@@ -508,6 +524,15 @@ const customBgTransform = computed(() => {
         v-if="activeBackgroundInfo?.type === 'flow'"
         :cover-src="bgImageSrc"
         :paused="reduceDynamicEffects"
+        :dark="isDarkTheme"
+      />
+    </transition>
+
+    <transition name="fade">
+      <MistBackground
+        v-if="activeBackgroundInfo?.type === 'mist'"
+        :cover-src="activeBackgroundInfo.src"
+        :suspended="reduceDynamicEffects || isMiniMode"
         :dark="isDarkTheme"
       />
     </transition>
