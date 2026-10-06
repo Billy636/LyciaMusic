@@ -84,15 +84,6 @@ const drop = ref<Drop | null>(null);
 const drag = ref<{ id: FooterMovableId; pointerId: number; startX: number; startY: number; x: number; y: number; active: boolean; anchor: HTMLElement } | null>(null);
 let observer: ResizeObserver | undefined;
 const allIds = computed(() => [...layout.value.bar, ...layout.value.more, ...layout.value.hidden].map(item => item.id));
-const dragHint = computed(() => {
-  if (!drag.value?.active) return '';
-  if (!drop.value) return '这里放不下，请移到空白位置';
-  if (drop.value.guides?.symmetry !== undefined) return '已对称对齐 · 松手放下 · Esc 取消';
-  if (drop.value.guides?.center !== undefined) return '已吸附居中 · 松手放下 · Esc 取消';
-  if (drop.value.guides?.gaps) return '已等间距对齐 · 松手放下';
-  return drop.value.visibility === 'bar' ? '松手放在这里 · Esc 取消'
-    : drop.value.visibility === 'more' ? '松手收入更多菜单' : '松手隐藏';
-});
 const guideAxis = computed(() => drop.value?.guides?.symmetry ?? drop.value?.guides?.center);
 const guideAxisLabel = computed(() => {
   const guides = drop.value?.guides;
@@ -277,7 +268,6 @@ onBeforeUnmount(() => {
         <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
       </button>
     </div>
-    <p v-if="dragHint" class="editor-status" role="status" aria-live="polite">{{ dragHint }}</p>
     <div v-if="menuId" ref="menu" class="editor-menu" :style="{ left: `${menuLeft}px`, top: `${menuTop}px` }" :aria-label="`${footerAction(menuId).label}选项`" @pointerdown.stop>
       <div class="menu-heading"><FooterIcon v-bind="previewIconProps(menuId)" /><span>{{ footerAction(menuId).label }}</span><button type="button" aria-label="关闭按钮选项" @click.stop="closeMenu(true)"><X class="h-4 w-4" /></button></div>
       <button v-if="!layout.bar.some(item => item.id === menuId)" type="button" class="menu-option" @click.stop="choose('bar')">放回底栏</button>
@@ -365,7 +355,6 @@ onBeforeUnmount(() => {
 .spacing-reset { display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:7px; color:var(--spacing-muted); transition:color 150ms, background-color 150ms; }
 .spacing-reset:hover:not(:disabled) { background:rgb(236 65 65 / .08); color:#ec4141; }
 .spacing-reset:disabled { opacity:.35; cursor:default; }
-.editor-status { margin-top:8px; color:#ec4141; font-size:12px; }
 .editor-menu { position:absolute; z-index:30; width:216px; max-width:calc(100% - 16px); padding:6px; background:#fff; border:1px solid rgb(128 128 128 / .2); border-radius:10px; box-shadow:0 12px 40px rgb(0 0 0 / .15); }
 .menu-heading { display:flex; align-items:center; gap:8px; padding:6px 8px 10px; font-size:13px; }
 .menu-heading>button { margin-left:auto; padding:4px; }
