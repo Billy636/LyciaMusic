@@ -94,6 +94,13 @@ const confirmation = computed(() => pending.value === 'link'
       </div>
       <label class="flex items-center gap-2 text-xs" title="同步按钮布局、间距和进度条等设置；歌曲信息始终按场景独立保存"><input type="checkbox" class="accent-[#EC4141]" :checked="footer.linked" @change="changeLinked" />两个场景保持一致</label>
     </div>
+    <section class="space-y-4">
+      <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+        <span class="w-1 h-4 bg-[#EC4141] rounded-full" aria-hidden="true"></span>
+        自定义控件位置
+      </h2>
+      <FooterLayoutEditor :scene="scene" @reset="pending = 'reset'" />
+    </section>
     <section class="space-y-3">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
         <span class="w-1 h-4 bg-[#EC4141] rounded-full" aria-hidden="true"></span>
@@ -101,12 +108,29 @@ const confirmation = computed(() => pending.value === 'link'
       </h2>
       <div class="display-rows">
         <div class="display-row">
-          <div>
-            <label for="footer-song-info" class="display-label">歌曲信息</label>
-            <p class="mt-1 text-xs app-text-secondary">{{ scene === 'detail' ? '播放页已展示大封面，底栏仅保留时间或隐藏' : '此项按场景独立保存，不参与同步' }}</p>
-          </div>
+          <label for="footer-cover-shape" class="display-label">封面形状</label>
+          <SettingsSelect class="display-info-select" label="封面形状" hide-label trigger-id="footer-cover-shape"
+            :model-value="footer.coverShape" :options="coverShapeOptions"
+            @update:model-value="setCoverShape($event === 'circle' ? 'circle' : 'square')" />
+        </div>
+        <div class="display-row">
+          <label for="footer-song-info" class="display-label">歌曲信息</label>
           <SettingsSelect :key="`info-${scene}`" class="display-info-select" label="歌曲信息" hide-label trigger-id="footer-song-info"
             :model-value="behavior.info" :options="infoOptions" @update:model-value="changeSelection('info', $event)" />
+        </div>
+        <div v-if="scene === 'detail'" class="display-row">
+          <span id="footer-visualizer-label" class="display-label">音频频谱</span>
+          <button type="button" role="switch" aria-labelledby="footer-visualizer-label" :aria-checked="behavior.visualizer"
+            class="display-switch" :class="{ 'is-on': behavior.visualizer }" @click="setBehavior(scene, { visualizer: !behavior.visualizer })">
+            <span aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="display-row">
+          <span id="footer-auto-hide-label" class="display-label">闲置时隐藏底栏</span>
+          <button type="button" role="switch" aria-labelledby="footer-auto-hide-label" :aria-checked="behavior.autoHide"
+            class="display-switch" :class="{ 'is-on': behavior.autoHide }" @click="setBehavior(scene, { autoHide: !behavior.autoHide })">
+            <span aria-hidden="true"></span>
+          </button>
         </div>
         <div class="display-row">
           <span id="footer-progress-label" class="display-label">进度条</span>
@@ -144,45 +168,7 @@ const confirmation = computed(() => pending.value === 'link'
             </div>
           </div>
         </div>
-        <div class="display-row">
-          <span id="footer-auto-hide-label" class="display-label">闲置时隐藏底栏</span>
-          <button type="button" role="switch" aria-labelledby="footer-auto-hide-label" :aria-checked="behavior.autoHide"
-            class="display-switch" :class="{ 'is-on': behavior.autoHide }" @click="setBehavior(scene, { autoHide: !behavior.autoHide })">
-            <span aria-hidden="true"></span>
-          </button>
-        </div>
-        <div v-if="scene === 'detail'" class="display-row">
-          <span id="footer-visualizer-label" class="display-label">音频频谱</span>
-          <button type="button" role="switch" aria-labelledby="footer-visualizer-label" :aria-checked="behavior.visualizer"
-            class="display-switch" :class="{ 'is-on': behavior.visualizer }" @click="setBehavior(scene, { visualizer: !behavior.visualizer })">
-            <span aria-hidden="true"></span>
-          </button>
-        </div>
       </div>
-    </section>
-    <section class="space-y-3">
-      <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
-        <span class="w-1 h-4 bg-[#EC4141] rounded-full" aria-hidden="true"></span>
-        封面样式
-      </h2>
-      <div class="display-rows">
-        <div class="display-row">
-          <div>
-            <label for="footer-cover-shape" class="display-label">封面形状</label>
-            <p class="mt-1 text-xs app-text-secondary">圆形封面在播放时缓慢旋转</p>
-          </div>
-          <SettingsSelect class="display-info-select" label="封面形状" hide-label trigger-id="footer-cover-shape"
-            :model-value="footer.coverShape" :options="coverShapeOptions"
-            @update:model-value="setCoverShape($event === 'circle' ? 'circle' : 'square')" />
-        </div>
-      </div>
-    </section>
-    <section class="space-y-4">
-      <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
-        <span class="w-1 h-4 bg-[#EC4141] rounded-full" aria-hidden="true"></span>
-        自定义控件位置
-      </h2>
-      <FooterLayoutEditor :scene="scene" @reset="pending = 'reset'" />
     </section>
     <ModernModal :visible="pending !== null" :title="pending === 'link' ? '两个场景保持一致' : '恢复原版布局'" :content="confirmation" confirm-text="确认" @confirm="confirm" @cancel="pending = null" />
   </div>
