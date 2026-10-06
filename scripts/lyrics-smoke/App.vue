@@ -44,15 +44,23 @@ function togglePower() {
   hidden.value = !hidden.value;
   setMainWindowRenderingSnapshot({ windowVisible: !hidden.value });
 }
+function syncVisibility() {
+  setMainWindowRenderingSnapshot({ documentHidden: document.hidden });
+}
 let timer: ReturnType<typeof setInterval>;
 onMounted(() => {
+  syncVisibility();
+  document.addEventListener('visibilitychange', syncVisibility);
   void reload();
   timer = setInterval(() => {
     if (!playback.isPlaying) return;
     playback.currentTime = (playback.currentTime + 0.1) % 20;
   }, 100);
 });
-onUnmounted(() => clearInterval(timer));
+onUnmounted(() => {
+  clearInterval(timer);
+  document.removeEventListener('visibilitychange', syncVisibility);
+});
 </script>
 
 <template>

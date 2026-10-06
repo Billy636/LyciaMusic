@@ -26,6 +26,8 @@ import {
   type LyricsFontPreset,
   type LyricsPlayerAlignment,
   type LyricsPlayerRenderMode,
+  type LyricsPlayerWritingMode,
+  type LyricsVerticalScrollDirection,
   useLyrics,
 } from '../../composables/lyrics';
 import { useSettingsStore } from '../../features/settings/store';
@@ -44,10 +46,19 @@ const LINE_GAP_STEP = 0.05;
 const OFFSET_STEP = 1;
 const FONT_FILE_FILTERS = [{ name: 'Font', extensions: ['ttf', 'otf'] }];
 type FontPresetMenuMode = 'system' | 'custom';
-const PLAYER_ALIGNMENT_OPTIONS: Array<{ value: LyricsPlayerAlignment; label: string }> = [
-  { value: 'left', label: '靠左' },
+const isVerticalWriting = computed(() => lyricsSettings.playerWritingMode === 'vertical');
+const PLAYER_ALIGNMENT_OPTIONS = computed<Array<{ value: LyricsPlayerAlignment; label: string }>>(() => [
+  { value: 'left', label: isVerticalWriting.value ? '顶部' : '靠左' },
   { value: 'center', label: '居中' },
-  { value: 'right', label: '靠右' },
+  { value: 'right', label: isVerticalWriting.value ? '底部' : '靠右' },
+]);
+const PLAYER_WRITING_MODE_OPTIONS: Array<{ value: LyricsPlayerWritingMode; label: string }> = [
+  { value: 'horizontal', label: '横排' },
+  { value: 'vertical', label: '竖排' },
+];
+const VERTICAL_SCROLL_DIRECTION_OPTIONS: Array<{ value: LyricsVerticalScrollDirection; label: string }> = [
+  { value: 'left', label: '向左' },
+  { value: 'right', label: '向右' },
 ];
 const PLAYER_RENDER_MODE_OPTIONS: Array<{ value: LyricsPlayerRenderMode; label: string }> = [
   { value: 'amll', label: 'AMLL' },
@@ -146,6 +157,16 @@ function setPlayerFontPreset(value: LyricsFontPreset) {
 
 function setPlayerRenderMode(value: LyricsPlayerRenderMode) {
   settingsStore.patchSettings({ lyrics: { playerRenderMode: value } });
+}
+
+function setPlayerWritingMode(value: LyricsPlayerWritingMode) {
+  commitDraftLyricsSettings();
+  settingsStore.patchSettings({ lyrics: { playerWritingMode: value } });
+}
+
+function setVerticalScrollDirection(value: LyricsVerticalScrollDirection) {
+  commitDraftLyricsSettings();
+  settingsStore.patchSettings({ lyrics: { playerVerticalScrollDirection: value } });
 }
 
 function adjustPlayerFontScale(delta: number) {
@@ -419,6 +440,58 @@ onUnmounted(() => {
           </header>
           <div class="player-side-panel__scroll px-4 py-4">
           <div class="mb-3">
+            <div class="text-[9px] font-semibold uppercase tracking-[0.3em] text-white/30">Layout</div>
+            <div class="mt-1.5 flex items-center justify-between">
+              <span class="text-[13px] font-medium text-white/85">排版方向</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2" role="group" aria-label="排版方向">
+            <button
+              v-for="option in PLAYER_WRITING_MODE_OPTIONS"
+              :key="option.value"
+              type="button"
+              class="writing-mode-option flex h-[78px] flex-col items-center justify-center gap-2 rounded-2xl border px-3 text-xs font-medium transition"
+              :class="lyricsSettings.playerWritingMode === option.value
+                ? 'border-white/25 bg-white/14 text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]'
+                : 'border-white/10 bg-white/[0.03] text-white/60 hover:border-white/20 hover:bg-white/[0.06] hover:text-white'"
+              :aria-pressed="lyricsSettings.playerWritingMode === option.value"
+              @click="setPlayerWritingMode(option.value)"
+            >
+              <span
+                class="writing-mode-preview"
+                :class="{ 'writing-mode-preview--vertical': option.value === 'vertical' }"
+                aria-hidden="true"
+              >
+                <span></span><span></span><span></span>
+              </span>
+              {{ option.label }}
+            </button>
+          </div>
+
+          <template v-if="isVerticalWriting">
+            <div class="mt-4 mb-2 flex items-center justify-between">
+              <span class="text-[13px] font-medium text-white/85">移动方向</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2" role="group" aria-label="移动方向">
+              <button
+                v-for="option in VERTICAL_SCROLL_DIRECTION_OPTIONS"
+                :key="option.value"
+                type="button"
+                class="writing-mode-option flex h-9 items-center justify-center rounded-2xl border px-3 text-xs font-medium transition"
+                :class="lyricsSettings.playerVerticalScrollDirection === option.value
+                  ? 'border-white/25 bg-white/14 text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]'
+                  : 'border-white/10 bg-white/[0.03] text-white/60 hover:border-white/20 hover:bg-white/[0.06] hover:text-white'"
+                :aria-pressed="lyricsSettings.playerVerticalScrollDirection === option.value"
+                @click="setVerticalScrollDirection(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </template>
+
+          <template v-if="!isVerticalWriting">
+          <div class="mt-6 mb-3">
             <div class="text-[9px] font-semibold uppercase tracking-[0.3em] text-white/30">Render</div>
             <div class="mt-1.5 flex items-center justify-between">
               <span class="text-[13px] font-medium text-white/85">歌词效果</span>
@@ -439,6 +512,7 @@ onUnmounted(() => {
               {{ option.label }}
             </button>
           </div>
+          </template>
 
           <div class="mt-6 mb-3">
             <div class="text-[9px] font-semibold uppercase tracking-[0.3em] text-white/30">Lyrics</div>
@@ -495,7 +569,7 @@ onUnmounted(() => {
             <div class="text-[9px] font-semibold uppercase tracking-[0.3em] text-white/30">Spacing</div>
             <div class="mt-1.5 flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <span class="text-[13px] font-medium text-white/85">歌词间距</span>
+                <span class="text-[13px] font-medium text-white/85">{{ isVerticalWriting ? '列间距' : '歌词间距' }}</span>
                 <button
                   v-if="previewPlayerLineGap !== DEFAULT_PLAYER_LINE_GAP"
                   type="button"
@@ -848,6 +922,60 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.writing-mode-option:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: 3px;
+}
+
+.writing-mode-preview {
+  display: flex;
+  width: 40px;
+  height: 28px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 5px;
+}
+
+.writing-mode-preview > span {
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.45;
+}
+
+.writing-mode-preview > span:nth-child(2) {
+  width: 85%;
+  opacity: 1;
+}
+
+.writing-mode-preview > span:nth-child(3) {
+  width: 65%;
+}
+
+.writing-mode-preview--vertical {
+  flex-direction: row-reverse;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+}
+
+.writing-mode-preview--vertical > span {
+  width: 3px;
+  height: 100%;
+}
+
+.writing-mode-preview--vertical > span:nth-child(2) {
+  width: 3px;
+  height: 85%;
+}
+
+.writing-mode-preview--vertical > span:nth-child(3) {
+  width: 3px;
+  height: 65%;
+}
+
 .font-preset-menu-enter-active,
 .font-preset-menu-leave-active {
   transition: opacity 160ms ease, transform 160ms ease;

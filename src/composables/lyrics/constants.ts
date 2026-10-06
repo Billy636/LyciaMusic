@@ -6,6 +6,8 @@ import type {
   LyricsFontPreset,
   LyricsPlayerAlignment,
   LyricsPlayerRenderMode,
+  LyricsPlayerWritingMode,
+  LyricsVerticalScrollDirection,
   LyricsSettings,
 } from '../../types';
 import {
@@ -33,6 +35,8 @@ export const DEFAULT_PLAYER_ALIGNMENT: LyricsPlayerAlignment = 'left';
 export const DEFAULT_DESKTOP_PLAYER_ALIGNMENT: DesktopLyricsPlayerAlignment = 'center';
 export const DEFAULT_PLAYER_FONT_PRESET: LyricsFontPreset = 'system';
 export const DEFAULT_PLAYER_RENDER_MODE: LyricsPlayerRenderMode = 'amll';
+export const DEFAULT_PLAYER_WRITING_MODE: LyricsPlayerWritingMode = 'horizontal';
+export const DEFAULT_PLAYER_VERTICAL_SCROLL_DIRECTION: LyricsVerticalScrollDirection = 'left';
 export const DEFAULT_DESKTOP_CUSTOM_PLAYED_COLOR = '#EC4141';
 export const DEFAULT_DESKTOP_CUSTOM_UNPLAYED_COLOR = '#FFFFFF';
 export const DEFAULT_DESKTOP_CUSTOM_ROMAJI_PLAYED_COLOR = '#BFDBFE';
@@ -113,6 +117,8 @@ export const defaultLyricsSettings: LyricsSettings = {
   readingOrder: DEFAULT_LYRICS_READING_ORDER,
   readingOrderOverrides: {},
   playerRenderMode: DEFAULT_PLAYER_RENDER_MODE,
+  playerWritingMode: DEFAULT_PLAYER_WRITING_MODE,
+  playerVerticalScrollDirection: DEFAULT_PLAYER_VERTICAL_SCROLL_DIRECTION,
   playerFontScale: DEFAULT_PLAYER_FONT_SCALE,
   playerLineGap: DEFAULT_PLAYER_LINE_GAP,
   playerOffsetX: DEFAULT_PLAYER_OFFSET_X,
@@ -292,6 +298,14 @@ export function normalizeLyricsPlayerRenderMode(value: unknown): LyricsPlayerRen
   return value === 'light' || value === 'amll' ? value : DEFAULT_PLAYER_RENDER_MODE;
 }
 
+export function normalizeLyricsPlayerWritingMode(value: unknown): LyricsPlayerWritingMode {
+  return value === 'vertical' || value === 'horizontal' ? value : DEFAULT_PLAYER_WRITING_MODE;
+}
+
+export function normalizeLyricsVerticalScrollDirection(value: unknown): LyricsVerticalScrollDirection {
+  return value === 'left' || value === 'right' ? value : DEFAULT_PLAYER_VERTICAL_SCROLL_DIRECTION;
+}
+
 export function extractPrimaryFontFamily(fontFamily: string): string {
   return fontFamily
     .split(',')[0]
@@ -313,6 +327,8 @@ export function normalizeLyricsSettingsPatch(patch: Partial<LyricsSettings>): Ly
     readingOrder: normalizeLyricsReadingOrder(patch.readingOrder),
     readingOrderOverrides: normalizeLyricsReadingOrderOverrides(patch.readingOrderOverrides),
     playerRenderMode: normalizeLyricsPlayerRenderMode(patch.playerRenderMode),
+    playerWritingMode: normalizeLyricsPlayerWritingMode(patch.playerWritingMode),
+    playerVerticalScrollDirection: normalizeLyricsVerticalScrollDirection(patch.playerVerticalScrollDirection),
     playerFontScale: clampPlayerFontScale(patch.playerFontScale ?? DEFAULT_PLAYER_FONT_SCALE),
     playerLineGap: clampPlayerLineGap(patch.playerLineGap ?? DEFAULT_PLAYER_LINE_GAP),
     playerOffsetX: clampPlayerOffsetX(patch.playerOffsetX ?? DEFAULT_PLAYER_OFFSET_X),

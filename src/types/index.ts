@@ -353,6 +353,8 @@ export type DesktopLyricsPlayerAlignment = LyricsPlayerAlignment | 'split-corner
 export type LyricsColorScheme = 'auto' | 'default' | 'pink' | 'blue' | 'green' | 'white' | 'custom';
 export type LyricsFontPreset = string;
 export type LyricsPlayerRenderMode = 'amll' | 'light';
+export type LyricsPlayerWritingMode = 'horizontal' | 'vertical';
+export type LyricsVerticalScrollDirection = 'left' | 'right';
 export type LyricsReadingOrder =
   | 'main-translation-roman'
   | 'main-roman-translation'
@@ -376,6 +378,8 @@ export interface LyricsSettings {
   readingOrder: LyricsReadingOrder;
   readingOrderOverrides: Record<string, LyricsReadingOrder>;
   playerRenderMode: LyricsPlayerRenderMode;
+  playerWritingMode: LyricsPlayerWritingMode;
+  playerVerticalScrollDirection: LyricsVerticalScrollDirection;
   playerFontScale: number;
   playerLineGap: number;
   playerOffsetX: number;

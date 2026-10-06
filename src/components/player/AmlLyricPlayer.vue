@@ -4,6 +4,7 @@ import { DomLyricPlayer, type LyricLine, type LyricLineMouseEvent } from '@apple
 
 import { clampPlayerLineGap } from '../../composables/lyrics/constants';
 import { AmlLyricPlayerRuntime } from './amlLyricPlayerRuntime';
+import { VerticalAmlLyricPlayer } from './verticalAmlLyricPlayer';
 
 const props = withDefaults(defineProps<{
   disabled?: boolean;
@@ -23,6 +24,8 @@ const props = withDefaults(defineProps<{
   fontScale?: number;
   lineGap?: number;
   layoutVersion?: string | number;
+  writingMode?: 'horizontal' | 'vertical';
+  verticalScrollDirection?: 'left' | 'right';
 }>(), {
   disabled: false,
   lowPower: false,
@@ -39,6 +42,8 @@ const props = withDefaults(defineProps<{
   seekKey: '',
   wordFadeWidth: 0.5,
   layoutVersion: 0,
+  writingMode: 'horizontal',
+  verticalScrollDirection: 'left',
 });
 
 const emit = defineEmits<{
@@ -46,12 +51,37 @@ const emit = defineEmits<{
 }>();
 
 const wrapperRef = ref<HTMLDivElement | null>(null);
+const coordinateStageRef = ref<HTMLDivElement | null>(null);
+const isVerticalWriting = computed(() => props.writingMode === 'vertical');
+const isLeftwardVertical = computed(() => isVerticalWriting.value && props.verticalScrollDirection === 'left');
 const wrapperStyle = computed(() => props.lineGap === undefined
   ? undefined
   : { '--lyrics-line-gap': String(clampPlayerLineGap(props.lineGap)) });
 let player: DomLyricPlayer | null = null;
 let runtime: AmlLyricPlayerRuntime | null = null;
 let fontRefreshRevision = 0;
+let sizeObserver: ResizeObserver | null = null;
+let sizeFrame = 0;
+
+function syncCoordinateSize() {
+  const wrapper = wrapperRef.value;
+  const stage = coordinateStageRef.value;
+  if (!wrapper || !stage || !isVerticalWriting.value) return;
+  stage.style.width = `${wrapper.clientHeight}px`;
+  stage.style.height = `${wrapper.clientWidth}px`;
+}
+
+function handleHorizontalWheel(event: WheelEvent) {
+  if (!isVerticalWriting.value || !player || event.ctrlKey || Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  player.getElement().dispatchEvent(new WheelEvent('wheel', {
+    deltaY: isLeftwardVertical.value ? event.deltaX : -event.deltaX,
+    deltaMode: event.deltaMode,
+    bubbles: false,
+    cancelable: true,
+  }));
+}
 
 function applyPlayerProps() {
   if (!player) return;
@@ -86,13 +116,23 @@ defineExpose({ syncSeekLayout });
 
 onMounted(() => {
   const wrapper = wrapperRef.value;
-  if (!wrapper) return;
+  const stage = coordinateStageRef.value;
+  if (!wrapper || !stage) return;
 
-  player = new DomLyricPlayer();
+  syncCoordinateSize();
+  player = isVerticalWriting.value ? new VerticalAmlLyricPlayer(stage) : new DomLyricPlayer();
   const element = player.getElement();
   element.style.width = '100%';
   element.style.height = '100%';
-  wrapper.appendChild(element);
+  stage.appendChild(element);
+  if (isVerticalWriting.value) {
+    sizeObserver = new ResizeObserver(() => {
+      cancelAnimationFrame(sizeFrame);
+      sizeFrame = requestAnimationFrame(syncCoordinateSize);
+    });
+    sizeObserver.observe(wrapper);
+    wrapper.addEventListener('wheel', handleHorizontalWheel, { capture: true, passive: false });
+  }
   player.addEventListener('line-click', handleLineClick);
   applyPlayerProps();
 
@@ -109,6 +149,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   fontRefreshRevision += 1;
+  cancelAnimationFrame(sizeFrame);
+  sizeObserver?.disconnect();
+  wrapperRef.value?.removeEventListener('wheel', handleHorizontalWheel, { capture: true });
   player?.removeEventListener('line-click', handleLineClick);
   runtime?.dispose();
   runtime = null;
@@ -154,5 +197,68 @@ watch(() => props.fontScale, () => { runtime?.refreshMeasurements(); }, { flush:
 </script>
 
 <template>
-  <div ref="wrapperRef" class="w-full h-full min-h-0 min-w-0" :style="wrapperStyle" />
+  <div
+    ref="wrapperRef"
+    class="amll-coordinate-host relative w-full h-full min-h-0 min-w-0"
+    :class="{
+      'amll-coordinate-host--vertical': isVerticalWriting,
+      'amll-coordinate-host--leftward': isLeftwardVertical,
+    }"
+    :style="wrapperStyle"
+  >
+    <div ref="coordinateStageRef" class="amll-coordinate-stage h-full w-full" />
+  </div>
 </template>
+
+<style scoped>
+.amll-coordinate-host--vertical > .amll-coordinate-stage {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  transform: rotate(90deg);
+  transform-origin: 0 0;
+}
+
+.amll-coordinate-host--leftward > .amll-coordinate-stage {
+  left: 0;
+  /* Original X still points down; original Y now points right. */
+  transform: matrix(0, 1, 1, 0, 0, 0);
+}
+
+.amll-coordinate-host--vertical :deep(.amll-lyric-player [class*="_lyricLine"]:not([class*="_lyricLineWrapper"])) {
+  content-visibility: visible;
+}
+
+.amll-coordinate-host--vertical :deep(.amll-vertical-glyph) {
+  display: inline-block;
+  box-sizing: content-box;
+  position: relative;
+  width: 1em;
+  height: 1em;
+  margin: 0;
+  padding: 0;
+  line-height: 1em;
+  vertical-align: middle;
+  contain: none;
+  text-align: center;
+  transform: rotate(-90deg);
+}
+
+.amll-coordinate-host--vertical :deep(.amll-vertical-sideways) {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  vertical-align: baseline;
+  white-space: pre-wrap;
+  contain: none;
+}
+
+.amll-coordinate-host--leftward :deep(.amll-vertical-glyph) {
+  transform: matrix(0, 1, 1, 0, 0, 0);
+}
+
+.amll-coordinate-host--leftward :deep(.amll-vertical-sideways) {
+  transform: scaleY(-1);
+}
+</style>

@@ -6,6 +6,8 @@ import type {
   LyricsFontPreset,
   LyricsPlayerAlignment,
   LyricsPlayerRenderMode,
+  LyricsPlayerWritingMode,
+  LyricsVerticalScrollDirection,
   LyricsReadingOrder,
   LyricsSettings,
 } from '../../types';
@@ -18,6 +20,8 @@ export type {
   LyricsFontPreset,
   LyricsPlayerAlignment,
   LyricsPlayerRenderMode,
+  LyricsPlayerWritingMode,
+  LyricsVerticalScrollDirection,
   LyricsReadingOrder,
   LyricsSettings,
 };

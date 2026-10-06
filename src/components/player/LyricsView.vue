@@ -27,6 +27,7 @@ const { audioDelay } = storeToRefs(useSettingsStore());
 const { clockRevision, seekRevision } = storeToRefs(usePlaybackStore());
 const amlPlayerRef = ref<{ syncSeekLayout: (timeMs: number, lineIndex?: number) => void } | null>(null);
 const appearancePreview = computed(() => props.appearancePreview ?? readLyricsAppearanceDraft(lyricsSettings));
+const isVerticalWriting = computed(() => lyricsSettings.playerWritingMode === 'vertical');
 
 const amllLines = useAmlDisplayLines(nativeAmlLyrics, () => lyricsSettings);
 // Keep the signed source clock: positive lyric delay holds at zero until the
@@ -67,12 +68,13 @@ async function handleLightLineClick(line: LyricLine) {
     <div
       v-if="amllLines.length > 0"
       class="lyrics-mask-shell h-full min-h-0 w-full min-w-0"
-      :class="lyricsAlignmentClass"
+      :class="[lyricsAlignmentClass, { 'lyrics-writing-vertical': isVerticalWriting }]"
       :style="lyricsPlayerStyle"
     >
       <div class="lyrics-position-frame h-full min-h-0 w-full min-w-0">
         <AmlLyricPlayer
-          v-if="lyricsSettings.playerRenderMode === 'amll'"
+          v-if="isVerticalWriting || lyricsSettings.playerRenderMode === 'amll'"
+          :key="isVerticalWriting ? `vertical-${lyricsSettings.playerVerticalScrollDirection}` : 'horizontal'"
           ref="amlPlayerRef"
           class="amll-host h-full min-h-0 w-full min-w-0"
           :lyric-lines="amllLines"
@@ -84,13 +86,15 @@ async function handleLightLineClick(line: LyricLine) {
           :layout-version="lyricsLayoutVersion"
           :font-scale="appearancePreview.playerFontScale"
           align-anchor="center"
-          :align-position="0.42"
+          :align-position="isVerticalWriting ? 0.5 : 0.42"
           :enable-spring="true"
           :enable-blur="true"
           :enable-scale="true"
           :hide-passed-lines="false"
           :word-fade-width="0.5"
           :line-gap="appearancePreview.playerLineGap"
+          :writing-mode="lyricsSettings.playerWritingMode"
+          :vertical-scroll-direction="lyricsSettings.playerVerticalScrollDirection"
           @line-click="handleLineClick"
         />
         <LightLyricPlayer
@@ -158,6 +162,22 @@ async function handleLightLineClick(line: LyricLine) {
   min-height: 0;
 }
 
+.lyrics-writing-vertical {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+  mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+}
+
+.lyrics-writing-vertical .amll-host :deep(.amll-lyric-player) {
+  --amll-lp-font-size: calc(clamp(22px, 3.6vh, 40px) * var(--lyrics-font-scale, 1));
+  --amll-lp-line-width-aspect: 0.9;
+  line-height: 1.5;
+  letter-spacing: 0.1em;
+}
+
+.lyrics-writing-vertical .amll-host :deep(.amll-lyric-player [class*="_lyricSubLine"]) {
+  letter-spacing: 0.08em;
+}
+
 .lyrics-position-frame {
   transform: translate3d(var(--lyrics-offset-x, 0%), var(--lyrics-offset-y, 0%), 0);
   transition: transform 180ms ease;
@@ -217,6 +237,10 @@ async function handleLightLineClick(line: LyricLine) {
 @media screen and (max-width: 768px) {
   .amll-host :deep(.amll-lyric-player) {
     --amll-lp-font-size: calc(max(8vw, 12px) * var(--lyrics-font-scale, 1));
+  }
+
+  .lyrics-writing-vertical .amll-host :deep(.amll-lyric-player) {
+    --amll-lp-font-size: calc(clamp(20px, 4vw, 30px) * var(--lyrics-font-scale, 1));
   }
 }
 
