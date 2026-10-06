@@ -84,7 +84,7 @@ const {
             <div class="desktop-lyrics-host h-full min-h-0 w-full min-w-0" :class="lyricsAlignmentClass">
               <div class="desktop-lyrics-mask-shell h-full min-h-0 w-full min-w-0">
                 <div class="desktop-lyrics-position-frame h-full min-h-0 w-full min-w-0">
-                  <transition name="desktop-block" mode="out-in">
+                  <transition name="desktop-block" mode="out-in" :css="!settings.showDoubleLine">
                     <div
                       v-if="activeLyricLine"
                       :key="blockTransitionKey"
@@ -382,11 +382,11 @@ const {
 }
 
 .desktop-lyric-main--solid.desktop-lyric-main--inactive {
-  color: color-mix(in srgb, var(--desktop-lyric-solid-color, var(--desktop-text-primary)) 76%, transparent);
+  color: color-mix(in srgb, var(--desktop-text-primary) 76%, transparent);
   filter:
     drop-shadow(0 1px 2px rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.48)))
     drop-shadow(0 0 var(--desktop-second-line-text-shadow-blur, 0px) rgb(var(--desktop-second-line-text-shadow-color, var(--desktop-text-shadow-color, 0 0 0)) / calc(var(--desktop-second-line-text-shadow-alpha, 0) * 0.86)))
-    drop-shadow(0 0 18px color-mix(in srgb, var(--desktop-lyric-solid-color, var(--desktop-accent-c)) 14%, transparent));
+    drop-shadow(0 0 18px color-mix(in srgb, var(--desktop-text-primary) 14%, transparent));
 }
 
 .desktop-lyric-word {

@@ -1,5 +1,5 @@
 import { emitTo } from '@tauri-apps/api/event';
-import { computed, ref, watch, type CSSProperties, type Ref } from 'vue';
+import { computed, ref, type CSSProperties, type Ref } from 'vue';
 
 import {
   DEFAULT_DESKTOP_PLAYER_ALIGNMENT,
@@ -107,7 +107,6 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
   const themeColors = ref<string[]>([]);
   const customLyricsFonts = ref<ImportedLyricsFont[]>([]);
   const songDuration = ref<number | null>(null);
-  const doubleLinePageStartIndex = ref(-1);
   const settings = ref<DesktopLyricsWindowSettings>({
     showTranslation: true,
     showRomaji: false,
@@ -551,61 +550,19 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
 
     return displayLyrics.value[0] ?? null;
   });
-  watch(
-    [activeLyricIndex, displayLyrics, () => settings.value.showDoubleLine],
-    () => {
-      if (displayLyrics.value.length === 0) {
-        doubleLinePageStartIndex.value = -1;
-        return;
-      }
-
-      const currentIndex = activeLyricIndex.value >= 0 ? activeLyricIndex.value : 0;
-      if (!settings.value.showDoubleLine || !displayLyrics.value[currentIndex]?.text.trim()) {
-        doubleLinePageStartIndex.value = currentIndex;
-        return;
-      }
-
-      const pageStartIndex = doubleLinePageStartIndex.value;
-      const pageEndIndex = pageStartIndex + 1;
-      if (pageStartIndex < 0 || !displayLyrics.value[pageStartIndex]?.text.trim()
-        || currentIndex < pageStartIndex || currentIndex > pageEndIndex) {
-        doubleLinePageStartIndex.value = currentIndex;
-      }
-    },
-    { immediate: true },
-  );
-  const visiblePairStartIndex = computed(() => {
+  const visibleStartIndex = computed(() => {
     if (displayLyrics.value.length === 0) return -1;
-    if (!activeLyricLine.value?.text.trim()) return Math.max(0, activeLyricIndex.value);
-    if (!settings.value.showDoubleLine) {
-      return activeLyricIndex.value >= 0 ? activeLyricIndex.value : 0;
-    }
-
-    return doubleLinePageStartIndex.value >= 0 ? doubleLinePageStartIndex.value : 0;
-  });
-  const blockTransitionKey = computed(() => {
-    if (!activeLyricLine.value) return `${lyricsStatus.value}:${fallbackText.value}`;
-
-    if (!settings.value.showDoubleLine) {
-      const line = activeLyricLine.value;
-      return `${line.time}:${line.text}:${line.translation}:${line.romaji}`;
-    }
-
-    const firstLine = displayLyrics.value[visiblePairStartIndex.value];
-    const secondLine = displayLyrics.value[visiblePairStartIndex.value + 1];
-    return [
-      firstLine ? `${firstLine.time}:${firstLine.text}:${firstLine.translation}:${firstLine.romaji}` : '',
-      secondLine ? `${secondLine.time}:${secondLine.text}:${secondLine.translation}:${secondLine.romaji}` : '',
-    ].join('|');
+    return Math.max(0, activeLyricIndex.value);
   });
   const visibleLyricLines = computed<DesktopLyricDisplayLine[]>(() => {
-    if (displayLyrics.value.length === 0 || visiblePairStartIndex.value < 0) return [];
+    if (visibleStartIndex.value < 0) return [];
 
     const lineCount = settings.value.showDoubleLine && activeLyricLine.value?.text.trim() ? 2 : 1;
     const lines: DesktopLyricDisplayLine[] = [];
 
     for (let offset = 0; offset < lineCount; offset += 1) {
-      const lineIndex = visiblePairStartIndex.value + offset;
+      // Both modes follow the current cue; double-line mode previews the next cue.
+      const lineIndex = visibleStartIndex.value + offset;
       const line = displayLyrics.value[lineIndex];
       if (!line) continue;
 
@@ -623,6 +580,13 @@ export function useDesktopLyricsDisplay(showDragShadow: Ref<boolean>) {
     }
 
     return lines;
+  });
+  const blockTransitionKey = computed(() => {
+    if (!activeLyricLine.value) return `${lyricsStatus.value}:${fallbackText.value}`;
+
+    return visibleLyricLines.value.map(({ line }) => (
+      `${line.time}:${line.text}:${line.translation}:${line.romaji}`
+    )).join('|');
   });
   const blockStyle = computed(() => ({
     '--desktop-line-gap': settings.value.playerLineGap.toString(),

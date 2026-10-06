@@ -57,6 +57,10 @@ export interface DesktopLyricsStatePayload {
   syncedAt: number;
   isPlaying: boolean;
   audioDelay: number;
+  seekRevision?: number;
+  sampleSequence?: number;
+  songPath?: string;
+  playbackId?: number;
   settings: DesktopLyricsWindowSettings;
   customLyricsFonts: ImportedLyricsFont[];
   themeColors: string[];
@@ -67,6 +71,10 @@ export interface DesktopLyricsPlaybackPayload {
   syncedAt: number;
   isPlaying: boolean;
   audioDelay: number;
+  seekRevision?: number;
+  sampleSequence?: number;
+  songPath?: string;
+  playbackId?: number;
 }
 
 export type DesktopLyricsSettingsPatch = Partial<DesktopLyricsWindowSettings>;

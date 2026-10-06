@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Word {
     pub text: String,
@@ -12,11 +12,12 @@ pub struct Word {
     pub romaji: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Line {
     pub time: f64,
     pub end_time: f64,
+    pub end_time_inferred: Option<String>,
     pub text: String,
     pub translation: String,
     pub romaji: String,
@@ -25,7 +26,7 @@ pub struct Line {
     pub words: Vec<Word>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub show_translation: bool,
@@ -102,16 +103,20 @@ pub struct Playback {
     pub synced_at: f64,
     pub is_playing: bool,
     pub audio_delay: f64,
+    pub seek_revision: Option<u64>,
+    pub sample_sequence: Option<u64>,
+    pub song_path: Option<String>,
+    pub playback_id: Option<u64>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Song {
     pub path: String,
     pub duration: f64,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ImportedFont {
     pub family: String,
@@ -144,41 +149,112 @@ pub struct Clock {
     sample: Playback,
     received: Instant,
     projected: f64,
+    correction: f64,
+    initialized: bool,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClockSync {
+    Ignored,
+    Updated,
+    Discontinuity,
+}
+
 impl Clock {
     pub fn new(sample: Playback) -> Self {
         let mut clock = Self {
             sample: Playback::default(),
             received: Instant::now(),
             projected: 0.,
+            correction: 0.,
+            initialized: false,
         };
         clock.sync(sample);
         clock
     }
-    pub fn sync(&mut self, sample: Playback) {
+    pub fn sync(&mut self, sample: Playback) -> ClockSync {
+        if !sample.playback_time.is_finite() || !sample.audio_delay.is_finite() {
+            return ClockSync::Ignored;
+        }
+        if self.initialized {
+            if let (Some(previous), Some(next)) =
+                (self.sample.sample_sequence, sample.sample_sequence)
+            {
+                if next <= previous {
+                    return ClockSync::Ignored;
+                }
+            } else if sample.synced_at > 0.
+                && self.sample.synced_at > 0.
+                && sample.synced_at < self.sample.synced_at
+            {
+                return ClockSync::Ignored;
+            }
+        }
+        let now = Instant::now();
+        let previous_time = self.position(now);
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs_f64()
             * 1000.;
-        let elapsed = if sample.is_playing && sample.synced_at > 0. {
+        let elapsed = if sample.is_playing && sample.synced_at.is_finite() && sample.synced_at > 0.
+        {
             ((now_ms - sample.synced_at) / 1000.).max(0.)
         } else {
             0.
         };
-        self.projected = (sample.playback_time + elapsed).max(0.);
+        let target = (sample.playback_time + elapsed).max(0.);
+        let explicit_seek = self.initialized
+            && matches!((self.sample.seek_revision, sample.seek_revision), (Some(previous), Some(next)) if previous != next);
+        let song_changed = self.initialized && self.sample.song_path != sample.song_path;
+        let playback_changed = self.initialized && self.sample.playback_id != sample.playback_id;
+        // Older senders lack the deliberate-seek marker; retain their large-jump
+        // behavior. New senders distinguish even a short backward seek from drift.
+        let legacy_seek = self.initialized
+            && self.sample.seek_revision.is_none()
+            && sample.seek_revision.is_none()
+            && (target - previous_time).abs() > 1.5;
+        let reanchor =
+            !self.initialized || explicit_seek || song_changed || playback_changed || legacy_seek;
+        let offset_changed = self.initialized && self.sample.audio_delay != sample.audio_delay;
+        let forward_jump = self.initialized && target - previous_time > 1.5;
+        self.correction = 0.;
+        self.projected = if reanchor {
+            target
+        } else if !sample.is_playing && !self.sample.is_playing {
+            // Repeated pause snapshots must not move the frozen word highlight.
+            previous_time
+        } else {
+            let position = previous_time.max(target);
+            if sample.is_playing {
+                // Backend corrections can be slightly behind the locally rendered
+                // frame. Repay that lead by slowing/holding, never by rewinding.
+                self.correction = (position - target).max(0.);
+            }
+            position
+        };
         self.sample = sample;
-        self.received = Instant::now();
+        self.received = now;
+        self.initialized = true;
+        if reanchor || offset_changed || forward_jump {
+            ClockSync::Discontinuity
+        } else {
+            ClockSync::Updated
+        }
+    }
+    fn position(&self, now: Instant) -> f64 {
+        if !self.sample.is_playing {
+            return self.projected;
+        }
+        let elapsed = now.duration_since(self.received).as_secs_f64();
+        // Small drift converges at 80% speed. A larger lead first holds until the
+        // audio timeline catches up, so underruns cannot cause unlimited drift.
+        let hold = (self.correction - 0.2).max(0.);
+        let advancing = (elapsed - hold).max(0.);
+        self.projected + advancing - (advancing * 0.2).min(self.correction.min(0.2))
     }
     pub fn time(&self) -> f64 {
-        (self.projected
-            + if self.sample.is_playing {
-                self.received.elapsed().as_secs_f64()
-            } else {
-                0.
-            }
-            - self.sample.audio_delay)
-            .max(0.)
+        (self.position(Instant::now()) - self.sample.audio_delay).max(0.)
     }
     pub fn playing(&self) -> bool {
         self.sample.is_playing
@@ -239,39 +315,83 @@ fn foreground_indices(lines: &[Line]) -> Vec<usize> {
         .collect()
 }
 
-pub fn visible_line_indices(
-    lines: &[Line],
-    page: usize,
-    active: usize,
-    double: bool,
-) -> Vec<usize> {
+/// Match the playback page's seven-second interlude threshold. A timed blank
+/// explicitly marks waiting even in a shorter gap; a song without lyrics or a
+/// completed final verse keeps its usual fallback/last-line display.
+pub fn interlude_range(state: &Snapshot, time: f64) -> Option<(f64, f64)> {
+    if state.lyrics_status != "ready" || !time.is_finite() {
+        return None;
+    }
+    let lines = &state.parsed_lyrics;
+    let blank = lines
+        .iter()
+        .filter(|line| line.time.is_finite() && line.time <= time && line.text.trim().is_empty())
+        .map(|line| line.time)
+        .max_by(f64::total_cmp);
+    let mut next = f64::INFINITY;
+    let mut start: f64 = 0.;
+    let mut latest_start = f64::NEG_INFINITY;
+    for line in lines
+        .iter()
+        .filter(|line| line.time.is_finite() && !line.text.trim().is_empty())
+    {
+        if line.time > time {
+            next = next.min(line.time);
+            continue;
+        }
+        latest_start = latest_start.max(line.time);
+        let word_end = line
+            .words
+            .iter()
+            .filter(|word| word.start.is_finite() && word.end.is_finite() && word.end > word.start)
+            .map(|word| word.end)
+            .max_by(f64::total_cmp);
+        let mut end = if line.end_time_inferred.as_deref() == Some("line") && word_end.is_some() {
+            word_end.unwrap()
+        } else if line.end_time.is_finite() && line.end_time > line.time {
+            line.end_time
+        } else if let Some(end) = word_end {
+            end
+        } else {
+            // Untimed LRC cannot tell us when the singer stopped. Do not invent
+            // an interlude unless the source supplies a later explicit blank.
+            blank.filter(|blank| *blank > line.time)?
+        };
+        if let Some(blank) = blank.filter(|blank| *blank > line.time) {
+            end = end.min(blank);
+        }
+        if end > time {
+            return None;
+        }
+        start = start.max(end);
+    }
+    if !next.is_finite() {
+        return None;
+    }
+    let explicit_wait = blank.is_some_and(|blank| blank > latest_start);
+    if let Some(blank) = blank.filter(|blank| *blank >= start) {
+        // An intro may contain a timed blank before the first real lyric.
+        if start == 0. {
+            start = blank;
+        }
+    }
+    (time >= start && time < next && (explicit_wait || next - start >= 7.)).then_some((start, next))
+}
+
+pub fn visible_line_indices(lines: &[Line], active: usize, double: bool) -> Vec<usize> {
     let Some(active_line) = lines.get(active) else {
         return vec![];
     };
-    // An explicit interlude must also clear the previous row of a two-line page.
+    // An explicit interlude clears the preview as well as the current lyric.
     if active_line.text.trim().is_empty() {
         return vec![active];
     }
-    let start = if lines
-        .get(page)
-        .is_none_or(|line| line.text.trim().is_empty())
-    {
-        active
-    } else {
-        page
-    };
+    // Always promote the current lyric to the first row, including after seeking.
     foreground_indices(lines)
         .into_iter()
-        .filter(|&index| index >= start)
+        .filter(|&index| index >= active)
         .take(if double { 2 } else { 1 })
         .collect()
-}
-
-pub fn page_start(previous: Option<usize>, active: usize, double: bool) -> usize {
-    match previous {
-        Some(start) if double && active >= start && active <= start + 1 => start,
-        _ => active,
-    }
 }
 
 pub fn progress(start: f64, end: f64, time: f64) -> f32 {
@@ -434,8 +554,8 @@ mod tests {
         assert_eq!(active_index(&lines, 0.), 0);
         assert_eq!(active_index(&lines, 3.), 0);
         assert_eq!(active_index(&lines, 4.), 1);
-        assert_eq!(visible_line_indices(&lines, 0, 1, true), vec![1]);
-        assert_eq!(visible_line_indices(&lines, 1, 2, true), vec![2]);
+        assert_eq!(visible_line_indices(&lines, 1, true), vec![1]);
+        assert_eq!(visible_line_indices(&lines, 2, true), vec![2]);
         assert_eq!(active_index(&lines, 100.), 2);
     }
 
@@ -482,7 +602,7 @@ mod tests {
         ];
         assert_eq!(active_index(&lines, 0.), 1);
         assert_eq!(active_index(&lines, 4.), 1);
-        assert_eq!(visible_line_indices(&lines, 0, 1, true), vec![1, 2]);
+        assert_eq!(visible_line_indices(&lines, 1, true), vec![1, 2]);
         assert_eq!(active_index(&lines[..1], 1.), 0);
     }
 
@@ -496,27 +616,30 @@ mod tests {
         assert_eq!(css_rgb("transparent"), None);
     }
     #[test]
-    fn selection_and_pair_order_match_web() {
+    fn selection_and_current_next_order_match_web() {
         let lines = vec![
             Line {
                 time: 2.,
+                text: "One".into(),
                 ..Line::default()
             },
             Line {
                 time: 5.,
+                text: "Two".into(),
                 ..Line::default()
             },
             Line {
                 time: 8.,
+                text: "Three".into(),
                 ..Line::default()
             },
         ];
         assert_eq!(active_index(&lines, 0.), 0);
         assert_eq!(active_index(&lines, 5.), 1);
-        assert_eq!(page_start(Some(0), 1, true), 0);
-        assert_eq!(page_start(Some(0), 2, true), 2);
-        assert_eq!(page_start(Some(2), 0, true), 0);
-        assert_eq!(page_start(Some(0), 1, false), 1);
+        assert_eq!(visible_line_indices(&lines, 1, true), vec![1, 2]);
+        assert_eq!(visible_line_indices(&lines, 2, true), vec![2]);
+        assert_eq!(visible_line_indices(&lines, 0, true), vec![0, 1]);
+        assert_eq!(visible_line_indices(&lines, 1, false), vec![1]);
     }
     #[test]
     fn pseudo_words_finish_before_next_line() {

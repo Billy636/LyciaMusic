@@ -2,7 +2,7 @@
 //! GDI is used only to present that surface to the layered Win32 window.
 use super::flow::{self, Cue};
 use super::model::*;
-use std::{mem::size_of, path::Path};
+use std::{mem::size_of, path::Path, time::Instant};
 use windows::{
     core::{w, Interface, Result, PCWSTR},
     Win32::{
@@ -40,6 +40,15 @@ fn color(hex: &str, alpha: f32) -> D2D1_COLOR_F {
         b: rgb[2],
         a: alpha,
     }
+}
+
+unsafe fn text_baseline(layout: &IDWriteTextLayout) -> Result<f32> {
+    // Each timed fragment has its own fallback font runs. Its layout origin is
+    // therefore not a shared baseline, even when every fragment uses one size.
+    let mut metrics = [DWRITE_LINE_METRICS::default()];
+    let mut count = 0;
+    layout.GetLineMetrics(Some(&mut metrics), &mut count)?;
+    Ok(metrics[0].baseline)
 }
 
 struct Surface {
@@ -124,6 +133,52 @@ impl Lane {
             _ => flow::playhead(&self.cues, time, self.start, self.end, self.width),
         };
         flow::scroll_offset(position, self.width, available)
+    }
+}
+
+#[derive(Clone)]
+struct Row {
+    index: usize,
+    lanes: std::ops::Range<usize>,
+    top: f32,
+    height: f32,
+    anchor_x: f32,
+    font_size: f32,
+}
+
+struct CachedLyrics {
+    texts: Vec<Text>,
+    lanes: Vec<Lane>,
+    glyph_tiles: Vec<(usize, GlyphMask)>,
+}
+
+struct Transition {
+    started: Instant,
+    previous: CachedLyrics,
+    outgoing: Row,
+    frozen_time: f64,
+    promotion_scale: f32,
+    promotion_x: f32,
+    promotion_y: f32,
+    outgoing_distance: f32,
+    incoming_distance: f32,
+}
+
+#[derive(Clone, Copy)]
+struct Placement {
+    scale: f32,
+    x: f32,
+    y: f32,
+    opacity: f32,
+}
+impl Default for Placement {
+    fn default() -> Self {
+        Self {
+            scale: 1.,
+            x: 0.,
+            y: 0.,
+            opacity: 1.,
+        }
     }
 }
 
@@ -300,7 +355,10 @@ pub struct Renderer {
     scale: f32,
     texts: Vec<Text>,
     lanes: Vec<Lane>,
+    rows: Vec<Row>,
     glyph_tiles: Vec<(usize, GlyphMask)>,
+    transition: Option<Transition>,
+    showing_interlude: bool,
     fade_brushes: Vec<ID2D1Brush>,
     fade_layer: ID2D1Layer,
     font_key: String,
@@ -351,7 +409,10 @@ impl Renderer {
             scale,
             texts: vec![],
             lanes: vec![],
+            rows: vec![],
             glyph_tiles: vec![],
+            transition: None,
+            showing_interlude: false,
             fade_brushes: vec![],
             fade_layer,
             font_key: String::new(),
@@ -365,6 +426,7 @@ impl Renderer {
         if (width, height, scale) == (self.width, self.height, self.scale) {
             return Ok(false);
         }
+        self.cancel_transition();
         let surface = Surface::new(width, height)?;
         self.target.BindDC(
             surface.dc,
@@ -474,14 +536,78 @@ impl Renderer {
         ))
     }
 
-    pub unsafe fn rebuild(&mut self, state: &Snapshot, page: usize, active: usize) -> Result<()> {
-        self.rebuild_fitted(state, page, active, 1., 0)
+    pub unsafe fn rebuild(&mut self, state: &Snapshot, active: usize) -> Result<()> {
+        self.cancel_transition();
+        self.rebuild_fitted(state, active, 1., 0)
+    }
+
+    pub fn cancel_transition(&mut self) {
+        self.transition = None;
+    }
+
+    /// Remains true until draw presents the final frame, including while playback is paused.
+    pub fn has_transition(&self) -> bool {
+        self.transition.is_some()
+    }
+
+    pub unsafe fn transition_to(&mut self, state: &Snapshot, active: usize) -> Result<()> {
+        // A second cue during a short transition starts from the previous target layout;
+        // keep only one old layout rather than accumulating historical glyph caches.
+        self.cancel_transition();
+        let continuous = !self.showing_interlude
+            && state.settings.show_double_line
+            && self.rows.len() == 2
+            && self.rows[1].index == active
+            && self.rows.iter().all(|row| {
+                state
+                    .parsed_lyrics
+                    .get(row.index)
+                    .is_some_and(|line| !line.text.trim().is_empty())
+            });
+        if !continuous {
+            return self.rebuild(state, active);
+        }
+        let outgoing = self.rows[0].clone();
+        let preview = self.rows[1].clone();
+        let mut previous = CachedLyrics {
+            texts: std::mem::take(&mut self.texts),
+            lanes: std::mem::take(&mut self.lanes),
+            glyph_tiles: std::mem::take(&mut self.glyph_tiles),
+        };
+        // Only the departing sentence needs historical tiles. The promoted sentence
+        // is drawn from the new cache at its interpolated size and position.
+        let outgoing_end = previous.lanes[outgoing.lanes.end - 1].range.end;
+        previous.texts.truncate(outgoing_end);
+        previous.lanes.truncate(outgoing.lanes.end);
+        previous
+            .glyph_tiles
+            .retain(|(index, _)| *index < outgoing_end);
+        self.rebuild(state, active)?;
+        let Some(current) = self.rows.first() else {
+            return Ok(());
+        };
+        // Promote the preview as one group, smoothly increasing its font size as well
+        // as moving its main text, aligned romanization and translation together.
+        let promotion_scale = preview.font_size / current.font_size.max(0.001);
+        self.transition = Some(Transition {
+            started: Instant::now(),
+            frozen_time: state.parsed_lyrics[active].time,
+            promotion_x: preview.anchor_x - current.anchor_x * promotion_scale,
+            promotion_y: preview.top - current.top * promotion_scale,
+            promotion_scale,
+            outgoing_distance: (outgoing.top + outgoing.height - 52.).max(0.) + 8.,
+            incoming_distance: self.rows.get(1).map_or(0., |row| {
+                (self.height as f32 / self.scale - 20. - row.top + 8.).max(row.height + 8.)
+            }),
+            previous,
+            outgoing,
+        });
+        Ok(())
     }
 
     unsafe fn rebuild_fitted(
         &mut self,
         state: &Snapshot,
-        page: usize,
         active: usize,
         vertical_scale: f32,
         attempt: u8,
@@ -504,6 +630,7 @@ impl Renderer {
         }
         self.texts.clear();
         self.lanes.clear();
+        self.rows.clear();
         self.glyph_tiles.clear();
         self.fade_brushes.clear();
         let s = &state.settings;
@@ -550,11 +677,12 @@ impl Renderer {
         let mut y = 0.;
         let mut row_ranges = Vec::new();
         for (visible_row, index) in
-            visible_line_indices(&state.parsed_lyrics, page, active, s.show_double_line)
+            visible_line_indices(&state.parsed_lyrics, active, s.show_double_line)
                 .into_iter()
                 .enumerate()
         {
             let line_start = self.texts.len();
+            let lane_start = self.lanes.len();
             let line_top = y;
             let line = &state.parsed_lyrics[index];
             let is_active = index == active;
@@ -662,27 +790,45 @@ impl Renderer {
                 y += h;
             } else {
                 // Keep words and their aligned romanization in the same horizontal cell.
-                let mut x = 0.;
-                let mut row_height: f32 = 0.;
-                let mut row_start = self.texts.len();
+                // Align both text tiers by measured baselines, not layout tops: a
+                // fallback run or trailing space can change one fragment's ascent.
+                let mut shaped_words = Vec::with_capacity(words.len());
+                let mut main_baseline: f32 = 0.;
+                let mut main_descent: f32 = 0.;
+                let mut roman_baseline: f32 = 0.;
+                let mut roman_descent: f32 = 0.;
                 for word in words {
-                    let (layout, w, h) = self.layout(&word.text, font_size, available, false)?;
+                    let main = self.layout(&word.text, font_size, available, false)?;
+                    let baseline = text_baseline(&main.0)?;
+                    main_baseline = main_baseline.max(baseline);
+                    main_descent = main_descent.max(main.2 - baseline);
                     let roman = if aligned {
-                        Some(self.layout(
+                        let (layout, w, h) = self.layout(
                             word.romaji.as_deref().unwrap_or(""),
                             font_size * 0.46,
                             available,
                             false,
-                        )?)
+                        )?;
+                        let baseline = text_baseline(&layout)?;
+                        roman_baseline = roman_baseline.max(baseline);
+                        roman_descent = roman_descent.max(h - baseline);
+                        Some((layout, w, h, baseline))
                     } else {
                         None
                     };
+                    shaped_words.push((word, main, baseline, roman));
+                }
+                let main_height = main_baseline + main_descent;
+                let roman_height = roman_baseline + roman_descent;
+                let mut x = 0.;
+                let row_height = main_height + roman_height;
+                let mut row_start = self.texts.len();
+                for (word, (layout, w, h), baseline, roman) in shaped_words {
                     let cell_width = w.max(roman.as_ref().map(|r| r.1).unwrap_or(0.));
                     if wrap && x > 0. && x + cell_width > available {
                         align_row(&mut self.texts[row_start..], available, x, alignment);
                         y += row_height;
                         x = 0.;
-                        row_height = 0.;
                         row_start = self.texts.len();
                     }
                     cues.push(Cue {
@@ -725,7 +871,7 @@ impl Renderer {
                     self.texts.push(Text {
                         layout,
                         x: x + (cell_width - w) / 2.,
-                        y,
+                        y: y + main_baseline - baseline,
                         width: w,
                         height: h,
                         timing,
@@ -734,12 +880,11 @@ impl Renderer {
                         played,
                         shadow,
                     });
-                    let mut cell_height = h;
-                    if let Some((layout, w, h2)) = roman {
+                    if let Some((layout, w, h2, baseline)) = roman {
                         self.texts.push(Text {
                             layout,
                             x: x + (cell_width - w) / 2.,
-                            y: y + h,
+                            y: y + main_height + roman_baseline - baseline,
                             width: w,
                             height: h2,
                             timing,
@@ -748,10 +893,8 @@ impl Renderer {
                             played: roman_played,
                             shadow,
                         });
-                        cell_height += h2;
                     }
                     x += cell_width;
-                    row_height = row_height.max(cell_height);
                 }
                 align_row(&mut self.texts[row_start..], available, x, alignment);
                 main_width = if wrap { available } else { x };
@@ -850,6 +993,14 @@ impl Renderer {
                 y += h;
             }
             row_ranges.push((line_start, self.texts.len(), line_top, y - line_top));
+            self.rows.push(Row {
+                index,
+                lanes: lane_start..self.lanes.len(),
+                top: line_top,
+                height: y - line_top,
+                anchor_x: 0.,
+                font_size,
+            });
             y += 3.52 * gap;
         }
         if self.texts.is_empty() {
@@ -890,7 +1041,6 @@ impl Renderer {
         if y > body_height && attempt < 4 {
             return self.rebuild_fitted(
                 state,
-                page,
                 active,
                 vertical_scale * (body_height / y) * 0.98,
                 attempt + 1,
@@ -936,6 +1086,24 @@ impl Renderer {
         for text in &mut self.texts {
             text.x += 24.;
             text.y += top;
+        }
+        for row in &mut self.rows {
+            let first = &self.lanes[row.lanes.start];
+            let last = &self.lanes[row.lanes.end - 1];
+            let texts = &self.texts[first.range.start..last.range.end];
+            row.top = texts
+                .iter()
+                .map(|text| text.y)
+                .fold(f32::INFINITY, f32::min);
+            row.height = texts
+                .iter()
+                .map(|text| text.y + text.height)
+                .fold(row.top, f32::max)
+                - row.top;
+            row.anchor_x = self.texts[first.range.clone()]
+                .iter()
+                .map(|text| text.x)
+                .fold(f32::INFINITY, f32::min);
         }
 
         // Cache glyph-local tiles, including offscreen words, so panning never rerasterizes text.
@@ -985,7 +1153,7 @@ impl Renderer {
     }
 
     pub unsafe fn draw(
-        &self,
+        &mut self,
         hwnd: HWND,
         state: &Snapshot,
         time: f64,
@@ -997,6 +1165,16 @@ impl Renderer {
     ) -> Result<()> {
         let width = self.width as f32 / self.scale;
         let height = self.height as f32 / self.scale;
+        let interlude = interlude_range(state, time);
+        self.showing_interlude = interlude.is_some();
+        if self.showing_interlude {
+            // Do not bring a finished lyric back as an outgoing row after waiting.
+            self.cancel_transition();
+        }
+        let transition_progress = self
+            .transition
+            .as_ref()
+            .map(|transition| (transition.started.elapsed().as_secs_f32() / 0.36).min(1.));
         self.target.BeginDraw();
         // Alpha 1/255 keeps the unlocked transparent surface draggable without a visible box.
         self.target.Clear(Some(&color(
@@ -1009,7 +1187,11 @@ impl Renderer {
                 1. / 255.
             },
         )));
-        self.paint_lyrics(time);
+        if let Some((start, end)) = interlude {
+            self.paint_interlude(state, time, start, end);
+        } else {
+            self.paint_lyrics(time, transition_progress);
+        }
         self.target
             .SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         if surface {
@@ -1043,31 +1225,179 @@ impl Renderer {
                 AlphaFormat: AC_SRC_ALPHA as u8,
             }),
             ULW_ALPHA,
-        )
+        )?;
+        if transition_progress.is_some_and(|progress| progress >= 1.) {
+            self.cancel_transition();
+        }
+        Ok(())
     }
 
-    unsafe fn paint_lyrics(&self, time: f64) {
+    unsafe fn paint_interlude(&self, state: &Snapshot, time: f64, start: f64, end: f64) {
+        let settings = &state.settings;
+        let dot_color = if settings.color_scheme == "custom" {
+            settings.custom_unplayed_color.as_str()
+        } else {
+            "#ffffff"
+        };
+        let width = self.width as f32 / self.scale;
+        let height = self.height as f32 / self.scale;
+        let scale = settings.player_font_scale.clamp(0.5, 3.);
+        let radius = (4.2 * scale).min((width - 48.).max(1.) / 8.4);
+        let step = radius * 3.2;
+        let used = step * 2. + radius * 2.;
+        let available = (width - 48.).max(used);
+        let x = match settings.player_alignment.as_str() {
+            "left" | "split-corners" => 0.,
+            "right" => available - used,
+            _ => (available - used) / 2.,
+        };
+        let x = (x + width * settings.player_offset_x.clamp(-100., 100.) / 100.)
+            .clamp(0., (available - used).max(0.))
+            + 24.
+            + radius;
+        let y = ((52. + height - 20.) / 2.
+            + height * settings.player_offset_y.clamp(-100., 100.) / 100.)
+            .clamp(52. + radius, (height - 20. - radius).max(52. + radius));
+        let elapsed = (time - start).max(0.) as f32;
+        let completion = progress(start, end, time);
+        self.target
+            .SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        for index in 0..3 {
+            // Media time drives every dot, so pause freezes the waiting indicator
+            // together with word progress, and seeking restores the same phase.
+            let breath =
+                ((elapsed * std::f32::consts::TAU / 1.6 - index as f32 * 0.8).sin() + 1.) / 2.;
+            let filled = (completion * 3. - index as f32).clamp(0., 1.);
+            self.brush.SetColor(&color(
+                dot_color,
+                settings.text_opacity.clamp(0., 1.) * (0.42 + 0.28 * breath + 0.3 * filled),
+            ));
+            let size = radius * (0.86 + breath * 0.14);
+            self.target.FillEllipse(
+                &D2D1_ELLIPSE {
+                    point: point(x + step * index as f32, y),
+                    radiusX: size,
+                    radiusY: size,
+                },
+                &self.brush,
+            );
+        }
+    }
+
+    unsafe fn paint_lyrics(&self, time: f64, transition_progress: Option<f32>) {
+        let width = self.width as f32 / self.scale;
+        let height = self.height as f32 / self.scale;
+        // Keep animated sentence groups inside the lyric body; the toolbar is painted
+        // separately after this fixed clip is removed.
+        self.target.PushAxisAlignedClip(
+            &rect(24., 52., (width - 48.).max(1.), (height - 72.).max(1.)),
+            D2D1_ANTIALIAS_MODE_ALIASED,
+        );
+        if let Some((transition, progress)) = self
+            .transition
+            .as_ref()
+            .zip(transition_progress)
+            .filter(|(_, progress)| *progress < 1.)
+        {
+            let eased = 1. - (1. - progress).powi(3);
+            let remaining = 1. - eased;
+            self.paint_lanes(
+                &transition.previous.texts,
+                &transition.previous.lanes,
+                &transition.previous.glyph_tiles,
+                transition.outgoing.lanes.clone(),
+                transition.frozen_time,
+                Placement {
+                    y: -transition.outgoing_distance * eased,
+                    opacity: remaining,
+                    ..Default::default()
+                },
+            );
+            if let Some(current) = self.rows.first() {
+                self.paint_lanes(
+                    &self.texts,
+                    &self.lanes,
+                    &self.glyph_tiles,
+                    current.lanes.clone(),
+                    time,
+                    Placement {
+                        scale: 1. + (transition.promotion_scale - 1.) * remaining,
+                        x: transition.promotion_x * remaining,
+                        y: transition.promotion_y * remaining,
+                        opacity: 0.74 + 0.26 * eased,
+                    },
+                );
+            }
+            if let Some(preview) = self.rows.get(1) {
+                self.paint_lanes(
+                    &self.texts,
+                    &self.lanes,
+                    &self.glyph_tiles,
+                    preview.lanes.clone(),
+                    time,
+                    Placement {
+                        y: transition.incoming_distance * remaining,
+                        opacity: eased,
+                        ..Default::default()
+                    },
+                );
+            }
+        } else {
+            self.paint_lanes(
+                &self.texts,
+                &self.lanes,
+                &self.glyph_tiles,
+                0..self.lanes.len(),
+                time,
+                Placement::default(),
+            );
+        }
+        self.target.PopAxisAlignedClip();
+    }
+
+    unsafe fn paint_lanes(
+        &self,
+        texts: &[Text],
+        lanes: &[Lane],
+        glyph_tiles: &[(usize, GlyphMask)],
+        range: std::ops::Range<usize>,
+        time: f64,
+        placement: Placement,
+    ) {
         use std::mem::ManuallyDrop;
+        if placement.opacity <= 0. {
+            return;
+        }
         let available = (self.width as f32 / self.scale - 48.).max(1.);
         let identity = Matrix3x2 {
             M11: 1.,
             M22: 1.,
             ..Default::default()
         };
-        for lane in &self.lanes {
-            let offset = (lane.offset(time, available) * self.scale).round() / self.scale;
-            let viewport = rect(24., (lane.top - 8.).max(44.), available, lane.height + 16.);
-            let overflow = lane.width > available + 0.5;
-            if overflow {
+        for lane in &lanes[range] {
+            let lane_available = available / placement.scale;
+            let offset = (lane.offset(time, lane_available) * self.scale * placement.scale).round()
+                / (self.scale * placement.scale);
+            let viewport = rect(
+                24.,
+                (lane.top - 8.) * placement.scale + placement.y,
+                available,
+                (lane.height + 16.) * placement.scale,
+            );
+            let overflow = lane.width > lane_available + 0.5;
+            let layered = overflow || placement.opacity < 1.;
+            if layered {
                 let flags = usize::from(offset > 0.)
-                    | (usize::from(offset + available < lane.width - 0.5) << 1);
+                    | (usize::from(offset + lane_available < lane.width - 0.5) << 1);
                 let mut parameters = D2D1_LAYER_PARAMETERS {
                     contentBounds: viewport,
                     geometricMask: ManuallyDrop::new(None),
                     maskAntialiasMode: D2D1_ANTIALIAS_MODE_ALIASED,
                     maskTransform: identity,
-                    opacity: 1.,
-                    opacityBrush: ManuallyDrop::new(Some(self.fade_brushes[flags].clone())),
+                    opacity: placement.opacity,
+                    opacityBrush: ManuallyDrop::new(
+                        overflow.then(|| self.fade_brushes[flags].clone()),
+                    ),
                     layerOptions: D2D1_LAYER_OPTIONS_NONE,
                 };
                 self.target.PushLayer(&parameters, &self.fade_layer);
@@ -1077,14 +1407,17 @@ impl Renderer {
                     .PushAxisAlignedClip(&viewport, D2D1_ANTIALIAS_MODE_ALIASED);
             }
             self.target.SetTransform(&Matrix3x2 {
-                M31: -offset,
-                ..identity
+                M11: placement.scale,
+                M22: placement.scale,
+                M31: placement.x - offset * placement.scale,
+                M32: placement.y,
+                ..Default::default()
             });
             // Decorations move with the fills and remain underneath every word in this lane.
-            for (index, mask) in &self.glyph_tiles {
+            for (index, mask) in glyph_tiles {
                 if !lane.range.contains(index)
-                    || mask.bounds.right - offset < 24.
-                    || mask.bounds.left - offset > available + 24.
+                    || (mask.bounds.right - offset) * placement.scale + placement.x < 24.
+                    || (mask.bounds.left - offset) * placement.scale + placement.x > available + 24.
                 {
                     continue;
                 }
@@ -1100,14 +1433,14 @@ impl Renderer {
             }
             // FillOpacityMask requires aliased geometry AA; coverage AA lives in the cached mask.
             self.target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-            for (index, mask) in &self.glyph_tiles {
+            for (index, mask) in glyph_tiles {
                 if !lane.range.contains(index)
-                    || mask.bounds.right - offset < 24.
-                    || mask.bounds.left - offset > available + 24.
+                    || (mask.bounds.right - offset) * placement.scale + placement.x < 24.
+                    || (mask.bounds.left - offset) * placement.scale + placement.x > available + 24.
                 {
                     continue;
                 }
-                let text = &self.texts[*index];
+                let text = &texts[*index];
                 let Some((start, end)) = text.timing else {
                     self.brush.SetColor(&text.base);
                     mask.fill(&self.target, &self.brush, mask.bounds);
@@ -1145,7 +1478,7 @@ impl Renderer {
                 }
             }
             self.target.SetTransform(&identity);
-            if overflow {
+            if layered {
                 self.target.PopLayer();
             } else {
                 self.target.PopAxisAlignedClip();
@@ -1287,6 +1620,7 @@ mod tests {
                         is_bg: false,
                         time: 0.,
                         end_time: 20.,
+                        end_time_inferred: None,
                         text: words.iter().map(|w| w.text.as_str()).collect(),
                         translation: "不要离开我，这个漫长的夜晚，让这段旋律陪着我走过每一个季节。"
                             .into(),
@@ -1306,7 +1640,7 @@ mod tests {
             for scale in [1., 1.5, 2.] {
                 let (w, h) = ((520. * scale) as i32, (160. * scale) as i32);
                 let mut renderer = Renderer::new(w, h, scale, std::env::temp_dir()).unwrap();
-                renderer.rebuild(&state, 0, 0).unwrap();
+                renderer.rebuild(&state, 0).unwrap();
                 assert_eq!(
                     renderer.lanes.len(),
                     4,
@@ -1380,7 +1714,7 @@ mod tests {
                 }
                 let mut wrap_state = state.clone();
                 wrap_state.settings.overflow_mode = "wrap".into();
-                renderer.rebuild(&wrap_state, 0, 0).unwrap();
+                renderer.rebuild(&wrap_state, 0).unwrap();
                 assert!(renderer.lanes.iter().all(|l| l.width <= 472.1));
                 assert!(renderer.texts.iter().all(|t| t.y + t.height <= 140.1));
                 let main_rows: std::collections::BTreeSet<_> = renderer.texts
@@ -1404,7 +1738,7 @@ mod tests {
                 let mut plain = state.clone();
                 plain.settings.enable_word_effect = false;
                 plain.parsed_lyrics[0].romaji = "romanization without per-word timing ".repeat(5);
-                renderer.rebuild(&plain, 0, 0).unwrap();
+                renderer.rebuild(&plain, 0).unwrap();
                 assert_eq!(
                     renderer.lanes.len(),
                     5,
@@ -1426,11 +1760,11 @@ mod tests {
                     std::slice::from_raw_parts(renderer.surface.bits, (w * h * 4) as usize),
                     "paused scroll must be stable"
                 );
-                renderer.rebuild(&state, 0, 1).unwrap();
+                renderer.rebuild(&state, 1).unwrap();
                 assert_eq!(
                     renderer.lanes[0].offset(31., 472.),
-                    (renderer.lanes[0].width - 472.).max(0.),
-                    "completed sentence stays at its end"
+                    0.,
+                    "the promoted current sentence starts at its own beginning"
                 );
             }
             DestroyWindow(hwnd).unwrap();
@@ -1483,7 +1817,7 @@ mod tests {
             };
             for scale in [1., 1.25, 1.5, 2.] {
                 let mut renderer = Renderer::new(900, 280, scale, std::env::temp_dir()).unwrap();
-                renderer.rebuild(&state, 0, 0).unwrap();
+                renderer.rebuild(&state, 0).unwrap();
                 renderer
                     .draw(hwnd, &state, 0., false, false, None, true, 1.)
                     .unwrap();
@@ -1610,7 +1944,7 @@ mod tests {
                 ..Snapshot::default()
             };
             let mut renderer = Renderer::new(900, 280, 1., std::env::temp_dir()).unwrap();
-            renderer.rebuild(&state, 0, 0).unwrap();
+            renderer.rebuild(&state, 0).unwrap();
             assert!(renderer.texts.len() >= 8);
             renderer
                 .draw(hwnd, &state, 0., true, false, None, true, 1.)
@@ -1655,13 +1989,13 @@ mod tests {
             image.save(&preview).unwrap();
             println!("Native render preview: {}", preview.display());
             assert!(renderer.resize(1350, 420, 1.5).unwrap());
-            renderer.rebuild(&state, 0, 1).unwrap();
+            renderer.rebuild(&state, 1).unwrap();
             renderer
                 .draw(hwnd, &state, 4.5, false, false, None, true, 1.)
                 .unwrap();
             let mut split = state.clone();
             split.settings.player_alignment = "split-corners".into();
-            renderer.rebuild(&split, 0, 0).unwrap();
+            renderer.rebuild(&split, 0).unwrap();
             let first_y = renderer.texts.first().unwrap().y;
             let last_y = renderer.texts.last().unwrap().y;
             assert!(
@@ -1697,12 +2031,12 @@ mod tests {
                     GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) >= baseline + 2,
                     "resource probe must see the live DIB/DC"
                 );
-                renderer.rebuild(&state, 0, 0).unwrap();
+                renderer.rebuild(&state, 0).unwrap();
                 renderer
                     .draw(hwnd, &state, 1.5, false, false, None, true, 1.)
                     .unwrap();
                 assert!(renderer.resize(1000, 300, 1.).unwrap());
-                renderer.rebuild(&state, 0, 1).unwrap();
+                renderer.rebuild(&state, 1).unwrap();
                 drop(renderer);
             }
             let after = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);

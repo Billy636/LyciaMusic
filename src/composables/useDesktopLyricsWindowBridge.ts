@@ -44,6 +44,7 @@ import {
 } from '../features/desktopLyrics/shared';
 
 let desktopLyricsWindowPromise: Promise<WebviewWindow> | null = null;
+let desktopLyricsPlaybackSampleSequence = 0;
 const DESKTOP_LYRICS_PLAYBACK_SYNC_INTERVAL_MS = 400;
 const DESKTOP_LYRICS_READY_TIMEOUT_MS = 1200;
 
@@ -61,11 +62,17 @@ export function formatDesktopLyricsOpenError(error: unknown): string {
 export function createDesktopLyricsPlaybackClockTracker(now = () => Date.now()) {
   let sampledPlaybackTime: number | null = null;
   let sampledAt = now();
+  let anchorPlaybackTime = 0;
+  let playing: boolean | null = null;
+  let lastSeekRevision = 0;
+  let lastSongPath: string | null = null;
+  let lastPlaybackId = 0;
 
   const markPlaybackTimeSample = (playbackTime: number) => {
     if (!Number.isFinite(playbackTime)) return;
 
     sampledPlaybackTime = Math.max(0, playbackTime);
+    anchorPlaybackTime = sampledPlaybackTime;
     sampledAt = now();
   };
 
@@ -81,9 +88,51 @@ export function createDesktopLyricsPlaybackClockTracker(now = () => Date.now()) 
     return sampledAt;
   };
 
+  const resolvePlaybackSample = (
+    playbackTime: number,
+    isPlaying: boolean,
+    seekRevision = 0,
+    songPath: string | null = null,
+    playbackId = 0,
+  ) => {
+    const sampledTime = Number.isFinite(playbackTime) ? Math.max(0, playbackTime) : 0;
+    const timestamp = now();
+    const timelineChanged = playing === null
+      || seekRevision !== lastSeekRevision
+      || songPath !== lastSongPath
+      || playbackId !== lastPlaybackId;
+    const timeChanged = sampledPlaybackTime === null
+      || Math.abs(sampledTime - sampledPlaybackTime) > 0.000_001;
+    if (timelineChanged) {
+      markPlaybackTimeSample(sampledTime);
+    } else if (playing !== isPlaying) {
+      if (playing) {
+        // Freeze the interpolated frame, including the part after the last 100ms
+        // (or low-power 1s) progress sample. Resume starts from this frozen anchor.
+        anchorPlaybackTime = Math.max(
+          sampledTime,
+          anchorPlaybackTime + Math.max(0, timestamp - sampledAt) / 1000,
+        );
+      } else if (timeChanged) {
+        anchorPlaybackTime = sampledTime;
+      }
+      sampledPlaybackTime = sampledTime;
+      sampledAt = timestamp;
+    } else if (timeChanged) {
+      if (isPlaying) markPlaybackTimeSample(sampledTime);
+      else sampledPlaybackTime = sampledTime;
+    }
+    playing = isPlaying;
+    lastSeekRevision = seekRevision;
+    lastSongPath = songPath;
+    lastPlaybackId = playbackId;
+    return { playbackTime: anchorPlaybackTime, syncedAt: sampledAt };
+  };
+
   return {
     markPlaybackTimeSample,
     resolveSyncedAt,
+    resolvePlaybackSample,
   };
 }
 
@@ -269,18 +318,32 @@ export function useDesktopLyricsWindowBridge() {
   const playbackClockTracker = createDesktopLyricsPlaybackClockTracker();
 
   let isMainWindowClosing = false;
+  let nativeSyncTask = Promise.resolve();
   let syncIntervalId: ReturnType<typeof setInterval> | null = null;
   const unlisteners: Array<() => void> = [];
+
+  const createPlaybackPayload = (): DesktopLyricsPlaybackPayload => ({
+    ...playbackClockTracker.resolvePlaybackSample(
+      currentTime.value,
+      isPlaying.value,
+      playbackStore.seekRevision ?? 0,
+      currentSong.value?.path ?? null,
+      playbackStore.currentPlaybackId ?? 0,
+    ),
+    isPlaying: isPlaying.value,
+    audioDelay: audioDelay.value,
+    seekRevision: playbackStore.seekRevision ?? 0,
+    sampleSequence: ++desktopLyricsPlaybackSampleSequence,
+    songPath: currentSong.value?.path,
+    playbackId: playbackStore.currentPlaybackId ?? 0,
+  });
 
   const createStatePayload = (): DesktopLyricsStatePayload => ({
     song: createDesktopLyricsSongSnapshot(currentSong.value),
     parsedLyrics: toRaw(parsedLyrics.value) as DesktopLyricsStatePayload['parsedLyrics'],
     lyricsStatus: lyricsStatus.value,
     fallbackText: currentLyricLine.value.text,
-    playbackTime: currentTime.value,
-    syncedAt: playbackClockTracker.resolveSyncedAt(currentTime.value),
-    isPlaying: isPlaying.value,
-    audioDelay: audioDelay.value,
+    ...createPlaybackPayload(),
     settings: {
       showTranslation: lyricsSettings.showTranslation,
       showRomaji: lyricsSettings.showRomaji,
@@ -318,20 +381,23 @@ export function useDesktopLyricsWindowBridge() {
     themeColors: [...dominantColors.value],
   });
 
-  const createPlaybackPayload = (): DesktopLyricsPlaybackPayload => ({
-    playbackTime: currentTime.value,
-    syncedAt: playbackClockTracker.resolveSyncedAt(currentTime.value),
-    isPlaying: isPlaying.value,
-    audioDelay: audioDelay.value,
-  });
-
   let isEmitStateThrottled = false;
   let hasPendingEmitState = false;
   let throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
+  const enqueueNativeSync = (send: () => Promise<void>) => {
+    // State and playback share one ordered stream, so a later periodic sample
+    // cannot overtake the final lyrics/settings snapshot and make it stale.
+    const task = nativeSyncTask.catch(() => undefined).then(async () => {
+      if (nativeWindowOpen && !disposed && !isMainWindowClosing) await send();
+    });
+    nativeSyncTask = task;
+    return task;
+  };
+
   const emitStateToDesktopLyrics = async (immediate = false) => {
     if (useNativeRenderer) {
-      if (nativeWindowOpen) await nativeDesktopLyrics.state(createStatePayload());
+      if (nativeWindowOpen) await enqueueNativeSync(() => nativeDesktopLyrics.state(createStatePayload()));
       return;
     }
     const targetWindow = await getDesktopLyricsWindow();
@@ -377,7 +443,7 @@ export function useDesktopLyricsWindowBridge() {
 
   const emitPlaybackToDesktopLyrics = async () => {
     if (useNativeRenderer) {
-      if (nativeWindowOpen) await nativeDesktopLyrics.playback(createPlaybackPayload());
+      if (nativeWindowOpen) await enqueueNativeSync(() => nativeDesktopLyrics.playback(createPlaybackPayload()));
       return;
     }
     const targetWindow = await getDesktopLyricsWindow();
@@ -493,6 +559,7 @@ export function useDesktopLyricsWindowBridge() {
   const destroyDesktopLyricsWindow = async () => {
     if (useNativeRenderer) {
       nativeWindowOpen = false;
+      await nativeSyncTask.catch(() => undefined);
       await nativeDesktopLyrics.close();
       return;
     }
@@ -630,9 +697,16 @@ export function useDesktopLyricsWindowBridge() {
   });
 
   watch(
-    currentTime,
-    (time) => {
-      playbackClockTracker.markPlaybackTimeSample(time);
+    [currentTime, isPlaying, () => playbackStore.seekRevision ?? 0, () => currentSong.value?.path,
+      () => playbackStore.currentPlaybackId ?? 0],
+    ([time, playing, seekRevision, songPath, playbackId], previous) => {
+      playbackClockTracker.resolvePlaybackSample(time, playing, seekRevision, songPath ?? null, playbackId);
+      if (showDesktopLyrics.value && previous
+        && (playing !== previous[1] || seekRevision !== previous[2] || playbackId !== previous[4])) {
+        void emitPlaybackToDesktopLyrics().catch((error) => {
+          logDesktopLyricsBridgeError('sync playback to', error);
+        });
+      }
     },
     { immediate: true },
   );

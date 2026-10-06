@@ -10,12 +10,17 @@ use tauri::{Emitter, Manager};
 use windows::{
     core::{w, Result as WinResult},
     Win32::{
-        Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+        Foundation::{
+            CloseHandle, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, WAIT_FAILED, WPARAM,
+        },
         Graphics::Gdi::{GetMonitorInfoW, MonitorFromRect, MONITORINFO, MONITOR_DEFAULTTONEAREST},
         System::{
             Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED},
             LibraryLoader::GetModuleHandleW,
-            Threading::GetCurrentThreadId,
+            Threading::{
+                CancelWaitableTimer, CreateWaitableTimerExW, GetCurrentThreadId, SetWaitableTimer,
+                CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, INFINITE, TIMER_ALL_ACCESS,
+            },
         },
         UI::{
             HiDpi::{GetDpiForSystem, GetDpiForWindow},
@@ -38,7 +43,44 @@ struct Worker {
 }
 static WORKER: LazyLock<Mutex<Option<Worker>>> = LazyLock::new(|| Mutex::new(None));
 const WAKE: u32 = WM_APP + 71;
-const TIMER: usize = 1;
+const PLAYBACK_FRAME: Duration = Duration::from_nanos(1_000_000_000 / 60);
+const TRANSITION_FRAME: Duration = Duration::from_nanos(1_000_000_000 / 120);
+const IDLE_POLL: Duration = Duration::from_millis(100);
+
+/// A one-shot frame deadline shares the message wait without changing the
+/// system-wide timer resolution or repeatedly resetting a WM_TIMER interval.
+struct FrameWake(HANDLE);
+impl FrameWake {
+    unsafe fn new() -> WinResult<Self> {
+        CreateWaitableTimerExW(
+            None,
+            None,
+            CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+            TIMER_ALL_ACCESS.0,
+        )
+        .or_else(|_| CreateWaitableTimerExW(None, None, 0, TIMER_ALL_ACCESS.0))
+        .map(Self)
+    }
+
+    unsafe fn wait(&self, delay: Duration) -> WinResult<()> {
+        let due = -(delay.as_nanos().div_ceil(100).max(1).min(i64::MAX as u128) as i64);
+        SetWaitableTimer(self.0, &due, 0, None, None, false)?;
+        if MsgWaitForMultipleObjectsEx(Some(&[self.0]), INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE)
+            == WAIT_FAILED
+        {
+            return Err(windows::core::Error::from_win32());
+        }
+        Ok(())
+    }
+}
+impl Drop for FrameWake {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CancelWaitableTimer(self.0);
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
 
 pub fn open(
     app: tauri::AppHandle,
@@ -368,7 +410,6 @@ struct NativeWindow(HWND);
 impl Drop for NativeWindow {
     fn drop(&mut self) {
         unsafe {
-            let _ = KillTimer(Some(self.0), TIMER);
             let _ = DestroyWindow(self.0);
         }
     }
@@ -499,8 +540,7 @@ unsafe fn run(
         .join("custom-lyrics-fonts");
     let mut renderer = Renderer::new(initial.width, initial.height, scale, custom_dir.clone())?;
     let mut clock = Clock::new(state.playback.clone());
-    let mut page = None;
-    let mut previous_active = usize::MAX;
+    let mut last_state_sequence = state.playback.sample_sequence;
     let mut layout_dirty = true;
     let mut dirty = true;
     let mut reveal_until = Instant::now() + Duration::from_millis(1200);
@@ -517,7 +557,8 @@ unsafe fn run(
     let mut last_frame = Instant::now() - Duration::from_secs(1);
     // The first frame must succeed before open() reports success.
     let initial_active = active_index(&state.parsed_lyrics, clock.time());
-    renderer.rebuild(&state, initial_active, initial_active)?;
+    let mut previous_active = initial_active;
+    renderer.rebuild(&state, initial_active)?;
     renderer.draw(
         hwnd,
         &state,
@@ -528,21 +569,36 @@ unsafe fn run(
         clock.playing(),
         1.,
     )?;
-    if SetTimer(Some(hwnd), TIMER, 33, None) == 0 {
-        return Err(windows::core::Error::from_win32());
-    }
+    let frame_wake = FrameWake::new()?;
+    let mut last_poll = Instant::now() - IDLE_POLL;
     let _ = ready.send(Ok(GetCurrentThreadId()));
     let mut message = MSG::default();
     loop {
-        let result = GetMessageW(&mut message, None, 0, 0);
-        if result.0 == -1 {
-            return Err(windows::core::Error::from_win32());
+        let frame_interval = if renderer.has_transition() {
+            TRANSITION_FRAME
+        } else {
+            PLAYBACK_FRAME
+        };
+        let needs_frame =
+            !was_hidden && (dirty || layout_dirty || clock.playing() || renderer.has_transition());
+        let wait = if needs_frame {
+            frame_interval.saturating_sub(last_frame.elapsed())
+        } else {
+            IDLE_POLL.saturating_sub(last_poll.elapsed())
+        };
+        frame_wake.wait(wait)?;
+        last_poll = Instant::now();
+        // Bound message draining so cursor traffic cannot starve frame deadlines.
+        for _ in 0..64 {
+            if !PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                break;
+            }
+            if message.message == WM_QUIT {
+                return Ok(());
+            }
+            let _ = TranslateMessage(&message);
+            DispatchMessageW(&message);
         }
-        if result.0 == 0 {
-            break;
-        }
-        let _ = TranslateMessage(&message);
-        DispatchMessageW(&message);
         // The sender is bounded in frequency (400ms playback); coalesce state within this tick.
         for command in receiver.try_iter() {
             match command {
@@ -552,18 +608,51 @@ unsafe fn run(
                     dirty = true;
                 }
                 Command::Playback(sample) => {
-                    clock.sync(sample);
+                    let sync = clock.sync(sample.clone());
+                    if sync == ClockSync::Ignored {
+                        continue;
+                    }
+                    state.playback = sample;
+                    if sync == ClockSync::Discontinuity {
+                        renderer.cancel_transition();
+                        layout_dirty = true;
+                    }
                     dirty = true;
                 }
-                Command::State(snapshot) => {
-                    let song_changed = state.song.as_ref().map(|s| &s.path)
-                        != snapshot.song.as_ref().map(|s| &s.path);
-                    if song_changed {
-                        page = None;
+                Command::State(mut snapshot) => {
+                    let incoming_sequence = snapshot.playback.sample_sequence;
+                    if matches!((last_state_sequence, incoming_sequence), (Some(previous), Some(next)) if next <= previous)
+                    {
+                        continue;
                     }
-                    clock.sync(snapshot.playback.clone());
+                    let sync = clock.sync(snapshot.playback.clone());
+                    if sync == ClockSync::Ignored {
+                        // A settings snapshot may arrive behind a newer clock-only
+                        // packet. Preserve its newer visual content, but never let
+                        // its old clock or a previous playback session take over.
+                        if snapshot.playback.song_path != state.playback.song_path
+                            || snapshot.playback.playback_id != state.playback.playback_id
+                        {
+                            continue;
+                        }
+                        snapshot.playback = state.playback.clone();
+                    }
+                    last_state_sequence = incoming_sequence;
+                    // Pause/resume also sends full snapshots. Preserve the in-flight
+                    // row handoff when only the playback clock has changed.
+                    let content_changed = state.song != snapshot.song
+                        || state.parsed_lyrics != snapshot.parsed_lyrics
+                        || state.settings != snapshot.settings
+                        || state.custom_lyrics_fonts != snapshot.custom_lyrics_fonts
+                        || state.theme_colors != snapshot.theme_colors
+                        || state.lyrics_status != snapshot.lyrics_status
+                        || (state.parsed_lyrics.is_empty()
+                            && state.fallback_text != snapshot.fallback_text);
                     state = *snapshot;
-                    layout_dirty = true;
+                    if content_changed || sync == ClockSync::Discontinuity {
+                        renderer.cancel_transition();
+                        layout_dirty = true;
+                    }
                     dirty = true;
                 }
             }
@@ -639,6 +728,9 @@ unsafe fn run(
         let hidden =
             !revealed && (fullscreen || (state.settings.auto_hide_when_paused && !clock.playing()));
         if hidden != was_hidden {
+            // Hidden frames cannot take part in a visible row handoff.
+            renderer.cancel_transition();
+            layout_dirty = true;
             let _ = ShowWindow(hwnd, if hidden { SW_HIDE } else { SW_SHOWNOACTIVATE });
             was_hidden = hidden;
             dirty = true;
@@ -698,36 +790,34 @@ unsafe fn run(
             dirty = true;
             previous_opacity = opacity;
         }
-        // No repaint while hidden. Paused windows only poll for hover/fullscreen at 10 Hz.
-        SetTimer(
-            Some(hwnd),
-            TIMER,
-            if hidden || !clock.playing() { 100 } else { 33 },
-            None,
-        );
         if hidden {
             continue;
         }
-        // Mouse messages can arrive much faster than the timer; cap presentation at 30fps.
-        if !dirty && !layout_dirty && last_frame.elapsed() < Duration::from_millis(33) {
+        // Pause/seek/input updates use the same frame budget; dirty messages do not
+        // create unbounded extra frames between timer deadlines.
+        if last_frame.elapsed() < frame_interval {
             continue;
         }
         layout_dirty |= renderer.resize(bounds.width.max(1), bounds.height.max(1), scale)?;
         let time = clock.time();
         let active = active_index(&state.parsed_lyrics, time);
-        let next_page = page_start(page, active, state.settings.show_double_line);
-        if page != Some(next_page) || previous_active != active {
-            layout_dirty = true;
-        }
-        page = Some(next_page);
-        previous_active = active;
+        let active_changed = previous_active != active;
         let draw_result = (|| -> WinResult<()> {
             if layout_dirty {
-                renderer.rebuild(&state, next_page, active)?;
+                renderer.rebuild(&state, active)?;
                 layout_dirty = false;
                 dirty = true;
+            } else if active_changed {
+                if clock.playing() {
+                    renderer.transition_to(&state, active)?;
+                } else {
+                    renderer.rebuild(&state, active)?;
+                }
+                dirty = true;
             }
-            if dirty || clock.playing() {
+            previous_active = active;
+            if dirty || clock.playing() || renderer.has_transition() {
+                let frame_started = Instant::now();
                 renderer.draw(
                     hwnd,
                     &state,
@@ -739,7 +829,7 @@ unsafe fn run(
                     opacity,
                 )?;
                 dirty = false;
-                last_frame = Instant::now();
+                last_frame = frame_started;
             }
             Ok(())
         })();
@@ -756,7 +846,6 @@ unsafe fn run(
             recovery_count = 0;
         }
     }
-    Ok(())
 }
 
 #[cfg(test)]

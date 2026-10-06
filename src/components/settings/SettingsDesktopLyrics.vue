@@ -1373,7 +1373,7 @@ onUnmounted(() => {
         <!-- 行六：双行显示 & 字体方案 -->
         <div class="desktop-compact-row">
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">双行显示</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0" title="第一行显示当前句，第二行显示下一句，每句自动推进">双行显示</div>
             <div class="desktop-segmented-control flex overflow-hidden rounded-xl border border-gray-200 bg-white/40 dark:border-white/10 dark:bg-white/5">
               <button
                 v-if="desktopLyricsSettings.showDoubleLine"
