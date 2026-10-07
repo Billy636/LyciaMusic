@@ -21,7 +21,7 @@ export const LEGACY_DESKTOP_LYRICS_SETTINGS_KEY = 'desktop_lyrics_settings';
 
 export const DEFAULT_PLAYER_FONT_SCALE = 1;
 export const MIN_PLAYER_FONT_SCALE = 0.5;
-export const MAX_PLAYER_FONT_SCALE = 3.0;
+export const MAX_PLAYER_FONT_SCALE = 2.0;
 export const DEFAULT_PLAYER_LINE_GAP = 1;
 export const MIN_PLAYER_LINE_GAP = 0.5;
 export const MAX_PLAYER_LINE_GAP = 3.0;
@@ -114,6 +114,7 @@ export const LYRICS_FONT_OPTIONS = [
 export const defaultLyricsSettings: LyricsSettings = {
   showTranslation: true,
   showRomaji: false,
+  enableBlur: true,
   readingOrder: DEFAULT_LYRICS_READING_ORDER,
   readingOrderOverrides: {},
   playerRenderMode: DEFAULT_PLAYER_RENDER_MODE,
@@ -318,6 +319,9 @@ export function normalizeLyricsSettingsPatch(patch: Partial<LyricsSettings>): Ly
   return {
     ...defaultLyricsSettings,
     ...patch,
+    enableBlur: typeof patch.enableBlur === 'boolean'
+      ? patch.enableBlur
+      : defaultLyricsSettings.enableBlur,
     showTranslation: typeof patch.showTranslation === 'boolean'
       ? patch.showTranslation
       : defaultLyricsSettings.showTranslation,

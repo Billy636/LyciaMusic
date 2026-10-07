@@ -375,6 +375,7 @@ export interface ImportedLyricsFont {
 export interface LyricsSettings {
   showTranslation: boolean;
   showRomaji: boolean;
+  enableBlur: boolean;
   readingOrder: LyricsReadingOrder;
   readingOrderOverrides: Record<string, LyricsReadingOrder>;
   playerRenderMode: LyricsPlayerRenderMode;

@@ -451,7 +451,7 @@ onUnmounted(() => {
               v-for="option in PLAYER_WRITING_MODE_OPTIONS"
               :key="option.value"
               type="button"
-              class="writing-mode-option flex h-[78px] flex-col items-center justify-center gap-2 rounded-2xl border px-3 text-xs font-medium transition"
+              class="writing-mode-option flex h-10 items-center justify-center gap-2 rounded-2xl border px-3 text-xs font-medium transition"
               :class="lyricsSettings.playerWritingMode === option.value
                 ? 'border-white/25 bg-white/14 text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]'
                 : 'border-white/10 bg-white/[0.03] text-white/60 hover:border-white/20 hover:bg-white/[0.06] hover:text-white'"
@@ -613,6 +613,27 @@ onUnmounted(() => {
               @click="setPlayerLineGap(previewPlayerLineGap + LINE_GAP_STEP)"
             >
               +
+            </button>
+          </div>
+
+          <div
+            v-if="isVerticalWriting || lyricsSettings.playerRenderMode === 'amll'"
+            class="mt-5 flex items-center justify-between gap-3"
+          >
+            <span id="lyrics-blur-label" class="text-[13px] font-medium text-white/85">歌词模糊效果</span>
+            <button
+              type="button"
+              role="switch"
+              aria-labelledby="lyrics-blur-label"
+              :aria-checked="lyricsSettings.enableBlur"
+              class="relative inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70"
+              :class="lyricsSettings.enableBlur ? 'border-white/25 bg-white/30' : 'border-white/10 bg-white/10'"
+              @click="settingsStore.patchSettings({ lyrics: { enableBlur: !lyricsSettings.enableBlur } })"
+            >
+              <span
+                class="h-4 w-4 rounded-full bg-white shadow transition-transform"
+                :class="lyricsSettings.enableBlur ? 'translate-x-5' : 'translate-x-1'"
+              ></span>
             </button>
           </div>
 
@@ -929,17 +950,17 @@ onUnmounted(() => {
 
 .writing-mode-preview {
   display: flex;
-  width: 40px;
-  height: 28px;
+  width: 20px;
+  height: 16px;
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  gap: 5px;
+  gap: 3px;
 }
 
 .writing-mode-preview > span {
   width: 100%;
-  height: 3px;
+  height: 2px;
   border-radius: 999px;
   background: currentColor;
   opacity: 0.45;
@@ -958,21 +979,21 @@ onUnmounted(() => {
   flex-direction: row-reverse;
   align-items: flex-start;
   justify-content: center;
-  gap: 6px;
+  gap: 3px;
 }
 
 .writing-mode-preview--vertical > span {
-  width: 3px;
+  width: 2px;
   height: 100%;
 }
 
 .writing-mode-preview--vertical > span:nth-child(2) {
-  width: 3px;
+  width: 2px;
   height: 85%;
 }
 
 .writing-mode-preview--vertical > span:nth-child(3) {
-  width: 3px;
+  width: 2px;
   height: 65%;
 }
 
