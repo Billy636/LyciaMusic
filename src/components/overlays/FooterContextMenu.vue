@@ -51,8 +51,8 @@ const menuEntries: FooterMenuEntry[] = [
   { type: 'action', key: 'viewAlbum', label: '查看专辑', icon: Disc3 },
   { type: 'divider', key: 'divider-file' },
   { type: 'action', key: 'openFolder', label: '打开文件所在目录', icon: Folder },
-  { type: 'action', key: 'viewSongInfo', label: '查看歌曲信息', icon: Info },
   { type: 'action', key: 'refreshSongInfo', label: '刷新歌曲信息', icon: RefreshCw },
+  { type: 'action', key: 'viewSongInfo', label: '查看歌曲信息', icon: Info },
 ];
 
 // 当菜单显示时，立即测量其尺寸
