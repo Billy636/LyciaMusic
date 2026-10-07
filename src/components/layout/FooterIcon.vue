@@ -46,5 +46,18 @@ withDefaults(defineProps<{
   </template>
   <AudioLines v-else-if="id === 'visualizer'" class="h-5 w-5 shrink-0" :stroke-width="2" aria-hidden="true" />
   <SlidersHorizontal v-else-if="id === 'equalizer'" class="h-5 w-5 shrink-0" :stroke-width="2" aria-hidden="true" />
+  <svg v-else-if="id === 'wasapiExclusive'" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M4 14v-3a8 8 0 0 1 16 0v3" />
+    <rect x="3" y="12" width="4" height="8" rx="2" />
+    <rect x="17" y="12" width="4" height="8" rx="2" />
+    <g stroke-width="1.6">
+      <rect x="9" y="14" width="6" height="5" rx="1" />
+      <path d="M10 14v-2a2 2 0 0 1 4 0v2" />
+    </g>
+  </svg>
+  <svg v-else-if="id === 'volumeBalance'" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M4 9v6M8 5v14M12 7v10M16 4v16M20 9v6" />
+    <path d="M2 12h20" />
+  </svg>
   <Ellipsis v-else-if="id === 'more'" class="h-5 w-5 shrink-0" aria-hidden="true" />
 </template>

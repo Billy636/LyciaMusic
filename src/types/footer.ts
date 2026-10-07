@@ -1,7 +1,7 @@
 export type FooterScene = 'main' | 'detail';
 export type FooterCoverShape = 'square' | 'circle';
 export type FooterActionId = 'favorite' | 'mode' | 'queue' | 'volume' | 'desktopLyrics'
-  | 'equalizer' | 'pin' | 'progress' | 'lyricsStyle' | 'visualizer' | 'more';
+  | 'equalizer' | 'wasapiExclusive' | 'volumeBalance' | 'pin' | 'progress' | 'lyricsStyle' | 'visualizer' | 'more';
 export type FooterMovableId = FooterActionId | 'previous' | 'play' | 'next';
 export type FooterPlacementBasis = 'canvas' | 'legacy-none' | 'legacy-cover' | 'legacy-text';
 export interface FooterPlacement {

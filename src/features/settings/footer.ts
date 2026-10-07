@@ -7,6 +7,8 @@ export const FOOTER_ACTIONS: { id: FooterActionId; label: string; position: Foot
   { id: 'volume', label: '音量', position: 'right' },
   { id: 'desktopLyrics', label: '桌面歌词', position: 'right' },
   { id: 'equalizer', label: '均衡器', position: 'right' },
+  { id: 'wasapiExclusive', label: 'WASAPI 独占', position: 'hidden' },
+  { id: 'volumeBalance', label: '音量平衡', position: 'hidden' },
   { id: 'pin', label: '固定底栏', position: 'more' },
   { id: 'progress', label: '进度条显示开关', position: 'more' },
   { id: 'more', label: '更多底栏操作', position: 'right' },

@@ -7,6 +7,8 @@ import { useLibraryCollections } from '../../features/collections/useLibraryColl
 import { useLyrics } from '../../composables/lyrics';
 import { usePlaybackController } from '../../features/playback/usePlaybackController';
 import { useFooterSettings } from '../../features/settings/useFooterSettings';
+import { useSettingsStore } from '../../features/settings/store';
+import { playbackApi } from '../../services/tauri/playbackApi';
 import { effectiveFooterLayout, footerAction, FOOTER_ACTIONS } from '../../features/settings/footer';
 import { resolveFreeFooterLayout } from '../../features/settings/freeFooterLayout';
 import { footerCoverVisible, footerCoverAnchor, footerViewport, footerLivePresentation } from './footerPresentation';
@@ -31,6 +33,8 @@ const { showDesktopLyrics, showLyricsPlayerSettingsPanel } = useLyrics();
 const { addMarker, formatMarkerTime, errorMessage } = useSongHighlights();
 const { showToast } = useToast();
 const { footer, setBehavior, toggleProgress } = useFooterSettings();
+const settingsStore = useSettingsStore();
+const switchingOutputMode = ref(false);
 const route = useRoute();
 const footerRef = ref<HTMLElement | null>(null);
 const footerWidth = ref(window.innerWidth);
@@ -231,11 +235,18 @@ const actionLabel = (id: FooterMovableId) => {
   if (id === 'visualizer') return isVisualizerEnabled.value ? '关闭音频频谱' : '开启音频频谱';
   if (id === 'favorite') return currentSong.value && isFavorite(currentSong.value) ? '取消收藏' : '收藏';
   if (id === 'mode') return ['列表循环', '单曲循环', '随机播放'][playMode.value];
+  if (id === 'wasapiExclusive') return switchingOutputMode.value ? '正在切换音频输出模式'
+    : settingsStore.settings.audio.outputMode === 'wasapiExclusive' ? '关闭 WASAPI 独占' : '开启 WASAPI 独占（其他软件可能无声）';
+  if (id === 'volumeBalance') return settingsStore.settings.audio.volumeBalance.enabled ? '关闭音量平衡' : '开启音量平衡';
   return footerAction(id).label;
 };
+const actionDisabled = (id: FooterMovableId) => (id === 'favorite' && !currentSong.value)
+  || (id === 'wasapiExclusive' && switchingOutputMode.value);
 const actionActive = (id: FooterMovableId) => ({
   favorite: !!currentSong.value && isFavorite(currentSong.value), mode: false, queue: showPlaylist.value,
   volume: volume.value === 0, desktopLyrics: showDesktopLyrics.value, equalizer: popup.value === 'equalizer',
+  wasapiExclusive: settingsStore.settings.audio.outputMode === 'wasapiExclusive',
+  volumeBalance: settingsStore.settings.audio.volumeBalance.enabled,
   pin: isPinned.value, progress: !isProgressHidden.value, lyricsStyle: showLyricsPlayerSettingsPanel.value, visualizer: isVisualizerEnabled.value,
   more: popup.value === 'more', previous: false, play: false, next: false,
 })[id];
@@ -273,6 +284,24 @@ const activateAction = async (id: FooterMovableId, event: MouseEvent, fromMenu =
     case 'pin': setBehavior(scene.value, { autoHide: !behavior.value.autoHide }); break;
     case 'progress': toggleProgress(scene.value); break;
     case 'visualizer': setBehavior(scene.value, { visualizer: !behavior.value.visualizer }); break;
+    case 'volumeBalance':
+      settingsStore.patchSettings({ audio: { volumeBalance: { enabled: !settingsStore.settings.audio.volumeBalance.enabled } } });
+      break;
+    case 'wasapiExclusive': {
+      if (switchingOutputMode.value) break;
+      const outputMode = settingsStore.settings.audio.outputMode === 'wasapiExclusive' ? 'shared' : 'wasapiExclusive';
+      switchingOutputMode.value = true;
+      try {
+        await playbackApi.setAudioOutputMode(outputMode);
+        settingsStore.patchSettings({ audio: { outputMode } });
+      } catch (error) {
+        console.error('Failed to update audio output mode:', error);
+        showToast('切换音频输出模式失败', 'error');
+      } finally {
+        switchingOutputMode.value = false;
+      }
+      break;
+    }
   }
 };
 const handleOutsidePointer = (event: PointerEvent) => {
@@ -420,7 +449,7 @@ onUnmounted(() => {
       <FooterActionButton v-for="item in groups.bar" :id="item.id" :key="item.id" class="footer-free-button"
         :style="{ left: `${item.x}px`, width: `${item.width}px`, height: `${item.width}px` }"
         :label="actionLabel(item.id)" :active="actionActive(item.id)" :playing="isPlaying"
-        :expanded="item.id === 'more' ? popup === 'more' : undefined" :disabled="item.id === 'favorite' && !currentSong"
+        :expanded="item.id === 'more' ? popup === 'more' : undefined" :disabled="actionDisabled(item.id)"
         :play-mode="playMode" :volume="volume" :progress-hidden="isProgressHidden" :pinned="isPinned"
         @activate="activateAction(item.id, $event)" @enter="volumeEnter(item.id, $event)" @leave="item.id === 'volume' && volumeLeave()" @wheel="actionWheel(item.id, $event)" />
     </div>
@@ -431,7 +460,7 @@ onUnmounted(() => {
         :aria-label="popup === 'equalizer' ? '均衡器' : popup === 'volume' ? '音量' : '更多底栏操作'"
         @pointerdown.stop @mouseenter="clearVolumeTimer" @mouseleave="popup === 'volume' && volumeLeave()" @wheel="popup === 'volume' && actionWheel('volume', $event)">
         <template v-if="popup === 'more'">
-          <FooterActionButton v-for="item in groups.more" :id="item.id" :key="item.id" menu :playing="isPlaying" :label="actionLabel(item.id)" :active="actionActive(item.id)" :expanded="item.id === 'more' ? popup === 'more' : undefined" :disabled="item.id === 'favorite' && !currentSong" :play-mode="playMode" :volume="volume" :progress-hidden="isProgressHidden" :pinned="isPinned" @activate="activateAction(item.id, $event, true)" />
+          <FooterActionButton v-for="item in groups.more" :id="item.id" :key="item.id" menu :playing="isPlaying" :label="actionLabel(item.id)" :active="actionActive(item.id)" :expanded="item.id === 'more' ? popup === 'more' : undefined" :disabled="actionDisabled(item.id)" :play-mode="playMode" :volume="volume" :progress-hidden="isProgressHidden" :pinned="isPinned" @activate="activateAction(item.id, $event, true)" />
           <p v-if="!groups.more.length" class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">暂无更多操作</p>
         </template>
         <template v-else-if="popup === 'volume'">
