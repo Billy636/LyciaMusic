@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { startStartupUpdateCheck, useStartupUpdateNotice } from '../../composables/useUpdateCheck';
 import { useSettings } from '../../features/settings/useSettings';
-import UpdateAvailableDialog from './UpdateAvailableDialog.vue';
+import UpdateAvailableBanner from './UpdateAvailableBanner.vue';
 
 const { settings } = useSettings();
 const { startupUpdate, dismissStartupUpdate } = useStartupUpdateNotice();
@@ -21,9 +21,8 @@ onUnmounted(() => dispose());
 </script>
 
 <template>
-  <UpdateAvailableDialog
+  <UpdateAvailableBanner
     v-model:visible="visible"
-    :current-version="startupUpdate?.currentVersion ?? ''"
     :release="startupUpdate?.release ?? null"
   />
 </template>
