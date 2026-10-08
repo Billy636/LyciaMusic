@@ -1,4 +1,4 @@
-use super::{model::*, render::Renderer};
+use super::{model::*, render::Renderer, topmost::TopmostGuard};
 use std::{
     cell::{Cell, RefCell},
     mem::size_of,
@@ -545,7 +545,7 @@ unsafe fn run(
     let mut dirty = true;
     let mut reveal_until = Instant::now() + Duration::from_millis(1200);
     let mut last_fullscreen_poll = Instant::now() - Duration::from_secs(1);
-    let mut last_topmost = Instant::now() - Duration::from_secs(2);
+    let mut topmost_guard = TopmostGuard::new();
     let mut fullscreen = false;
     let mut was_hidden = true;
     let mut previous_interaction = (false, false, None);
@@ -716,7 +716,6 @@ unsafe fn run(
                 position(hwnd, bounds)?;
                 let _ = app.emit_to("main", "desktop-lyrics:bounds", bounds);
             }
-            last_topmost = Instant::now() - Duration::from_secs(2);
             previous_flags = Some(flags);
         }
         if last_fullscreen_poll.elapsed() >= Duration::from_millis(300) {
@@ -735,22 +734,7 @@ unsafe fn run(
             was_hidden = hidden;
             dirty = true;
         }
-        if flags_changed || (flags.0 && last_topmost.elapsed() >= Duration::from_millis(1500)) {
-            SetWindowPos(
-                hwnd,
-                Some(if flags.0 {
-                    HWND_TOPMOST
-                } else {
-                    HWND_NOTOPMOST
-                }),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            )?;
-            last_topmost = Instant::now();
-        }
+        topmost_guard.update(hwnd, flags.0, !hidden)?;
         let toolbar_state = toolbar_interaction(state.settings.is_locked, over, hover, revealed);
         let toolbar = toolbar_state.visible;
         let surface = state.settings.always_show_shadow_background

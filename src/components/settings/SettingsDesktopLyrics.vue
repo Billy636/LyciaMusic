@@ -855,6 +855,7 @@ onUnmounted(() => {
         >
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">窗口置顶</div>
+            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">游戏中显示歌词时，请同时关闭“全屏时自动隐藏”</div>
           </div>
           <span class="desktop-switch" :class="desktopLyricsSettings.isAlwaysOnTop ? 'desktop-switch--on' : ''">
             <span class="desktop-switch-thumb" :class="desktopLyricsSettings.isAlwaysOnTop ? 'translate-x-5' : ''" />

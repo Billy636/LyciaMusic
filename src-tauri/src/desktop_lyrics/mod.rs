@@ -8,6 +8,8 @@ mod outline;
 #[cfg(target_os = "windows")]
 mod render;
 #[cfg(target_os = "windows")]
+mod topmost;
+#[cfg(target_os = "windows")]
 mod window;
 
 #[tauri::command]
