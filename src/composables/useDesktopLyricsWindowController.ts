@@ -23,12 +23,14 @@ const FULLSCREEN_POLL_INTERVAL_MS = 300;
 const RESIZE_VISIBILITY_HOLD_MS = 1200;
 
 export function shouldAutoHideDesktopLyrics({
+  isAlwaysOnTop = false,
   autoHideWhenFullscreen,
   autoHideWhenPaused,
   isForegroundFullscreen,
   isPlaying,
   isResizeInteractionActive,
 }: {
+  isAlwaysOnTop?: boolean;
   autoHideWhenFullscreen: boolean;
   autoHideWhenPaused: boolean;
   isForegroundFullscreen: boolean;
@@ -39,7 +41,7 @@ export function shouldAutoHideDesktopLyrics({
     return false;
   }
 
-  return (autoHideWhenFullscreen && isForegroundFullscreen)
+  return (!isAlwaysOnTop && autoHideWhenFullscreen && isForegroundFullscreen)
     || (autoHideWhenPaused && !isPlaying);
 }
 
@@ -106,6 +108,7 @@ export function useDesktopLyricsWindowController(options: {
   let lockPollingTimer: ReturnType<typeof setInterval> | null = null;
 
   const isAutoHidden = computed(() => shouldAutoHideDesktopLyrics({
+    isAlwaysOnTop: settings.value.isAlwaysOnTop,
     autoHideWhenFullscreen: settings.value.autoHideWhenFullscreen,
     autoHideWhenPaused: settings.value.autoHideWhenPaused,
     isForegroundFullscreen: isSystemHidden.value,

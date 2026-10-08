@@ -1,4 +1,6 @@
 //! Windows desktop lyrics use an in-process Win32 window, never a WebView.
+#[cfg(target_os = "windows")]
+mod display_position;
 #[cfg(any(target_os = "windows", test))]
 mod flow;
 #[cfg(any(target_os = "windows", test))]

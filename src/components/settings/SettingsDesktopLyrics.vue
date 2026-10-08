@@ -855,7 +855,7 @@ onUnmounted(() => {
         >
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">窗口置顶</div>
-            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">游戏中显示歌词时，请同时关闭“全屏时自动隐藏”</div>
+            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">开启后优先保持显示，游戏请使用无边框全屏；独占全屏可能无法覆盖</div>
           </div>
           <span class="desktop-switch" :class="desktopLyricsSettings.isAlwaysOnTop ? 'desktop-switch--on' : ''">
             <span class="desktop-switch-thumb" :class="desktopLyricsSettings.isAlwaysOnTop ? 'translate-x-5' : ''" />
@@ -884,10 +884,13 @@ onUnmounted(() => {
         <button
           type="button"
           class="desktop-setting-row"
+          :disabled="desktopLyricsSettings.isAlwaysOnTop"
+          :class="desktopLyricsSettings.isAlwaysOnTop ? 'cursor-not-allowed opacity-50' : ''"
           @click="desktopLyricsSettings.autoHideWhenFullscreen = !desktopLyricsSettings.autoHideWhenFullscreen"
         >
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">全屏时自动隐藏</div>
+            <div v-if="desktopLyricsSettings.isAlwaysOnTop" class="mt-1 text-xs text-gray-500 dark:text-gray-400">窗口置顶已开启，此设置在关闭置顶后生效</div>
           </div>
           <span class="desktop-switch" :class="desktopLyricsSettings.autoHideWhenFullscreen ? 'desktop-switch--on' : ''">
             <span class="desktop-switch-thumb" :class="desktopLyricsSettings.autoHideWhenFullscreen ? 'translate-x-5' : ''" />

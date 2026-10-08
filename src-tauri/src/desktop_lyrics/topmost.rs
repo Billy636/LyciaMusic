@@ -10,10 +10,10 @@ use windows_sys::Win32::{
         Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK},
         WindowsAndMessaging::{
             GetWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible, SetWindowPos,
-            EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_REORDER, EVENT_OBJECT_SHOW,
+            ShowWindow, EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_REORDER, EVENT_OBJECT_SHOW,
             EVENT_SYSTEM_FOREGROUND, GWL_EXSTYLE, GW_HWNDPREV, HWND_NOTOPMOST, HWND_TOPMOST,
             OBJID_WINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
-            WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WS_EX_TOPMOST,
+            SW_SHOWNOACTIVATE, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WS_EX_TOPMOST,
         },
     },
 };
@@ -93,13 +93,17 @@ impl TopmostGuard {
         }
     }
 
+    pub(super) fn request_refresh(&self) {
+        Z_ORDER_DIRTY.with(|dirty| dirty.set(true));
+    }
+
     // Called only on the HWND's owning thread, after applying automatic visibility.
     pub(super) unsafe fn update(
         &mut self,
         hwnd: NativeHwnd,
         enabled: bool,
         visible: bool,
-    ) -> WinResult<()> {
+    ) -> WinResult<bool> {
         let hwnd = hwnd.0;
         let changed = self.enabled != Some(enabled);
         if changed {
@@ -107,10 +111,22 @@ impl TopmostGuard {
             self.enabled = Some(enabled);
         }
 
-        if !enabled || !visible {
+        if !visible {
             self.hooks = None;
             Z_ORDER_DIRTY.with(|dirty| dirty.set(false));
-            return Ok(());
+            return Ok(false);
+        }
+
+        // Logical visibility can stay true while Windows hides/minimizes the
+        // HWND during a mode switch. Restore its actual state without focus.
+        let restored_visibility = IsWindowVisible(hwnd) == 0 || IsIconic(hwnd) != 0;
+        if restored_visibility {
+            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        }
+        if !enabled {
+            self.hooks = None;
+            Z_ORDER_DIRTY.with(|dirty| dirty.set(false));
+            return Ok(restored_visibility);
         }
 
         let starting = self.hooks.is_none();
@@ -118,15 +134,22 @@ impl TopmostGuard {
             self.hooks = Some(EventHooks::install());
         }
         let dirty = Z_ORDER_DIRTY.with(|dirty| dirty.replace(false));
-        if starting || changed || dirty || self.last_check.elapsed() >= CHECK_INTERVAL {
+        if starting
+            || changed
+            || dirty
+            || restored_visibility
+            || self.last_check.elapsed() >= CHECK_INTERVAL
+        {
             self.last_check = Instant::now();
             // Games can promote themselves again after the foreground event, or
             // change only Z order without a location event. Inspect the actual order.
-            if starting || needs_restore(hwnd) {
+            // A mode/foreground notification also needs a real promotion when
+            // the HWND list appears unchanged; it does not describe scanout.
+            if starting || changed || dirty || restored_visibility || needs_restore(hwnd) {
                 set_topmost(hwnd, true)?;
             }
         }
-        Ok(())
+        Ok(restored_visibility)
     }
 }
 

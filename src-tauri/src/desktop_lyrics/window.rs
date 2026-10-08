@@ -1,4 +1,4 @@
-use super::{model::*, render::Renderer, topmost::TopmostGuard};
+use super::{display_position::DisplayPosition, model::*, render::Renderer, topmost::TopmostGuard};
 use std::{
     cell::{Cell, RefCell},
     mem::size_of,
@@ -193,6 +193,8 @@ enum WindowEvent {
     Close,
     Bounds,
     DisplayChanged,
+    DpiChanged,
+    DragStarted,
 }
 #[derive(Clone, Copy)]
 struct Drag {
@@ -289,6 +291,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPAR
                         }))
                     });
                     SetCapture(hwnd);
+                    event(WindowEvent::DragStarted);
                 }
             }
             LRESULT(0)
@@ -343,7 +346,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPAR
                 // rectangle move an intentionally off-screen window back inside.
                 SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER,
             );
-            event(WindowEvent::Bounds);
+            event(WindowEvent::DpiChanged);
             LRESULT(0)
         }
         WM_GETMINMAXINFO => {
@@ -546,6 +549,11 @@ unsafe fn run(
     let mut reveal_until = Instant::now() + Duration::from_millis(1200);
     let mut last_fullscreen_poll = Instant::now() - Duration::from_secs(1);
     let mut topmost_guard = TopmostGuard::new();
+    let mut topmost_error_reported = false;
+    let mut display_position = DisplayPosition::new(initial);
+    let mut last_display_recovery = Instant::now() - IDLE_POLL;
+    let mut display_recovery_error_reported = false;
+    let mut dpi_bounds_pending = false;
     let mut fullscreen = false;
     let mut was_hidden = true;
     let mut previous_interaction = (false, false, None);
@@ -606,6 +614,7 @@ unsafe fn run(
                 Command::Reveal => {
                     reveal_until = Instant::now() + Duration::from_millis(1200);
                     dirty = true;
+                    topmost_guard.request_refresh();
                 }
                 Command::Playback(sample) => {
                     let sync = clock.sync(sample.clone());
@@ -696,14 +705,60 @@ unsafe fn run(
                         serde_json::json!({"type":"close"}),
                     );
                 }
-                WindowEvent::Bounds | WindowEvent::DisplayChanged => {
+                WindowEvent::Bounds => {
                     let fitted = finish_bounds_change(hwnd, bounds, scale)?;
                     bounds = fitted;
+                    display_position.user_changed(bounds);
                     let _ = app.emit_to("main", "desktop-lyrics:bounds", fitted);
                     reveal_until = Instant::now() + Duration::from_millis(1200);
                     dirty = true;
                 }
+                WindowEvent::DragStarted => {
+                    display_position.user_changed(bounds);
+                }
+                WindowEvent::DisplayChanged | WindowEvent::DpiChanged => {
+                    // Keep the actual HWND bounds during a mode switch. The
+                    // pending recovery applies size limits with retry handling.
+                    display_position.request_refresh();
+                    last_display_recovery = Instant::now() - IDLE_POLL;
+                    dpi_bounds_pending |= matches!(event, WindowEvent::DpiChanged);
+                    topmost_guard.request_refresh();
+                    reveal_until = Instant::now() + Duration::from_millis(1200);
+                    dirty = true;
+                }
             }
+        }
+        if display_position.needs_refresh() && last_display_recovery.elapsed() >= IDLE_POLL {
+            last_display_recovery = Instant::now();
+            if let Some(recovered) = display_position.pending_position(bounds) {
+                let recovered = constrain_bounds_size(recovered, scale);
+                match position(hwnd, recovered) {
+                    Ok(()) => {
+                        bounds = get_bounds(hwnd)?;
+                        display_position.position_applied(bounds);
+                        display_recovery_error_reported = false;
+                        layout_dirty = true;
+                        dirty = true;
+                        topmost_guard.request_refresh();
+                    }
+                    Err(error) => {
+                        // Keep the pending coordinates and original position
+                        // until Windows accepts recovery after the mode switch.
+                        if !display_recovery_error_reported {
+                            eprintln!("Native desktop lyrics display recovery failed; will retry: {error}");
+                            display_recovery_error_reported = true;
+                        }
+                    }
+                }
+            }
+        }
+        if dpi_bounds_pending && !display_position.needs_refresh() {
+            // Failed/pending or temporary recovery must not replace the user's
+            // persisted desktop coordinates.
+            if !display_position.is_temporary() {
+                let _ = app.emit_to("main", "desktop-lyrics:bounds", bounds);
+            }
+            dpi_bounds_pending = false;
         }
         let flags = (
             state.settings.is_always_on_top,
@@ -714,18 +769,21 @@ unsafe fn run(
             if horizontal_center_requested(previous_flags, state.settings.center_horizontally) {
                 bounds = center_bounds_horizontally(bounds);
                 position(hwnd, bounds)?;
+                display_position.user_changed(bounds);
                 let _ = app.emit_to("main", "desktop-lyrics:bounds", bounds);
             }
             previous_flags = Some(flags);
         }
         if last_fullscreen_poll.elapsed() >= Duration::from_millis(300) {
-            fullscreen = state.settings.auto_hide_when_fullscreen
-                && crate::foreground_window::get_foreground_fullscreen_state().is_fullscreen;
+            fullscreen = crate::foreground_window::get_foreground_fullscreen_state().is_fullscreen;
             last_fullscreen_poll = Instant::now();
         }
         let revealed = Instant::now() < reveal_until || DRAG.with(Cell::get).is_some();
-        let hidden =
-            !revealed && (fullscreen || (state.settings.auto_hide_when_paused && !clock.playing()));
+        let hide_for_fullscreen = fullscreen
+            && state.settings.auto_hide_when_fullscreen
+            && !state.settings.is_always_on_top;
+        let hidden = !revealed
+            && (hide_for_fullscreen || (state.settings.auto_hide_when_paused && !clock.playing()));
         if hidden != was_hidden {
             // Hidden frames cannot take part in a visible row handoff.
             renderer.cancel_transition();
@@ -734,7 +792,25 @@ unsafe fn run(
             was_hidden = hidden;
             dirty = true;
         }
-        topmost_guard.update(hwnd, flags.0, !hidden)?;
+        match topmost_guard.update(hwnd, flags.0, !hidden) {
+            Ok(restored_visibility) => {
+                topmost_error_reported = false;
+                if restored_visibility {
+                    bounds = get_bounds(hwnd)?;
+                    dirty = true;
+                }
+            }
+            Err(error) => {
+                // Mode switches can temporarily reject Z-order changes. Keep
+                // the lyrics alive and retry, recording the first failure.
+                if !topmost_error_reported {
+                    eprintln!("Native desktop lyrics topmost recovery failed; will retry: {error}");
+                    topmost_error_reported = true;
+                }
+                topmost_guard.request_refresh();
+            }
+        }
+        display_position.observe(bounds);
         let toolbar_state = toolbar_interaction(state.settings.is_locked, over, hover, revealed);
         let toolbar = toolbar_state.visible;
         let surface = state.settings.always_show_shadow_background
