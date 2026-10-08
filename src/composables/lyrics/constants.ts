@@ -22,6 +22,9 @@ export const LEGACY_DESKTOP_LYRICS_SETTINGS_KEY = 'desktop_lyrics_settings';
 export const DEFAULT_PLAYER_FONT_SCALE = 1;
 export const MIN_PLAYER_FONT_SCALE = 0.5;
 export const MAX_PLAYER_FONT_SCALE = 2.0;
+export const DEFAULT_PLAYER_TRANSLATION_FONT_SCALE = 1;
+export const MIN_PLAYER_TRANSLATION_FONT_SCALE = 0.5;
+export const MAX_PLAYER_TRANSLATION_FONT_SCALE = 2;
 export const DEFAULT_PLAYER_LINE_GAP = 1;
 export const MIN_PLAYER_LINE_GAP = 0.5;
 export const MAX_PLAYER_LINE_GAP = 3.0;
@@ -121,6 +124,7 @@ export const defaultLyricsSettings: LyricsSettings = {
   playerWritingMode: DEFAULT_PLAYER_WRITING_MODE,
   playerVerticalScrollDirection: DEFAULT_PLAYER_VERTICAL_SCROLL_DIRECTION,
   playerFontScale: DEFAULT_PLAYER_FONT_SCALE,
+  playerTranslationFontScale: DEFAULT_PLAYER_TRANSLATION_FONT_SCALE,
   playerLineGap: DEFAULT_PLAYER_LINE_GAP,
   playerOffsetX: DEFAULT_PLAYER_OFFSET_X,
   playerOffsetY: DEFAULT_PLAYER_OFFSET_Y,
@@ -174,6 +178,11 @@ export function createDefaultDesktopLyricsSettings(): DesktopLyricsSettings {
 export function clampPlayerFontScale(value: number) {
   if (!Number.isFinite(value)) return DEFAULT_PLAYER_FONT_SCALE;
   return Math.min(MAX_PLAYER_FONT_SCALE, Math.max(MIN_PLAYER_FONT_SCALE, value));
+}
+
+export function clampPlayerTranslationFontScale(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_PLAYER_TRANSLATION_FONT_SCALE;
+  return Math.min(MAX_PLAYER_TRANSLATION_FONT_SCALE, Math.max(MIN_PLAYER_TRANSLATION_FONT_SCALE, value));
 }
 
 export function clampPlayerLineGap(value: number) {
@@ -334,6 +343,9 @@ export function normalizeLyricsSettingsPatch(patch: Partial<LyricsSettings>): Ly
     playerWritingMode: normalizeLyricsPlayerWritingMode(patch.playerWritingMode),
     playerVerticalScrollDirection: normalizeLyricsVerticalScrollDirection(patch.playerVerticalScrollDirection),
     playerFontScale: clampPlayerFontScale(patch.playerFontScale ?? DEFAULT_PLAYER_FONT_SCALE),
+    playerTranslationFontScale: clampPlayerTranslationFontScale(
+      patch.playerTranslationFontScale ?? DEFAULT_PLAYER_TRANSLATION_FONT_SCALE,
+    ),
     playerLineGap: clampPlayerLineGap(patch.playerLineGap ?? DEFAULT_PLAYER_LINE_GAP),
     playerOffsetX: clampPlayerOffsetX(patch.playerOffsetX ?? DEFAULT_PLAYER_OFFSET_X),
     playerOffsetY: clampPlayerOffsetY(patch.playerOffsetY ?? DEFAULT_PLAYER_OFFSET_Y),

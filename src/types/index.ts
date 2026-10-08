@@ -382,6 +382,7 @@ export interface LyricsSettings {
   playerWritingMode: LyricsPlayerWritingMode;
   playerVerticalScrollDirection: LyricsVerticalScrollDirection;
   playerFontScale: number;
+  playerTranslationFontScale: number;
   playerLineGap: number;
   playerOffsetX: number;
   playerOffsetY: number;

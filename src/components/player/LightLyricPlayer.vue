@@ -20,6 +20,7 @@ const props = withDefaults(defineProps<{
   playing?: boolean;
   showTranslation?: boolean;
   showRomaji?: boolean;
+  translationFontScale?: number;
   lineGap?: number;
   title?: string;
   artist?: string;
@@ -32,6 +33,7 @@ const props = withDefaults(defineProps<{
   playing: true,
   showTranslation: true,
   showRomaji: false,
+  translationFontScale: 1,
   lineGap: 1,
   title: '',
   artist: '',
@@ -309,6 +311,12 @@ watch(() => props.seekKey, () => {
   scrollToActiveLine(false);
 });
 
+// Translation scaling changes row heights without resizing the player root.
+// Recenter after the inherited CSS variable updates, respecting manual scroll.
+watch(() => props.translationFontScale, () => {
+  if (!isUserInteracting.value) scrollToActiveLine(true);
+}, { flush: 'post' });
+
 watch(() => props.playing, () => {
   syncExternalPlaybackTime(true);
   if (!isUserInteracting.value) {
@@ -580,11 +588,15 @@ onBeforeUnmount(() => {
 .light-lyric-subline {
   max-width: min(100%, 900px);
   margin-top: 0.42em;
-  font-size: calc(max(max(2.4vh, 1.2vw), 11px) * var(--lyrics-font-scale, 1));
+  font-size: calc(max(max(2.4vh, 1.2vw), 11px) * var(--lyrics-font-scale, 1) * var(--light-subline-font-scale, 1));
   font-weight: 600;
   line-height: 1.25;
   color: rgba(255, 255, 255, 0.52);
   overflow-wrap: anywhere;
+}
+
+.light-lyric-translation {
+  --light-subline-font-scale: var(--lyrics-translation-font-scale, 1);
 }
 
 .light-lyric-line--active .light-lyric-subline {
@@ -645,7 +657,7 @@ onBeforeUnmount(() => {
   }
 
   .light-lyric-subline {
-    font-size: calc(max(3.6vw, 11px) * var(--lyrics-font-scale, 1));
+    font-size: calc(max(3.6vw, 11px) * var(--lyrics-font-scale, 1) * var(--light-subline-font-scale, 1));
   }
 }
 </style>

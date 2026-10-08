@@ -9,6 +9,7 @@ import {
   DEFAULT_PLAYER_LINE_GAP,
   DEFAULT_PLAYER_OFFSET_X,
   DEFAULT_PLAYER_OFFSET_Y,
+  DEFAULT_PLAYER_TRANSLATION_FONT_SCALE,
   buildImportedLyricsFontOptions,
   importLyricsFontFile,
   LYRICS_FONT_OPTIONS,
@@ -16,10 +17,12 @@ import {
   MAX_PLAYER_LINE_GAP,
   MAX_PLAYER_OFFSET_X,
   MAX_PLAYER_OFFSET_Y,
+  MAX_PLAYER_TRANSLATION_FONT_SCALE,
   MIN_PLAYER_FONT_SCALE,
   MIN_PLAYER_LINE_GAP,
   MIN_PLAYER_OFFSET_X,
   MIN_PLAYER_OFFSET_Y,
+  MIN_PLAYER_TRANSLATION_FONT_SCALE,
   loadSystemLyricsFonts,
   normalizeLyricsFontPreset,
   systemLyricsFontOptions,
@@ -36,7 +39,7 @@ import LyricsReadingOrderControl from './LyricsReadingOrderControl.vue';
 import { useLyricsAppearanceDraft, type LyricsAppearanceDraft } from './useLyricsAppearanceDraft';
 import './playerSidePanel.css';
 
-const emit = defineEmits<{ preview: [draft: LyricsAppearanceDraft] }>();
+const emit = defineEmits<{ preview: [draft: Required<LyricsAppearanceDraft>] }>();
 const { lyricsSettings, showLyricsPlayerSettingsPanel } = useLyrics();
 const { showPlayerDetail } = usePlayer();
 const settingsStore = useSettingsStore();
@@ -83,12 +86,14 @@ const {
 );
 const {
   playerFontScale: previewPlayerFontScale,
+  playerTranslationFontScale: previewPlayerTranslationFontScale,
   playerLineGap: previewPlayerLineGap,
   playerOffsetX: previewPlayerOffsetX,
   playerOffsetY: previewPlayerOffsetY,
 } = toRefs(draft);
 
 const fontScalePercent = computed(() => `${Math.round(previewPlayerFontScale.value * 100)}%`);
+const translationFontScalePercent = computed(() => `${Math.round(previewPlayerTranslationFontScale.value * 100)}%`);
 const lineGapPercent = computed(() => `${Math.round(previewPlayerLineGap.value * 100)}%`);
 const horizontalOffsetPercent = computed(() => formatOffsetValue(previewPlayerOffsetX.value));
 const verticalOffsetPercent = computed(() => formatOffsetValue(previewPlayerOffsetY.value));
@@ -115,6 +120,11 @@ const fontScaleProgress = computed(() => {
   return ((previewPlayerFontScale.value - MIN_PLAYER_FONT_SCALE) / (MAX_PLAYER_FONT_SCALE - MIN_PLAYER_FONT_SCALE)) * 100;
 });
 
+const translationFontScaleProgress = computed(() => {
+  return ((previewPlayerTranslationFontScale.value - MIN_PLAYER_TRANSLATION_FONT_SCALE)
+    / (MAX_PLAYER_TRANSLATION_FONT_SCALE - MIN_PLAYER_TRANSLATION_FONT_SCALE)) * 100;
+});
+
 const lineGapProgress = computed(() => {
   return ((previewPlayerLineGap.value - MIN_PLAYER_LINE_GAP) / (MAX_PLAYER_LINE_GAP - MIN_PLAYER_LINE_GAP)) * 100;
 });
@@ -133,6 +143,14 @@ function formatOffsetValue(value: number) {
 
 function setPlayerFontScale(value: number, immediately = true) {
   setAppearanceField('playerFontScale', value, immediately);
+}
+
+function setPlayerTranslationFontScale(value: number, immediately = true) {
+  setAppearanceField('playerTranslationFontScale', value, immediately);
+}
+
+function resetPlayerTranslationFontScale() {
+  setPlayerTranslationFontScale(DEFAULT_PLAYER_TRANSLATION_FONT_SCALE);
 }
 
 function setPlayerLineGap(value: number, immediately = true) {
@@ -210,6 +228,13 @@ function handleFontScaleInput(event: Event) {
   if (!target) return;
 
   setPlayerFontScale(Number(target.value), false);
+}
+
+function handleTranslationFontScaleInput(event: Event) {
+  const target = event.target as HTMLInputElement | null;
+  if (!target) return;
+
+  setPlayerTranslationFontScale(Number(target.value), false);
 }
 
 function handleLineGapInput(event: Event) {
@@ -560,6 +585,59 @@ onUnmounted(() => {
               class="flex h-8 w-8 items-center justify-center rounded-full text-xs font-light text-white/60 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
               :disabled="previewPlayerFontScale >= MAX_PLAYER_FONT_SCALE"
               @click="adjustPlayerFontScale(FONT_SCALE_STEP)"
+            >
+              A+
+            </button>
+          </div>
+
+          <div class="mt-5 mb-3 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span id="lyrics-translation-font-size-label" class="text-[13px] font-medium text-white/85">翻译字号</span>
+              <button
+                v-if="previewPlayerTranslationFontScale !== DEFAULT_PLAYER_TRANSLATION_FONT_SCALE"
+                type="button"
+                class="flex h-5 w-5 items-center justify-center rounded-full text-white/40 transition hover:bg-white/10 hover:text-white"
+                aria-label="重置翻译字号"
+                title="重置"
+                @click="resetPlayerTranslationFontScale"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+              </button>
+            </div>
+            <span class="text-xs font-medium tabular-nums text-white/60">{{ translationFontScalePercent }}</span>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              class="flex h-8 w-8 items-center justify-center rounded-full text-xs font-light text-white/60 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+              aria-label="缩小翻译字号"
+              :disabled="previewPlayerTranslationFontScale <= MIN_PLAYER_TRANSLATION_FONT_SCALE"
+              @click="setPlayerTranslationFontScale(previewPlayerTranslationFontScale - FONT_SCALE_STEP)"
+            >
+              A-
+            </button>
+
+            <input
+              class="font-size-slider h-1 flex-1 cursor-pointer appearance-none rounded-full"
+              :style="{ background: `linear-gradient(to right, rgba(255,255,255,0.85) ${translationFontScaleProgress}%, rgba(255,255,255,0.12) ${translationFontScaleProgress}%)` }"
+              type="range"
+              aria-labelledby="lyrics-translation-font-size-label"
+              :aria-valuetext="translationFontScalePercent"
+              :min="MIN_PLAYER_TRANSLATION_FONT_SCALE"
+              :max="MAX_PLAYER_TRANSLATION_FONT_SCALE"
+              :step="FONT_SCALE_STEP"
+              :value="previewPlayerTranslationFontScale"
+              @input="handleTranslationFontScaleInput"
+              @change="commitDraftLyricsSettings"
+            />
+
+            <button
+              type="button"
+              class="flex h-8 w-8 items-center justify-center rounded-full text-xs font-light text-white/60 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+              aria-label="放大翻译字号"
+              :disabled="previewPlayerTranslationFontScale >= MAX_PLAYER_TRANSLATION_FONT_SCALE"
+              @click="setPlayerTranslationFontScale(previewPlayerTranslationFontScale + FONT_SCALE_STEP)"
             >
               A+
             </button>

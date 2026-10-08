@@ -38,6 +38,7 @@ const lyricsTimeSyncKey = computed(() => `${currentSong.value?.path ?? ''}:${aud
 const lyricsAlignmentClass = computed(() => `lyrics-align-${lyricsSettings.playerAlignment}`);
 const lyricsPlayerStyle = computed(() => ({
   '--lyrics-font-scale': appearancePreview.value.playerFontScale.toString(),
+  '--lyrics-translation-font-scale': (appearancePreview.value.playerTranslationFontScale ?? 1).toString(),
   '--lyrics-line-gap': appearancePreview.value.playerLineGap.toString(),
   '--lyrics-font-family': getLyricsFontFamily(lyricsSettings.playerFontPreset),
   '--lyrics-offset-x': `${appearancePreview.value.playerOffsetX}%`,
@@ -85,6 +86,7 @@ async function handleLightLineClick(line: LyricLine) {
           :low-power="shouldReduceLyricsRendering"
           :layout-version="lyricsLayoutVersion"
           :font-scale="appearancePreview.playerFontScale"
+          :translation-font-scale="appearancePreview.playerTranslationFontScale"
           align-anchor="center"
           :align-position="isVerticalWriting ? 0.5 : 0.42"
           :enable-spring="true"
@@ -107,6 +109,7 @@ async function handleLightLineClick(line: LyricLine) {
           :playing="isPlaying && !shouldReduceLyricsRendering"
           :show-translation="lyricsSettings.showTranslation"
           :show-romaji="lyricsSettings.showRomaji"
+          :translation-font-scale="appearancePreview.playerTranslationFontScale"
           :line-gap="appearancePreview.playerLineGap"
           :title="currentSong?.title || currentSong?.name"
           :artist="currentSong?.artist"
@@ -189,6 +192,12 @@ async function handleLightLineClick(line: LyricLine) {
   --amll-lp-bg-color: transparent;
   --amll-lp-font-size: calc(max(max(5vh, 2.5vw), 12px) * var(--lyrics-font-scale, 1));
   font-family: var(--lyrics-font-family, system-ui, sans-serif);
+}
+
+/* AMLL 0.6 keeps translation as the second child and romanization as the third;
+   the two share a class, so target the translation slot independently. */
+.amll-host :deep(.amll-lyric-player [class*="_lyricSubLine"]:nth-child(2)) {
+  font-size: calc(max(0.5em, 10px) * var(--lyrics-translation-font-scale, 1));
 }
 
 /* AMLL 0.6 skin: retain its layout/duet structure and only change appearance. */

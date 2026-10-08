@@ -22,6 +22,7 @@ const props = withDefaults(defineProps<{
   seekKey?: string | number;
   wordFadeWidth?: number;
   fontScale?: number;
+  translationFontScale?: number;
   lineGap?: number;
   layoutVersion?: string | number;
   writingMode?: 'horizontal' | 'vertical';
@@ -191,9 +192,11 @@ watch(() => [props.currentTime, props.timeSyncKey, props.seekKey] as const, (
 // AMLL observes normal container/line size changes itself. Font replacement is
 // the only explicit reconstruction here; no internal layout or recovery loop.
 watch(() => props.layoutVersion, () => { void refreshAfterFontsReady(); });
-// The font-size CSS variable lives on the parent view. Refresh the official
+// The font-size CSS variables live on the parent view. Refresh the official
 // metrics after Vue has applied that style, without reconstructing lyric rows.
-watch(() => props.fontScale, () => { runtime?.refreshMeasurements(); }, { flush: 'post' });
+watch(() => [props.fontScale, props.translationFontScale], () => {
+  runtime?.refreshMeasurements();
+}, { flush: 'post' });
 </script>
 
 <template>
