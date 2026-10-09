@@ -10,6 +10,7 @@ import { LYRICS_READING_ORDER_OPTIONS } from '../../composables/lyrics/readingOr
 import { createLyricsSourceDocument } from '../../composables/lyrics/sourceDocument';
 import { configureLyricsSource, createLyricsSourcePresentation } from '../../composables/lyrics/sourceEditor';
 import type { LyricsReadingOrder } from '../../types';
+import { getApplicationStyleNonce } from '../../utils/styleNonce';
 
 const props = defineProps<{
   modelValue: string;
@@ -55,6 +56,7 @@ function createState(raw: string) {
   return EditorState.create({
     doc: documentModel.doc,
     extensions: [
+      EditorView.cspNonce.of(getApplicationStyleNonce()),
       documentModel.extension,
       lineNumbers(),
       presentation.extension,

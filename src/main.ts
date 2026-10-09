@@ -5,7 +5,9 @@ import { applyPersistedStartupTheme, shouldApplyStartupThemePaint } from './comp
 import { loadWindowRoot, resolveWindowKind, windowUsesPinia, windowUsesRouter } from './windowBootstrap'
 import { installTouchClickSupport } from './utils/touchClickSupport'
 import { createWindowScriptErrorHandler } from './utils/windowScriptErrors'
+import { getApplicationStyleNonce } from './utils/styleNonce'
 
+getApplicationStyleNonce()
 installTouchClickSupport()
 
 const currentWindowLabel = (() => {
