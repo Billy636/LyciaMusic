@@ -88,10 +88,8 @@ function normalizeTintValue(value = 50): number {
 
 function getBlurTint(isDark: boolean, tintValue = 50): Color {
   const value = normalizeTintValue(tintValue);
-  // Dark blur uses this native tint as its only visible mask. Keep the
-  // midpoint, but allow a lighter low end and a stronger high end.
   const alpha = isDark
-    ? 20 + Math.round(value * 1.8)
+    ? 50 + Math.round(value * 1.2)
     : 40 + value;
   return isDark ? [18, 18, 18, alpha] : [248, 248, 248, alpha];
 }

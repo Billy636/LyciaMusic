@@ -89,6 +89,11 @@ const isMaterialTuningExpanded = (mode: SelectableWindowMaterialMode) => (
 const showMaterialTuning = computed(() => (
   isMaterialTuningExpanded('blur') || isMaterialTuningExpanded('transparent')
 ));
+const showRetainMaterialOnUnfocus = computed(() => {
+  const mode = materialMode.value;
+  return (mode === 'acrylic' || mode === 'mica')
+    && getWindowMaterialModeDisabledReason(mode) === null;
+});
 const materialTuningMode = ref<'blur' | 'transparent'>('blur');
 watch(
   () => showMaterialTuning.value ? materialMode.value : null,
@@ -377,7 +382,7 @@ const getWindowMaterialHint = (mode: Exclude<WindowMaterialMode, 'none'>) => {
 
         <transition name="flow-panel">
           <div
-            v-if="materialMode !== 'none' && materialMode !== 'transparent'"
+            v-if="showRetainMaterialOnUnfocus"
             class="mt-4 flex items-center justify-between rounded-xl border border-gray-200/50 bg-white/20 px-4 py-3 shadow-xs dark:border-white/5 dark:bg-white/5"
           >
             <div class="space-y-0.5">
@@ -385,7 +390,7 @@ const getWindowMaterialHint = (mode: Exclude<WindowMaterialMode, 'none'>) => {
                 失去焦点时保持材质效果
               </div>
               <div class="text-xs text-gray-500 dark:text-white/45">
-                关闭后，点击桌面等失焦情况下将变回系统默认的暗淡纯色背景
+                开启后，窗口失去焦点时仍保留亚克力或云母效果
               </div>
             </div>
             <button

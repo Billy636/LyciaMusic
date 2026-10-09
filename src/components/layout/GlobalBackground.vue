@@ -436,15 +436,6 @@ const materialScrimStyle = computed(() => {
   }
 
   if (isDarkTheme.value) {
-    if (activeWindowMaterial.value === 'blur') {
-      // Native blur already supplies the adjustable dark tint. A second
-      // fixed mask hides the backdrop even at the slider's lowest value.
-      // Keep a barely painted surface for WebView2 hit testing.
-      return {
-        backgroundColor: `rgba(18, 18, 18, ${1 / 255})`,
-      };
-    }
-
     return {
       backgroundColor: 'rgba(12, 14, 16, 0.34)',
     };

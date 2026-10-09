@@ -185,7 +185,8 @@ export function useAppThemeSync() {
   );
 
   watch(
-    () => theme.value.retainMaterialOnUnfocus,
+    () => theme.value.retainMaterialOnUnfocus
+      && (activeWindowMaterial.value === 'acrylic' || activeWindowMaterial.value === 'mica'),
     (enabled) => {
       void windowApi.setRetainMaterialOnUnfocus(enabled);
     },
