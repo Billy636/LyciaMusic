@@ -171,7 +171,7 @@ const toggleEqualizer = () => {
   border-bottom: 0;
 }
 
-:global(.dark) .desktop-setting-row {
+.dark .desktop-setting-row {
   border-bottom-color: var(--settings-divider);
 }
 
@@ -216,11 +216,11 @@ const toggleEqualizer = () => {
   transform: translateY(0);
 }
 
-:global(.dark) .audio-tip {
+.dark .audio-tip {
   color: #fcd34d;
 }
 
-:global(.dark) .audio-tip-popover {
+.dark .audio-tip-popover {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(31, 31, 31, 0.96);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);

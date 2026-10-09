@@ -361,7 +361,7 @@ onUnmounted(() => {
   color: #2563eb;
 }
 
-:global(.dark) .liquid-glass {
+.dark .liquid-glass {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02));
   border-color: rgba(255, 255, 255, 0.15);
   color: #fff;
@@ -402,29 +402,29 @@ onUnmounted(() => {
   background: rgba(254, 242, 242, 0.9);
 }
 
-:global(.dark) .floating-action {
+.dark .floating-action {
   color: rgba(255, 255, 255, 0.82);
 }
 
-:global(.dark) .floating-action:hover {
+.dark .floating-action:hover {
   background: rgba(255, 255, 255, 0.08);
   color: white;
 }
 
-:global(.dark) .floating-action.danger {
+.dark .floating-action.danger {
   color: #fca5a5;
 }
 
-:global(.dark) .floating-action.danger:hover {
+.dark .floating-action.danger:hover {
   background: rgba(127, 29, 29, 0.45);
   color: #fecaca;
 }
 
-:global(.dark) .floating-action.subtle {
+.dark .floating-action.subtle {
   color: #f87171;
 }
 
-:global(.dark) .floating-action.subtle:hover {
+.dark .floating-action.subtle:hover {
   background: rgba(127, 29, 29, 0.3);
 }
 

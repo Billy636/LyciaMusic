@@ -590,38 +590,38 @@ onScopeDispose(() => {
   font-weight: 700;
 }
 
-:global(.dark) .remote-source-list,
-:global(.dark) .remote-cache-row,
-:global(.dark) .remote-browser,
-:global(.dark) .remote-panel {
+.dark .remote-source-list,
+.dark .remote-cache-row,
+.dark .remote-browser,
+.dark .remote-panel {
   background: rgba(255, 255, 255, 0.04);
 }
 
-:global(.dark) .remote-field {
+.dark .remote-field {
   color: rgba(255, 255, 255, 0.72);
 }
 
-:global(.dark) .remote-input {
+.dark .remote-input {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.92);
 }
 
-:global(.dark) .remote-source-row {
+.dark .remote-source-row {
   background: rgba(255, 255, 255, 0.06);
 }
 
-:global(.dark) .remote-cache-row,
-:global(.dark) .remote-browser__bar,
-:global(.dark) .remote-browser__entry {
+.dark .remote-cache-row,
+.dark .remote-browser__bar,
+.dark .remote-browser__entry {
   color: rgba(255, 255, 255, 0.86);
 }
 
-:global(.dark) .remote-browser__entry {
+.dark .remote-browser__entry {
   background: rgba(255, 255, 255, 0.06);
 }
 
-:global(.dark) .remote-progress__top {
+.dark .remote-progress__top {
   color: rgba(255, 255, 255, 0.7);
 }
 </style>

@@ -186,7 +186,11 @@ export function useAppThemeSync() {
 
   watch(
     () => theme.value.retainMaterialOnUnfocus
-      && (activeWindowMaterial.value === 'acrylic' || activeWindowMaterial.value === 'mica'),
+      && (
+        activeWindowMaterial.value === 'acrylic'
+        || activeWindowMaterial.value === 'mica'
+        || activeWindowMaterial.value === 'blur'
+      ),
     (enabled) => {
       void windowApi.setRetainMaterialOnUnfocus(enabled);
     },

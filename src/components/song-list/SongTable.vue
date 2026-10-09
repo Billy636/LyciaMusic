@@ -1105,23 +1105,23 @@ const getRowStyle = (songIndex: number, songPath: string) => {
   background-color: rgba(236, 65, 65, 0.68);
 }
 
-:global(.dark) .song-list-scroll-container {
+.dark .song-list-scroll-container {
   scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
 }
 
-:global(.dark) .song-list-scroll-container::-webkit-scrollbar-thumb {
+.dark .song-list-scroll-container::-webkit-scrollbar-thumb {
   background-color: rgba(255, 255, 255, 0.22);
 }
 
-:global(.dark) .song-list-scroll-container.song-list-scrollbar-active {
+.dark .song-list-scroll-container.song-list-scrollbar-active {
   scrollbar-color: rgba(236, 65, 65, 0.7) transparent;
 }
 
-:global(.dark) .song-list-scroll-container.song-list-scrollbar-active::-webkit-scrollbar-thumb {
+.dark .song-list-scroll-container.song-list-scrollbar-active::-webkit-scrollbar-thumb {
   background-color: rgba(236, 65, 65, 0.72);
 }
 
-:global(.dark) .song-list-scroll-container::-webkit-scrollbar-thumb:hover {
+.dark .song-list-scroll-container::-webkit-scrollbar-thumb:hover {
   background-color: rgba(236, 65, 65, 0.82);
 }
 
@@ -1348,12 +1348,12 @@ const getRowStyle = (songIndex: number, songPath: string) => {
 }
 
 
-:global(.dark) .library-hero-backdrop {
+.dark .library-hero-backdrop {
   background: rgba(2, 6, 23, 0.68);
   backdrop-filter: blur(4px);
 }
 
-:global(.dark) .library-hero-card {
+.dark .library-hero-card {
   border-color: rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(12, 18, 28, 0.8), rgba(10, 16, 25, 0.84));
   box-shadow:
@@ -1361,56 +1361,56 @@ const getRowStyle = (songIndex: number, songPath: string) => {
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
-:global(.dark) .library-hero-card-success {
+.dark .library-hero-card-success {
   background: linear-gradient(180deg, rgba(7, 46, 39, 0.84), rgba(8, 58, 47, 0.86));
 }
 
-:global(.dark) .library-hero-card-error {
+.dark .library-hero-card-error {
   background: linear-gradient(180deg, rgba(67, 13, 13, 0.84), rgba(82, 18, 18, 0.86));
 }
 
-:global(.dark) .library-hero-title,
-:global(.dark) .library-hero-progress-value {
+.dark .library-hero-title,
+.dark .library-hero-progress-value {
   color: rgba(255, 255, 255, 0.96);
 }
 
-:global(.dark) .library-hero-phase {
+.dark .library-hero-phase {
   color: rgba(191, 201, 216, 0.8);
 }
 
-:global(.dark) .library-hero-card-success .library-hero-phase {
+.dark .library-hero-card-success .library-hero-phase {
   color: rgba(110, 231, 183, 0.82);
 }
 
-:global(.dark) .library-hero-card-error .library-hero-phase {
+.dark .library-hero-card-error .library-hero-phase {
   color: rgba(252, 165, 165, 0.88);
 }
 
-:global(.dark) .library-hero-progress-meta,
-:global(.dark) .library-hero-progress-note {
+.dark .library-hero-progress-meta,
+.dark .library-hero-progress-note {
   color: rgba(226, 232, 240, 0.72);
 }
 
-:global(.dark) .index-nav-item {
+.dark .index-nav-item {
   color: rgba(255, 255, 255, 0.72);
 }
 
-:global(.dark) .index-nav-item:hover {
+.dark .index-nav-item:hover {
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.96);
 }
 
-:global(.dark) .index-nav-item-active {
+.dark .index-nav-item-active {
   background: rgba(236, 65, 65, 0.24);
   color: #fda4af;
 }
 
-:global(.dark) .index-nav-item-hover {
+.dark .index-nav-item-hover {
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.96);
 }
 
-:global(.dark) .index-nav-item-drag {
+.dark .index-nav-item-drag {
   background: rgba(255, 255, 255, 0.14);
   color: rgba(255, 255, 255, 0.98);
 }
@@ -1474,13 +1474,13 @@ const getRowStyle = (songIndex: number, songPath: string) => {
   }
 }
 
-:global(.dark) .hero-secondary-btn {
+.dark .hero-secondary-btn {
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.9);
 }
 
-:global(.dark) .hero-secondary-btn:hover {
+.dark .hero-secondary-btn:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 

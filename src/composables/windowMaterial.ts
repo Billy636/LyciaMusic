@@ -88,9 +88,11 @@ function normalizeTintValue(value = 50): number {
 
 function getBlurTint(isDark: boolean, tintValue = 50): Color {
   const value = normalizeTintValue(tintValue);
+  // Keep the legacy midpoint and upper range, but remove the tint floor
+  // below 50 so the lowest setting does not keep a dark native mask.
   const alpha = isDark
-    ? 50 + Math.round(value * 1.2)
-    : 40 + value;
+    ? value < 50 ? Math.round(value * 2.2) : 50 + Math.round(value * 1.2)
+    : value < 50 ? Math.round(value * 1.8) : 40 + value;
   return isDark ? [18, 18, 18, alpha] : [248, 248, 248, alpha];
 }
 
@@ -186,9 +188,15 @@ async function applyWindowMaterialNow(
   const appWindow = getCurrentWindow();
 
   try {
-    // Older Windows 11 builds use different native APIs for Mica and Acrylic.
-    // Setting the new effect alone does not remove the previous material.
-    if (resolved !== 'none' && resolved !== 'transparent' && resolved !== activeWindowMaterial.value) {
+    // Clear an existing material when switching native APIs. A plain window
+    // has no effect to clear, and compositor rebuilds already clear once.
+    // Keep the legacy direct apply path for startup and rebuilding Blur.
+    if (
+      activeWindowMaterial.value !== 'none'
+      && resolved !== 'none'
+      && resolved !== 'transparent'
+      && resolved !== activeWindowMaterial.value
+    ) {
       await appWindow.clearEffects();
     }
 
@@ -209,11 +217,11 @@ async function applyWindowMaterialNow(
     } else if (resolved === 'blur') {
       await trySetWindowBackgroundColor(getTransparentWindowColor());
       await windowApi.setDarkModeForWindow(isDark);
-      await trySetWindowShadow(false);
       await appWindow.setEffects({
         effects: [Effect.Blur],
         color: getBlurTint(isDark, blurTint),
       });
+      await trySetWindowShadow(false);
     } else if (resolved === 'transparent') {
       await appWindow.clearEffects();
       await trySetWindowShadow(false);

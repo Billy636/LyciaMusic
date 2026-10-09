@@ -435,6 +435,19 @@ const materialScrimStyle = computed(() => {
     };
   }
 
+  if (activeWindowMaterial.value === 'blur') {
+    const tint = Math.min(100, Math.max(0, Math.round(theme.value.windowBlurTint)));
+    // Fade out the legacy scrim at the low end; 50 and above keep its
+    // original opacity. A barely painted surface preserves hit testing.
+    const strength = Math.min(1, tint / 50);
+    const opacity = Math.max(1 / 255, (isDarkTheme.value ? 0.34 : 0.5) * strength);
+    return {
+      backgroundColor: isDarkTheme.value
+        ? `rgba(12, 14, 16, ${opacity})`
+        : `rgba(250, 250, 252, ${opacity})`,
+    };
+  }
+
   if (isDarkTheme.value) {
     return {
       backgroundColor: 'rgba(12, 14, 16, 0.34)',
