@@ -14,6 +14,7 @@ import LyricsView from './LyricsView.vue';
 import LyricsAppearancePanel from './LyricsAppearancePanel.vue';
 import { readLyricsAppearanceDraft } from './useLyricsAppearanceDraft';
 import PlayerDetailBackground from './PlayerDetailBackground.vue';
+import type { PlayerForeground } from './playerBackgroundReadability';
 import PlayerDetailLeft from './PlayerDetailLeft.vue';
 import ImmersiveTransitionOverlay from './ImmersiveTransitionOverlay.vue';
 import QueueList from './QueueList.vue';
@@ -33,6 +34,14 @@ const { settings } = useSettings();
 
 const { parsedLyrics, lyricsStatus, lyricsSettings, showLyricsPlayerSettingsPanel } = useLyrics();
 const lyricsAppearancePreview = ref(readLyricsAppearanceDraft(lyricsSettings));
+const lyricsView = ref<InstanceType<typeof LyricsView> | null>(null);
+const lyricsElement = computed(() => !isCoverFocused.value && !showQueue.value
+  ? lyricsView.value?.$el as HTMLElement | undefined : undefined);
+const lyricsLayoutKey = computed(() => JSON.stringify(lyricsAppearancePreview.value));
+const playerForeground = ref<PlayerForeground>('light');
+const playerForegroundStyle = computed(() => ({
+  '--player-detail-rgb': playerForeground.value === 'dark' ? '12 16 23' : '255 255 255',
+}));
 const hasLyricsPresentation = computed(() => lyricsStatus.value === 'loading'
   || lyricsStatus.value === 'error'
   || (lyricsStatus.value === 'ready' && parsedLyrics.value.length > 0));
@@ -471,6 +480,7 @@ const metaInfo = computed(() => {
       showPlayerDetail ? 'pointer-events-auto' : 'pointer-events-none',
       isImmersiveCursorHidden ? 'immersive-cursor-hidden' : '',
     ]"
+    :style="playerForegroundStyle"
   >
     <LyricsAppearancePanel
       v-if="showPlayerDetail"
@@ -484,7 +494,13 @@ const metaInfo = computed(() => {
           transform: showPlayerDetail ? 'translateY(0)' : 'translateY(100%)',
         }"
       >
-        <PlayerDetailBackground :bgOpacity="1" :active="showPlayerDetail" />
+        <PlayerDetailBackground
+          :bgOpacity="1"
+          :active="showPlayerDetail"
+          :lyrics-element="lyricsElement"
+          :lyrics-layout-key="lyricsLayoutKey"
+          @foreground-change="playerForeground = $event"
+        />
         <div class="absolute inset-0 z-[-1] bg-[#0a0a0a]"></div>
       </div>
 
@@ -603,6 +619,7 @@ const metaInfo = computed(() => {
                 />
 
                 <LyricsView
+                  ref="lyricsView"
                   v-else-if="showPlayerDetail && hasLyricsPresentation"
                   :appearance-preview="lyricsAppearancePreview"
                   class="h-full"
@@ -637,7 +654,13 @@ const metaInfo = computed(() => {
 .player-detail {
   --player-cover-focus-duration: 600ms;
   --player-cover-focus-easing: cubic-bezier(0.4, 0, 0.2, 1);
+  color: rgb(var(--player-detail-rgb, 255 255 255));
 }
+
+.player-detail :deep(.text-white) { color: rgb(var(--player-detail-rgb, 255 255 255)); }
+.player-detail :deep([class~="text-white/80"]) { color: rgb(var(--player-detail-rgb, 255 255 255) / 0.8); }
+.player-detail :deep([class~="text-white/50"]) { color: rgb(var(--player-detail-rgb, 255 255 255) / 0.65); }
+.player-detail :deep([class~="text-white/40"]) { color: rgb(var(--player-detail-rgb, 255 255 255) / 0.55); }
 
 .cover-focus-content-enter-active {
   transition: opacity 450ms ease-out 150ms;
