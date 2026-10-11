@@ -76,9 +76,10 @@ async function ensureTaskbarWindowSize(targetWindow: WebviewWindow) {
   });
 }
 
-async function refreshTaskbarWindowTopmost(targetWindow: WebviewWindow) {
-  await targetWindow.setAlwaysOnTop(true);
-  await invoke('refresh_taskbar_window_topmost').catch((err) => {
+async function refreshTaskbarWindowTopmost() {
+  await invoke<boolean>('refresh_taskbar_window_topmost').then((refreshed) => {
+    if (!refreshed) console.warn('Taskbar player topmost refresh could not find its window.');
+  }).catch((err) => {
     console.warn('Failed to refresh taskbar player topmost state:', err);
   });
 }
@@ -87,7 +88,7 @@ async function stabilizeTaskbarWindowGeometry(targetWindow: WebviewWindow) {
   if (isTaskbarPlayerDragging) return;
   await ensureTaskbarWindowSize(targetWindow);
   await updatePosition();
-  await refreshTaskbarWindowTopmost(targetWindow);
+  await refreshTaskbarWindowTopmost();
 }
 
 function scheduleTaskbarWindowGeometryStabilization(targetWindow: WebviewWindow) {
@@ -428,16 +429,19 @@ export function useTaskbarPlayerBridge() {
     await emitStateToTaskbarPlayer();
     await emitTo(TASKBAR_PLAYER_WINDOW_LABEL, TASKBAR_PLAYER_VISIBILITY_EVENT, { visible: true });
     await targetWindow.show();
+    // Install immediately after showing so Shell interactions are guarded while
+    // geometry and lyric state finish synchronizing.
+    await invoke<boolean>('install_taskbar_zorder_guard').then((installed) => {
+      if (!installed) console.warn('Taskbar player z-order guard could not find its window.');
+    }).catch((err) => {
+      console.warn('Failed to install taskbar z-order guard:', err);
+    });
     await stabilizeTaskbarWindowGeometry(targetWindow);
     lastGeometryFallbackAt = Date.now();
     isTaskbarPlayerVisible.value = true;
     // Lyrics may have finished loading during the initial state/show handshake.
     await emitStateToTaskbarPlayer();
 
-    // 安装 Z-order 守护，防止点击任务栏时播控窗口被遮盖
-    void invoke('install_taskbar_zorder_guard').catch((err) => {
-      console.warn('Failed to install taskbar zorder guard:', err);
-    });
     // Tauri 2 官方 API 缩放更改监听绑定
     if (unlistenScaleChange) {
       unlistenScaleChange();
@@ -460,6 +464,15 @@ export function useTaskbarPlayerBridge() {
     dragEventSequence++;
     isTaskbarPlayerDragging = false;
     currentPositionBounds = null;
+    stopCheckLoop();
+    if (unlistenScaleChange) {
+      unlistenScaleChange();
+      unlistenScaleChange = null;
+    }
+    // Stop the guard even if the native window has already disappeared.
+    await invoke('uninstall_taskbar_zorder_guard').catch((error) => {
+      console.warn('Failed to uninstall taskbar z-order guard:', error);
+    });
     const targetWindow = await getTaskbarPlayerWindow();
     if (!targetWindow) {
       isTaskbarPlayerReady = false;
@@ -469,13 +482,6 @@ export function useTaskbarPlayerBridge() {
       return;
     }
 
-    stopCheckLoop();
-    if (unlistenScaleChange) {
-      unlistenScaleChange();
-      unlistenScaleChange = null;
-    }
-    // 在 destroy 前卸载守护，防止回调访问已失效的 HWND
-    void invoke('uninstall_taskbar_zorder_guard').catch(() => {});
     try {
       await targetWindow.destroy();
     } catch (error) {

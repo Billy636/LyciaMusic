@@ -500,234 +500,333 @@ pub fn cancel_taskbar_player_drag(window: tauri::Window, session_id: u64) -> Res
     }
 }
 
-// ── Z-order 守护：防止任务栏点击遮盖播控窗口 ──────────────────────────────────
-//
-// 原理：注册三路 WinEventHook，监听与 TopMostGuard 完全相同的事件集。
-// 当任意"前台窗口切换"或"Shell 类窗口焦点/菜单"事件发生时，立即将播控窗口
-// 重新置顶（SetWindowPos HWND_TOPMOST），从而在用户感知帧内完成补救。
-// 该 hook 使用 WINEVENT_OUTOFCONTEXT，由专用守护线程的消息循环驱动，
-// 不注入目标进程，安全可靠。
+// Taskbar ordering is repaired on one message thread. Native events coalesce
+// immediate checks; a timer covers shell promotions without accessibility events.
 #[cfg(target_os = "windows")]
 mod zorder_guard {
+    use std::cell::Cell;
     use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
-    use std::sync::{mpsc, OnceLock};
-    use std::time::Duration;
+    use std::sync::{mpsc, Mutex, OnceLock};
 
-    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Foundation::{HWND, RECT};
     use windows_sys::Win32::System::Threading::GetCurrentThreadId;
     use windows_sys::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetAncestor, GetClassNameW, GetMessageW, IsWindow, PeekMessageW,
-        PostThreadMessageW, SetWindowPos, TranslateMessage, GA_ROOT, HWND_TOPMOST, MSG,
-        PM_NOREMOVE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSENDCHANGING, SWP_NOSIZE,
-        WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP,
+        DispatchMessageW, GetAncestor, GetClassNameW, GetMessageW, GetPropW, GetTopWindow,
+        GetWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindow, IsWindowVisible,
+        KillTimer, PeekMessageW, PostThreadMessageW, RemovePropW, SetPropW, SetTimer, SetWindowPos,
+        TranslateMessage, EVENT_OBJECT_FOCUS, EVENT_OBJECT_REORDER, EVENT_OBJECT_SHOW,
+        EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MENUSTART, GA_ROOT, GWL_EXSTYLE, GW_HWNDNEXT,
+        GW_HWNDPREV, HWND_TOPMOST, MSG, OBJID_WINDOW, PM_NOREMOVE, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOOWNERZORDER, SWP_NOSENDCHANGING, SWP_NOSIZE, WINEVENT_OUTOFCONTEXT,
+        WINEVENT_SKIPOWNPROCESS, WM_APP, WM_TIMER, WS_EX_TOPMOST,
     };
 
-    /// 播控窗口 HWND（跨线程原子存储）
-    pub static PLAYER_HWND: AtomicIsize = AtomicIsize::new(0);
-    static REFRESH_TOKEN: AtomicU64 = AtomicU64::new(0);
-
-    /// 守护线程控制消息
+    static PLAYER_HWND: AtomicIsize = AtomicIsize::new(0);
+    static GENERATION: AtomicU64 = AtomicU64::new(0);
+    // Only control updates use this lock. No SetWindowPos may run while held.
+    static CONTROL: Mutex<()> = Mutex::new(());
     const WM_INSTALL: u32 = WM_APP + 0x200;
     const WM_UNINSTALL: u32 = WM_APP + 0x201;
+    const WM_REFRESH: u32 = WM_APP + 0x202;
+    const CHECK_INTERVAL_MS: u32 = 100;
 
-    // ── 监听与 TopMostGuard 完全相同的三类事件 ─────────────────────────────────
-    //
-    // EVENT_OBJECT_LOCATIONCHANGE（0x800B）在纯 Z-order 变化（窗口只改变层级，
-    // 不改变位置/大小）时【不会】触发，因此不能用于捕捉任务栏被置顶的场景。
-    //
-    // 正确做法：
-    //   • EVENT_SYSTEM_FOREGROUND (0x0003)：任意窗口成为前台窗口时触发。
-    //     点击任务栏空白区域会让 Shell_TrayWnd 成为前台，此事件必然触发。
-    //   • EVENT_OBJECT_FOCUS     (0x8005)：焦点转移到 Shell 类窗口时触发。
-    //     捕捉 NotifyIconOverflowWindow（显示/隐藏图标箭头弹出框）等场景。
-    //   • EVENT_SYSTEM_MENUSTART (0x0004)：开始菜单或系统菜单弹出时触发。
-    const EVENT_SYSTEM_FOREGROUND: u32 = 0x0003;
-    const EVENT_SYSTEM_MENUSTART: u32 = 0x0004;
-    const EVENT_OBJECT_FOCUS: u32 = 0x8005;
+    thread_local! {
+        static REFRESH_PENDING: Cell<bool> = const { Cell::new(false) };
+        static SHELL_PROMOTION_PENDING: Cell<bool> = const { Cell::new(false) };
+    }
 
     struct GuardThread {
         thread_id: u32,
     }
-
     static GUARD_THREAD: OnceLock<GuardThread> = OnceLock::new();
 
-    /// 获取窗口的根祖先（最顶层父窗口）
-    fn root_window(hwnd: HWND) -> HWND {
-        if hwnd.is_null() {
-            return hwnd;
-        }
-        unsafe {
-            let root = GetAncestor(hwnd, GA_ROOT);
-            if root.is_null() {
-                hwnd
-            } else {
-                root
-            }
+    fn property_name() -> *const u16 {
+        static NAME: OnceLock<Vec<u16>> = OnceLock::new();
+        NAME.get_or_init(|| {
+            "LyciaTaskbarPlayerGuardGeneration\0"
+                .encode_utf16()
+                .collect()
+        })
+        .as_ptr()
+    }
+
+    unsafe fn remove_identity(player: HWND, generation: u64) {
+        if !player.is_null() && GetPropW(player, property_name()) as usize == generation as usize {
+            RemovePropW(player, property_name());
         }
     }
 
-    /// 判断是否为 Shell 类窗口（任务栏、通知区域、溢出窗口等）
-    fn is_shell_window(hwnd: HWND) -> bool {
-        if hwnd.is_null() {
-            return false;
+    unsafe fn is_current(player: HWND, generation: u64) -> bool {
+        GENERATION.load(Ordering::SeqCst) == generation
+            && PLAYER_HWND.load(Ordering::SeqCst) == player as isize
+            && IsWindow(player) != 0
+            && GetPropW(player, property_name()) as usize == generation as usize
+    }
+
+    unsafe fn class_name(hwnd: HWND) -> String {
+        let mut buf = [0u16; 256];
+        let len = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+        if len <= 0 {
+            String::new()
+        } else {
+            String::from_utf16_lossy(&buf[..len as usize])
         }
-        unsafe {
-            let mut buf = [0u16; 256];
-            let len = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
-            if len <= 0 {
+    }
+
+    unsafe fn is_shell_window(hwnd: HWND) -> bool {
+        matches!(
+            class_name(hwnd).as_str(),
+            "Shell_TrayWnd"
+                | "Shell_SecondaryTrayWnd"
+                | "TrayNotifyWnd"
+                | "NotifyIconOverflowWindow"
+                | "WorkerW"
+                | "Progman"
+                | "SHELLDLL_DefView"
+                | "DV2ControlHost"
+        )
+    }
+
+    unsafe fn intersecting_taskbar(player: HWND, target: &RECT) -> Option<HWND> {
+        let mut candidate = GetTopWindow(std::ptr::null_mut());
+        // Walk actual desktop order, including secondary bars and parent-sourced
+        // reorder notifications. Bound the walk while windows are changing.
+        for _ in 0..512 {
+            if candidate.is_null() {
+                break;
+            }
+            if candidate != player && IsWindowVisible(candidate) != 0 && IsIconic(candidate) == 0 {
+                let mut rect: RECT = std::mem::zeroed();
+                if GetWindowRect(candidate, &mut rect) != 0
+                    && rect.left < target.right
+                    && rect.right > target.left
+                    && rect.top < target.bottom
+                    && rect.bottom > target.top
+                    && matches!(
+                        class_name(candidate).as_str(),
+                        "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
+                    )
+                {
+                    return Some(candidate);
+                }
+            }
+            let next = GetWindow(candidate, GW_HWNDNEXT);
+            if next == candidate {
+                break;
+            }
+            candidate = next;
+        }
+        None
+    }
+
+    unsafe fn is_above(player: HWND, taskbar: HWND) -> bool {
+        let mut above = GetWindow(player, GW_HWNDPREV);
+        for _ in 0..512 {
+            if above.is_null() || above == player {
                 return false;
             }
-            let class = String::from_utf16_lossy(&buf[..len as usize]);
-            matches!(
-                class.as_str(),
-                "Shell_TrayWnd"
-                    | "Shell_SecondaryTrayWnd"
-                    | "TrayNotifyWnd"
-                    | "NotifyIconOverflowWindow"
-                    | "WorkerW"
-                    | "Progman"
-                    | "SHELLDLL_DefView"
-                    | "DV2ControlHost"
-            )
-        }
-    }
-
-    fn refresh_player_topmost(player: HWND) {
-        if player.is_null() {
-            return;
-        }
-
-        unsafe {
-            if IsWindow(player) == 0 {
-                return;
+            if above == taskbar {
+                return true;
             }
-
-            SetWindowPos(
-                player,
-                HWND_TOPMOST,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING | SWP_NOOWNERZORDER,
-            );
+            above = GetWindow(above, GW_HWNDPREV);
         }
+        false
     }
 
-    fn schedule_player_topmost_refresh(player: HWND) {
-        let token = REFRESH_TOKEN.fetch_add(1, Ordering::Relaxed) + 1;
-        refresh_player_topmost(player);
+    // Returns whether the target remains valid / the requested native call succeeds.
+    // Hidden windows are deliberately left alone; fullscreen visibility owns them.
+    unsafe fn repair(player: HWND, generation: Option<u64>, shell_promotion: bool) -> bool {
+        let valid = || match generation {
+            Some(value) => is_current(player, value),
+            None => !player.is_null() && IsWindow(player) != 0,
+        };
+        if !valid() {
+            return false;
+        }
+        if IsWindowVisible(player) == 0 || IsIconic(player) != 0 {
+            return true;
+        }
+        let lost_topmost = GetWindowLongPtrW(player, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST == 0;
+        let mut target: RECT = std::mem::zeroed();
+        if GetWindowRect(player, &mut target) == 0 {
+            return false;
+        }
+        let taskbar = intersecting_taskbar(player, &target);
+        let occluded = taskbar.is_some_and(|bar| is_above(player, bar));
+        let promote = shell_promotion && taskbar.is_some();
+        if !lost_topmost && !occluded && !promote {
+            return true;
+        }
 
-        let player_hwnd = player as isize;
-        std::thread::spawn(move || {
-            for delay_ms in [40_u64, 120, 300, 700] {
-                std::thread::sleep(Duration::from_millis(delay_ms));
-                if REFRESH_TOKEN.load(Ordering::Relaxed) != token {
-                    return;
-                }
-
-                refresh_player_topmost(player_hwnd as HWND);
+        // Position just above the bar, preserving higher menu/notification
+        // windows. A non-topmost predecessor cannot preserve the required style.
+        let insert_after = taskbar.map_or(HWND_TOPMOST, |bar| {
+            let mut preceding = GetWindow(bar, GW_HWNDPREV);
+            if preceding == player {
+                preceding = GetWindow(player, GW_HWNDPREV);
+            }
+            if !preceding.is_null()
+                && IsWindow(preceding) != 0
+                && GetWindowLongPtrW(preceding, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0
+            {
+                preceding
+            } else {
+                HWND_TOPMOST
             }
         });
+        let flags =
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING;
+        if !valid() || IsWindowVisible(player) == 0 {
+            return false;
+        }
+        // A shell activation can change compositor order without changing the
+        // HWND list. Promote once for that signal; timer checks stay conditional.
+        if promote && SetWindowPos(player, HWND_TOPMOST, 0, 0, 0, 0, flags) == 0 {
+            return false;
+        }
+        if !valid() || IsWindowVisible(player) == 0 {
+            return false;
+        }
+        SetWindowPos(player, insert_after, 0, 0, 0, 0, flags) != 0
     }
 
-    /// WinEventHook 回调（与 TopMostGuard 逻辑对称，但守护目标是播控窗口）
-    ///
-    /// • EVENT_SYSTEM_FOREGROUND：任意窗口变为前台时重新置顶播控窗口
-    /// • EVENT_OBJECT_FOCUS / EVENT_SYSTEM_MENUSTART：仅当事件源是 Shell 类
-    ///   窗口时响应（避免对普通应用的焦点切换产生不必要的 SetWindowPos 调用）
     unsafe extern "system" fn hook_proc(
         _hook: HWINEVENTHOOK,
         event: u32,
         hwnd: HWND,
-        _id_object: i32,
-        _id_child: i32,
+        id_object: i32,
+        id_child: i32,
         _event_thread: u32,
         _event_time: u32,
     ) {
-        let player = PLAYER_HWND.load(Ordering::Relaxed) as HWND;
-        if player.is_null() || IsWindow(player) == 0 {
+        let generation = GENERATION.load(Ordering::SeqCst);
+        let player = PLAYER_HWND.load(Ordering::SeqCst) as HWND;
+        if !is_current(player, generation) || IsWindowVisible(player) == 0 {
             return;
         }
-
-        // 事件源根窗口是播控窗口自身时跳过，避免自触发
-        let source_root = root_window(hwnd);
-        if !source_root.is_null() && source_root == player {
+        let source = if hwnd.is_null() {
+            hwnd
+        } else {
+            GetAncestor(hwnd, GA_ROOT)
+        };
+        if source == player {
             return;
         }
-
-        let should_refresh = match event {
-            // 任意前台切换都需要重置，因为新前台窗口可能是 TOPMOST
-            EVENT_SYSTEM_FOREGROUND => true,
-            // 焦点/菜单事件仅在 Shell 类窗口上响应
-            EVENT_OBJECT_FOCUS | EVENT_SYSTEM_MENUSTART => is_shell_window(source_root),
+        let shell = !source.is_null() && is_shell_window(source);
+        let check = match event {
+            EVENT_SYSTEM_FOREGROUND | EVENT_OBJECT_REORDER => true,
+            EVENT_OBJECT_SHOW => id_object == OBJID_WINDOW && id_child == 0,
+            EVENT_OBJECT_FOCUS | EVENT_SYSTEM_MENUSTART => shell,
             _ => false,
         };
-
-        if should_refresh {
-            schedule_player_topmost_refresh(player);
+        if !check {
+            return;
+        }
+        if shell
+            && matches!(
+                event,
+                EVENT_SYSTEM_FOREGROUND | EVENT_OBJECT_FOCUS | EVENT_SYSTEM_MENUSTART
+            )
+        {
+            SHELL_PROMOTION_PENDING.with(|pending| pending.set(true));
+        }
+        if REFRESH_PENDING.with(|pending| pending.replace(true)) {
+            return;
+        }
+        if PostThreadMessageW(
+            GetCurrentThreadId(),
+            WM_REFRESH,
+            generation as usize,
+            player as isize,
+        ) == 0
+        {
+            REFRESH_PENDING.with(|pending| pending.set(false));
         }
     }
 
-    /// 惰性启动守护线程（进程生命周期内仅初始化一次）
+    unsafe fn stop_resources(hooks: &mut Vec<HWINEVENTHOOK>, timer: &mut usize) {
+        if *timer != 0 {
+            KillTimer(std::ptr::null_mut(), *timer);
+            *timer = 0;
+        }
+        for hook in hooks.drain(..) {
+            UnhookWinEvent(hook);
+        }
+        REFRESH_PENDING.with(|pending| pending.set(false));
+        SHELL_PROMOTION_PENDING.with(|pending| pending.set(false));
+    }
+
     fn guard_thread() -> &'static GuardThread {
         GUARD_THREAD.get_or_init(|| {
             let (tx, rx) = mpsc::channel::<u32>();
-
             std::thread::spawn(move || unsafe {
                 let tid = GetCurrentThreadId();
-
-                // 先强制创建消息队列，再通知主线程，防止 PostThreadMessageW 发到空队列
                 let mut msg: MSG = std::mem::zeroed();
                 PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE);
                 let _ = tx.send(tid);
-
-                // 同时维护三个 hook 句柄，对应三类事件
-                let mut hook_fg: HWINEVENTHOOK = std::ptr::null_mut(); // EVENT_SYSTEM_FOREGROUND
-                let mut hook_focus: HWINEVENTHOOK = std::ptr::null_mut(); // EVENT_OBJECT_FOCUS
-                let mut hook_menu: HWINEVENTHOOK = std::ptr::null_mut(); // EVENT_SYSTEM_MENUSTART
-
-                let install_hook = |event: u32| -> HWINEVENTHOOK {
-                    SetWinEventHook(
-                        event,
-                        event,
-                        std::ptr::null_mut(),
-                        Some(hook_proc),
-                        0, // 所有进程
-                        0, // 所有线程
-                        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
-                    )
-                };
-
-                let unhook = |h: &mut HWINEVENTHOOK| {
-                    if !h.is_null() {
-                        UnhookWinEvent(*h);
-                        *h = std::ptr::null_mut();
-                    }
-                };
-
-                loop {
-                    if GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) <= 0 {
-                        break;
-                    }
-
+                let mut hooks = Vec::<HWINEVENTHOOK>::new();
+                let mut timer = 0usize;
+                let mut active_generation = 0u64;
+                let mut active_player = 0isize;
+                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                    let message_generation = msg.wParam as u64;
                     match msg.message {
                         WM_INSTALL => {
-                            // 先卸载旧 hook，防止重复安装
-                            unhook(&mut hook_fg);
-                            unhook(&mut hook_focus);
-                            unhook(&mut hook_menu);
-
-                            hook_fg = install_hook(EVENT_SYSTEM_FOREGROUND);
-                            hook_focus = install_hook(EVENT_OBJECT_FOCUS);
-                            hook_menu = install_hook(EVENT_SYSTEM_MENUSTART);
+                            let player = msg.lParam as HWND;
+                            if !is_current(player, message_generation) {
+                                continue;
+                            }
+                            stop_resources(&mut hooks, &mut timer);
+                            active_generation = message_generation;
+                            active_player = player as isize;
+                            for event in [
+                                EVENT_SYSTEM_FOREGROUND,
+                                EVENT_OBJECT_FOCUS,
+                                EVENT_SYSTEM_MENUSTART,
+                                EVENT_OBJECT_REORDER,
+                                EVENT_OBJECT_SHOW,
+                            ] {
+                                let hook = SetWinEventHook(
+                                    event,
+                                    event,
+                                    std::ptr::null_mut(),
+                                    Some(hook_proc),
+                                    0,
+                                    0,
+                                    WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+                                );
+                                if !hook.is_null() {
+                                    hooks.push(hook);
+                                }
+                            }
+                            // With NULL HWND, Windows chooses the actual timer id.
+                            timer = SetTimer(std::ptr::null_mut(), 0, CHECK_INTERVAL_MS, None);
+                            repair(player, Some(active_generation), true);
                         }
                         WM_UNINSTALL => {
-                            unhook(&mut hook_fg);
-                            unhook(&mut hook_focus);
-                            unhook(&mut hook_menu);
-                            PLAYER_HWND.store(0, Ordering::Relaxed);
+                            if GENERATION.load(Ordering::SeqCst) == message_generation
+                                && PLAYER_HWND.load(Ordering::SeqCst) == 0
+                            {
+                                stop_resources(&mut hooks, &mut timer);
+                                active_generation = 0;
+                                active_player = 0;
+                            }
+                        }
+                        WM_REFRESH => {
+                            if active_generation != message_generation
+                                || active_player != msg.lParam
+                                || !is_current(active_player as HWND, active_generation)
+                            {
+                                continue;
+                            }
+                            REFRESH_PENDING.with(|pending| pending.set(false));
+                            let promote =
+                                SHELL_PROMOTION_PENDING.with(|pending| pending.replace(false));
+                            repair(active_player as HWND, Some(active_generation), promote);
+                        }
+                        WM_TIMER if timer != 0 && msg.wParam == timer => {
+                            repair(active_player as HWND, Some(active_generation), false);
                         }
                         _ => {
                             TranslateMessage(&msg);
@@ -735,42 +834,91 @@ mod zorder_guard {
                         }
                     }
                 }
-
-                // 线程异常退出时确保所有 hook 被清理
-                unhook(&mut hook_fg);
-                unhook(&mut hook_focus);
-                unhook(&mut hook_menu);
+                stop_resources(&mut hooks, &mut timer);
+                let _control = CONTROL.lock().unwrap_or_else(|error| error.into_inner());
+                if GENERATION.load(Ordering::SeqCst) == active_generation
+                    && PLAYER_HWND.load(Ordering::SeqCst) == active_player
+                {
+                    GENERATION.fetch_add(1, Ordering::SeqCst);
+                    PLAYER_HWND.store(0, Ordering::SeqCst);
+                    remove_identity(active_player as HWND, active_generation);
+                }
             });
-
-            let thread_id = rx.recv().expect("taskbar zorder guard thread init failed");
-            GuardThread { thread_id }
+            GuardThread {
+                thread_id: rx.recv().expect("taskbar zorder guard thread init failed"),
+            }
         })
     }
 
-    /// 安装 Z-order 守护：记录播控窗口 HWND 并启动 WinEventHook
-    pub fn install(player_hwnd: isize) {
-        PLAYER_HWND.store(player_hwnd, Ordering::Relaxed);
-        schedule_player_topmost_refresh(player_hwnd as HWND);
-        let t = guard_thread();
-        unsafe {
-            PostThreadMessageW(t.thread_id, WM_INSTALL, 0, 0);
+    pub fn install(player_hwnd: isize) -> bool {
+        let _control = CONTROL.lock().unwrap_or_else(|error| error.into_inner());
+        let player = player_hwnd as HWND;
+        if player.is_null() || unsafe { IsWindow(player) } == 0 {
+            return false;
         }
-    }
-
-    /// 主动刷新播控窗口层级，不重复安装 hook。
-    pub fn refresh(player_hwnd: isize) {
-        schedule_player_topmost_refresh(player_hwnd as HWND);
-    }
-
-    /// 卸载 Z-order 守护：移除 WinEventHook 并清空 HWND
-    pub fn uninstall() {
-        if let Some(t) = GUARD_THREAD.get() {
-            unsafe {
-                PostThreadMessageW(t.thread_id, WM_UNINSTALL, 0, 0);
+        let previous = PLAYER_HWND.load(Ordering::SeqCst);
+        let previous_generation = GENERATION.fetch_add(1, Ordering::SeqCst);
+        let generation = previous_generation.wrapping_add(1);
+        PLAYER_HWND.store(0, Ordering::SeqCst);
+        unsafe { remove_identity(previous as HWND, previous_generation) };
+        if unsafe { SetPropW(player, property_name(), generation as usize as _) } == 0 {
+            if let Some(thread) = GUARD_THREAD.get() {
+                unsafe {
+                    PostThreadMessageW(thread.thread_id, WM_UNINSTALL, generation as usize, 0)
+                };
             }
-        } else {
-            // 守护线程尚未初始化时，直接清空 HWND 即可
-            PLAYER_HWND.store(0, Ordering::Relaxed);
+            return false;
+        }
+        PLAYER_HWND.store(player_hwnd, Ordering::SeqCst);
+        let thread = guard_thread();
+        let posted = unsafe {
+            PostThreadMessageW(
+                thread.thread_id,
+                WM_INSTALL,
+                generation as usize,
+                player_hwnd,
+            )
+        } != 0;
+        if !posted {
+            PLAYER_HWND.store(0, Ordering::SeqCst);
+            unsafe { remove_identity(player, generation) };
+        }
+        posted
+    }
+
+    pub fn refresh(player_hwnd: isize) -> bool {
+        {
+            let _control = CONTROL.lock().unwrap_or_else(|error| error.into_inner());
+            let generation = GENERATION.load(Ordering::SeqCst);
+            if PLAYER_HWND.load(Ordering::SeqCst) == player_hwnd
+                && unsafe { is_current(player_hwnd as HWND, generation) }
+            {
+                if let Some(thread) = GUARD_THREAD.get() {
+                    return unsafe {
+                        PostThreadMessageW(
+                            thread.thread_id,
+                            WM_REFRESH,
+                            generation as usize,
+                            player_hwnd,
+                        )
+                    } != 0;
+                }
+            }
+        }
+        // Before installation / after uninstall, perform a single conditional
+        // repair with no hooks or timer. Never hold CONTROL over SetWindowPos.
+        unsafe { repair(player_hwnd as HWND, None, false) }
+    }
+
+    pub fn uninstall() {
+        let _control = CONTROL.lock().unwrap_or_else(|error| error.into_inner());
+        let previous = PLAYER_HWND.load(Ordering::SeqCst);
+        let previous_generation = GENERATION.fetch_add(1, Ordering::SeqCst);
+        let generation = previous_generation.wrapping_add(1);
+        PLAYER_HWND.store(0, Ordering::SeqCst);
+        unsafe { remove_identity(previous as HWND, previous_generation) };
+        if let Some(thread) = GUARD_THREAD.get() {
+            unsafe { PostThreadMessageW(thread.thread_id, WM_UNINSTALL, generation as usize, 0) };
         }
     }
 }
@@ -787,8 +935,7 @@ pub fn install_taskbar_zorder_guard(app: tauri::AppHandle) -> bool {
         if let Some(window) = app.get_webview_window(TASKBAR_PLAYER_WINDOW_LABEL) {
             if let Ok(handle) = window.as_ref().window().window_handle() {
                 if let RawWindowHandle::Win32(win32) = handle.as_raw() {
-                    zorder_guard::install(win32.hwnd.get() as isize);
-                    return true;
+                    return zorder_guard::install(win32.hwnd.get() as isize);
                 }
             }
         }
@@ -812,8 +959,7 @@ pub fn refresh_taskbar_window_topmost(app: tauri::AppHandle) -> bool {
         if let Some(window) = app.get_webview_window(TASKBAR_PLAYER_WINDOW_LABEL) {
             if let Ok(handle) = window.as_ref().window().window_handle() {
                 if let RawWindowHandle::Win32(win32) = handle.as_raw() {
-                    zorder_guard::refresh(win32.hwnd.get() as isize);
-                    return true;
+                    return zorder_guard::refresh(win32.hwnd.get() as isize);
                 }
             }
         }

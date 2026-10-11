@@ -34,7 +34,6 @@ import {
   resolveTaskbarLyricLine,
 } from '../../features/taskbarPlayer/lyrics';
 import type { LyricLine, LyricsStatus } from '../../composables/lyrics/types';
-import { windowApi } from '../../services/tauri/windowApi';
 import { useCoverRotation } from '../player/useCoverRotation';
 import type { Song } from '../../types';
 import TaskbarLyricLine from './TaskbarLyricLine.vue';
@@ -231,8 +230,8 @@ const sendAction = (actionType: TaskbarSimpleActionType) => {
 
 const refreshTaskbarWindowTopmost = async () => {
   try {
-    await appWindow.setAlwaysOnTop(true);
-    await windowApi.refreshCurrentWindowTopmost(true);
+    const refreshed = await invoke<boolean>('refresh_taskbar_window_topmost');
+    if (!refreshed) console.warn('Taskbar player topmost refresh could not find its window.');
   } catch (error) {
     console.warn('Failed to refresh taskbar player topmost state:', error);
   }
