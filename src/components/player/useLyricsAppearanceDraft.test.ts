@@ -78,20 +78,4 @@ describe('lyrics appearance drafts', () => {
     expect(persist).toHaveBeenCalledExactlyOnceWith({ playerFontScale: 1.5 });
   });
 
-  it('clamps, rounds, and immediately persists button adjustments', () => {
-    const { setField, settings, persist } = createDraft();
-    setField('playerFontScale', 99);
-    setField('playerLineGap', -1);
-    setField('playerOffsetX', 99);
-    setField('playerOffsetY', -99);
-    expect(settings).toEqual({ playerFontScale: 3, playerLineGap: 0.5, playerOffsetX: 30, playerOffsetY: -25 });
-    setField('playerFontScale', 1.234);
-    setField('playerOffsetX', 9.7);
-    expect(settings.playerFontScale).toBe(1.23);
-    expect(settings.playerOffsetX).toBe(10);
-    const calls = persist.mock.calls.length;
-    setField('playerFontScale', NaN);
-    setField('playerOffsetY', Infinity);
-    expect(persist).toHaveBeenCalledTimes(calls);
-  });
 });

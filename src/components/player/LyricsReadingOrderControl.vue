@@ -5,15 +5,16 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import { LYRICS_READING_ORDER_OPTIONS, type LyricsReadingRole } from '../../composables/lyrics/readingOrder';
 import { usePlaybackStore } from '../../features/playback/store';
 import { useSettingsStore } from '../../features/settings/store';
-import { useLyricsReadingOrderControl } from './useLyricsReadingOrderControl';
+import { useLyricsReadingOrderControl, type LyricsReadingOrderScope } from './useLyricsReadingOrderControl';
 
+const props = withDefaults(defineProps<{ inline?: boolean }>(), { inline: false });
 const emit = defineEmits<{ open: [] }>();
 const settingsStore = useSettingsStore();
 const playbackStore = usePlaybackStore();
 const {
   songPath, hasSong, scope, expanded, selectionToken, hasSongOverride,
   selectedOrder, selectedOption, canReset,
-  openOptions, closeOptions, setScope, selectOrder, reset,
+  openOptions, closeOptions, setScope: setReadingOrderScope, selectOrder, reset,
 } = useLyricsReadingOrderControl(
   () => settingsStore.settings.lyrics,
   () => playbackStore.currentSong?.path ?? '',
@@ -26,6 +27,7 @@ const optionsId = `${controlId}-options`;
 const controlRef = ref<HTMLElement | null>(null);
 const triggerRef = ref<HTMLButtonElement | null>(null);
 const optionsRef = ref<HTMLElement | null>(null);
+let mounted = false;
 const popupStyle = ref<Record<string, string>>({});
 const announcement = ref('');
 const drag = ref<{
@@ -46,8 +48,16 @@ const statusLabel = computed(() => scope.value === 'default'
 const resetSelection = computed(() => {
   const path = songPath.value;
   const targetScope = scope.value;
-  return () => reset(path, targetScope);
+  return () => {
+    reset(path, targetScope);
+    if (props.inline && !expanded.value) openOptions();
+  };
 });
+
+function setScope(value: LyricsReadingOrderScope) {
+  setReadingOrderScope(value);
+  if (props.inline && !expanded.value) openOptions();
+}
 
 async function expandOptions() {
   emit('open');
@@ -74,8 +84,13 @@ function closeFromKeyboard(event: KeyboardEvent) {
   triggerRef.value?.focus();
 }
 
+function syncKeyboardListener() {
+  document.removeEventListener('keydown', closeFromKeyboard, true);
+  if (mounted && !props.inline) document.addEventListener('keydown', closeFromKeyboard, true);
+}
+
 function updatePopupPosition() {
-  if (!expanded.value || !triggerRef.value) return;
+  if (props.inline || !expanded.value || !triggerRef.value) return;
   const trigger = triggerRef.value.getBoundingClientRect();
   const panel = triggerRef.value.closest('.player-side-panel')?.getBoundingClientRect() ?? trigger;
   const topEdge = Math.max(16, panel.top);
@@ -99,6 +114,7 @@ function updatePopupPosition() {
 }
 
 function handleOutsidePointer(event: MouseEvent) {
+  if (props.inline) return;
   const target = event.target as Node | null;
   if (!target || controlRef.value?.contains(target) || optionsRef.value?.contains(target)) return;
   closeOptions();
@@ -180,8 +196,19 @@ async function moveRole(role: LyricsReadingRole, direction: -1 | 1) {
 
 watch(expanded, (visible) => { if (!visible) cancelDrag(); }, { flush: 'sync' });
 watch(selectedOrder, cancelDrag, { flush: 'sync' });
+watch([songPath, scope], () => {
+  cancelDrag();
+  if (props.inline) openOptions();
+}, { flush: 'sync' });
+watch(() => props.inline, (inline) => {
+  cancelDrag();
+  if (inline) openOptions();
+  else closeOptions();
+  if (mounted) syncKeyboardListener();
+}, { immediate: true, flush: 'sync' });
 
 onMounted(() => {
+  mounted = true;
   // Capture outside presses even when another panel control stops bubbling.
   window.addEventListener('mousedown', handleOutsidePointer, true);
   // Keyboard-activated buttons emit click without mousedown (e.g. opening fonts).
@@ -191,12 +218,13 @@ onMounted(() => {
   window.addEventListener('blur', cancelDrag);
   // Dialogs at window capture keep priority; this menu beats the drawer's
   // window-bubble Escape handler regardless of component mounting order.
-  document.addEventListener('keydown', closeFromKeyboard, true);
+  syncKeyboardListener();
 });
 
 onBeforeUnmount(() => {
   cancelDrag();
   closeOptions();
+  mounted = false;
   window.removeEventListener('mousedown', handleOutsidePointer, true);
   window.removeEventListener('click', handleOutsidePointer, true);
   window.removeEventListener('resize', updatePopupPosition);
@@ -207,10 +235,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section ref="controlRef" class="reading-order-control" data-shortcut-capture="true" :aria-labelledby="headingId">
+  <section ref="controlRef" class="reading-order-control" :class="{ 'reading-order-control--inline': inline }" data-shortcut-capture="true" :aria-labelledby="headingId">
     <div class="reading-order-heading">
       <div>
-        <div class="reading-order-eyebrow">Reading</div>
+        <div v-if="!inline" class="reading-order-eyebrow">Reading</div>
         <h3 :id="headingId">歌词读取顺序</h3>
       </div>
       <button
@@ -246,6 +274,7 @@ onBeforeUnmount(() => {
     </div>
 
     <button
+      v-if="!inline"
       ref="triggerRef"
       type="button"
       class="reading-order-trigger"
@@ -266,9 +295,43 @@ onBeforeUnmount(() => {
       <svg class="reading-order-chevron" :class="{ 'reading-order-chevron--expanded': expanded }" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
     </button>
 
+    <div
+      v-if="inline"
+      :id="optionsId"
+      ref="optionsRef"
+      class="reading-order-inline-options"
+      role="region"
+      :aria-label="`${scopeLabel}的歌词读取顺序`"
+      @pointermove="moveDrag"
+      @pointerup="finishDrag"
+      @pointercancel="cancelDrag"
+      @lostpointercapture="cancelDrag"
+      @dragstart.prevent
+    >
+      <ol class="reading-order-sort-list">
+        <li v-for="(role, index) in displayedRoles" :key="role" :data-reading-role="role">
+          <button
+            type="button"
+            class="reading-order-drag-item"
+            :class="{ 'reading-order-drag-item--dragging': drag?.role === role }"
+            :aria-label="`${roleLabels[role]}，第 ${index + 1} 项；可拖动或使用上下箭头调整顺序`"
+            aria-keyshortcuts="ArrowUp ArrowDown"
+            @pointerdown="startDrag($event, role)"
+            @keydown.up.prevent="moveRole(role, -1)"
+            @keydown.down.prevent="moveRole(role, 1)"
+          >
+            <span class="reading-order-position" aria-hidden="true">{{ index + 1 }}</span>
+            <span class="reading-order-item-label">{{ roleLabels[role] }}</span>
+            <GripVertical :size="16" class="reading-order-grip" aria-hidden="true" />
+          </button>
+        </li>
+      </ol>
+    </div>
+
     <span class="sr-only" aria-live="polite">{{ announcement }}</span>
   </section>
 
+  <template v-if="!inline">
   <Teleport to="body">
     <transition name="reading-order-popover">
       <div
@@ -309,10 +372,14 @@ onBeforeUnmount(() => {
       </div>
     </transition>
   </Teleport>
+  </template>
 </template>
 
 <style scoped>
 .reading-order-control { margin-top: 24px; }
+.reading-order-control--inline { margin-top: 0; }
+.reading-order-control--inline .reading-order-heading h3 { margin-top: 0; }
+.reading-order-inline-options { margin-top: 12px; }
 .reading-order-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 .reading-order-eyebrow { color: rgb(255 255 255 / 30%); font-size: 9px; font-weight: 600; letter-spacing: .3em; text-transform: uppercase; }
 .reading-order-heading h3 { margin: 6px 0 0; color: rgb(255 255 255 / 85%); font-size: 13px; font-weight: 500; }
