@@ -24,9 +24,9 @@ onBeforeUnmount(() => {
 <template>
   <div class="flow-background" :class="{ 'flow-background--dark': dark }" aria-hidden="true">
     <PlayerColorBackground
-      class="flow-soft-background"
       mode="soft"
       palette="cover"
+      :light="!dark"
       :cover-src="coverSrc"
       :suspended="renderingSuspended"
     />
@@ -42,7 +42,4 @@ onBeforeUnmount(() => {
   background: #fafafa;
 }
 .flow-background--dark { background: #121212; }
-/* Keep dark text readable on light themes; dark themes use the player colors directly. */
-.flow-soft-background { opacity: 0.22; }
-.flow-background--dark .flow-soft-background { opacity: 1; }
 </style>

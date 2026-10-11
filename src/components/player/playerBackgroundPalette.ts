@@ -156,15 +156,30 @@ function backgroundColor(h: number, s: number, l: number, ceiling: number): stri
   return `hsl(${tone.h.toFixed(1)} ${tone.s.toFixed(1)}% ${tone.l.toFixed(1)}%)`;
 }
 
-/** Generate the independently designed player backdrop colors for white lyrics. */
+function lightBackgroundColor(h: number, s: number, l: number): string {
+  const tone = { h, s: s === 0 ? 0 : clamp(s, 20, 58), l };
+  // Keep saturated color fields bright enough for the main window's dark text.
+  while (relativeLuminance(tone) < 0.32 && tone.l < 100) tone.l += 0.25;
+  return backgroundColor(tone.h, tone.s, tone.l, 1);
+}
+
+/** Use the same cover hues with tone targets suited to each foreground. */
 export function createPlayerBackgroundPalette(
   choice: PlayerBackgroundPalette,
   profile: CoverColorProfile,
+  light = false,
 ): PlayerBackgroundColors {
   const [first, second, third] = choice === 'cover'
     ? coverTones(profile)
     : PRESETS[choice === 'rose' || choice === 'teal' ? choice : 'indigo'];
-  const colors = {
+  const colors = light ? {
+    base: lightBackgroundColor(first.h, saturationOffset(first, 6), 73),
+    end: lightBackgroundColor(second.h, saturationOffset(second, 6), 68),
+    left: lightBackgroundColor(third.h, saturationOffset(third, 8), 70),
+    glow: lightBackgroundColor(first.h - 12, saturationOffset(first, 7), 82),
+    accent: lightBackgroundColor(second.h, saturationOffset(second, 10), 65),
+    quiet: lightBackgroundColor(first.h + 12, first.s, 72),
+  } : {
     base: backgroundColor(first.h, first.s, 36, 0.105),
     end: backgroundColor(second.h, second.s, 33, 0.075),
     left: backgroundColor(third.h, third.s, 47, 0.21),

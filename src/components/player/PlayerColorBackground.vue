@@ -10,14 +10,16 @@ const props = withDefaults(defineProps<{
   coverSrc?: string;
   motion?: boolean;
   suspended?: boolean;
+  light?: boolean;
 }>(), {
   coverSrc: '',
   motion: true,
   suspended: false,
+  light: false,
 });
 
 const emptyProfile = { colors: [] };
-const colors = shallowRef(createPlayerBackgroundPalette(props.palette, emptyProfile));
+const colors = shallowRef(createPlayerBackgroundPalette(props.palette, emptyProfile, props.light));
 const moving = computed(() => props.mode === 'soft' && props.motion && !props.suspended);
 const paletteStyle = computed(() => ({
   '--player-bg-base': colors.value.base,
@@ -31,23 +33,23 @@ const coverToSample = computed(() => (
   props.palette === 'cover' && !props.suspended ? props.coverSrc : ''
 ));
 
-watch([() => props.palette, coverToSample, () => props.suspended], async ([palette, coverSrc, suspended], _, onCleanup) => {
+watch([() => props.palette, coverToSample, () => props.suspended, () => props.light], async ([palette, coverSrc, suspended], _, onCleanup) => {
   let stale = false;
   onCleanup(() => { stale = true; });
 
   if (palette !== 'cover') {
-    colors.value = createPlayerBackgroundPalette(palette, emptyProfile);
+    colors.value = createPlayerBackgroundPalette(palette, emptyProfile, props.light);
     return;
   }
 
   // Closed/hidden players skip sampling and use the shared cache on resume.
   if (suspended) return;
   if (!coverSrc) {
-    colors.value = createPlayerBackgroundPalette(palette, emptyProfile);
+    colors.value = createPlayerBackgroundPalette(palette, emptyProfile, props.light);
     return;
   }
   const profile = await extractCoverColorProfile(coverSrc);
-  if (!stale) colors.value = createPlayerBackgroundPalette(palette, profile);
+  if (!stale) colors.value = createPlayerBackgroundPalette(palette, profile, props.light);
 }, { immediate: true });
 </script>
 
