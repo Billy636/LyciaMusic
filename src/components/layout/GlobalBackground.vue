@@ -170,7 +170,7 @@ const isMicaWindowMaterial = computed(() => activeWindowMaterial.value === 'mica
 const reduceDynamicEffects = computed(() => showPlayerDetail.value || isMainWindowLowPower.value);
 // The artwork view can retain the previous thumbnail while the new song loads.
 // Only let a cover belonging to the current song supply its background color.
-const mistCoverSrc = computed(() => {
+const matchingCoverSrc = computed(() => {
   const song = currentSong.value;
   return song && currentCoverPath.value
     && (currentCoverPath.value === song.path || currentCoverPath.value === song.cue_source_path)
@@ -201,7 +201,7 @@ const activeBackgroundInfo = computed(() => {
 
   if (currentTheme.dynamicBgType === 'flow') {
     return {
-      src: currentCover.value,
+      src: matchingCoverSrc.value,
       blur: 60,
       opacity: 0.9,
       isDynamic: true,
@@ -222,7 +222,7 @@ const activeBackgroundInfo = computed(() => {
 
   if (currentTheme.dynamicBgType === 'mist') {
     return {
-      src: mistCoverSrc.value,
+      src: matchingCoverSrc.value,
       type: 'mist' as const,
     };
   }
@@ -527,7 +527,7 @@ const customBgTransform = computed(() => {
       <FlowBackground
         v-if="activeBackgroundInfo?.type === 'flow'"
         :cover-src="bgImageSrc"
-        :paused="reduceDynamicEffects"
+        :paused="reduceDynamicEffects || isMiniMode"
         :dark="isDarkTheme"
       />
     </transition>
