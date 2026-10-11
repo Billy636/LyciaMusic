@@ -23,9 +23,6 @@ const contentMode = computed(() => normalizeTaskbarContentMode(settings.value.ta
 const coverShape = computed(() => normalizeTaskbarCoverShape(settings.value.taskbarCoverShape));
 const positionLocked = computed(() => settings.value.taskbarPositionLocked);
 const leftOffset = computed(() => normalizeTaskbarLeftOffset(settings.value.taskbarLeftOffset));
-const contentDescription = computed(() => contentMode.value === 'bilingual'
-  ? '原文、译文各一行；没有翻译时显示原文。'
-  : contentMode.value === 'lyrics-only' ? '隐藏歌名，专注显示当前歌词。' : '同时显示歌曲名称和当前歌词。');
 const contentModeOptions = [
   { value: 'title-lyrics', label: '歌名＋歌词' },
   { value: 'bilingual', label: '双语歌词' },
@@ -88,25 +85,12 @@ async function alignLeft() {
 <template>
   <div class="taskbar-settings space-y-8 text-gray-800 dark:text-gray-100">
     <section>
-      <div class="taskbar-setting-row">
-        <div>
-          <span id="taskbar-enabled-label" class="taskbar-setting-label">开启任务栏播控</span>
-          <p class="taskbar-setting-description">在任务栏显示封面、歌词和播放控制。</p>
-        </div>
-        <button type="button" role="switch" aria-labelledby="taskbar-enabled-label" :aria-checked="settings.showTaskbarPlayer"
-          class="taskbar-switch" :class="{ 'is-on': settings.showTaskbarPlayer }" @click="patchSettings({ showTaskbarPlayer: !settings.showTaskbarPlayer })">
-          <span aria-hidden="true" />
-        </button>
-      </div>
-    </section>
-    <section>
       <h2 class="taskbar-section-title"><span aria-hidden="true" />显示内容</h2>
       <div class="taskbar-setting-row">
         <div>
           <label for="taskbar-content-mode" class="taskbar-setting-label">内容模式</label>
-          <p id="taskbar-content-description" class="taskbar-setting-description">{{ contentDescription }}</p>
         </div>
-        <SettingsSelect class="taskbar-select" label="内容模式" hide-label trigger-id="taskbar-content-mode" described-by="taskbar-content-description"
+        <SettingsSelect class="taskbar-select" label="内容模式" hide-label trigger-id="taskbar-content-mode"
           :model-value="contentMode" :options="contentModeOptions" @update:model-value="patchSettings({ taskbarContentMode: normalizeTaskbarContentMode($event) })" />
       </div>
     </section>
@@ -120,9 +104,8 @@ async function alignLeft() {
       <div class="taskbar-setting-row">
         <div>
           <span id="taskbar-cover-rotate-label" class="taskbar-setting-label">播放时旋转封面</span>
-          <p id="taskbar-cover-rotate-description" class="taskbar-setting-description">{{ coverShape === 'circle' ? '播放时旋转，暂停时保持当前角度。' : '选择圆形封面后可开启。' }}</p>
         </div>
-        <button type="button" role="switch" aria-labelledby="taskbar-cover-rotate-label" aria-describedby="taskbar-cover-rotate-description"
+        <button type="button" role="switch" aria-labelledby="taskbar-cover-rotate-label"
           :aria-checked="settings.taskbarCoverRotate" :disabled="coverShape !== 'circle'" class="taskbar-switch"
           :class="{ 'is-on': settings.taskbarCoverRotate }" @click="patchSettings({ taskbarCoverRotate: !settings.taskbarCoverRotate })">
           <span aria-hidden="true" />
@@ -134,7 +117,6 @@ async function alignLeft() {
       <div class="taskbar-setting-row">
         <div>
           <span id="taskbar-position-locked-label" class="taskbar-setting-label">锁定位置</span>
-          <p class="taskbar-setting-description">锁定后隐藏拖动手柄，避免误触移动。</p>
         </div>
         <button type="button" role="switch" aria-labelledby="taskbar-position-locked-label" :aria-checked="positionLocked"
           class="taskbar-switch" :class="{ 'is-on': positionLocked }" @click="patchSettings({ taskbarPositionLocked: !positionLocked })">
@@ -144,12 +126,11 @@ async function alignLeft() {
       <div class="taskbar-setting-row">
         <div>
           <label for="taskbar-left-offset" class="taskbar-setting-label">向左偏移</label>
-          <p id="taskbar-left-offset-description" class="taskbar-setting-description">相对默认位置向左移动，拖动后同步更新。</p>
         </div>
         <div class="taskbar-position-controls">
           <div class="taskbar-offset-stepper">
             <button type="button" aria-label="减少向左偏移" :disabled="leftOffset === 0" @click="setLeftOffset(leftOffset - 10)"><Minus :size="14" /></button>
-            <input id="taskbar-left-offset" type="number" min="0" step="1" :value="leftOffset" aria-describedby="taskbar-left-offset-description"
+            <input id="taskbar-left-offset" type="number" min="0" step="1" :value="leftOffset"
               @change="onLeftOffsetInput" @blur="restoreOffsetInput" />
             <span class="taskbar-offset-unit" aria-hidden="true">px</span>
             <button type="button" aria-label="增加向左偏移" @click="setLeftOffset(leftOffset + 10)"><Plus :size="14" /></button>
@@ -214,7 +195,6 @@ async function alignLeft() {
 .taskbar-setting-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; min-height: 66px; padding: 16px 2px; border-bottom: 1px solid var(--settings-divider); }
 .taskbar-setting-row:last-child { border-bottom: 0; }
 .taskbar-setting-label { font-size: 14px; font-weight: 500; }
-.taskbar-setting-description { margin-top: 5px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; }
 .taskbar-select { width: 224px; max-width: 100%; flex-shrink: 0; }
 .taskbar-select :deep(.settings-select-trigger:not(:hover):not(:focus-visible):not(.is-open)) { background: transparent; border-color: transparent; box-shadow: none; }
 .taskbar-switch { width: 44px; height: 24px; padding: 3px; border-radius: 999px; flex-shrink: 0; background: #d1d5db; transition: background-color 160ms; }
