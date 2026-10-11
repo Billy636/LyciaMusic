@@ -3,6 +3,7 @@ import { ref, watch, type Ref } from 'vue';
 import type { AlbumCatalogItem, Song } from '../types';
 import { tauriInvoke } from '../services/tauri/invoke';
 import { compareByAlphabetIndex } from '../utils/alphabetIndex';
+import type { ArtistBrowseMode } from '../shared/stores/navigation';
 
 interface ArtistAlbumItem {
   key: string;
@@ -15,6 +16,7 @@ interface ArtistAlbumItem {
 interface UseHomeArtistAlbumsOptions {
   localFilterCondition: Ref<string>;
   filterCondition: Ref<string>;
+  currentArtistBrowseMode: Ref<ArtistBrowseMode>;
   librarySongs: Ref<Song[]>;
   albumSortMode: Ref<'count' | 'name' | 'artist' | 'custom'>;
   albumCustomOrder: Ref<string[]>;
@@ -30,6 +32,7 @@ const songHasArtistName = (song: Song, artistName: string) =>
 export function useHomeArtistAlbums({
   localFilterCondition,
   filterCondition,
+  currentArtistBrowseMode,
   librarySongs,
   albumSortMode,
   albumCustomOrder,
@@ -41,7 +44,10 @@ export function useHomeArtistAlbums({
     const albumMap = new Map<string, ArtistAlbumItem>();
 
     librarySongs.value.forEach(song => {
-      if (!songHasArtistName(song, artistName)) {
+      const matchesArtist = currentArtistBrowseMode.value === 'albumArtist'
+        ? (song.album_artist?.trim() || song.artist?.trim() || 'Unknown').toLowerCase() === artistName.toLowerCase()
+        : songHasArtistName(song, artistName);
+      if (!matchesArtist) {
         return;
       }
 
@@ -101,7 +107,7 @@ export function useHomeArtistAlbums({
   };
 
   watch(
-    [localFilterCondition, filterCondition],
+    [localFilterCondition, filterCondition, currentArtistBrowseMode],
     async () => {
       const currentRequestId = ++requestId;
       const artistName = localFilterCondition.value || filterCondition.value;
@@ -111,7 +117,10 @@ export function useHomeArtistAlbums({
       }
 
       try {
-        const albums = await tauriInvoke('get_library_album_catalog_by_artist', { artistName });
+        const albums = await tauriInvoke('get_library_album_catalog_by_artist', {
+          artistName,
+          ...(currentArtistBrowseMode.value === 'albumArtist' ? { albumArtist: true } : {}),
+        });
         if (currentRequestId === requestId) {
           artistAlbumList.value = sortAlbums(albums);
         }

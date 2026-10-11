@@ -19,6 +19,7 @@ export const playerStorageKeys = {
   favorites: 'player_favorites',
   playlists: 'player_custom_playlists',
   artistSortMode: 'player_artist_sort_mode',
+  albumArtistSortMode: 'player_album_artist_sort_mode',
   albumSortMode: 'player_album_sort_mode',
   albumDetailSortMode: 'player_album_detail_sort_mode',
   folderSortMode: 'player_folder_sort_mode',
@@ -26,6 +27,7 @@ export const playerStorageKeys = {
   playlistSortMode: 'player_playlist_sort_mode',
   playlistSortOverrides: 'player_playlist_sort_overrides',
   artistCustomOrder: 'player_artist_custom_order',
+  albumArtistCustomOrder: 'player_album_artist_custom_order',
   albumCustomOrder: 'player_album_custom_order',
   albumFolderCollections: 'player_album_folder_collections',
   folderCustomOrder: 'player_folder_custom_order',
@@ -198,6 +200,7 @@ export const playerStorage = {
     settings: AppSettings;
     playQueuePaths: string[];
     artistCustomOrder: string[];
+    albumArtistCustomOrder?: string[];
     albumCustomOrder: string[];
     folderCustomOrder: Record<string, string[]>;
     localCustomOrder: string[];
@@ -209,6 +212,9 @@ export const playerStorage = {
     localStore.setJson(playerStorageKeys.settings, options.settings);
     localStore.setJson(options.queuePathKey, options.playQueuePaths);
     localStore.setJson(playerStorageKeys.artistCustomOrder, options.artistCustomOrder);
+    if (options.albumArtistCustomOrder !== undefined) {
+      localStore.setJson(playerStorageKeys.albumArtistCustomOrder, options.albumArtistCustomOrder);
+    }
     localStore.setJson(playerStorageKeys.albumCustomOrder, options.albumCustomOrder);
     localStore.setJson(playerStorageKeys.folderCustomOrder, options.folderCustomOrder);
     localStore.setJson(playerStorageKeys.localCustomOrder, options.localCustomOrder);

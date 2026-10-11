@@ -1,10 +1,12 @@
 import type { RouteLocationRaw, Router } from 'vue-router';
 import type { SidebarNavigationId, SidebarSettings } from '../types';
 import { getSidebarHomepageId } from '../features/settings/sidebarNavigation';
+import type { ArtistBrowseMode } from '../shared/stores/navigation';
 
 type HomeNavigationTarget =
   | { view: 'all' }
-  | { view: 'artist' | 'album' | 'playlist'; filter: string }
+  | { view: 'artist'; filter: string; artistMode?: ArtistBrowseMode }
+  | { view: 'album' | 'playlist'; filter: string }
   | { view: 'folder'; folder?: string; collection?: boolean }
   | { view: 'statistics' };
 
@@ -29,6 +31,9 @@ const buildHomeLocation = (target: HomeNavigationTarget): RouteLocationRaw => {
         query: {
           view: target.view,
           filter: target.filter,
+          ...(target.view === 'artist' && target.artistMode === 'albumArtist'
+            ? { artistMode: 'albumArtist' }
+            : {}),
         },
       };
     case 'folder':
@@ -117,8 +122,8 @@ export function useHomeNavigation(router: Router) {
     return options.replace ? router.replace(location) : router.push(location);
   };
 
-  const openHomeArtist = (artistName: string, options?: { replace?: boolean }) =>
-    openHome({ view: 'artist', filter: artistName }, options);
+  const openHomeArtist = (artistName: string, options?: { replace?: boolean; artistMode?: ArtistBrowseMode }) =>
+    openHome({ view: 'artist', filter: artistName, artistMode: options?.artistMode }, options);
 
   const openHomeAlbum = (albumKey: string, options?: { replace?: boolean }) =>
     openHome({ view: 'album', filter: albumKey }, options);

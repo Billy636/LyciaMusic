@@ -10,6 +10,7 @@ import { useAddToPlaylistDialog } from '../../features/collections/addToPlaylist
 import { useLibraryCollections } from '../../features/collections/useLibraryCollections';
 import { useToast } from '../../composables/toast';
 import ModernInputModal from '../common/ModernInputModal.vue';
+import type { ArtistBrowseMode } from '../../shared/stores/navigation';
 
 const props = defineProps<{
   visible: boolean;
@@ -19,6 +20,7 @@ const props = defineProps<{
   targetKey: string;
   targetName: string;
   folderPath?: string;
+  artistMode?: ArtistBrowseMode;
 }>();
 
 const emit = defineEmits(['close']);
@@ -103,12 +105,14 @@ type SongTarget = {
   type: 'artist' | 'album';
   targetKey: string;
   folderPath?: string;
+  artistMode?: ArtistBrowseMode;
 };
 
 const captureSongTarget = (): SongTarget => ({
   type: props.type,
   targetKey: props.targetKey,
   folderPath: props.folderPath,
+  artistMode: props.artistMode,
 });
 
 const getSongPaths = async (target: SongTarget): Promise<string[]> => {
@@ -120,7 +124,7 @@ const getSongPaths = async (target: SongTarget): Promise<string[]> => {
     });
   }
   if (target.type === 'artist') {
-    return await loadArtistSongPaths(target.targetKey);
+    return await loadArtistSongPaths(target.targetKey, target.artistMode === 'albumArtist');
   } else {
     return await loadAlbumSongPaths(target.targetKey, 'track_number');
   }
@@ -211,7 +215,7 @@ const cancelFolderCollection = () => {
           @contextmenu.prevent
         >
           <div :class="sectionTitleClass" :style="motionDelay(0)" :title="folderPath || targetName">
-            {{ folderPath ? '文件夹合集：' : type === 'artist' ? '歌手：' : '专辑：' }}{{ targetName }}
+            {{ folderPath ? '文件夹合集：' : type === 'artist' ? artistMode === 'albumArtist' ? '专辑艺术家：' : '歌手：' : '专辑：' }}{{ targetName }}
           </div>
 
           <div class="song-menu-divider" :style="motionDelay(1)"></div>

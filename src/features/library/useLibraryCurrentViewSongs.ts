@@ -70,7 +70,7 @@ export function useLibraryCurrentViewSongs({
 }: UseLibraryCurrentViewSongsOptions) {
   const libraryStore = useLibraryStore();
   const { includeSubfolders } = useFolderSongScope(currentFolderFilter);
-  const { searchRevision } = storeToRefs(useNavigationStore());
+  const { searchRevision, currentArtistBrowseMode } = storeToRefs(useNavigationStore());
 
   const allViewLoading = ref(false);
   const allViewUseCanonicalFallback = ref(false);
@@ -519,9 +519,11 @@ export function useLibraryCurrentViewSongs({
       albumDetailSortMode,
       canonicalSongPaths,
       searchRevision,
+      currentArtistBrowseMode,
     ],
     async ([viewMode, filter, query, currentLocalSortMode, currentAlbumSortMode]) => {
       const requestId = ++detailViewRequestId;
+      const albumArtist = viewMode === 'artist' && currentArtistBrowseMode.value === 'albumArtist';
 
       if (!filter || (viewMode !== 'artist' && viewMode !== 'album')) {
         detailViewSongPaths.value = [];
@@ -538,6 +540,7 @@ export function useLibraryCurrentViewSongs({
             query,
             artistFilter: viewMode === 'artist' ? filter : '',
             albumFilter: viewMode === 'album' ? filter : '',
+            ...(albumArtist ? { albumArtist: true } : {}),
             sortMode,
             offset: 0,
             limit: 256,
@@ -555,11 +558,13 @@ export function useLibraryCurrentViewSongs({
                 query,
                 artistFilter: filter,
                 sortMode: 'title',
+                ...(albumArtist ? { albumArtist: true } : {}),
               })
             : await loadAllViewSongPaths({
                 query,
                 artistFilter: filter,
                 sortMode: currentLocalSortMode,
+                ...(albumArtist ? { albumArtist: true } : {}),
               })
           : currentAlbumSortMode === 'track_number' || currentAlbumSortMode === 'track_number_desc'
             ? await loadAlbumSongPaths(filter, currentAlbumSortMode)
@@ -915,17 +920,24 @@ export function useLibraryCurrentViewSongs({
         if (viewMode === 'artist' && localSortMode.value === 'custom') {
           return;
         }
+        const requestId = detailViewRequestId;
+        const filter = filterCondition.value;
+        const artistMode = currentArtistBrowseMode.value;
+        const offset = detailViewSongPaths.value.length;
         const page = await tauriInvoke('get_library_song_path_page_for_all_view', {
           query,
-          artistFilter: viewMode === 'artist' ? filterCondition.value : '',
-          albumFilter: viewMode === 'album' ? filterCondition.value : '',
+          artistFilter: viewMode === 'artist' ? filter : '',
+          albumFilter: viewMode === 'album' ? filter : '',
+          ...(viewMode === 'artist' && artistMode === 'albumArtist' ? { albumArtist: true } : {}),
           sortMode: viewMode === 'artist'
             ? localSortMode.value === 'custom' ? 'title' : localSortMode.value
             : albumDetailSortMode.value,
-          offset: detailViewSongPaths.value.length,
+          offset,
           limit: 256,
         });
-        if (query === searchQuery.value && viewMode === currentViewMode.value) {
+        if (requestId === detailViewRequestId && query === searchQuery.value && viewMode === currentViewMode.value
+          && filter === filterCondition.value && artistMode === currentArtistBrowseMode.value
+          && offset === detailViewSongPaths.value.length) {
           detailViewSongPaths.value = [...detailViewSongPaths.value, ...page.paths];
           detailSearchHasMore.value = detailViewSongPaths.value.length < page.total;
         }

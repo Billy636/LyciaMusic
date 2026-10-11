@@ -45,6 +45,7 @@ export function useHomePageModel() {
     activeRootPath,
     currentFolderFilter,
     filterCondition,
+    currentArtistBrowseMode,
   } = usePlayerViewState();
   const {
     displaySongList,
@@ -85,12 +86,16 @@ export function useHomePageModel() {
     localViewMode,
     localFilterCondition,
     artistActiveTab,
-    viewTransitionKey,
+    viewTransitionKey: baseViewTransitionKey,
   } = useHomeViewState({
     currentViewMode,
     filterCondition,
     isManagementMode,
   });
+
+  const viewTransitionKey = computed(() => localViewMode.value === 'artist'
+    ? `${baseViewTransitionKey.value}:${currentArtistBrowseMode.value}`
+    : baseViewTransitionKey.value);
 
   const localSongList = computed(() => displaySongList.value);
   const localSongPaths = computed(() => currentViewSongPaths.value);
@@ -120,6 +125,7 @@ export function useHomePageModel() {
       route.path,
       currentViewMode.value,
       filterCondition.value,
+      currentViewMode.value === 'artist' ? currentArtistBrowseMode.value : '',
       currentFolderFilter.value,
       currentViewMode.value === 'folder' && includeSubfolders.value,
     ].join('::'),
@@ -254,6 +260,7 @@ export function useHomePageModel() {
   const { artistAlbumList } = useHomeArtistAlbums({
     localFilterCondition,
     filterCondition,
+    currentArtistBrowseMode,
     librarySongs,
     albumSortMode,
     albumCustomOrder,

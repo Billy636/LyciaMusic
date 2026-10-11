@@ -19,6 +19,7 @@ export const createPlayerPersistence = ({ keys }: { keys: PlayerPersistenceKeys 
   const settingsStore = useSettingsStore();
   const {
     artistCustomOrder,
+    albumArtistCustomOrder,
     albumCustomOrder,
     folderCustomOrder,
     localCustomOrder,
@@ -45,6 +46,7 @@ export const createPlayerPersistence = ({ keys }: { keys: PlayerPersistenceKeys 
       settings: settingsStore.settings,
       playQueuePaths: playQueuePaths.value,
       artistCustomOrder: artistCustomOrder.value,
+      albumArtistCustomOrder: albumArtistCustomOrder.value,
       albumCustomOrder: albumCustomOrder.value,
       folderCustomOrder: folderCustomOrder.value,
       localCustomOrder: localCustomOrder.value,

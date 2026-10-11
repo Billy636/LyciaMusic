@@ -4,13 +4,14 @@ defineOptions({ name: 'Artists' });
 import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { useRoute, useRouter } from 'vue-router';
-import { artistHeaderCache, artistViewportCoverSnapshotCache } from '../caches/imageCaches';
+import { artistHeaderCache, artistViewportCoverSnapshotCache, listScrollCache } from '../caches/imageCaches';
 import { dragSession } from '../composables/dragState';
 import { useCoverCache } from '../composables/useCoverCache';
 import { useHomeNavigation } from '../composables/useHomeNavigation';
 import { useListScrollMemory } from '../composables/useListScrollMemory';
 import { useVisibleCoverUrls } from '../composables/useVisibleCoverUrls';
 import SortModeIcon from '../components/common/SortModeIcon.vue';
+import ArtistModeIcon from '../components/common/ArtistModeIcon.vue';
 import ArtistImageControl from '../components/headers/ArtistImageControl.vue';
 import { useArtistImages } from '../features/library/artistImages';
 import { useLibraryBrowse } from '../features/library/useLibraryBrowse';
@@ -18,7 +19,11 @@ import type { ArtistListItem } from '../features/library/playerLibraryViewShared
 import { getAlphabetIndexKey } from '../utils/alphabetIndex';
 import ArtistAlbumContextMenu from '../components/overlays/ArtistAlbumContextMenu.vue';
 
-const { filteredArtistList, artistSortMode, updateArtistOrder, searchQuery } = useLibraryBrowse();
+const { filteredArtistList, artistSortMode, artistBrowseMode, updateArtistOrder, searchQuery } = useLibraryBrowse();
+const isAlbumArtistMode = computed(() => artistBrowseMode.value === 'albumArtist');
+const modeSwitchLabel = computed(() => isAlbumArtistMode.value
+  ? '当前：专辑艺术家模式，点击切换为艺术家模式'
+  : '当前：艺术家模式，点击切换为专辑艺术家模式');
 const router = useRouter();
 const route = useRoute();
 const { openHomeArtist } = useHomeNavigation(router);
@@ -33,7 +38,7 @@ const containerScrollTop = ref(0);
 const containerHeight = ref(720);
 let coverObserver: IntersectionObserver | null = null;
 let containerResizeObserver: ResizeObserver | null = null;
-const VIEWPORT_SNAPSHOT_KEY = 'artists-current';
+const viewportSnapshotKey = computed(() => `artists-current::${artistBrowseMode.value}`);
 const VIEWPORT_SNAPSHOT_LIMIT = 72;
 const ARTIST_GRID_GAP_Y = 16;
 const ARTIST_SECTION_GAP_Y = 8;
@@ -61,7 +66,7 @@ const handleArtistClick = (artist: ArtistListItem) => {
   if (avatarUrl && !artistImages.urlFor(artist.name)) {
     artistHeaderCache.set(artist.name, avatarUrl);
   }
-  void openHomeArtist(artist.name);
+  void openHomeArtist(artist.name, { artistMode: artistBrowseMode.value });
 };
 
 const handleSortChange = (mode: 'count' | 'name' | 'custom') => {
@@ -114,7 +119,7 @@ const isArtistAvatarLoading = (artist: ArtistListItem) => {
 };
 
 const restoreViewportCoverSnapshot = () => {
-  const snapshot = artistViewportCoverSnapshotCache.get(VIEWPORT_SNAPSHOT_KEY);
+  const snapshot = artistViewportCoverSnapshotCache.get(viewportSnapshotKey.value);
   if (!snapshot || snapshot.length === 0) {
     return;
   }
@@ -167,11 +172,11 @@ const saveViewportCoverSnapshot = () => {
   });
 
   if (snapshot.length > 0) {
-    artistViewportCoverSnapshotCache.set(VIEWPORT_SNAPSHOT_KEY, snapshot);
+    artistViewportCoverSnapshotCache.set(viewportSnapshotKey.value, snapshot);
     return;
   }
 
-  artistViewportCoverSnapshotCache.delete(VIEWPORT_SNAPSHOT_KEY);
+  artistViewportCoverSnapshotCache.delete(viewportSnapshotKey.value);
 };
 
 const artistSections = computed(() => {
@@ -410,7 +415,7 @@ const initCoverObserver = async () => {
 };
 
 const scrollMemoryKey = computed(
-  () => ['artists-view', route.path, artistSortMode.value, searchQuery.value.trim()].join('::'),
+  () => ['artists-view', route.path, artistBrowseMode.value, artistSortMode.value, searchQuery.value.trim()].join('::'),
 );
 
 useListScrollMemory(scrollMemoryKey, containerRef);
@@ -480,6 +485,20 @@ const resetArtistDrag = () => {
     dragSession.data = null;
     dragOverName.value = null;
   }
+};
+
+const toggleArtistMode = async () => {
+  saveViewportCoverSnapshot();
+  resetArtistDrag();
+  showSortMenu.value = false;
+  showContextMenu.value = false;
+  artistBrowseMode.value = isAlbumArtistMode.value ? 'artist' : 'albumArtist';
+  if (!listScrollCache.has(scrollMemoryKey.value)) {
+    listScrollCache.set(scrollMemoryKey.value, 0);
+  }
+  containerScrollTop.value = listScrollCache.get(scrollMemoryKey.value) ?? 0;
+  await nextTick();
+  restoreViewportCoverSnapshot();
 };
 
 const handleGlobalPointerEnd = (cancelled = false) => {
@@ -560,10 +579,20 @@ onUnmounted(() => {
     <header class="h-auto px-6 pt-2 pb-3 shrink-0 select-none flex flex-col justify-center z-10 relative">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2 pb-1">
-          <h2 class="text-xl font-bold text-gray-900 dark:text-white">歌手列表</h2>
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white">{{ isAlbumArtistMode ? '专辑艺术家列表' : '歌手列表' }}</h2>
         </div>
 
         <div class="relative z-50 flex items-center gap-2">
+          <button
+            type="button"
+            :title="modeSwitchLabel"
+            :aria-label="modeSwitchLabel"
+            :aria-pressed="isAlbumArtistMode"
+            class="artist-mode-switch bg-white/1 hover:bg-white/10 border border-white/1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-7 h-7 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
+            @click="toggleArtistMode"
+          >
+            <ArtistModeIcon :album-artist="isAlbumArtistMode" class="h-4 w-4" />
+          </button>
           <ArtistImageControl :other-menu-open="showSortMenu" @open="showSortMenu = false" />
           <button
             title="排序方式"
@@ -624,7 +653,7 @@ onUnmounted(() => {
       <Transition name="search-refresh">
       <div
         v-if="artistSortMode === 'name'"
-        :key="`artist-grouped-${searchQuery.trim()}`"
+        :key="`artist-grouped-${artistBrowseMode}-${searchQuery.trim()}`"
         :style="{ paddingTop: groupedArtistVirtualState.paddingTop, paddingBottom: groupedArtistVirtualState.paddingBottom }"
       >
         <template v-for="row in groupedArtistVirtualState.rows" :key="row.key">
@@ -681,7 +710,7 @@ onUnmounted(() => {
 
       <div
         v-else
-        :key="`artist-flat-${searchQuery.trim()}`"
+        :key="`artist-flat-${artistBrowseMode}-${searchQuery.trim()}`"
         class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-6 gap-y-4"
         :style="{ paddingTop: flatArtistVirtualState.paddingTop, paddingBottom: flatArtistVirtualState.paddingBottom }"
       >
@@ -726,6 +755,7 @@ onUnmounted(() => {
       :x="contextMenuX"
       :y="contextMenuY"
       type="artist"
+      :artistMode="artistBrowseMode"
       :targetKey="contextMenuTargetKey"
       :targetName="contextMenuTargetName"
       @close="showContextMenu = false"
@@ -746,5 +776,10 @@ onUnmounted(() => {
 
 .artists-scroll-container {
   overflow-anchor: none;
+}
+
+.artist-mode-switch:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 </style>

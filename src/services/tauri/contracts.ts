@@ -261,14 +261,15 @@ export interface TauriCommandMap {
   get_library_artist_catalog: { payload: undefined; response: ArtistCatalogItem[] };
   save_artist_avatar: { payload: { artistId: number; imagePath: string; writeToTags: boolean }; response: SaveArtistAvatarResponse };
   get_library_album_catalog: { payload: { folderCollections?: string[] } | undefined; response: AlbumCatalogItem[] };
-  get_library_album_catalog_by_artist: { payload: { artistName: string }; response: AlbumCatalogItem[] };
-  get_library_song_paths_by_artist: { payload: { artistName: string }; response: string[] };
+  get_library_album_catalog_by_artist: { payload: { artistName: string; albumArtist?: boolean }; response: AlbumCatalogItem[] };
+  get_library_song_paths_by_artist: { payload: { artistName: string; albumArtist?: boolean }; response: string[] };
   get_library_song_paths_by_album: { payload: { albumKey: string; sortMode?: 'title' | 'track_number' | 'track_number_desc' }; response: string[] };
   get_library_song_paths_for_all_view: {
     payload: {
       query?: string;
       artistFilter?: string;
       albumFilter?: string;
+      albumArtist?: boolean;
       sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
     };
     response: string[];
@@ -399,6 +400,7 @@ export interface TauriCommandMap {
       query?: string;
       artistFilter?: string;
       albumFilter?: string;
+      albumArtist?: boolean;
       sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
       offset: number;
       limit: number;
@@ -410,6 +412,7 @@ export interface TauriCommandMap {
       query?: string;
       artistFilter?: string;
       albumFilter?: string;
+      albumArtist?: boolean;
       sortMode: 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc' | 'track_number' | 'track_number_desc';
       offset: number;
       limit: number;
@@ -429,7 +432,7 @@ export interface TauriCommandMap {
   get_library_song_artist_index_keys: { payload: { paths: string[] }; response: string[] };
   get_library_song_paths_cached: { payload: undefined; response: string[] };
   get_library_song_labels_for_all_view: {
-    payload: { query?: string; artistFilter?: string; albumFilter?: string };
+    payload: { query?: string; artistFilter?: string; albumFilter?: string; albumArtist?: boolean };
     response: LibrarySongLabel[];
   };
   play_audio: { payload: PlayAudioOptions; response: number };

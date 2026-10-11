@@ -30,7 +30,8 @@ const makeCacheKey = (
   artistFilter: string,
   albumFilter: string,
   sortMode: BackendLocalSortMode,
-) => `${sortMode}\u0001${query}\u0001${artistFilter}\u0001${albumFilter}`;
+  albumArtist: boolean,
+) => `${sortMode}\u0001${query}\u0001${artistFilter}\u0001${albumFilter}\u0001${albumArtist}`;
 
 export function useLibraryAllSongPathCache() {
   const libraryStore = useLibraryStore();
@@ -39,14 +40,16 @@ export function useLibraryAllSongPathCache() {
     query = '',
     artistFilter = '',
     albumFilter = '',
+    albumArtist = false,
     sortMode,
   }: {
     query?: string;
     artistFilter?: string;
     albumFilter?: string;
+    albumArtist?: boolean;
     sortMode: BackendLocalSortMode;
   }) => {
-    const cacheKey = makeCacheKey(query, artistFilter, albumFilter, sortMode);
+    const cacheKey = makeCacheKey(query, artistFilter, albumFilter, sortMode, albumArtist);
     activateLibrarySongPathCacheEntry(ALL_VIEW_PATH_CACHE_NAMESPACE, cacheKey);
     const cached = getLibrarySongPathCacheEntry(ALL_VIEW_PATH_CACHE_NAMESPACE, cacheKey);
     if (cached) {
@@ -84,6 +87,7 @@ export function useLibraryAllSongPathCache() {
           query,
           artistFilter,
           albumFilter,
+          ...(albumArtist ? { albumArtist: true } : {}),
         }).then((labels) => {
           // Keep older mocks and mixed-version backends compatible while the
           // compact label endpoint rolls out.
@@ -118,6 +122,7 @@ export function useLibraryAllSongPathCache() {
           artistFilter,
           albumFilter,
           sortMode,
+          ...(albumArtist ? { albumArtist: true } : {}),
         }).then(paths => ({ paths }));
 
     const request = pathRequest

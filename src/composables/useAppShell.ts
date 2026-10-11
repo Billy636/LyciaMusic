@@ -59,7 +59,7 @@ export function useAppShell() {
   const route = useRoute();
   const router = useRouter();
   const { skipNextPageTransition, startupCompositionMaskVisible } = storeToRefs(useUiStore());
-  const { currentViewMode, filterCondition, currentFolderFilter, folderCollectionPath, activeRootPath } = usePlayerViewState();
+  const { currentViewMode, filterCondition, currentArtistBrowseMode, currentFolderFilter, folderCollectionPath, activeRootPath } = usePlayerViewState();
   const { folderTree, searchQuery } = usePlayerLibraryView();
   let startupCompositionMaskStartedAt = 0;
 
@@ -106,6 +106,7 @@ export function useAppShell() {
     router,
     currentViewMode,
     filterCondition,
+    currentArtistBrowseMode,
     currentFolderFilter,
     folderCollectionPath,
     activeRootPath,

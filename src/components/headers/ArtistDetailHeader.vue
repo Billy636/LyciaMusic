@@ -446,7 +446,8 @@ const handlePlayAll = () => {
       <!-- 封面图 (圆形) -->
       <div 
         @click="handleAvatarClick"
-        class="w-36 h-36 rounded-full shadow-sm flex items-center justify-center shrink-0 overflow-hidden group relative select-none bg-gray-100 dark:bg-white/5 border-4 border-white/50 dark:border-white/5 cursor-pointer"
+        class="w-36 h-36 rounded-full shadow-sm flex items-center justify-center shrink-0 overflow-hidden group relative select-none bg-gray-100 dark:bg-white/5 border-4 border-white/50 dark:border-white/5"
+        :class="{ 'cursor-pointer': !!currentArtist }"
       >
         <div v-if="isLoading && !displayedCover" class="w-full h-full bg-gray-200 dark:bg-white/10 animate-pulse"></div>
         <img v-else-if="displayedCover" :src="displayedCover" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="artistName" @error="!currentArtist?.avatarPath && artistImages.markFailed(artistName)"/>
@@ -466,7 +467,7 @@ const handlePlayAll = () => {
         
         <!-- Hover Overlay Mask -->
         <div 
-          v-else
+          v-else-if="currentArtist"
           class="absolute inset-0 bg-black/50 opacity-0 flex flex-col items-center justify-center text-white transition-opacity duration-300 gap-1.5"
           :class="isSavingAvatar ? 'hidden' : 'group-hover:opacity-100'"
         >

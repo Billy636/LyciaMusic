@@ -1,6 +1,8 @@
 import { ref } from 'vue';
 import { defineStore } from 'pinia';
 
+export type ArtistBrowseMode = 'artist' | 'albumArtist';
+
 export type NavigationViewMode =
   | 'all'
   | 'folder'
@@ -17,6 +19,8 @@ export const useNavigationStore = defineStore('navigation', () => {
   const searchQuery = ref('');
   const searchRevision = ref(0);
   const localMusicTab = ref<'default' | 'artist' | 'album'>('default');
+  const artistBrowseMode = ref<ArtistBrowseMode>('artist');
+  const currentArtistBrowseMode = ref<ArtistBrowseMode>('artist');
   const currentArtistFilter = ref('');
   const currentAlbumFilter = ref('');
   const currentFolderFilter = ref('');
@@ -40,6 +44,8 @@ export const useNavigationStore = defineStore('navigation', () => {
     searchQuery,
     searchRevision,
     localMusicTab,
+    artistBrowseMode,
+    currentArtistBrowseMode,
     currentArtistFilter,
     currentAlbumFilter,
     currentFolderFilter,

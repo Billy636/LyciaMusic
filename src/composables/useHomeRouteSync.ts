@@ -6,6 +6,7 @@ import type {
   Router,
 } from 'vue-router';
 import type { FolderNode } from '../types';
+import type { ArtistBrowseMode } from '../shared/stores/navigation';
 
 type SyncedHomeViewMode = 'all' | 'folder' | 'artist' | 'album' | 'playlist' | 'statistics';
 
@@ -13,6 +14,7 @@ interface HomeRouteState {
   viewMode: SyncedHomeViewMode;
   filter: string;
   folder: string;
+  artistMode: ArtistBrowseMode;
 }
 
 interface UseHomeRouteSyncOptions {
@@ -20,6 +22,7 @@ interface UseHomeRouteSyncOptions {
   router: Router;
   currentViewMode: Ref<string>;
   filterCondition: Ref<string>;
+  currentArtistBrowseMode?: Ref<ArtistBrowseMode>;
   currentFolderFilter: Ref<string>;
   folderCollectionPath?: Ref<string>;
   activeRootPath: Ref<string | null>;
@@ -27,7 +30,7 @@ interface UseHomeRouteSyncOptions {
   searchQuery: Ref<string>;
 }
 
-const HOME_QUERY_KEYS = ['view', 'filter', 'folder', 'collection'] as const;
+const HOME_QUERY_KEYS = ['view', 'filter', 'folder', 'collection', 'artistMode'] as const;
 
 const readQueryString = (value: LocationQuery[string]) => {
   if (Array.isArray(value)) {
@@ -50,15 +53,22 @@ const parseHomeRouteState = (query: LocationQuery): HomeRouteState => {
     case 'album':
     case 'playlist':
       if (!filter) {
-        return { viewMode: 'all', filter: '', folder: '' };
+        return { viewMode: 'all', filter: '', folder: '', artistMode: 'artist' };
       }
-      return { viewMode: view, filter, folder: '' };
+      return {
+        viewMode: view,
+        filter,
+        folder: '',
+        artistMode: view === 'artist' && readQueryString(query.artistMode) === 'albumArtist'
+          ? 'albumArtist'
+          : 'artist',
+      };
     case 'folder':
-      return { viewMode: 'folder', filter: '', folder };
+      return { viewMode: 'folder', filter: '', folder, artistMode: 'artist' };
     case 'statistics':
-      return { viewMode: 'statistics', filter: '', folder: '' };
+      return { viewMode: 'statistics', filter: '', folder: '', artistMode: 'artist' };
     default:
-      return { viewMode: 'all', filter: '', folder: '' };
+      return { viewMode: 'all', filter: '', folder: '', artistMode: 'artist' };
   }
 };
 
@@ -83,12 +93,19 @@ const buildHomeRouteQuery = (
   filterCondition: string,
   currentFolderFilter: string,
   folderCollectionPath: string,
+  currentArtistBrowseMode: ArtistBrowseMode,
 ): LocationQueryRaw => {
   switch (currentViewMode) {
     case 'artist':
     case 'album':
     case 'playlist':
-      return filterCondition ? { view: currentViewMode, filter: filterCondition } : {};
+      return filterCondition ? {
+        view: currentViewMode,
+        filter: filterCondition,
+        ...(currentViewMode === 'artist' && currentArtistBrowseMode === 'albumArtist'
+          ? { artistMode: 'albumArtist' }
+          : {}),
+      } : {};
     case 'statistics':
       return { view: 'statistics' };
     case 'folder':
@@ -107,6 +124,7 @@ const getComparableHomeQuery = (query: LocationQuery | LocationQueryRaw) => ({
   filter: readQueryString(query.filter as LocationQuery[string]),
   folder: readQueryString(query.folder as LocationQuery[string]),
   collection: readQueryString(query.collection as LocationQuery[string]),
+  artistMode: readQueryString(query.artistMode as LocationQuery[string]),
 });
 
 export function useHomeRouteSync({
@@ -114,6 +132,7 @@ export function useHomeRouteSync({
   router,
   currentViewMode,
   filterCondition,
+  currentArtistBrowseMode = ref<ArtistBrowseMode>('artist'),
   currentFolderFilter,
   folderCollectionPath = ref(''),
   activeRootPath,
@@ -122,15 +141,17 @@ export function useHomeRouteSync({
   const resetToDefaultHomeState = () => {
     currentViewMode.value = 'all';
     filterCondition.value = '';
+    currentArtistBrowseMode.value = 'artist';
   };
 
   const applyCollectionRouteState = (viewMode: 'favorites' | 'recent') => {
     currentViewMode.value = viewMode;
     filterCondition.value = '';
+    currentArtistBrowseMode.value = 'artist';
   };
 
   watch(
-    [() => route.path, () => route.query.view, () => route.query.filter, () => route.query.folder, () => route.query.collection],
+    [() => route.path, () => route.query.view, () => route.query.filter, () => route.query.folder, () => route.query.collection, () => route.query.artistMode],
     ([path]) => {
       folderCollectionPath.value = '';
       if (path === '/favorites') {
@@ -155,6 +176,7 @@ export function useHomeRouteSync({
       const nextState = parseHomeRouteState(route.query);
       currentViewMode.value = nextState.viewMode;
       filterCondition.value = nextState.filter;
+      currentArtistBrowseMode.value = nextState.artistMode;
 
       if (nextState.viewMode === 'folder') {
         const resolvedFolder =
@@ -181,7 +203,7 @@ export function useHomeRouteSync({
   );
 
   watch(
-    [() => route.path, currentViewMode, filterCondition, currentFolderFilter, folderCollectionPath],
+    [() => route.path, currentViewMode, filterCondition, currentFolderFilter, folderCollectionPath, currentArtistBrowseMode],
     ([path]) => {
       if (currentViewMode.value !== 'folder'
         || normalizePath(currentFolderFilter.value).toLowerCase() !== normalizePath(folderCollectionPath.value).toLowerCase()) {
@@ -208,6 +230,7 @@ export function useHomeRouteSync({
           filterCondition.value,
           currentFolderFilter.value,
           folderCollectionPath.value,
+          currentArtistBrowseMode.value,
         ),
       };
 

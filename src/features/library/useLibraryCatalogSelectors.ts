@@ -12,29 +12,35 @@ import {
 interface UseLibraryCatalogSelectorsOptions {
   artistCatalog: Ref<ArtistCatalogItem[]>;
   albumCatalog: Ref<AlbumCatalogItem[]>;
+  metadataAlbumCatalog: Ref<AlbumCatalogItem[]>;
   searchQuery: Ref<string>;
   artistSortMode: Ref<ArtistSortMode>;
   albumSortMode: Ref<AlbumSortMode>;
   artistCustomOrder: Ref<string[]>;
+  albumArtistSortMode: Ref<ArtistSortMode>;
+  albumArtistCustomOrder: Ref<string[]>;
   albumCustomOrder: Ref<string[]>;
 }
 
 export function useLibraryCatalogSelectors({
   artistCatalog,
   albumCatalog,
+  metadataAlbumCatalog,
   searchQuery,
   artistSortMode,
   albumSortMode,
   artistCustomOrder,
+  albumArtistSortMode,
+  albumArtistCustomOrder,
   albumCustomOrder,
 }: UseLibraryCatalogSelectorsOptions) {
-  const artistList = computed<ArtistListItem[]>(() => {
-    const list = [...artistCatalog.value];
+  const sortArtists = (items: ArtistListItem[], mode: ArtistSortMode, order: string[]) => {
+    const list = [...items];
 
-    if (artistSortMode.value === 'name') {
+    if (mode === 'name') {
       list.sort((a, b) => compareByAlphabetIndex(a.name, b.name));
-    } else if (artistSortMode.value === 'custom') {
-      const orderMap = new Map(artistCustomOrder.value.map((name, index) => [name, index]));
+    } else if (mode === 'custom') {
+      const orderMap = new Map(order.map((name, index) => [name, index]));
       list.sort((a, b) => {
         const left = orderMap.has(a.name) ? orderMap.get(a.name)! : Number.MAX_SAFE_INTEGER;
         const right = orderMap.has(b.name) ? orderMap.get(b.name)! : Number.MAX_SAFE_INTEGER;
@@ -45,6 +51,38 @@ export function useLibraryCatalogSelectors({
     }
 
     return list;
+  };
+
+  const artistList = computed(() => sortArtists(
+    artistCatalog.value, artistSortMode.value, artistCustomOrder.value,
+  ));
+
+  const albumArtistList = computed<ArtistListItem[]>(() => {
+    // Match SQLite's NOCASE comparison, which folds ASCII letters only.
+    const nameKey = (name: string) => name.trim().replace(/[A-Z]/g, letter => letter.toLowerCase());
+    const knownArtists = new Map(artistCatalog.value.map(artist => [nameKey(artist.name), artist]));
+    const artists = new Map<string, ArtistListItem>();
+
+    // Use the complete metadata catalog, including artists absent from track credits.
+    for (const album of metadataAlbumCatalog.value) {
+      const name = album.artist.trim() || 'Unknown';
+      const key = nameKey(name);
+      const existing = artists.get(key);
+      if (existing) {
+        existing.count += album.count;
+        continue;
+      }
+      const artist = knownArtists.get(key);
+      artists.set(key, {
+        id: artist?.id ?? 0,
+        name: artist?.name ?? name,
+        count: album.count,
+        firstSongPath: album.firstSongPath,
+        avatarPath: artist?.avatarPath ?? null,
+      });
+    }
+
+    return sortArtists([...artists.values()], albumArtistSortMode.value, albumArtistCustomOrder.value);
   });
 
   const albumList = computed<AlbumListItem[]>(() => {
@@ -80,6 +118,13 @@ export function useLibraryCatalogSelectors({
     return artistList.value.filter(artist => matchesPinyinSearch([artist.name || ''], query));
   });
 
+  const filteredAlbumArtistList = computed(() => {
+    const query = searchQuery.value.trim().toLowerCase();
+    return query
+      ? albumArtistList.value.filter(artist => matchesPinyinSearch([artist.name], query))
+      : albumArtistList.value;
+  });
+
   const filteredAlbumList = computed(() => {
     const query = searchQuery.value.trim().toLowerCase();
     if (!query) {
@@ -94,8 +139,10 @@ export function useLibraryCatalogSelectors({
 
   return {
     artistList,
+    albumArtistList,
     albumList,
     filteredArtistList,
+    filteredAlbumArtistList,
     filteredAlbumList,
   };
 }

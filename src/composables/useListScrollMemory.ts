@@ -53,7 +53,7 @@ export function useListScrollMemory(
 
     await nextTick();
 
-    if (!containerRef.value) {
+    if (!containerRef.value || key !== resolveKey()) {
       return;
     }
 
@@ -67,7 +67,7 @@ export function useListScrollMemory(
 
       const applyScrollPosition = () => {
         const element = containerRef.value;
-        if (!element) {
+        if (!element || key !== resolveKey()) {
           resolve();
           return;
         }

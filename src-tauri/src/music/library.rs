@@ -951,36 +951,37 @@ pub async fn get_library_album_catalog(
 #[tauri::command]
 pub async fn get_library_album_catalog_by_artist(
     artist_name: String,
+    album_artist: Option<bool>,
     db_state: State<'_, DbState>,
 ) -> Result<Vec<AlbumCatalogItem>, String> {
     let db_conn = db_state.conn.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        let sql = format!(
+            "WITH artist_songs AS (
+                SELECT DISTINCT songs.id, songs.path, songs.added_at,
+                    COALESCE(NULLIF(TRIM(songs.album_key), ''), '') AS album_key,
+                    COALESCE(NULLIF(TRIM(songs.album), ''), 'Unknown') AS album_name,
+                    COALESCE(NULLIF(TRIM(songs.album_artist), ''), NULLIF(TRIM(songs.artist), ''), 'Unknown') AS album_artist_name
+                FROM songs
+                WHERE {}
+             ), ranked_songs AS (
+                SELECT album_key, album_name, album_artist_name, path,
+                    COUNT(*) OVER (PARTITION BY album_key, album_name, album_artist_name) AS song_count,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY album_key, album_name, album_artist_name
+                        ORDER BY added_at DESC, id ASC
+                    ) AS representative_rank
+                FROM artist_songs
+             )
+             SELECT album_key, album_name, album_artist_name, song_count, path
+             FROM ranked_songs
+             WHERE representative_rank = 1",
+            artist_song_predicate(album_artist.unwrap_or(false)),
+        );
         let mut stmt = conn
-            .prepare(
-                "WITH artist_songs AS (
-                    SELECT DISTINCT songs.id, songs.path, songs.added_at,
-                        COALESCE(NULLIF(TRIM(songs.album_key), ''), '') AS album_key,
-                        COALESCE(NULLIF(TRIM(songs.album), ''), 'Unknown') AS album_name,
-                        COALESCE(NULLIF(TRIM(songs.album_artist), ''), NULLIF(TRIM(songs.artist), ''), 'Unknown') AS album_artist_name
-                    FROM songs
-                    JOIN song_artists ON song_artists.song_id = songs.id
-                    JOIN artists ON artists.id = song_artists.artist_id
-                    WHERE artists.name = ?1 COLLATE NOCASE
-                 ), ranked_songs AS (
-                    SELECT album_key, album_name, album_artist_name, path,
-                        COUNT(*) OVER (PARTITION BY album_key, album_name, album_artist_name) AS song_count,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY album_key, album_name, album_artist_name
-                            ORDER BY added_at DESC, id ASC
-                        ) AS representative_rank
-                    FROM artist_songs
-                 )
-                 SELECT album_key, album_name, album_artist_name, song_count, path
-                 FROM ranked_songs
-                 WHERE representative_rank = 1",
-            )
+            .prepare(&sql)
             .map_err(|error| error.to_string())?;
         let rows = stmt
             .query_map([artist_name], |row| {
@@ -1011,23 +1012,21 @@ pub async fn get_library_album_catalog_by_artist(
 #[tauri::command]
 pub async fn get_library_song_paths_by_artist(
     artist_name: String,
+    album_artist: Option<bool>,
     db_state: State<'_, DbState>,
 ) -> Result<Vec<String>, String> {
     let db_conn = db_state.conn.clone();
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT songs.path
-                 FROM songs
-                 JOIN song_artists ON song_artists.song_id = songs.id
-                 JOIN artists ON artists.id = song_artists.artist_id
-                 WHERE artists.name = ?1 COLLATE NOCASE
-                 GROUP BY songs.id, songs.path
-                 ORDER BY COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC",
-            )
-            .map_err(|e| e.to_string())?;
+        let sql = format!(
+            "SELECT songs.path
+             FROM songs
+             WHERE {}
+             ORDER BY COALESCE(NULLIF(TRIM(songs.title), ''), songs.path) COLLATE NOCASE ASC",
+            artist_song_predicate(album_artist.unwrap_or(false)),
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
         let rows = stmt
             .query_map([artist_name], |row| row.get::<_, String>(0))
@@ -1115,12 +1114,45 @@ pub async fn get_library_song_paths_by_album(
     Ok(result)
 }
 
+fn artist_song_predicate(album_artist: bool) -> &'static str {
+    if album_artist {
+        "COALESCE(NULLIF(TRIM(songs.album_artist), ''), NULLIF(TRIM(songs.artist), ''), 'Unknown') = ? COLLATE NOCASE"
+    } else {
+        "EXISTS (
+            SELECT 1
+            FROM song_artists
+            JOIN artists ON artists.id = song_artists.artist_id
+            WHERE song_artists.song_id = songs.id
+              AND artists.name = ? COLLATE NOCASE
+        )"
+    }
+}
+
+#[cfg(test)]
 fn load_all_view_song_paths(
     conn: &rusqlite::Connection,
     query: Option<String>,
     artist_filter: Option<String>,
     album_filter: Option<String>,
     sort_mode: LibrarySongSortMode,
+) -> Result<Vec<String>, String> {
+    load_all_view_song_paths_with_artist_mode(
+        conn,
+        query,
+        artist_filter,
+        album_filter,
+        sort_mode,
+        false,
+    )
+}
+
+fn load_all_view_song_paths_with_artist_mode(
+    conn: &rusqlite::Connection,
+    query: Option<String>,
+    artist_filter: Option<String>,
+    album_filter: Option<String>,
+    sort_mode: LibrarySongSortMode,
+    album_artist: bool,
 ) -> Result<Vec<String>, String> {
     if matches!(sort_mode, LibrarySongSortMode::Artist) {
         register_song_sorting(conn)?;
@@ -1136,15 +1168,8 @@ fn load_all_view_song_paths(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
     {
-        sql.push_str(
-            " AND EXISTS (
-                    SELECT 1
-                    FROM song_artists
-                    JOIN artists ON artists.id = song_artists.artist_id
-                    WHERE song_artists.song_id = songs.id
-                      AND artists.name = ? COLLATE NOCASE
-                )",
-        );
+        sql.push_str(" AND ");
+        sql.push_str(artist_song_predicate(album_artist));
         params.push(artist_name);
     }
 
@@ -1235,12 +1260,20 @@ pub async fn get_library_song_paths_for_all_view(
     artist_filter: Option<String>,
     album_filter: Option<String>,
     sort_mode: LibrarySongSortMode,
+    album_artist: Option<bool>,
     db_state: State<'_, DbState>,
 ) -> Result<Vec<String>, String> {
     let db_conn = db_state.conn.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|error| error.to_string())?;
-        load_all_view_song_paths(&conn, query, artist_filter, album_filter, sort_mode)
+        load_all_view_song_paths_with_artist_mode(
+            &conn,
+            query,
+            artist_filter,
+            album_filter,
+            sort_mode,
+            album_artist.unwrap_or(false),
+        )
     })
     .await
     .map_err(|error| error.to_string())?
@@ -1259,6 +1292,7 @@ fn build_all_view_page_filter(
     artist_filter: Option<String>,
     album_filter: Option<String>,
     index_complete: bool,
+    album_artist: bool,
 ) -> (String, Vec<String>) {
     let mut filter = String::from(" WHERE 1 = 1");
     let mut params = Vec::new();
@@ -1267,15 +1301,8 @@ fn build_all_view_page_filter(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
     {
-        filter.push_str(
-            " AND EXISTS (
-                SELECT 1
-                FROM song_artists
-                JOIN artists ON artists.id = song_artists.artist_id
-                WHERE song_artists.song_id = songs.id
-                  AND artists.name = ? COLLATE NOCASE
-            )",
-        );
+        filter.push_str(" AND ");
+        filter.push_str(artist_song_predicate(album_artist));
         params.push(artist_name);
     }
 
@@ -1308,12 +1335,14 @@ fn load_all_view_song_labels(
     query: Option<String>,
     artist_filter: Option<String>,
     album_filter: Option<String>,
+    album_artist: bool,
 ) -> Result<Vec<LibrarySongLabel>, String> {
     let (filter, params) = build_all_view_page_filter(
         query,
         artist_filter,
         album_filter,
         search_index_is_complete(conn),
+        album_artist,
     );
     let sql = format!("SELECT songs.path, songs.title FROM songs{filter}");
     let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
@@ -1339,12 +1368,19 @@ pub async fn get_library_song_labels_for_all_view(
     query: Option<String>,
     artist_filter: Option<String>,
     album_filter: Option<String>,
+    album_artist: Option<bool>,
     db_state: State<'_, DbState>,
 ) -> Result<Vec<LibrarySongLabel>, String> {
     let db_conn = db_state.conn.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|error| error.to_string())?;
-        load_all_view_song_labels(&conn, query, artist_filter, album_filter)
+        load_all_view_song_labels(
+            &conn,
+            query,
+            artist_filter,
+            album_filter,
+            album_artist.unwrap_or(false),
+        )
     })
     .await
     .map_err(|error| error.to_string())?
@@ -1396,6 +1432,7 @@ fn all_view_page_order(sort_mode: &LibrarySongSortMode) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn load_all_view_song_page(
     conn: &rusqlite::Connection,
     query: Option<String>,
@@ -1404,6 +1441,28 @@ fn load_all_view_song_page(
     sort_mode: LibrarySongSortMode,
     offset: u32,
     limit: u32,
+) -> Result<LibrarySongPage, String> {
+    load_all_view_song_page_with_artist_mode(
+        conn,
+        query,
+        artist_filter,
+        album_filter,
+        sort_mode,
+        offset,
+        limit,
+        false,
+    )
+}
+
+fn load_all_view_song_page_with_artist_mode(
+    conn: &rusqlite::Connection,
+    query: Option<String>,
+    artist_filter: Option<String>,
+    album_filter: Option<String>,
+    sort_mode: LibrarySongSortMode,
+    offset: u32,
+    limit: u32,
+    album_artist: bool,
 ) -> Result<LibrarySongPage, String> {
     if matches!(sort_mode, LibrarySongSortMode::Artist) {
         register_song_sorting(conn)?;
@@ -1414,6 +1473,7 @@ fn load_all_view_song_page(
         artist_filter,
         album_filter,
         search_index_is_complete(conn),
+        album_artist,
     );
     let count_sql = format!("SELECT COUNT(*) FROM songs{filter}");
     let total = conn
@@ -1446,6 +1506,7 @@ fn load_all_view_song_page(
     })
 }
 
+#[cfg(test)]
 fn load_all_view_song_path_page(
     conn: &rusqlite::Connection,
     query: Option<String>,
@@ -1454,6 +1515,28 @@ fn load_all_view_song_path_page(
     sort_mode: LibrarySongSortMode,
     offset: u32,
     limit: u32,
+) -> Result<LibrarySongPathPage, String> {
+    load_all_view_song_path_page_with_artist_mode(
+        conn,
+        query,
+        artist_filter,
+        album_filter,
+        sort_mode,
+        offset,
+        limit,
+        false,
+    )
+}
+
+fn load_all_view_song_path_page_with_artist_mode(
+    conn: &rusqlite::Connection,
+    query: Option<String>,
+    artist_filter: Option<String>,
+    album_filter: Option<String>,
+    sort_mode: LibrarySongSortMode,
+    offset: u32,
+    limit: u32,
+    album_artist: bool,
 ) -> Result<LibrarySongPathPage, String> {
     if matches!(sort_mode, LibrarySongSortMode::Artist) {
         register_song_sorting(conn)?;
@@ -1467,6 +1550,7 @@ fn load_all_view_song_path_page(
         artist_filter,
         album_filter,
         search_index_is_complete(conn),
+        album_artist,
     );
     let total = conn
         .query_row(
@@ -1511,12 +1595,13 @@ pub async fn get_library_song_path_page_for_all_view(
     sort_mode: LibrarySongSortMode,
     offset: u32,
     limit: u32,
+    album_artist: Option<bool>,
     db_state: State<'_, DbState>,
 ) -> Result<LibrarySongPathPage, String> {
     let db_conn = db_state.conn.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|error| error.to_string())?;
-        load_all_view_song_path_page(
+        load_all_view_song_path_page_with_artist_mode(
             &conn,
             query,
             artist_filter,
@@ -1524,6 +1609,7 @@ pub async fn get_library_song_path_page_for_all_view(
             sort_mode,
             offset,
             limit,
+            album_artist.unwrap_or(false),
         )
     })
     .await
@@ -1538,12 +1624,13 @@ pub async fn get_library_song_page(
     sort_mode: LibrarySongSortMode,
     offset: u32,
     limit: u32,
+    album_artist: Option<bool>,
     db_state: State<'_, DbState>,
 ) -> Result<LibrarySongPage, String> {
     let db_conn = db_state.conn.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let conn = db_conn.lock().map_err(|error| error.to_string())?;
-        load_all_view_song_page(
+        load_all_view_song_page_with_artist_mode(
             &conn,
             query,
             artist_filter,
@@ -1551,6 +1638,7 @@ pub async fn get_library_song_page(
             sort_mode,
             offset,
             limit,
+            album_artist.unwrap_or(false),
         )
     })
     .await

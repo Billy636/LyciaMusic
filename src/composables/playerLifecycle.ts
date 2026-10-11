@@ -80,9 +80,11 @@ let dominantColorSignature = '';
 
 interface SortSettingsRefs {
   artistSortMode: Ref<ArtistSortMode>;
+  albumArtistSortMode?: Ref<ArtistSortMode>;
   albumSortMode: Ref<AlbumSortMode>;
   albumDetailSortMode: Ref<AlbumDetailSortMode>;
   artistCustomOrder: Ref<string[]>;
+  albumArtistCustomOrder?: Ref<string[]>;
   albumCustomOrder: Ref<string[]>;
   folderSortMode: Ref<FolderSortMode>;
   folderCustomOrder: Ref<Record<string, string[]>>;
@@ -109,9 +111,11 @@ const restoreOutputDevice = async () => {
 
 const restoreSortSettings = ({
   artistSortMode,
+  albumArtistSortMode,
   albumSortMode,
   albumDetailSortMode,
   artistCustomOrder,
+  albumArtistCustomOrder,
   albumCustomOrder,
   folderSortMode,
   folderCustomOrder,
@@ -122,6 +126,11 @@ const restoreSortSettings = ({
   const storedArtistSort = playerStorage.getString(playerStorageKeys.artistSortMode);
   if (storedArtistSort) {
     artistSortMode.value = storedArtistSort as ArtistSortMode;
+  }
+
+  const storedAlbumArtistSort = playerStorage.getString(playerStorageKeys.albumArtistSortMode);
+  if (albumArtistSortMode && storedAlbumArtistSort && ['count', 'name', 'custom'].includes(storedAlbumArtistSort)) {
+    albumArtistSortMode.value = storedAlbumArtistSort as ArtistSortMode;
   }
 
   const storedAlbumSort = playerStorage.getString(playerStorageKeys.albumSortMode);
@@ -137,6 +146,11 @@ const restoreSortSettings = ({
   const storedArtistOrder = playerStorage.readStringArray(playerStorageKeys.artistCustomOrder);
   if (storedArtistOrder) {
     artistCustomOrder.value = storedArtistOrder;
+  }
+
+  const storedAlbumArtistOrder = playerStorage.readStringArray(playerStorageKeys.albumArtistCustomOrder);
+  if (albumArtistCustomOrder && storedAlbumArtistOrder) {
+    albumArtistCustomOrder.value = storedAlbumArtistOrder;
   }
 
   const storedAlbumOrder = playerStorage.readStringArray(playerStorageKeys.albumCustomOrder);
@@ -210,9 +224,11 @@ export const createPlayerLifecycle = ({
     sourceSongPaths,
     watchedFolders,
     artistSortMode,
+    albumArtistSortMode,
     albumSortMode,
     albumDetailSortMode,
     artistCustomOrder,
+    albumArtistCustomOrder,
     albumCustomOrder,
     folderSortMode,
     folderCustomOrder,
@@ -382,12 +398,16 @@ export const createPlayerLifecycle = ({
       { deep: true }
     );
     watch(artistCustomOrder, scheduleStatePersistence, { deep: true });
+    watch(albumArtistCustomOrder, scheduleStatePersistence, { deep: true });
     watch(albumCustomOrder, scheduleStatePersistence, { deep: true });
     watch(folderCustomOrder, scheduleStatePersistence, { deep: true });
     watch(localCustomOrder, scheduleStatePersistence, { deep: true });
 
     watch(artistSortMode, value => {
       playerStorage.setString(playerStorageKeys.artistSortMode, value);
+    });
+    watch(albumArtistSortMode, value => {
+      playerStorage.setString(playerStorageKeys.albumArtistSortMode, value);
     });
     watch(albumSortMode, value => {
       playerStorage.setString(playerStorageKeys.albumSortMode, value);
@@ -586,9 +606,11 @@ export const createPlayerLifecycle = ({
 
       restoreSortSettings({
         artistSortMode,
+        albumArtistSortMode,
         albumSortMode,
         albumDetailSortMode,
         artistCustomOrder,
+        albumArtistCustomOrder,
         albumCustomOrder,
         folderSortMode,
         folderCustomOrder,

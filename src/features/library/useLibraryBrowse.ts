@@ -1,4 +1,5 @@
 import { storeToRefs } from 'pinia';
+import { computed } from 'vue';
 
 import { useLibraryStore } from './store';
 import { useNavigationStore } from '../../shared/stores/navigation';
@@ -15,6 +16,7 @@ export function useLibraryBrowse() {
     currentViewMode,
     currentFolderFilter,
     activeRootPath,
+    artistBrowseMode,
   } = storeToRefs(navigationStore);
   const {
     libraryFolders,
@@ -23,14 +25,25 @@ export function useLibraryBrowse() {
     canonicalSongs,
     sourceSongs,
     libraryHierarchy,
-    artistSortMode,
+    artistSortMode: trackArtistSortMode,
+    albumArtistSortMode,
     albumSortMode,
     artistCustomOrder,
+    albumArtistCustomOrder,
     albumCustomOrder,
   } = storeToRefs(libraryStore);
 
+  const artistSortMode = computed({
+    get: () => artistBrowseMode.value === 'albumArtist' ? albumArtistSortMode.value : trackArtistSortMode.value,
+    set: mode => {
+      if (artistBrowseMode.value === 'albumArtist') albumArtistSortMode.value = mode;
+      else trackArtistSortMode.value = mode;
+    },
+  });
+
   const updateArtistOrder = (newOrder: string[]) => {
-    artistCustomOrder.value = newOrder;
+    if (artistBrowseMode.value === 'albumArtist') albumArtistCustomOrder.value = newOrder;
+    else artistCustomOrder.value = newOrder;
     if (artistSortMode.value !== 'custom') {
       artistSortMode.value = 'custom';
     }
@@ -60,12 +73,15 @@ export function useLibraryBrowse() {
     canonicalSongs,
     sourceSongs,
     artistSortMode,
+    artistBrowseMode,
     albumSortMode,
-    artistList: libraryView.artistList,
+    artistList: computed(() => artistBrowseMode.value === 'albumArtist'
+      ? libraryView.albumArtistList.value : libraryView.artistList.value),
     albumList: libraryView.albumList,
     currentFolderSongs: libraryView.currentFolderSongs,
     currentViewSongs: libraryView.currentViewSongs,
-    filteredArtistList: libraryView.filteredArtistList,
+    filteredArtistList: computed(() => artistBrowseMode.value === 'albumArtist'
+      ? libraryView.filteredAlbumArtistList.value : libraryView.filteredArtistList.value),
     filteredAlbumList: libraryView.filteredAlbumList,
     folderList: libraryView.folderList,
     favoriteSongList: libraryView.favoriteSongList,
