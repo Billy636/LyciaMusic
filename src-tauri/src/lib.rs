@@ -72,8 +72,9 @@ use statistics::{
 };
 use system_fonts::get_system_fonts;
 use taskbar::{
-    get_taskbar_tray_geometry, install_taskbar_zorder_guard, refresh_taskbar_window_topmost,
-    setup_taskbar_window, uninstall_taskbar_zorder_guard,
+    cancel_taskbar_player_drag, drag_taskbar_player, get_taskbar_tray_geometry,
+    install_taskbar_zorder_guard, refresh_taskbar_window_topmost, setup_taskbar_window,
+    uninstall_taskbar_zorder_guard,
 };
 use tauri::Manager;
 use toolbox::{
@@ -264,6 +265,8 @@ pub fn run() {
             read_lyrics_font_data_url,
             setup_taskbar_window,
             get_taskbar_tray_geometry,
+            drag_taskbar_player,
+            cancel_taskbar_player_drag,
             install_taskbar_zorder_guard,
             refresh_taskbar_window_topmost,
             uninstall_taskbar_zorder_guard,

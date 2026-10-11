@@ -1,3 +1,5 @@
+import type { TaskbarContentMode, TaskbarCoverShape } from '../features/taskbarPlayer/shared';
+
 export interface SongCore {
   id?: number;       // 数据库主键 (用于播放记录关联)
   name: string;
@@ -520,7 +522,14 @@ export interface AppSettings {
   taskbarBackgroundOpacity: number;
   taskbarWindowWidth: number;
   taskbarTextColor: string;
+  /** Deprecated compatibility field; position locking uses taskbarPositionLocked. */
   taskbarPlayerCanDrag: boolean;
+  taskbarPositionLocked: boolean;
+  taskbarContentMode: TaskbarContentMode;
+  taskbarCoverShape: TaskbarCoverShape;
+  taskbarCoverRotate: boolean;
+  /** Null until a legacy absolute taskbar position has been migrated. */
+  taskbarLeftOffset: number | null;
   gpuAcceleration: boolean;
   writeArtistAvatarToTags: boolean;
   autoScanLibraryOnStartup: boolean;

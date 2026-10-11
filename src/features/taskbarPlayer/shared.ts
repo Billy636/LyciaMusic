@@ -16,6 +16,22 @@ export const TASKBAR_PLAYER_WINDOW_WIDTH = 280;
 export const TASKBAR_PLAYER_MIN_WIDTH = 220;
 export const TASKBAR_PLAYER_MAX_WIDTH = 600;
 export const TASKBAR_PLAYER_DEFAULT_TEXT_COLOR = '#ffffff';
+export type TaskbarContentMode = 'title-lyrics' | 'bilingual' | 'lyrics-only';
+export type TaskbarCoverShape = 'square' | 'circle';
+
+export function normalizeTaskbarContentMode(value: unknown): TaskbarContentMode {
+  return value === 'bilingual' || value === 'lyrics-only' ? value : 'title-lyrics';
+}
+
+export function normalizeTaskbarCoverShape(value: unknown): TaskbarCoverShape {
+  return value === 'circle' ? 'circle' : 'square';
+}
+
+export function normalizeTaskbarLeftOffset(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value))) : 0;
+}
+
 export function normalizeTaskbarTextColor(value: unknown): string {
   return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)
     ? value.toLowerCase() : TASKBAR_PLAYER_DEFAULT_TEXT_COLOR;
@@ -73,8 +89,17 @@ export interface TaskbarPlayerStatePayload extends TaskbarPlayerPlaybackPayload 
   isDarkTheme: boolean;
   backgroundOpacity?: number;
   textColor?: string;
+  contentMode?: TaskbarContentMode;
+  coverShape?: TaskbarCoverShape;
+  coverRotate?: boolean;
+  canDrag?: boolean;
   parsedLyrics: LyricLine[];
   lyricsStatus: LyricsStatus;
+}
+
+export interface TaskbarPlayerDragPayload {
+  dragging: boolean;
+  leftOffset?: number;
 }
 
 export type TaskbarPlayerAction =
@@ -82,4 +107,6 @@ export type TaskbarPlayerAction =
   | { type: 'toggle-play' }
   | { type: 'prev-song' }
   | { type: 'next-song' }
+  | { type: 'set-left-offset'; offset: number }
+  | { type: 'align-left' }
   | { type: 'close' };

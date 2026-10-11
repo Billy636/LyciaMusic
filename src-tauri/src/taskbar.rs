@@ -1,7 +1,13 @@
+#[cfg(target_os = "windows")]
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicIsize, Ordering};
 
 pub static LAST_TASKBAR_HWND: AtomicIsize = AtomicIsize::new(0);
 const TASKBAR_PLAYER_WINDOW_LABEL: &str = "taskbar-player";
+#[cfg(target_os = "windows")]
+static TASKBAR_DRAG_ACTIVE_SESSION: AtomicU64 = AtomicU64::new(0);
+#[cfg(target_os = "windows")]
+static TASKBAR_DRAG_CANCELLED_SESSION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(serde::Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -332,6 +338,165 @@ pub fn get_taskbar_tray_geometry(app: tauri::AppHandle) -> Result<TaskbarTrayGeo
     #[cfg(not(target_os = "windows"))]
     {
         Err("Unsupported OS".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn drag_taskbar_player(
+    window: tauri::Window,
+    session_id: u64,
+    min_x: i32,
+    max_x: i32,
+    y: i32,
+    grab_offset_x: i32,
+) -> Result<i32, String> {
+    if window.label() != TASKBAR_PLAYER_WINDOW_LABEL {
+        return Err("Only the taskbar player window can start taskbar dragging".to_string());
+    }
+    if min_x > max_x {
+        return Err("Invalid taskbar drag bounds".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::time::{Duration, Instant};
+        use windows::Win32::UI::HiDpi::{
+            SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT,
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        };
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            GetAsyncKeyState, VK_ESCAPE, VK_LBUTTON, VK_RBUTTON,
+        };
+        use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetCursorPos, GetSystemMetrics, GetWindowRect, IsWindow, IsWindowVisible, SetWindowPos,
+            SM_SWAPBUTTON, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
+        };
+
+        // The caller reserves the id before any IPC. Separate monotonic high
+        // watermarks prevent delayed starts from reviving a cancelled session
+        // or replacing a newer drag, even before this async command is polled.
+        TASKBAR_DRAG_ACTIVE_SESSION.fetch_max(session_id, Ordering::SeqCst);
+        let hwnd = window.hwnd().map_err(|error| error.to_string())?.0 as isize;
+
+        tauri::async_runtime::spawn_blocking(move || {
+            // Runtime workers do not necessarily inherit the window thread's
+            // awareness. Keep the native reads and writes in physical pixels,
+            // then restore this pooled thread's context on every exit path.
+            struct RestoreDpiContext(DPI_AWARENESS_CONTEXT);
+            impl Drop for RestoreDpiContext {
+                fn drop(&mut self) {
+                    unsafe { SetThreadDpiAwarenessContext(self.0) };
+                }
+            }
+            let mut previous_dpi =
+                unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+            if previous_dpi.0.is_null() {
+                previous_dpi = unsafe {
+                    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE)
+                };
+            }
+            if previous_dpi.0.is_null() {
+                return Err("Failed to set the taskbar drag worker's DPI awareness".to_string());
+            }
+            let _restore_dpi = RestoreDpiContext(previous_dpi);
+
+            let hwnd = hwnd as HWND;
+            let mut rect: RECT = unsafe { std::mem::zeroed() };
+            if unsafe { IsWindow(hwnd) } == 0 || unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+                return Err("Taskbar player window is unavailable".to_string());
+            }
+            let mut confirmed_x = rect.left;
+            let mut confirmed_y = rect.top;
+            let started = Instant::now();
+            // DOM button 0 follows the user's primary-button preference;
+            // GetAsyncKeyState reports physical left/right buttons instead.
+            let primary_button = if unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0 {
+                VK_RBUTTON
+            } else {
+                VK_LBUTTON
+            };
+
+            // Read native input instead of WebView pointer events. The no-activate
+            // taskbar window can lose DOM capture while the button is still held.
+            loop {
+                if TASKBAR_DRAG_ACTIVE_SESSION.load(Ordering::SeqCst) != session_id
+                    || TASKBAR_DRAG_CANCELLED_SESSION.load(Ordering::SeqCst) >= session_id
+                    || started.elapsed() >= Duration::from_secs(30)
+                    || unsafe { IsWindow(hwnd) } == 0
+                    || unsafe { IsWindowVisible(hwnd) } == 0
+                    || unsafe { GetAsyncKeyState(primary_button.0 as i32) } >= 0
+                    || unsafe { GetAsyncKeyState(VK_ESCAPE.0 as i32) } < 0
+                {
+                    break;
+                }
+
+                let mut cursor = POINT { x: 0, y: 0 };
+                if unsafe { GetCursorPos(&mut cursor) } == 0 {
+                    return Err(format!(
+                        "Failed to read the cursor position: {}",
+                        std::io::Error::last_os_error()
+                    ));
+                }
+                let next_x = cursor.x.saturating_sub(grab_offset_x).clamp(min_x, max_x);
+                if next_x != confirmed_x || y != confirmed_y {
+                    // Keep every coordinate physical and apply movement
+                    // synchronously so completion cannot precede a queued move.
+                    if unsafe {
+                        SetWindowPos(
+                            hwnd,
+                            std::ptr::null_mut(),
+                            next_x,
+                            y,
+                            0,
+                            0,
+                            SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER,
+                        )
+                    } == 0
+                    {
+                        return Err(format!(
+                            "Failed to move the taskbar player: {}",
+                            std::io::Error::last_os_error()
+                        ));
+                    }
+                    if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+                        break;
+                    }
+                    confirmed_x = rect.left;
+                    confirmed_y = rect.top;
+                }
+                std::thread::sleep(Duration::from_millis(12));
+            }
+
+            if unsafe { IsWindow(hwnd) } != 0 && unsafe { GetWindowRect(hwnd, &mut rect) } != 0 {
+                confirmed_x = rect.left;
+            }
+            Ok(confirmed_x)
+        })
+        .await
+        .map_err(|error| format!("Taskbar drag worker failed: {error}"))?
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, session_id, min_x, max_x, y, grab_offset_x);
+        Err("Taskbar player dragging is only supported on Windows".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn cancel_taskbar_player_drag(window: tauri::Window, session_id: u64) -> Result<(), String> {
+    if window.label() != TASKBAR_PLAYER_WINDOW_LABEL {
+        return Err("Only the taskbar player window can cancel taskbar dragging".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        TASKBAR_DRAG_CANCELLED_SESSION.fetch_max(session_id, Ordering::SeqCst);
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = session_id;
+        Err("Taskbar player dragging is only supported on Windows".to_string())
     }
 }
 

@@ -139,6 +139,8 @@ commands.allow = [
   "exit_app",
   "setup_taskbar_window",
   "get_taskbar_tray_geometry",
+  "drag_taskbar_player",
+  "cancel_taskbar_player_drag",
   "file_exists",
   "set_gpu_acceleration",
   "check_update_by_rust",

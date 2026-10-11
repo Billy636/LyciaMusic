@@ -1,6 +1,12 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
-import { normalizeTaskbarWidth, normalizeTaskbarTextColor } from '../taskbarPlayer/shared';
+import {
+  normalizeTaskbarWidth,
+  normalizeTaskbarTextColor,
+  normalizeTaskbarContentMode,
+  normalizeTaskbarCoverShape,
+  normalizeTaskbarLeftOffset,
+} from '../taskbarPlayer/shared';
 
 import type {
   AppSettings,
@@ -164,6 +170,11 @@ export const defaultAppSettings: AppSettings = {
   taskbarWindowWidth: 280,
   taskbarTextColor: '#ffffff',
   taskbarPlayerCanDrag: false,
+  taskbarPositionLocked: false,
+  taskbarContentMode: 'title-lyrics',
+  taskbarCoverShape: 'square',
+  taskbarCoverRotate: false,
+  taskbarLeftOffset: null,
   gpuAcceleration: true,
   writeArtistAvatarToTags: false,
   autoScanLibraryOnStartup: false,
@@ -342,6 +353,18 @@ export const mergeAppSettings = (
       ? Math.min(100, Math.max(0, Math.round(patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity))) : 0,
     taskbarWindowWidth: normalizeTaskbarWidth(patch.taskbarWindowWidth ?? base.taskbarWindowWidth),
     taskbarTextColor: normalizeTaskbarTextColor(patch.taskbarTextColor ?? base.taskbarTextColor),
+    taskbarPlayerCanDrag: typeof (patch.taskbarPlayerCanDrag ?? base.taskbarPlayerCanDrag) === 'boolean'
+      ? (patch.taskbarPlayerCanDrag ?? base.taskbarPlayerCanDrag) : false,
+    // The legacy can-drag flag was not used by the drag handle. Only an explicit
+    // position lock should hide it; existing settings must remain draggable.
+    taskbarPositionLocked: typeof (patch.taskbarPositionLocked ?? base.taskbarPositionLocked) === 'boolean'
+      ? (patch.taskbarPositionLocked ?? base.taskbarPositionLocked) : false,
+    taskbarContentMode: normalizeTaskbarContentMode(patch.taskbarContentMode ?? base.taskbarContentMode),
+    taskbarCoverShape: normalizeTaskbarCoverShape(patch.taskbarCoverShape ?? base.taskbarCoverShape),
+    taskbarCoverRotate: typeof (patch.taskbarCoverRotate ?? base.taskbarCoverRotate) === 'boolean'
+      ? (patch.taskbarCoverRotate ?? base.taskbarCoverRotate) : false,
+    taskbarLeftOffset: (patch.taskbarLeftOffset ?? base.taskbarLeftOffset) == null
+      ? null : normalizeTaskbarLeftOffset(patch.taskbarLeftOffset ?? base.taskbarLeftOffset),
     customLyricsFonts: normalizeImportedLyricsFonts(patch.customLyricsFonts ?? base.customLyricsFonts),
     theme: mergeThemeSettings(base.theme, patch.theme ?? {}),
     sidebar: mergeSidebarSettings(base.sidebar, patch.sidebar ?? {}),
