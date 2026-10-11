@@ -6,16 +6,11 @@ import { useRenderingPower } from '../../composables/renderingPower';
 import { normalizePlayerBackgroundSettings } from '../../features/settings/playerBackground';
 import MistBackground from '../layout/MistBackground.vue';
 import PlayerColorBackground from './PlayerColorBackground.vue';
-import PlayerAdaptiveForeground from './PlayerAdaptiveForeground.vue';
-import type { PlayerForeground } from './playerBackgroundReadability';
 
 const props = defineProps<{
   bgOpacity?: number;
   active?: boolean;
-  lyricsElement?: HTMLElement | null;
-  lyricsLayoutKey?: string;
 }>();
-const emit = defineEmits<{ (event: 'foreground-change', foreground: PlayerForeground): void }>();
 
 const { dominantColors, currentSong, currentCover, currentCoverPath } = usePlayer();
 const { theme } = useThemeSettings();
@@ -86,7 +81,7 @@ onUnmounted(() => {
         :style="{ backgroundColor: dominantColors[0] }"
       ></div>
 
-      <transition name="song-switch-bg">
+      <transition name="song-switch-bg" mode="out-in">
         <div v-if="thumbCoverUrl" :key="thumbCoverUrl" class="absolute inset-0 overflow-hidden z-[1]">
           <img
             :src="thumbCoverUrl"
@@ -104,15 +99,6 @@ onUnmounted(() => {
       <div class="absolute inset-0 bg-gradient-to-r from-black/6 via-transparent to-black/6 z-[18]"></div>
       <div class="absolute inset-0 bg-gradient-to-b from-black/3 via-transparent to-black/22 z-20"></div>
     </template>
-    <PlayerAdaptiveForeground
-      :cover-src="thumbCoverUrl"
-      :active="(props.active ?? true) && !isMainWindowLowPower"
-      :enabled="playerBackground.playerBackgroundMode === 'original' && !usesMistBackground"
-      :lyrics-element="props.lyricsElement"
-      :layout-key="props.lyricsLayoutKey"
-      :large-viewport="isLargeViewport"
-      @foreground-change="emit('foreground-change', $event)"
-    />
   </div>
 </template>
 

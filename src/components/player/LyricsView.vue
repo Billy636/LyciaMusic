@@ -68,7 +68,6 @@ async function handleLightLineClick(line: LyricLine) {
   <div class="group/lyrics-view relative h-full min-h-0 w-full min-w-0">
     <div
       v-if="amllLines.length > 0"
-      data-player-lyrics-viewport
       class="lyrics-mask-shell h-full min-h-0 w-full min-w-0"
       :class="[lyricsAlignmentClass, { 'lyrics-writing-vertical': isVerticalWriting }]"
       :style="lyricsPlayerStyle"
@@ -123,7 +122,7 @@ async function handleLightLineClick(line: LyricLine) {
 
     <div
       v-else
-      class="no-lyrics flex h-full items-center justify-center text-2xl font-medium"
+      class="no-lyrics flex h-full items-center justify-center text-2xl font-medium text-white/30"
     >
       {{ emptyStateText }}
     </div>
@@ -190,33 +189,20 @@ async function handleLightLineClick(line: LyricLine) {
 }
 
 .amll-host :deep(.amll-lyric-player) {
-  --amll-lp-color: rgb(var(--player-lyrics-rgb, 255 255 255) / 0.95);
+  --amll-lp-color: rgba(255, 255, 255, 0.95);
   --amll-lp-bg-color: transparent;
   --amll-lp-font-size: calc(max(max(5vh, 2.5vw), 12px) * var(--lyrics-font-scale, 1));
-  mix-blend-mode: normal;
   font-family: var(--lyrics-font-family, system-ui, sans-serif);
-}
-
-.amll-host :deep(.amll-lyric-player),
-.amll-host :deep(.amll-lyric-player *) {
-  text-shadow: none !important;
-}
-
-.no-lyrics {
-  color: rgb(var(--player-lyrics-rgb, 255 255 255) / 0.55);
 }
 
 /* AMLL 0.6 keeps translation as the second child and romanization as the third;
    the two share a class, so target the translation slot independently. */
 .amll-host :deep(.amll-lyric-player [class*="_lyricSubLine"]:nth-child(2)) {
   font-size: calc(max(0.5em, 10px) * var(--lyrics-translation-font-scale, 1));
-  opacity: var(--player-lyrics-amll-subline-alpha, 0.72);
 }
 
 /* AMLL 0.6 skin: retain its layout/duet structure and only change appearance. */
 .amll-host :deep(.amll-lyric-player [class*="_lyricLineWrapper"]) {
-  --amll-lp-color: rgb(var(--player-lyrics-rgb, 255 255 255) / 0.95);
-  color: var(--amll-lp-color);
   padding-top: calc(0.4em * var(--lyrics-line-gap, 1));
   padding-bottom: calc(0.4em * var(--lyrics-line-gap, 1));
 }

@@ -486,7 +486,7 @@ onBeforeUnmount(() => {
   -ms-overflow-style: none; /* IE10+ */
   box-sizing: border-box;
   padding: 0 32px; /* 增加左右安全边距，防止活跃行放大时字边缘被外层溢出裁剪遮挡 */
-  color: rgb(var(--player-lyrics-rgb, 255 255 255) / 0.95);
+  color: rgba(255, 255, 255, 0.95);
   font-family: var(--lyrics-font-family, system-ui, sans-serif);
   
   /* 首帧渲染管线防闪烁淡入 */
@@ -539,13 +539,12 @@ onBeforeUnmount(() => {
   border: 0;
   padding: calc(6px * var(--light-line-gap, 1)) 0;
   text-align: var(--lyrics-text-align, left);
-  color: rgb(var(--player-lyrics-rgb, 255 255 255) / var(--player-lyrics-inactive-alpha, 0.64));
+  color: rgba(255, 255, 255, 0.35); /* 默认未来行和未激活行降低亮度与透明度 */
   background: transparent;
-  /* Fade text once; row opacity would also dim translation and word fills. */
-  opacity: 1;
+  opacity: 0.35;
   transform: scale(0.98); /* 非激活行平面轻微缩小 */
   transform-origin: left center; /* 明确默认以靠左为放大原点，防止使用非法的 flex-start 导致浏览器回退到 center 发生向左溢出裁剪 */
-  transition: color 550ms ease, opacity 550ms ease, transform 760ms cubic-bezier(0.34, 1.56, 0.64, 1); /* 物理缩放与滚动曲线联动，带有极微幅超调弹性 */
+  transition: opacity 550ms ease, transform 760ms cubic-bezier(0.34, 1.56, 0.64, 1); /* 物理缩放与滚动曲线联动，带有极微幅超调弹性 */
 }
 
 /* 制作团队信息置顶排版样式 */
@@ -553,21 +552,21 @@ onBeforeUnmount(() => {
   font-size: 0.72em !important;
   align-items: flex-start !important;
   text-align: left !important;
-  color: rgb(var(--player-lyrics-rgb, 255 255 255) / var(--player-lyrics-subline-alpha, 0.62));
-  opacity: 1;
+  color: rgba(255, 255, 255, 0.45);
+  opacity: 0.45;
   cursor: pointer;
 }
 
 .light-lyric-line:hover {
-  opacity: 1;
-  color: rgb(var(--player-lyrics-rgb, 255 255 255) / 0.85);
+  opacity: 0.72;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .light-lyric-line--active {
-  color: rgb(var(--player-lyrics-rgb, 255 255 255) / 0.98);
+  color: rgba(255, 255, 255, 0.98);
   opacity: 1 !important;
   transform: scale(1.04) !important; /* 活跃行微幅平面放大 */
-  text-shadow: none;
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.12); /* 亮白高级微阴影 */
 }
 
 /* 适配不同的对齐方式，由 CSS 容器层自适应设定 transform-origin */
@@ -592,8 +591,7 @@ onBeforeUnmount(() => {
   font-size: calc(max(max(2.4vh, 1.2vw), 11px) * var(--lyrics-font-scale, 1) * var(--light-subline-font-scale, 1));
   font-weight: 600;
   line-height: 1.25;
-  color: rgb(var(--player-lyrics-rgb, 255 255 255) / var(--player-lyrics-subline-alpha, 0.62));
-  transition: color 550ms ease;
+  color: rgba(255, 255, 255, 0.52);
   overflow-wrap: anywhere;
 }
 
@@ -602,7 +600,7 @@ onBeforeUnmount(() => {
 }
 
 .light-lyric-line--active .light-lyric-subline {
-  color: rgb(var(--player-lyrics-rgb, 255 255 255) / var(--player-lyrics-active-subline-alpha, 0.82));
+  color: rgba(255, 255, 255, 0.68);
 }
 
 .light-lyric-word {
@@ -624,7 +622,7 @@ onBeforeUnmount(() => {
   -webkit-clip-path: inset(0 calc(100% - var(--line-progress, 0%)) 0 0);
   clip-path: inset(0 calc(100% - var(--line-progress, 0%)) 0 0);
   overflow: hidden;
-  color: rgb(var(--player-lyrics-rgb, 255 255 255) / 1);
+  color: rgba(255, 255, 255, 1);
   white-space: pre-wrap;
   pointer-events: none;
 }
@@ -640,7 +638,7 @@ onBeforeUnmount(() => {
   -webkit-clip-path: inset(0 calc(100% - var(--word-progress, 0%)) 0 0);
   clip-path: inset(0 calc(100% - var(--word-progress, 0%)) 0 0);
   overflow: hidden;
-  color: rgb(var(--player-lyrics-rgb, 255 255 255) / 1);
+  color: rgba(255, 255, 255, 1);
   white-space: pre-wrap;
   pointer-events: none;
 }
@@ -650,7 +648,7 @@ onBeforeUnmount(() => {
 }
 
 .light-lyric-line--active .light-lyric-word-base {
-  color: rgb(var(--player-lyrics-rgb, 255 255 255) / var(--player-lyrics-inactive-alpha, 0.64));
+  color: rgba(255, 255, 255, 0.35);
 }
 
 @media screen and (max-width: 768px) {
