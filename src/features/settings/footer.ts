@@ -1,4 +1,4 @@
-import type { FooterActionId, FooterBehavior, FooterLayoutItem, FooterMovableId, FooterPlacement, FooterPosition, FooterScene, FooterSettings } from '../../types/footer';
+import type { FooterActionId, FooterBehavior, FooterCoverShape, FooterLayoutItem, FooterMovableId, FooterPlacement, FooterPosition, FooterScene, FooterSettings } from '../../types/footer';
 
 export const FOOTER_ACTIONS: { id: FooterActionId; label: string; position: FooterPosition; detailOnly?: boolean }[] = [
   { id: 'favorite', label: '收藏', position: 'hidden' },
@@ -32,7 +32,7 @@ export function createDefaultFooterSettings(): FooterSettings {
   const main = FOOTER_ACTIONS.filter(action => !action.detailOnly).map(({ id, position }) => ({ id, position }));
   const detailExtras = FOOTER_ACTIONS.filter(action => action.detailOnly).map(({ id, position }) => ({ id, position }));
   return {
-    version: 1, linked: true, coverShape: 'square', main, detail: main.map(item => ({ ...item })),
+    version: 1, linked: true, coverShape: { main: 'square', detail: 'square' }, main, detail: main.map(item => ({ ...item })),
     detailExtras,
     detailOrder: legacyDetailOrder(main, detailExtras),
     spacing: { main: { controls: 24, utilities: 8 }, detail: { controls: 24, utilities: 8 } },
@@ -86,6 +86,11 @@ export function normalizeFooterSettings(value: unknown): FooterSettings {
   const main = normalizeLayout(raw.main, defaults.main), detail = normalizeLayout(raw.detail, defaults.detail);
   const detailExtras = normalizeLayout(raw.detailExtras, defaults.detailExtras);
   const linked = typeof raw.linked === 'boolean' ? raw.linked : defaults.linked;
+  // Older versions stored one shape for both scenes, including unlinked layouts.
+  const legacyShape = raw.coverShape === 'circle' ? 'circle' : 'square';
+  const shapes = object(raw.coverShape);
+  const normalizeShape = (value: unknown): FooterCoverShape => value === 'square' || value === 'circle' ? value : legacyShape;
+  const mainShape = normalizeShape(shapes.main);
   const fallbackOrder = legacyDetailOrder(linked ? main : detail, detailExtras);
   const detailOrder = Array.isArray(raw.detailOrder)
     ? [...new Set(raw.detailOrder.filter((id): id is FooterActionId => fallbackOrder.includes(id as FooterActionId)))] : [];
@@ -118,7 +123,7 @@ export function normalizeFooterSettings(value: unknown): FooterSettings {
     return { controls: clamp(entry.controls, 24, 8, 40), utilities: clamp(entry.utilities, 8, 0, 24) };
   };
   const normalized: FooterSettings = {
-    version: 1, linked, coverShape: raw.coverShape === 'circle' ? 'circle' : defaults.coverShape, main, detail, detailExtras, detailOrder,
+    version: 1, linked, coverShape: { main: mainShape, detail: linked ? mainShape : normalizeShape(shapes.detail) }, main, detail, detailExtras, detailOrder,
     spacing: { main: normalizeSpacing(spacing.main), detail: normalizeSpacing(spacing.detail) },
     placement: { main: normalizePlacement(placement.main, normalizedBehavior.main.info), detail: normalizePlacement(placement.detail, normalizedBehavior.detail.info) },
     behavior: normalizedBehavior,

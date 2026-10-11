@@ -21,12 +21,12 @@ const props = defineProps<{
 const emit = defineEmits<{ (event: 'toggle-focus'): void }>();
 
 const { footer } = useFooterSettings();
-const isCircleCover = computed(() => footer.value.coverShape === 'circle');
 const mainHasCover = computed(() => ['cover', 'song', 'both'].includes(footer.value.behavior.main.info)
   && (!footerViewport.value.width || resolveFreeFooterLayout(footer.value, 'main', footerViewport.value.width).infoWidth >= 48));
 // Without a main-page thumbnail, keep the cover at its large-cover geometry
 // even when collapsed: only opacity changes, never a flight from empty space.
 const usesLargeCoverLayout = computed(() => !!props.isExpanded || !mainHasCover.value);
+const isCircleCover = computed(() => footer.value.coverShape[usesLargeCoverLayout.value ? 'detail' : 'main'] === 'circle');
 const isCoverFocusMove = ref(false);
 watch([() => !!props.isExpanded, () => !!props.isCoverFocused], ([expanded, focused], [wasExpanded, wasFocused]) => {
   // Only an in-page layout toggle uses the focus timing. A remembered layout
@@ -53,6 +53,7 @@ const coverTransitionStyle = computed(() => {
   const opacityDuration = mainHasCover.value ? '700ms' : '300ms';
   return {
     '--cover-layout-duration': instant || !mainHasCover.value ? '0ms' : '700ms',
+    '--cover-shape-duration': instant ? '0ms' : '700ms',
     '--cover-opacity-duration': instant ? '0ms' : opacityDuration,
     '--cover-move-duration': instant ? '0ms' : isCoverFocusMove.value
       ? 'var(--player-cover-focus-duration, 600ms)' : opacityDuration,
@@ -228,7 +229,7 @@ const { isMainWindowLowPower, mainWindowRenderingSnapshot } = useRenderingPower(
 useCoverRotation(rotationSurfaceRef, reflectionRotationRef,
   () => isCircleCover.value && !!currentSong.value,
   () => isPlaying.value && !isMainWindowLowPower.value
-    && (!!props.isExpanded || (mainHasCover.value && footerCoverVisible.value)));
+    && (!!props.isExpanded || (mainHasCover.value && footerCoverVisible.value)), 700);
 useCoverTilt(detailCoverRef, tiltSurfaceRef, () => !!props.isExpanded
   && !props.isResizingWindow
   && !showContextMenu.value
@@ -291,10 +292,10 @@ defineExpose({ detailCoverRef });
 
         <!-- Glass Table Reflection Layer -->
         <transition name="reflection-reveal" appear>
-          <div v-if="props.isExpanded" class="absolute top-[calc(100%+2px)] left-0 w-full h-[65%] pointer-events-none z-10 reflection-wrapper overflow-hidden" :class="isCircleCover ? 'rounded-none' : 'rounded-[inherit]'">
-            <div class="absolute inset-0 reflection-glass overflow-hidden" :class="isCircleCover ? 'rounded-none' : 'rounded-[inherit]'">
-              <div v-if="isCircleCover" class="absolute top-0 left-0 w-full aspect-square scale-y-[-1] rounded-[50%]">
-                <div ref="reflectionRotationRef" class="cover-rotation-surface w-full h-full rounded-[inherit] overflow-hidden">
+          <div v-if="props.isExpanded" class="absolute top-[calc(100%+2px)] left-0 w-full h-[65%] pointer-events-none z-10 reflection-wrapper overflow-hidden">
+            <div class="absolute inset-0 reflection-glass overflow-hidden">
+              <div class="absolute top-0 left-0 w-full aspect-square scale-y-[-1]">
+                <div ref="reflectionRotationRef" class="reflection-mask cover-rotation-surface w-full h-full overflow-hidden" :class="isCircleCover ? 'rounded-[50%]' : 'rounded-2xl'">
                   <transition name="song-switch-cover" mode="out-in">
                     <div :key="currentSongPath" class="w-full h-full relative">
                       <img v-if="reflectionCoverUrl" :src="reflectionCoverUrl" class="absolute top-0 left-0 w-full aspect-square object-cover transition-opacity duration-[240ms] ease-out" draggable="false" decoding="async" />
@@ -302,11 +303,6 @@ defineExpose({ detailCoverRef });
                   </transition>
                 </div>
               </div>
-              <transition v-else name="song-switch-cover" mode="out-in">
-                <div :key="currentSongPath" class="w-full h-full relative">
-                  <img v-if="reflectionCoverUrl" :src="reflectionCoverUrl" class="absolute top-0 left-0 w-full aspect-square object-cover scale-y-[-1] transition-opacity duration-[240ms] ease-out" draggable="false" decoding="async" />
-                </div>
-              </transition>
             </div>
           </div>
         </transition>
@@ -334,7 +330,7 @@ defineExpose({ detailCoverRef });
     width var(--cover-layout-duration) var(--cover-layout-easing),
     height var(--cover-layout-duration) var(--cover-layout-easing),
     translate var(--cover-layout-duration) var(--cover-layout-easing),
-    border-radius var(--cover-layout-duration) var(--cover-layout-easing),
+    border-radius var(--cover-shape-duration) var(--cover-layout-easing),
     opacity var(--cover-opacity-duration) var(--cover-layout-easing),
     transform var(--cover-move-duration) var(--cover-move-easing);
 }
@@ -352,10 +348,12 @@ defineExpose({ detailCoverRef });
 }
 
 .cover-rotation-surface { transform-origin: center; }
+.reflection-mask { transition: border-radius var(--cover-shape-duration) var(--cover-layout-easing); }
 
 @media (prefers-reduced-motion: reduce) {
   .shared-cover,
-  .cover-tilt-surface { transition-duration: 0ms !important; }
+  .cover-tilt-surface,
+  .reflection-mask { transition-duration: 0ms !important; }
 }
 .reflection-wrapper {
   perspective: 1500px;

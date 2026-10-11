@@ -25,7 +25,7 @@ export interface FooterBehavior {
 export interface FooterSettings {
   version: 1;
   linked: boolean;
-  coverShape: FooterCoverShape;
+  coverShape: Record<FooterScene, FooterCoverShape>;
   main: FooterLayoutItem[];
   detail: FooterLayoutItem[];
   detailExtras: FooterLayoutItem[];

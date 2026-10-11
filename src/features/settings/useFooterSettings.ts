@@ -25,8 +25,9 @@ export function useFooterSettings() {
     if (patch.progress && patch.progress !== 'hidden') draft.behavior[scene].lastVisibleProgress = patch.progress;
     if (draft.linked) syncFooterBehavior(draft, scene);
   });
-  const setCoverShape = (shape: FooterCoverShape) => update(draft => {
-    draft.coverShape = shape;
+  const setCoverShape = (scene: FooterScene, shape: FooterCoverShape) => update(draft => {
+    draft.coverShape[scene] = shape;
+    if (draft.linked) draft.coverShape.main = draft.coverShape.detail = shape;
   });
   const setPosition = (scene: FooterScene, id: FooterActionId, position: FooterPosition) => update(draft => {
     const list = footerAction(id).detailOnly ? draft.detailExtras : draft[draft.linked ? 'main' : scene];
@@ -78,11 +79,13 @@ export function useFooterSettings() {
   };
   const setLinked = (linked: boolean, scene: FooterScene) => update(draft => {
     if (linked) {
+      draft.coverShape.main = draft.coverShape.detail = draft.coverShape[scene];
       draft.main = draft[scene].map(item => ({ ...item }));
       draft.spacing.main = { ...draft.spacing[scene] };
       draft.placement.main = Object.fromEntries(Object.entries(draft.placement[scene]).filter(([id]) => !footerAction(id as FooterMovableId).detailOnly));
       syncFooterBehavior(draft, scene);
     } else {
+      draft.coverShape.detail = draft.coverShape.main;
       draft.detail = draft.main.map(item => ({ ...item }));
       draft.spacing.detail = { ...draft.spacing.main };
       draft.placement.detail = {
@@ -94,6 +97,8 @@ export function useFooterSettings() {
   });
   const resetScene = (scene: FooterScene) => update(draft => {
     const defaults = createDefaultFooterSettings();
+    draft.coverShape[scene] = defaults.coverShape[scene];
+    if (draft.linked) draft.coverShape.main = draft.coverShape.detail = defaults.coverShape[scene];
     draft[draft.linked ? 'main' : scene] = defaults[scene];
     draft.behavior[scene] = defaults.behavior[scene];
     if (draft.linked) syncFooterBehavior(draft, scene);

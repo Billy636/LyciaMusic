@@ -84,7 +84,7 @@ function confirm() {
   pending.value = null;
 }
 const confirmation = computed(() => pending.value === 'link'
-  ? '将当前场景的按钮布局、间距、进度条显示与颜色、底栏自动隐藏设置应用到另一个场景。歌曲信息和播放页专属音频频谱始终独立，不会同步。'
+  ? '将当前场景的封面形状、按钮布局、间距、进度条显示与颜色、底栏自动隐藏设置应用到另一个场景。歌曲信息和播放页专属音频频谱始终独立，不会同步。'
   : `恢复当前场景的原版布局、间距和显示设置。${footer.value.linked ? '通用按钮和可同步的显示设置会同时恢复；另一场景的歌曲信息不变。' : ''}不会修改播放状态或音频参数。`);
 </script>
 
@@ -95,7 +95,7 @@ const confirmation = computed(() => pending.value === 'link'
         <button v-for="entry in ([['main', '主界面'], ['detail', '播放页']] as const)" :key="entry[0]" type="button" :aria-pressed="scene === entry[0]"
           class="rounded-md px-6 py-2 text-sm transition-colors" :class="scene === entry[0] ? 'bg-white text-[#EC4141] shadow-sm dark:bg-white/10' : 'app-text-secondary'" @click="scene = entry[0]">{{ entry[1] }}</button>
       </div>
-      <label class="flex items-center gap-2 text-xs" title="同步按钮布局、间距和进度条等设置；歌曲信息始终按场景独立保存"><input type="checkbox" class="accent-[#EC4141]" :checked="footer.linked" @change="changeLinked" />两个场景保持一致</label>
+      <label class="flex items-center gap-2 text-xs" title="同步封面形状、按钮布局、间距和进度条等设置；歌曲信息始终按场景独立保存"><input type="checkbox" class="accent-[#EC4141]" :checked="footer.linked" @change="changeLinked" />两个场景保持一致</label>
     </div>
     <section class="space-y-4">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
@@ -113,8 +113,8 @@ const confirmation = computed(() => pending.value === 'link'
         <div class="display-row">
           <label for="footer-cover-shape" class="display-label">封面形状</label>
           <SettingsSelect class="display-info-select" label="封面形状" hide-label trigger-id="footer-cover-shape"
-            :model-value="footer.coverShape" :options="coverShapeOptions"
-            @update:model-value="setCoverShape($event === 'circle' ? 'circle' : 'square')" />
+            :model-value="footer.coverShape[scene]" :options="coverShapeOptions"
+            @update:model-value="setCoverShape(scene, $event === 'circle' ? 'circle' : 'square')" />
         </div>
         <div class="display-row">
           <label for="footer-song-info" class="display-label">歌曲信息</label>
