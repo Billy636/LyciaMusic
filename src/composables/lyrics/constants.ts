@@ -19,6 +19,9 @@ import {
 export const LEGACY_LYRICS_SETTINGS_KEY = 'lyrics_settings';
 export const LEGACY_DESKTOP_LYRICS_SETTINGS_KEY = 'desktop_lyrics_settings';
 
+export const DEFAULT_LYRICS_BLUR_STRENGTH = 1;
+export const MIN_LYRICS_BLUR_STRENGTH = 0;
+export const MAX_LYRICS_BLUR_STRENGTH = 2;
 export const DEFAULT_PLAYER_FONT_SCALE = 1;
 export const MIN_PLAYER_FONT_SCALE = 0.5;
 export const MAX_PLAYER_FONT_SCALE = 2.0;
@@ -118,6 +121,7 @@ export const defaultLyricsSettings: LyricsSettings = {
   showTranslation: true,
   showRomaji: false,
   enableBlur: true,
+  blurStrength: DEFAULT_LYRICS_BLUR_STRENGTH,
   readingOrder: DEFAULT_LYRICS_READING_ORDER,
   readingOrderOverrides: {},
   playerRenderMode: DEFAULT_PLAYER_RENDER_MODE,
@@ -173,6 +177,11 @@ export function createDefaultLyricsSettings(): LyricsSettings {
 
 export function createDefaultDesktopLyricsSettings(): DesktopLyricsSettings {
   return { ...defaultDesktopLyricsSettings };
+}
+
+export function clampLyricsBlurStrength(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_LYRICS_BLUR_STRENGTH;
+  return Math.min(MAX_LYRICS_BLUR_STRENGTH, Math.max(MIN_LYRICS_BLUR_STRENGTH, value));
 }
 
 export function clampPlayerFontScale(value: number) {
@@ -331,6 +340,7 @@ export function normalizeLyricsSettingsPatch(patch: Partial<LyricsSettings>): Ly
     enableBlur: typeof patch.enableBlur === 'boolean'
       ? patch.enableBlur
       : defaultLyricsSettings.enableBlur,
+    blurStrength: clampLyricsBlurStrength(patch.blurStrength ?? DEFAULT_LYRICS_BLUR_STRENGTH),
     showTranslation: typeof patch.showTranslation === 'boolean'
       ? patch.showTranslation
       : defaultLyricsSettings.showTranslation,

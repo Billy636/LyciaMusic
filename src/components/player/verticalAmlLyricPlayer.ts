@@ -1,4 +1,6 @@
-import { DomLyricPlayer } from '@applemusic-like-lyrics/core';
+import type { DomLyricPlayer } from '@applemusic-like-lyrics/core';
+
+import { AdjustableBlurAmlLyricPlayer } from './adjustableBlurAmlLyricPlayer';
 
 const GLYPH_CLASS = 'amll-vertical-glyph';
 const SIDEWAYS_CLASS = 'amll-vertical-sideways';
@@ -94,7 +96,7 @@ type AmlDomLine = DomLyricPlayer['currentLyricGroups'][number]['mainLine'];
  * hooks only adapt display and word-motion coordinates, using the public
  * DOM-line methods from the pinned core 0.6.0 implementation.
  */
-export class VerticalAmlLyricPlayer extends DomLyricPlayer {
+export class VerticalAmlLyricPlayer extends AdjustableBlurAmlLyricPlayer {
   constructor(private readonly coordinateStage: HTMLElement) {
     super();
   }

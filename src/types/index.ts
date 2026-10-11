@@ -384,6 +384,7 @@ export interface LyricsSettings {
   showTranslation: boolean;
   showRomaji: boolean;
   enableBlur: boolean;
+  blurStrength: number;
   readingOrder: LyricsReadingOrder;
   readingOrderOverrides: Record<string, LyricsReadingOrder>;
   playerRenderMode: LyricsPlayerRenderMode;

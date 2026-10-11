@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { DomLyricPlayer, type LyricLine, type LyricLineMouseEvent } from '@applemusic-like-lyrics/core';
+import type { LyricLine, LyricLineMouseEvent } from '@applemusic-like-lyrics/core';
 
-import { clampPlayerLineGap } from '../../composables/lyrics/constants';
+import { clampPlayerLineGap, DEFAULT_LYRICS_BLUR_STRENGTH } from '../../composables/lyrics/constants';
+import { AdjustableBlurAmlLyricPlayer } from './adjustableBlurAmlLyricPlayer';
 import { AmlLyricPlayerRuntime } from './amlLyricPlayerRuntime';
 import { VerticalAmlLyricPlayer } from './verticalAmlLyricPlayer';
 
@@ -14,6 +15,7 @@ const props = withDefaults(defineProps<{
   alignPosition?: number;
   enableSpring?: boolean;
   enableBlur?: boolean;
+  blurStrength?: number;
   enableScale?: boolean;
   hidePassedLines?: boolean;
   lyricLines?: LyricLine[];
@@ -35,6 +37,7 @@ const props = withDefaults(defineProps<{
   alignPosition: 0.5,
   enableSpring: true,
   enableBlur: true,
+  blurStrength: DEFAULT_LYRICS_BLUR_STRENGTH,
   enableScale: true,
   hidePassedLines: false,
   lyricLines: () => [],
@@ -58,7 +61,7 @@ const isLeftwardVertical = computed(() => isVerticalWriting.value && props.verti
 const wrapperStyle = computed(() => props.lineGap === undefined
   ? undefined
   : { '--lyrics-line-gap': String(clampPlayerLineGap(props.lineGap)) });
-let player: DomLyricPlayer | null = null;
+let player: AdjustableBlurAmlLyricPlayer | null = null;
 let runtime: AmlLyricPlayerRuntime | null = null;
 let fontRefreshRevision = 0;
 let sizeObserver: ResizeObserver | null = null;
@@ -90,6 +93,7 @@ function applyPlayerProps() {
   player.setAlignPosition(props.alignPosition);
   player.setEnableSpring(props.enableSpring);
   player.setEnableBlur(props.enableBlur);
+  player.setBlurStrength(props.blurStrength);
   player.setEnableScale(props.enableScale);
   player.setHidePassedLines(props.hidePassedLines);
   player.setWordFadeWidth(props.wordFadeWidth);
@@ -121,7 +125,7 @@ onMounted(() => {
   if (!wrapper || !stage) return;
 
   syncCoordinateSize();
-  player = isVerticalWriting.value ? new VerticalAmlLyricPlayer(stage) : new DomLyricPlayer();
+  player = isVerticalWriting.value ? new VerticalAmlLyricPlayer(stage) : new AdjustableBlurAmlLyricPlayer();
   const element = player.getElement();
   element.style.width = '100%';
   element.style.height = '100%';
@@ -177,6 +181,10 @@ watch(() => [
   props.wordFadeWidth,
 ], applyPlayerProps);
 
+watch(() => props.blurStrength, (strength) => {
+  player?.setBlurStrength(strength);
+});
+
 watch(() => props.lyricLines, (lines) => {
   runtime?.setLyricLines(lines, props.currentTime);
 });
@@ -214,6 +222,11 @@ watch(() => [props.fontScale, props.translationFontScale], () => {
 </template>
 
 <style scoped>
+.amll-coordinate-host :deep(.amll-lyric-player:not(:hover) .amll-adjustable-blur) {
+  /* Override AMLL's inline filter while retaining its unmodified base radius. */
+  filter: var(--amll-adjusted-blur-filter, none) !important;
+}
+
 .amll-coordinate-host--vertical > .amll-coordinate-stage {
   position: absolute;
   top: 0;

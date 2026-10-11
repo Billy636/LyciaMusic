@@ -3,6 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { AlignLeft, ArrowLeft, ChevronRight, Languages, Move, Palette, Pin, RotateCcw, Sparkles, Timer, Trash2, Type, X } from 'lucide-vue-next';
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import {
+  DEFAULT_LYRICS_BLUR_STRENGTH,
   DEFAULT_PLAYER_ALIGNMENT,
   DEFAULT_PLAYER_FONT_PRESET,
   DEFAULT_PLAYER_FONT_SCALE,
@@ -13,11 +14,13 @@ import {
   buildImportedLyricsFontOptions,
   importLyricsFontFile,
   LYRICS_FONT_OPTIONS,
+  MAX_LYRICS_BLUR_STRENGTH,
   MAX_PLAYER_FONT_SCALE,
   MAX_PLAYER_LINE_GAP,
   MAX_PLAYER_OFFSET_X,
   MAX_PLAYER_OFFSET_Y,
   MAX_PLAYER_TRANSLATION_FONT_SCALE,
+  MIN_LYRICS_BLUR_STRENGTH,
   MIN_PLAYER_FONT_SCALE,
   MIN_PLAYER_LINE_GAP,
   MIN_PLAYER_OFFSET_X,
@@ -63,6 +66,7 @@ const importingFont = ref(false);
 const fontImportError = ref('');
 const FONT_SCALE_STEP = 0.05;
 const LINE_GAP_STEP = 0.05;
+const BLUR_STRENGTH_STEP = 0.05;
 const OFFSET_STEP = 1;
 const FONT_FILE_FILTERS = [{ name: 'Font', extensions: ['ttf', 'otf'] }];
 const isVerticalWriting = computed(() => lyricsSettings.playerWritingMode === 'vertical');
@@ -130,7 +134,7 @@ const summaries = computed<Record<LyricsAppearanceSection, string>>(() => ({
   typography: `${selectedFontLabel.value} · ${Math.round(draft.playerFontScale * 100)}%`,
   position: `${PLAYER_ALIGNMENT_OPTIONS.value.find((option) => option.value === lyricsSettings.playerAlignment)?.label} · 间距 ${Math.round(draft.playerLineGap * 100)}%`,
   subtitles: subtitlesLabel.value,
-  effects: `${isVerticalWriting.value ? '竖排' : lyricsSettings.playerRenderMode === 'amll' ? 'AMLL' : '轻量'}${(isVerticalWriting.value || lyricsSettings.playerRenderMode === 'amll') && lyricsSettings.enableBlur ? ' · 模糊' : ''}`,
+  effects: `${isVerticalWriting.value ? '竖排' : lyricsSettings.playerRenderMode === 'amll' ? 'AMLL' : '轻量'}${(isVerticalWriting.value || lyricsSettings.playerRenderMode === 'amll') && lyricsSettings.enableBlur ? ` · 模糊 ${Math.round(draft.blurStrength * 100)}%` : ''}`,
   sync: `${lyricsSyncOffsetLabel.value} · 全局`,
   background: playerBackground.value.playerBackgroundMode === 'original' ? '原背景'
     : `${playerBackground.value.playerBackgroundMode === 'soft' ? '柔光流动' : '静态渐变'} · ${{ indigo: '靛蓝', rose: '暖霞', teal: '青川', cover: '跟随封面' }[playerBackground.value.playerBackgroundPalette]}`,
@@ -144,6 +148,10 @@ function setPlayerFontPreset(value: LyricsFontPreset) {
 }
 function setPlayerRenderMode(value: LyricsPlayerRenderMode) {
   settingsStore.patchSettings({ lyrics: { playerRenderMode: value } });
+}
+function toggleLyricsBlur() {
+  commitDraftLyricsSettings();
+  settingsStore.patchSettings({ lyrics: { enableBlur: !lyricsSettings.enableBlur } });
 }
 function setPlayerWritingMode(value: LyricsPlayerWritingMode) {
   commitDraftLyricsSettings();
@@ -302,10 +310,10 @@ onUnmounted(() => {
                 <button v-for="option in PLAYER_WRITING_MODE_OPTIONS" :key="option.value" type="button" :aria-pressed="lyricsSettings.playerWritingMode === option.value" @click="setPlayerWritingMode(option.value)"><span class="writing-mode-preview" :class="{ 'writing-mode-preview--vertical': option.value === 'vertical' }" aria-hidden="true"><span></span><span></span><span></span></span>{{ option.label }}</button>
               </div>
             </div>
-            <Transition name="appearance-direction">
-              <div v-if="isVerticalWriting" class="appearance-direction">
-                <div class="appearance-direction-content">
-                  <div class="appearance-control-group appearance-direction-group">
+            <Transition name="appearance-expand">
+              <div v-if="isVerticalWriting" class="appearance-expand">
+                <div class="appearance-expand-content">
+                  <div class="appearance-control-group appearance-expand-spacing">
                     <span class="appearance-control-label">移动方向</span>
                     <div class="appearance-options" role="group" aria-label="移动方向">
                       <button v-for="option in VERTICAL_SCROLL_DIRECTION_OPTIONS" :key="option.value" type="button" :aria-pressed="lyricsSettings.playerVerticalScrollDirection === option.value" @click="setVerticalScrollDirection(option.value)">{{ option.label }}</button>
@@ -379,9 +387,29 @@ onUnmounted(() => {
                 <button v-for="option in PLAYER_RENDER_MODE_OPTIONS" :key="option.value" type="button" :aria-pressed="lyricsSettings.playerRenderMode === option.value" @click="setPlayerRenderMode(option.value)">{{ option.label }}</button>
               </div>
             </div>
-            <div v-if="isVerticalWriting || lyricsSettings.playerRenderMode === 'amll'" class="appearance-switch-row">
-              <span id="lyrics-blur-label" class="appearance-control-label">歌词模糊效果</span>
-              <button type="button" role="switch" aria-labelledby="lyrics-blur-label" :aria-checked="lyricsSettings.enableBlur" class="appearance-switch" @click="settingsStore.patchSettings({ lyrics: { enableBlur: !lyricsSettings.enableBlur } })"><span></span></button>
+            <div v-if="isVerticalWriting || lyricsSettings.playerRenderMode === 'amll'">
+              <div class="appearance-switch-row">
+                <span id="lyrics-blur-label" class="appearance-control-label">歌词模糊效果</span>
+                <button type="button" role="switch" aria-labelledby="lyrics-blur-label" :aria-checked="lyricsSettings.enableBlur" class="appearance-switch" @click="toggleLyricsBlur"><span></span></button>
+              </div>
+              <Transition name="appearance-expand">
+                <div v-if="lyricsSettings.enableBlur" class="appearance-expand">
+                  <div class="appearance-expand-content">
+                    <div class="appearance-expand-spacing">
+                      <LyricsAppearanceRange
+                        label="模糊程度"
+                        :model-value="draft.blurStrength"
+                        :min="MIN_LYRICS_BLUR_STRENGTH"
+                        :max="MAX_LYRICS_BLUR_STRENGTH"
+                        :step="BLUR_STRENGTH_STEP"
+                        :default-value="DEFAULT_LYRICS_BLUR_STRENGTH"
+                        @update:model-value="setAppearanceField('blurStrength', $event, false)"
+                        @commit="commitDraftLyricsSettings"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </Transition>
             </div>
           </div>
           <div v-else-if="activeSection === 'sync'" class="appearance-controls">
@@ -442,11 +470,11 @@ onUnmounted(() => {
 }
 .appearance-controls { display: flex; flex-direction: column; gap: 20px; }
 .appearance-layout-controls { gap: 0; }
-.appearance-direction { display: grid; grid-template-rows: 1fr; opacity: 1; }
-.appearance-direction-content { min-height: 0; overflow: hidden; }
-.appearance-direction-group { padding-top: 20px; }
-.appearance-direction-enter-active, .appearance-direction-leave-active { transition: grid-template-rows 280ms cubic-bezier(.22, 1, .36, 1), opacity 180ms ease, transform 280ms cubic-bezier(.22, 1, .36, 1); }
-.appearance-direction-enter-from, .appearance-direction-leave-to { grid-template-rows: 0fr; opacity: 0; transform: translateY(-6px); }
+.appearance-expand { display: grid; grid-template-rows: 1fr; opacity: 1; }
+.appearance-expand-content { min-height: 0; overflow: hidden; }
+.appearance-expand-spacing { padding-top: 20px; }
+.appearance-expand-enter-active, .appearance-expand-leave-active { transition: grid-template-rows 280ms cubic-bezier(.22, 1, .36, 1), opacity 180ms ease, transform 280ms cubic-bezier(.22, 1, .36, 1); }
+.appearance-expand-enter-from, .appearance-expand-leave-to { grid-template-rows: 0fr; opacity: 0; transform: translateY(-6px); }
 .appearance-control-group { display: flex; flex-direction: column; gap: 10px; }
 .appearance-control-group--divided { padding-top: 16px; border-top: 1px solid rgb(255 255 255 / 8%); }
 .appearance-control-label { color: rgb(255 255 255 / 82%); font-size: 13px; font-weight: 500; }
@@ -499,6 +527,6 @@ onUnmounted(() => {
 }
 @media (prefers-reduced-motion: reduce) {
   .appearance-section-content { animation: none; }
-  .appearance-section, .appearance-options button, .appearance-switch span, .appearance-popover-enter-active, .appearance-popover-leave-active, .appearance-direction-enter-active, .appearance-direction-leave-active { transition: none; }
+  .appearance-section, .appearance-options button, .appearance-switch span, .appearance-popover-enter-active, .appearance-popover-leave-active, .appearance-expand-enter-active, .appearance-expand-leave-active { transition: none; }
 }
 </style>

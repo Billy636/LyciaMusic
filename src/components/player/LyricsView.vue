@@ -92,6 +92,7 @@ async function handleLightLineClick(line: LyricLine) {
           :align-position="isVerticalWriting ? 0.5 : 0.42"
           :enable-spring="true"
           :enable-blur="lyricsSettings.enableBlur"
+          :blur-strength="appearancePreview.blurStrength"
           :enable-scale="true"
           :hide-passed-lines="false"
           :word-fade-width="0.5"
