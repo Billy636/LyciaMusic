@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   AlertCircle, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Files, FolderOpen,
-  HardDrive, Info, Library, LoaderCircle, Music2, Search, ShieldCheck, Sparkles, Trash2, X,
+  HardDrive, Info, Library, LoaderCircle, Music2, Search, Sparkles, Trash2, X,
 } from 'lucide-vue-next';
 import AppCheckbox from '../common/AppCheckbox.vue';
 import ModernModal from '../common/ModernModal.vue';
@@ -49,9 +49,6 @@ const hiddenSelectionCount = computed(() => {
   return store.selectedSongs.filter(song => !matchingPaths.has(song.path)).length;
 });
 const matchLabel = computed(() => `${store.matchMode === 'tags' ? '歌名与歌手相同' : '文件名相同'}${store.matchDuration ? ' · 时长接近' : ''}`);
-const matchDescription = computed(() => store.matchMode === 'tags'
-  ? '比较歌名与歌手，不移除标签中的 Live、伴奏等版本标记；缺少标签的文件不参与此规则。'
-  : '比较不含扩展名的完整文件名，忽略大小写和多余空格；不移除版本名称或数字后缀。');
 const formatBytes = (bytes: number) => bytes >= 1024 ** 3
   ? `${(bytes / 1024 ** 3).toFixed(2)} GB`
   : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MB` : `${(bytes / 1024).toFixed(1)} KB`;
@@ -221,11 +218,7 @@ async function applyDelete() {
 <template>
   <div class="duplicate-workbench text-gray-800 dark:text-gray-100">
     <header class="page-intro">
-      <div>
-        <h2 class="section-title"><span></span>重复歌曲管理</h2>
-        <p class="intro-description app-text-secondary">找出音乐库中的重复版本，对比后留下更合适的那一首。</p>
-      </div>
-      <span class="safe-label app-text-secondary"><ShieldCheck :size="14" aria-hidden="true" />扫描不会改动文件</span>
+      <h2 class="section-title"><span></span>重复歌曲管理</h2>
     </header>
 
     <section class="scan-settings" aria-label="重复歌曲扫描设置">
@@ -240,8 +233,7 @@ async function applyDelete() {
             <button type="button" :class="{ active: store.scope === 'library' }" :aria-pressed="store.scope === 'library'" :disabled="locked" @click="store.scope = 'library'"><Library :size="14" aria-hidden="true" />本地音乐库</button>
             <button type="button" :class="{ active: store.scope === 'folder' }" :aria-pressed="store.scope === 'folder'" :disabled="locked" @click="store.scope = 'folder'"><FolderOpen :size="14" aria-hidden="true" />指定文件夹</button>
           </div>
-          <div v-if="store.scope === 'library'" class="scope-description app-text-secondary"><HardDrive :size="14" aria-hidden="true" /><span>分析已添加的本地音乐文件夹，不包含远程音乐</span></div>
-          <button v-else type="button" class="folder-picker app-text-secondary" :disabled="locked" :title="store.folderPath || '选择要扫描的文件夹'" @click="chooseScanFolder"><FolderOpen :size="14" aria-hidden="true" /><span>{{ store.folderPath || '选择要扫描的文件夹' }}</span><span class="folder-change">{{ store.folderPath ? '更换' : '选择' }}</span></button>
+          <button v-if="store.scope === 'folder'" type="button" class="folder-picker app-text-secondary" :disabled="locked" :title="store.folderPath || '选择要扫描的文件夹'" @click="chooseScanFolder"><FolderOpen :size="14" aria-hidden="true" /><span>{{ store.folderPath || '选择要扫描的文件夹' }}</span><span class="folder-change">{{ store.folderPath ? '更换' : '选择' }}</span></button>
         </div>
         <div class="rule-settings">
           <h3 class="field-heading">匹配规则</h3>
@@ -249,7 +241,6 @@ async function applyDelete() {
             <button type="button" :class="{ active: store.matchMode === 'tags' }" :aria-pressed="store.matchMode === 'tags'" :disabled="locked" @click="store.matchMode = 'tags'"><span class="radio-dot"><Check v-if="store.matchMode === 'tags'" :size="10" :stroke-width="3" aria-hidden="true" /></span>歌曲名 + 歌手<span class="recommend-tag">推荐</span></button>
             <button type="button" :class="{ active: store.matchMode === 'filename' }" :aria-pressed="store.matchMode === 'filename'" :disabled="locked" @click="store.matchMode = 'filename'"><span class="radio-dot"><Check v-if="store.matchMode === 'filename'" :size="10" :stroke-width="3" aria-hidden="true" /></span>文件名</button>
           </div>
-          <p class="rule-description app-text-secondary">{{ matchDescription }}</p>
         </div>
       </div>
       <div v-if="settingsExpanded || !store.hasScanned" class="scan-settings-footer">
@@ -292,9 +283,8 @@ async function applyDelete() {
         <h4>正在寻找重复的旋律</h4><p class="app-text-secondary">{{ store.progressLabel || '正在读取音频标签与文件信息，大型音乐库可能需要一些时间。' }}</p>
         <button type="button" class="text-button app-text-secondary" @click="store.cancelScan(); showToast('已取消等待，后台文件读取可能仍在继续', 'info')">取消等待</button>
       </div>
-      <div v-else-if="!store.hasScanned" class="empty-state">
+      <div v-else-if="!store.hasScanned" class="empty-state initial-empty">
         <div class="empty-illustration"><Files :size="34" :stroke-width="1.25" aria-hidden="true" /><span class="illustration-search"><Search :size="15" aria-hidden="true" /></span></div>
-        <h4>给喜欢的音乐，留一个位置</h4><p class="app-text-secondary">选择扫描范围，开始查找散落在不同文件夹中的重复版本。</p>
         <div class="empty-steps app-text-secondary"><span><span class="step-number">1</span>扫描歌曲</span><ChevronRight :size="12" aria-hidden="true" /><span><span class="step-number">2</span>对比版本</span><ChevronRight :size="12" aria-hidden="true" /><span><span class="step-number">3</span>确认整理</span></div>
       </div>
       <div v-else-if="!store.activeGroups.length" class="empty-state">
@@ -308,7 +298,7 @@ async function applyDelete() {
           @toggle="toggleSong" @retain="store.retain" @ignore="store.ignoreGroup" @play="audition" @reveal="reveal" />
       </div>
       <nav v-if="pageCount > 1 && !store.isScanning" class="pagination app-text-secondary" aria-label="重复分组分页"><span>共 {{ filteredGroups.length }} 组</span><button type="button" :disabled="page <= 1 || locked" aria-label="上一页" @click="page--"><ChevronLeft :size="16" aria-hidden="true" /></button><span>{{ page }} / {{ pageCount }}</span><button type="button" :disabled="page >= pageCount || locked" aria-label="下一页" @click="page++"><ChevronRight :size="16" aria-hidden="true" /></button></nav>
-      <p class="safety-note app-text-secondary"><Info :size="13" aria-hidden="true" /><span>结果依据标签或文件名，不是音频指纹鉴定。建议保留仅参考音质参数，请试听确认；每组至少保留一份。</span></p>
+      <p class="safety-note app-text-secondary"><Info :size="13" aria-hidden="true" /><span>结果依据标签或文件名。建议保留仅参考音质参数，请试听确认；每组至少保留一份。</span></p>
     </section>
 
     <footer v-if="store.hasScanned && store.activeGroups.length" class="selection-bar">
@@ -329,8 +319,6 @@ async function applyDelete() {
 .page-intro { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 2px 0 24px; }
 .section-title { display: flex; align-items: center; gap: 9px; font-size: 17px; font-weight: 700; }
 .section-title > span { width: 4px; height: 18px; border-radius: 4px; background: #EC4141; }
-.intro-description { font-size: 14px; line-height: 1.8; margin-top: 8px; }
-.safe-label { display: flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
 .scan-settings { border: 1px solid rgb(255 255 255 / .52); border-radius: 12px; background: rgb(255 255 255 / .19); }
 .compact-settings { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; padding: 16px 18px; flex-wrap: wrap; }
 .compact-scope { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; flex: 1; font-size: 14px; }
@@ -346,9 +334,8 @@ async function applyDelete() {
 .segmented-control { display: flex; width: fit-content; max-width: 100%; padding: 3px; border-radius: 8px; background: rgb(0 0 0 / .045); }
 .segmented-control button { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 8px 16px; border-radius: 6px; font-size: 14px; white-space: nowrap; cursor: pointer; transition: background .15s, color .15s; }
 .segmented-control button.active { background: rgb(255 255 255 / .72); box-shadow: 0 1px 4px rgb(0 0 0 / .05); color: #c73434; font-weight: 500; }
-.scope-description, .folder-picker { display: flex; align-items: center; gap: 7px; min-height: 34px; margin-top: 9px; font-size: 13px; }
-.scope-description svg, .folder-picker svg { flex-shrink: 0; }
-.folder-picker { width: 100%; text-align: left; cursor: pointer; }
+.folder-picker { display: flex; align-items: center; gap: 7px; min-height: 34px; margin-top: 9px; font-size: 13px; width: 100%; text-align: left; cursor: pointer; }
+.folder-picker svg { flex-shrink: 0; }
 .folder-picker > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .folder-change { margin-left: auto; color: #c73434; flex-shrink: 0; }
 .rule-options { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -357,7 +344,6 @@ async function applyDelete() {
 .radio-dot { display: grid; place-items: center; width: 13px; height: 13px; border-radius: 50%; border: 1px solid rgb(128 128 128 / .4); color: white; }
 .active .radio-dot { background: #EC4141; border-color: #EC4141; }
 .recommend-tag { color: #c73333; font-size: 12px; }
-.rule-description { margin-top: 10px; font-size: 13px; line-height: 1.7; }
 .scan-settings-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 20px; border-top: 1px solid var(--settings-divider); }
 .scan-options { display: flex; flex-wrap: wrap; gap: 12px 22px; }
 .checkbox-option { display: flex; align-items: center; gap: 7px; font-size: 13px; }
@@ -392,6 +378,7 @@ button:focus-visible { box-shadow: 0 0 0 3px rgb(236 65 65 / .35); border-radius
 .text-button:hover:not(:disabled) { color: #EC4141; }
 .group-list { display: flex; flex-direction: column; gap: 13px; }
 .empty-state { display: flex; align-items: center; justify-content: center; flex-direction: column; min-height: 245px; gap: 11px; border: 1px dashed rgb(128 128 128 / .23); border-radius: 12px; background: rgb(255 255 255 / .08); padding: 30px 20px; text-align: center; }
+.initial-empty { min-height: 190px; }
 .empty-illustration { position: relative; display: grid; place-items: center; width: 66px; height: 66px; border-radius: 19px; background: rgb(255 255 255 / .35); color: #bd7772; border: 1px solid rgb(255 255 255 / .4); margin-bottom: 4px; }
 .illustration-search { position: absolute; right: -6px; bottom: 2px; display: grid; place-items: center; height: 25px; width: 25px; border-radius: 50%; background: #f8e6e3; color: #c44242; border: 3px solid rgb(255 255 255 / .6); }
 .empty-state h4 { font-size: 16px; font-weight: 500; }
