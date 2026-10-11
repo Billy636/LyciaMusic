@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { open } from '@tauri-apps/plugin-dialog';
-import { AlignLeft, ArrowLeft, ChevronRight, Languages, Move, Palette, Pin, RotateCcw, Sparkles, Trash2, Type, X } from 'lucide-vue-next';
+import { AlignLeft, ArrowLeft, ChevronRight, Languages, Move, Palette, Pin, RotateCcw, Sparkles, Timer, Trash2, Type, X } from 'lucide-vue-next';
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import {
   DEFAULT_PLAYER_ALIGNMENT,
@@ -89,6 +89,7 @@ const SECTIONS = [
   { id: 'position', label: '间距与位置', icon: Move },
   { id: 'subtitles', label: '副行与读取顺序', icon: Languages },
   { id: 'effects', label: '歌词效果', icon: Sparkles },
+  { id: 'sync', label: '歌词同步', icon: Timer },
   { id: 'background', label: '播放页背景', icon: Palette },
 ] as const;
 const { draft, setField: setAppearanceField, commit: commitDraftLyricsSettings } = useLyricsAppearanceDraft(
@@ -112,6 +113,17 @@ const readingOrderLabel = computed(() => LYRICS_READING_ORDER_OPTIONS.find((opti
 const subtitlesLabel = computed(() => [
   lyricsSettings.showTranslation ? '翻译' : '', lyricsSettings.showRomaji ? '罗马音' : '',
 ].filter(Boolean).join('、') || '仅原文');
+const lyricsSyncOffsetMs = computed({
+  get: () => Math.round(settingsStore.settings.lyricsSyncOffset * 1000),
+  set: (value: number | string) => {
+    const numericValue = typeof value === 'string' ? Number.parseFloat(value) : value;
+    const offset = Number.isFinite(numericValue) ? Math.max(-1000, Math.min(1000, Math.round(numericValue))) : 0;
+    settingsStore.patchSettings({ lyricsSyncOffset: offset / 1000 });
+  },
+});
+const lyricsSyncOffsetLabel = computed(() => (
+  `${lyricsSyncOffsetMs.value > 0 ? '+' : ''}${lyricsSyncOffsetMs.value} ms`
+));
 const summaries = computed<Record<LyricsAppearanceSection, string>>(() => ({
   layout: isVerticalWriting.value
     ? `竖排 · ${lyricsSettings.playerVerticalScrollDirection === 'left' ? '向左' : '向右'}` : '横排',
@@ -119,6 +131,7 @@ const summaries = computed<Record<LyricsAppearanceSection, string>>(() => ({
   position: `${PLAYER_ALIGNMENT_OPTIONS.value.find((option) => option.value === lyricsSettings.playerAlignment)?.label} · 间距 ${Math.round(draft.playerLineGap * 100)}%`,
   subtitles: subtitlesLabel.value,
   effects: `${isVerticalWriting.value ? '竖排' : lyricsSettings.playerRenderMode === 'amll' ? 'AMLL' : '轻量'}${(isVerticalWriting.value || lyricsSettings.playerRenderMode === 'amll') && lyricsSettings.enableBlur ? ' · 模糊' : ''}`,
+  sync: `${lyricsSyncOffsetLabel.value} · 全局`,
   background: playerBackground.value.playerBackgroundMode === 'original' ? '原背景'
     : `${playerBackground.value.playerBackgroundMode === 'soft' ? '柔光流动' : '静态渐变'} · ${{ indigo: '靛蓝', rose: '暖霞', teal: '青川', cover: '跟随封面' }[playerBackground.value.playerBackgroundPalette]}`,
 }));
@@ -371,6 +384,31 @@ onUnmounted(() => {
               <button type="button" role="switch" aria-labelledby="lyrics-blur-label" :aria-checked="lyricsSettings.enableBlur" class="appearance-switch" @click="settingsStore.patchSettings({ lyrics: { enableBlur: !lyricsSettings.enableBlur } })"><span></span></button>
             </div>
           </div>
+          <div v-else-if="activeSection === 'sync'" class="appearance-controls">
+            <LyricsAppearanceRange
+              v-model="lyricsSyncOffsetMs"
+              label="歌词同步补偿"
+              format="time"
+              :min="-1000"
+              :max="1000"
+              :step="10"
+              :default-value="0"
+            />
+            <div class="appearance-sync-value-row">
+              <label :for="`${popoverId}-sync-offset`" class="appearance-control-label">精确调整（ms）</label>
+              <input
+                :id="`${popoverId}-sync-offset`"
+                v-model="lyricsSyncOffsetMs"
+                type="number"
+                min="-1000"
+                max="1000"
+                step="10"
+                class="appearance-sync-input"
+              >
+            </div>
+            <p class="appearance-sync-description">正值让歌词延后，负值让歌词提前。用于补偿音频输出延迟，默认 0 ms。</p>
+            <p class="appearance-sync-description">全局生效：播放页、桌面歌词、mini 模式及任务栏歌词。</p>
+          </div>
           <LyricsBackgroundControl v-else-if="activeSection === 'background'" />
         </div>
       </section>
@@ -413,6 +451,10 @@ onUnmounted(() => {
 .appearance-control-group--divided { padding-top: 16px; border-top: 1px solid rgb(255 255 255 / 8%); }
 .appearance-control-label { color: rgb(255 255 255 / 82%); font-size: 13px; font-weight: 500; }
 .appearance-control-heading { display: flex; align-items: center; justify-content: space-between; }
+.appearance-sync-value-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.appearance-sync-input { width: 108px; min-height: 36px; padding: 6px 10px; border: 1px solid rgb(255 255 255 / 14%); border-radius: 10px; background: rgb(255 255 255 / 5%); color: rgb(255 255 255 / 85%); font-size: 12px; font-variant-numeric: tabular-nums; color-scheme: dark; }
+.appearance-sync-input:focus-visible { outline: 2px solid rgb(255 255 255 / 70%); outline-offset: 2px; }
+.appearance-sync-description { margin: 0; color: rgb(255 255 255 / 50%); font-size: 12px; line-height: 1.6; }
 .appearance-reset { display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 8px; color: rgb(255 255 255 / 45%); }
 .appearance-reset:hover { background: rgb(255 255 255 / 8%); color: white; }
 .appearance-options { display: flex; gap: 6px; }

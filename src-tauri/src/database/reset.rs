@@ -13,6 +13,10 @@ pub async fn clear_all_app_data(
         .app_data_dir()
         .map_err(|e| e.to_string())?;
 
+    #[cfg(target_os = "windows")]
+    crate::autostart::set_launch_on_startup(app_handle, false)
+        .map_err(|e| format!("清除开机自动运行设置失败: {e}"))?;
+
     tauri::async_runtime::spawn_blocking(move || {
         {
             let mut conn = db_conn.lock().map_err(|e| e.to_string())?;

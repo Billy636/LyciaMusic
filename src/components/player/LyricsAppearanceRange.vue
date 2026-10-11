@@ -9,7 +9,7 @@ const props = withDefaults(defineProps<{
   max: number;
   step: number;
   defaultValue: number;
-  format?: 'scale' | 'offset';
+  format?: 'scale' | 'offset' | 'time';
   decreaseLabel?: string;
   increaseLabel?: string;
 }>(), {
@@ -27,7 +27,8 @@ const rangeId = `lyrics-appearance-range-${useId()}`;
 const labelId = `${rangeId}-label`;
 const valueText = computed(() => {
   const value = Math.round(props.modelValue * (props.format === 'scale' ? 100 : 1));
-  return `${props.format === 'offset' && value > 0 ? '+' : ''}${value}%`;
+  const sign = props.format !== 'scale' && value > 0 ? '+' : '';
+  return `${sign}${value}${props.format === 'time' ? ' ms' : '%'}`;
 });
 const progress = computed(() => {
   if (props.max <= props.min) return 0;

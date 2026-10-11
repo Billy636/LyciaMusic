@@ -1,4 +1,5 @@
 mod app_runtime;
+mod autostart;
 mod custom_background;
 mod artist_images;
 mod custom_fonts;
@@ -24,6 +25,7 @@ mod window_z_order;
 use app_runtime::{
     consume_pending_open_paths, exit_app, handle_single_instance, setup_app, update_tray_tooltip,
 };
+use autostart::{get_launch_on_startup, set_launch_on_startup};
 use custom_background::{cancel_custom_background_image, prepare_custom_background_image};
 use custom_fonts::{import_lyrics_font, read_lyrics_font_data_url};
 use database::clear_all_app_data;
@@ -273,6 +275,8 @@ pub fn run() {
             exit_app,
             update_tray_tooltip,
             set_gpu_acceleration,
+            get_launch_on_startup,
+            set_launch_on_startup,
             check_update_by_rust,
             download_update_file,
             run_installer

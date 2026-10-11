@@ -143,6 +143,8 @@ commands.allow = [
   "cancel_taskbar_player_drag",
   "file_exists",
   "set_gpu_acceleration",
+  "get_launch_on_startup",
+  "set_launch_on_startup",
   "check_update_by_rust",
   "download_update_file",
   "run_installer",

@@ -1,6 +1,6 @@
 import { computed, nextTick, onScopeDispose, ref, watch, type CSSProperties, type Ref } from 'vue';
 
-export type LyricsAppearanceSection = 'layout' | 'typography' | 'position' | 'subtitles' | 'effects' | 'background';
+export type LyricsAppearanceSection = 'layout' | 'typography' | 'position' | 'subtitles' | 'effects' | 'sync' | 'background';
 export type LyricsAppearancePopoverSide = 'left' | 'right' | 'overlay';
 
 interface LyricsAppearancePopoverOptions {

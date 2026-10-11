@@ -540,6 +540,8 @@ export interface TauriCommandMap {
   start_topmost_guard: { payload: undefined; response: void };
   stop_topmost_guard: { payload: undefined; response: void };
   clear_all_app_data: { payload: undefined; response: void };
+  get_launch_on_startup: { payload: undefined; response: boolean };
+  set_launch_on_startup: { payload: { enabled: boolean }; response: boolean };
   open_external_program: {
     payload: { path: string; args: string[] };
     response: void;

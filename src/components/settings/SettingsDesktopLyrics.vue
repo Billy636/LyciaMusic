@@ -1002,7 +1002,7 @@ onUnmounted(() => {
           @click="showLyricsSyncOffsetPanel = !showLyricsSyncOffsetPanel"
         >
           <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">同步偏移</div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">同步偏移（全局）</div>
           </div>
           <div class="flex items-center gap-3 shrink-0">
             <div class="rounded-full bg-[#EC4141]/10 px-3 py-1 text-xs font-medium text-[#EC4141] tabular-nums">
@@ -1020,7 +1020,7 @@ onUnmounted(() => {
           <div v-if="showLyricsSyncOffsetPanel" class="desktop-setting-expand">
             <div class="desktop-setting-expand-inner">
               <div class="text-xs text-gray-600 dark:text-white/60">
-                正值让歌词更晚显示，负值让歌词更早显示。用于修正不同输出设备的播放缓冲差异，默认值为 0 ms。
+                正值让歌词更晚显示，负值让歌词更早显示。用于补偿音频输出延迟，默认值为 0 ms。此设置同时影响播放页、桌面歌词、mini 模式及任务栏歌词。
               </div>
 
               <div class="mt-4 flex flex-col gap-4 md:flex-row md:items-center">
