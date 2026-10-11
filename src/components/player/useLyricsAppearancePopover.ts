@@ -1,6 +1,6 @@
 import { computed, nextTick, onScopeDispose, ref, watch, type CSSProperties, type Ref } from 'vue';
 
-export type LyricsAppearanceSection = 'layout' | 'typography' | 'position' | 'subtitles' | 'effects';
+export type LyricsAppearanceSection = 'layout' | 'typography' | 'position' | 'subtitles' | 'effects' | 'background';
 export type LyricsAppearancePopoverSide = 'left' | 'right' | 'overlay';
 
 interface LyricsAppearancePopoverOptions {
@@ -26,6 +26,7 @@ export function useLyricsAppearancePopover(options: LyricsAppearancePopoverOptio
   const popoverSide = ref<LyricsAppearancePopoverSide>('right');
   const positionStyle = ref<CSSProperties>({ position: 'fixed', width: `${POPOVER_WIDTH}px` });
   const popoverStyle = computed(() => positionStyle.value);
+  const popoverScrollStyle = ref<CSSProperties>({});
 
   let openTimer: ReturnType<typeof setTimeout> | undefined;
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -46,6 +47,7 @@ export function useLyricsAppearancePopover(options: LyricsAppearancePopoverOptio
     sectionAnimation?.cancel();
     sectionAnimation = undefined;
     sectionTargetHeight = undefined;
+    popoverScrollStyle.value = {};
   }
 
   function clearOpenTimer() {
@@ -119,7 +121,11 @@ export function useLyricsAppearancePopover(options: LyricsAppearancePopoverOptio
     const measuredHeight = sectionTargetHeight
       ?? (options.popoverRef.value?.getBoundingClientRect().height || 280);
     const height = Math.min(measuredHeight, maxHeight);
-    const top = Math.max(topBoundary, Math.min(bottomBoundary - height, triggerRect.top));
+    // Match the active row's center while leaving room for the player controls.
+    // A narrow overlay keeps its existing anchor because it covers the directory.
+    const desiredTop = side === 'overlay' ? triggerRect.top
+      : triggerRect.top + (triggerRect.height - height) / 2;
+    const top = Math.max(topBoundary, Math.min(bottomBoundary - height, desiredTop));
 
     popoverSide.value = side;
     positionStyle.value = {
@@ -163,6 +169,14 @@ export function useLyricsAppearancePopover(options: LyricsAppearancePopoverOptio
     updatePosition();
     await nextTick();
     if (!isCurrent()) return;
+    // Keep the scroll viewport at its final size while the outer frame reveals
+    // it, so a taller group does not gain a temporary scrollbar mid-animation.
+    const scroll = popover.querySelector<HTMLElement>('[data-lyrics-popover-scroll]');
+    if (scroll) {
+      popoverScrollStyle.value = { height: `${scroll.getBoundingClientRect().height}px`, flexShrink: 0 };
+      await nextTick();
+      if (!isCurrent()) return;
+    }
     const to = popover.getBoundingClientRect();
 
     try {
@@ -178,11 +192,13 @@ export function useLyricsAppearancePopover(options: LyricsAppearancePopoverOptio
         if (!isCurrent() || sectionAnimation !== animation) return;
         sectionAnimation = undefined;
         sectionTargetHeight = undefined;
+        popoverScrollStyle.value = {};
         queuePosition();
       };
       void animation.finished.then(finish, finish);
     } catch {
       sectionTargetHeight = undefined;
+      popoverScrollStyle.value = {};
       queuePosition();
     }
   }
@@ -296,6 +312,22 @@ export function useLyricsAppearancePopover(options: LyricsAppearancePopoverOptio
     pinned.value = true;
     clearOpenTimer();
     clearCloseTimer();
+  }
+
+  function togglePopoverPin(event: MouseEvent) {
+    if (!activeSection.value) return;
+    if (!pinned.value) {
+      pinPopover();
+      return;
+    }
+    pinned.value = false;
+    clearOpenTimer();
+    // Release mouse-click focus so hover can resume; keyboard clicks keep it.
+    const button = event.currentTarget;
+    if (event.detail > 0 && button instanceof HTMLElement && document.activeElement === button) {
+      button.blur();
+    }
+    scheduleClose();
   }
 
   function handlePopoverPointerDown(event: PointerEvent) {
@@ -421,6 +453,7 @@ export function useLyricsAppearancePopover(options: LyricsAppearancePopoverOptio
     activeSection,
     pinned,
     popoverStyle,
+    popoverScrollStyle,
     popoverSide,
     enterSection,
     leaveSection,
@@ -429,5 +462,6 @@ export function useLyricsAppearancePopover(options: LyricsAppearancePopoverOptio
     leavePopover,
     closePopover,
     pinPopover,
+    togglePopoverPin,
   };
 }

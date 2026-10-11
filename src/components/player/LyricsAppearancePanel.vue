@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { open } from '@tauri-apps/plugin-dialog';
-import { AlignLeft, ArrowLeft, ChevronRight, Languages, Move, Pin, RotateCcw, Sparkles, Trash2, Type, X } from 'lucide-vue-next';
+import { AlignLeft, ArrowLeft, ChevronRight, Languages, Move, Palette, Pin, RotateCcw, Sparkles, Trash2, Type, X } from 'lucide-vue-next';
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import {
   DEFAULT_PLAYER_ALIGNMENT,
@@ -35,9 +35,12 @@ import {
 } from '../../composables/lyrics';
 import { LYRICS_READING_ORDER_OPTIONS, resolveLyricsReadingOrder } from '../../composables/lyrics/readingOrder';
 import { usePlayer } from '../../composables/player';
+import { useThemeSettings } from '../../composables/useThemeSettings';
 import { usePlaybackStore } from '../../features/playback/store';
+import { normalizePlayerBackgroundSettings } from '../../features/settings/playerBackground';
 import { useSettingsStore } from '../../features/settings/store';
 import LyricsAppearanceRange from './LyricsAppearanceRange.vue';
+import LyricsBackgroundControl from './LyricsBackgroundControl.vue';
 import LyricsReadingOrderControl from './LyricsReadingOrderControl.vue';
 import { useLyricsAppearanceDraft, type LyricsAppearanceDraft } from './useLyricsAppearanceDraft';
 import { useLyricsAppearancePopover, type LyricsAppearanceSection } from './useLyricsAppearancePopover';
@@ -48,6 +51,8 @@ const { lyricsSettings, showLyricsPlayerSettingsPanel } = useLyrics();
 const { showPlayerDetail } = usePlayer();
 const settingsStore = useSettingsStore();
 const playbackStore = usePlaybackStore();
+const { theme } = useThemeSettings();
+const playerBackground = computed(() => normalizePlayerBackgroundSettings(theme.value));
 const visible = computed(() => showPlayerDetail.value && showLyricsPlayerSettingsPanel.value);
 const panelRef = ref<HTMLElement | null>(null);
 const popoverRef = ref<HTMLElement | null>(null);
@@ -84,6 +89,7 @@ const SECTIONS = [
   { id: 'position', label: '间距与位置', icon: Move },
   { id: 'subtitles', label: '副行与读取顺序', icon: Languages },
   { id: 'effects', label: '歌词效果', icon: Sparkles },
+  { id: 'background', label: '播放页背景', icon: Palette },
 ] as const;
 const { draft, setField: setAppearanceField, commit: commitDraftLyricsSettings } = useLyricsAppearanceDraft(
   () => lyricsSettings,
@@ -91,8 +97,8 @@ const { draft, setField: setAppearanceField, commit: commitDraftLyricsSettings }
   (preview) => emit('preview', preview),
 );
 const {
-  activeSection, pinned, popoverStyle, popoverSide,
-  enterSection, leaveSection, toggleSection, keepPopoverOpen, leavePopover, closePopover, pinPopover,
+  activeSection, pinned, popoverStyle, popoverScrollStyle, popoverSide,
+  enterSection, leaveSection, toggleSection, keepPopoverOpen, leavePopover, closePopover, pinPopover, togglePopoverPin,
 } = useLyricsAppearancePopover({ visible, panelRef, popoverRef, beforeClose: commitDraftLyricsSettings });
 const activeSectionLabel = computed(() => SECTIONS.find((section) => section.id === activeSection.value)?.label);
 const customFontOptions = computed(() => buildImportedLyricsFontOptions(settingsStore.settings.customLyricsFonts));
@@ -113,6 +119,8 @@ const summaries = computed<Record<LyricsAppearanceSection, string>>(() => ({
   position: `${PLAYER_ALIGNMENT_OPTIONS.value.find((option) => option.value === lyricsSettings.playerAlignment)?.label} · 间距 ${Math.round(draft.playerLineGap * 100)}%`,
   subtitles: subtitlesLabel.value,
   effects: `${isVerticalWriting.value ? '竖排' : lyricsSettings.playerRenderMode === 'amll' ? 'AMLL' : '轻量'}${(isVerticalWriting.value || lyricsSettings.playerRenderMode === 'amll') && lyricsSettings.enableBlur ? ' · 模糊' : ''}`,
+  background: playerBackground.value.playerBackgroundMode === 'original' ? '原背景'
+    : `${playerBackground.value.playerBackgroundMode === 'soft' ? '柔光流动' : '静态渐变'} · ${{ indigo: '靛蓝', rose: '暖霞', teal: '青川', cover: '跟随封面' }[playerBackground.value.playerBackgroundPalette]}`,
 }));
 
 function setPlayerAlignment(value: LyricsPlayerAlignment) {
@@ -270,10 +278,10 @@ onUnmounted(() => {
         <header class="appearance-popover-header">
           <button v-if="popoverSide === 'overlay'" type="button" class="player-side-panel__icon-button" aria-label="返回歌词样式" @click="closePopover(true)"><ArrowLeft :size="16" /></button>
           <h3 :key="activeSection" :id="`${popoverId}-title`" class="appearance-section-content">{{ activeSectionLabel }}</h3>
-          <button type="button" class="player-side-panel__icon-button appearance-pin-button" data-lyrics-popover-pin :aria-pressed="pinned" :aria-label="pinned ? '取消固定选项' : '固定当前选项'" :title="pinned ? '取消固定' : '固定当前选项'" @click="pinned = !pinned"><Pin :size="14" /></button>
+          <button type="button" class="player-side-panel__icon-button appearance-pin-button" data-lyrics-popover-pin :aria-pressed="pinned" :aria-label="pinned ? '取消固定选项' : '固定当前选项'" :title="pinned ? '取消固定' : '固定当前选项'" @click="togglePopoverPin"><Pin :size="14" /></button>
           <button type="button" class="player-side-panel__icon-button" aria-label="关闭当前选项" @click="closePopover(true)"><X :size="16" /></button>
         </header>
-        <div :key="activeSection" class="appearance-popover-scroll appearance-section-content">
+        <div :key="activeSection" class="appearance-popover-scroll appearance-section-content" data-lyrics-popover-scroll :style="popoverScrollStyle">
           <div v-if="activeSection === 'layout'" class="appearance-controls appearance-layout-controls">
             <div class="appearance-control-group">
               <span class="appearance-control-label">排版方向</span>
@@ -363,6 +371,7 @@ onUnmounted(() => {
               <button type="button" role="switch" aria-labelledby="lyrics-blur-label" :aria-checked="lyricsSettings.enableBlur" class="appearance-switch" @click="settingsStore.patchSettings({ lyrics: { enableBlur: !lyricsSettings.enableBlur } })"><span></span></button>
             </div>
           </div>
+          <LyricsBackgroundControl v-else-if="activeSection === 'background'" />
         </div>
       </section>
     </transition>
@@ -387,11 +396,11 @@ onUnmounted(() => {
 .appearance-popover-header { display: flex; flex-shrink: 0; align-items: center; gap: 4px; padding: 10px 12px; border-bottom: 1px solid rgb(255 255 255 / 8%); }
 .appearance-popover-header h3 { flex: 1; min-width: 0; margin: 0; font-size: 13px; font-weight: 600; }
 .appearance-pin-button[aria-pressed="true"] { background: rgb(255 255 255 / 12%); color: white; }
-.appearance-popover-scroll { min-height: 0; overflow-y: auto; padding: 16px; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 20%) transparent; }
+.appearance-popover-scroll { min-height: 0; overflow-y: auto; padding: 16px; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 20%) transparent; }
 .appearance-section-content { animation: appearance-section-in 180ms cubic-bezier(.22, 1, .36, 1) both; }
 @keyframes appearance-section-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 .appearance-controls { display: flex; flex-direction: column; gap: 20px; }
 .appearance-layout-controls { gap: 0; }
@@ -418,7 +427,7 @@ onUnmounted(() => {
 .appearance-font-tabs { padding: 3px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 12px; background: rgb(255 255 255 / 3%); }
 .appearance-font-tabs button { min-height: 28px; border-color: transparent; border-radius: 8px; background: transparent; font-size: 11px; }
 .appearance-font-tabs button[aria-pressed="true"] { border-color: transparent; }
-.appearance-font-list { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 20%) transparent; }
+.appearance-font-list { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 20%) transparent; }
 .appearance-font-option { display: flex; width: 100%; align-items: center; gap: 8px; min-height: 38px; padding: 8px 10px; border-radius: 10px; color: rgb(255 255 255 / 65%); text-align: left; font-size: 12px; }
 .appearance-font-option:hover { background: rgb(255 255 255 / 6%); color: white; }
 .appearance-font-option[aria-pressed="true"] { background: rgb(255 255 255 / 12%); color: white; }

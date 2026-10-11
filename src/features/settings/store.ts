@@ -26,6 +26,7 @@ import {
 } from './shortcuts';
 import { playerStorage } from '../../services/storage/playerStorage';
 import { normalizeFooterSettings } from './footer';
+import { normalizePlayerBackgroundSettings } from './playerBackground';
 import { getSidebarHomepageId, normalizeSidebarNavigationOrder } from './sidebarNavigation';
 
 const createUserPresetId = (): string =>
@@ -80,6 +81,7 @@ export const normalizeThemeMode = (
 export const defaultThemeSettings: ThemeSettings = {
   mode: 'system',
   dynamicBgType: 'none',
+  ...normalizePlayerBackgroundSettings({}),
   windowMaterial: 'none',
   retainMaterialOnUnfocus: false,
   flowColorBoost: 25,
@@ -170,6 +172,7 @@ export const defaultAppSettings: AppSettings = {
 
 export const createDefaultThemeSettings = (): ThemeSettings => ({
   ...defaultThemeSettings,
+  ...normalizePlayerBackgroundSettings(defaultThemeSettings),
   customBackground: {
     ...defaultThemeSettings.customBackground,
   },
@@ -228,6 +231,7 @@ export const mergeThemeSettings = (
   return {
     ...base,
     ...patch,
+    ...normalizePlayerBackgroundSettings({ ...base, ...patch, customBackground: mergedCustomBackground }),
     mode: normalizeThemeMode(patch.mode, base.mode),
     windowTransparentOpacity: Number.isFinite(transparentOpacity)
       ? Math.min(100, Math.max(0, Math.round(transparentOpacity)))

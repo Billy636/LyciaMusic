@@ -294,9 +294,15 @@ export interface LibraryScanSession {
   sourcePath?: string;
 }
 
+export type PlayerBackgroundMode = 'original' | 'soft' | 'gradient';
+export type PlayerBackgroundPalette = 'indigo' | 'rose' | 'teal' | 'cover';
+
 export interface ThemeSettings {
   mode: 'system' | 'light' | 'dark' | 'custom';
   dynamicBgType: 'none' | 'flow' | 'blur' | 'mist';
+  playerBackgroundMode?: PlayerBackgroundMode;
+  playerBackgroundPalette?: PlayerBackgroundPalette;
+  playerBackgroundMotion?: boolean;
   windowMaterial: 'none' | 'mica' | 'acrylic' | 'blur' | 'transparent';
   retainMaterialOnUnfocus: boolean;
   flowColorBoost: number;

@@ -30,11 +30,19 @@ const optionsRef = ref<HTMLElement | null>(null);
 let mounted = false;
 const popupStyle = ref<Record<string, string>>({});
 const announcement = ref('');
+const REORDER_DURATION = 220;
+let reorderSequence = 0;
+const rowAnimations = new Map<HTMLElement, Animation>();
 const drag = ref<{
   role: LyricsReadingRole;
   pointerId: number;
   token: number;
   roles: LyricsReadingRole[];
+  startY: number;
+  startListTop: number;
+  offsetY: number;
+  originTop: number;
+  slots: { top: number; height: number }[];
 } | null>(null);
 const displayedRoles = computed(() => drag.value?.roles ?? selectedOption.value.roles);
 const roleLabels: Record<LyricsReadingRole, string> = {
@@ -126,47 +134,119 @@ function persistRoles(roles: readonly LyricsReadingRole[], token: number) {
   if (option && selectOrder(option.value, token)) announcement.value = `读取顺序：${option.label}`;
 }
 
+function sortRows() {
+  return Array.from(optionsRef.value?.querySelectorAll<HTMLElement>('[data-reading-role]') ?? []);
+}
+
+function sortListTop() {
+  return optionsRef.value?.querySelector('.reading-order-sort-list')?.getBoundingClientRect().top ?? 0;
+}
+
+function captureRowRects() {
+  return new Map(sortRows().map((row) => [row.dataset.readingRole,
+    (row.querySelector('button') ?? row).getBoundingClientRect()]));
+}
+
+function cancelRowAnimations() {
+  reorderSequence += 1;
+  rowAnimations.forEach((animation) => animation.cancel());
+  rowAnimations.clear();
+}
+
+async function animateRows(from: ReturnType<typeof captureRowRects>, draggedRole?: LyricsReadingRole) {
+  const sequence = ++reorderSequence;
+  await nextTick();
+  if (sequence !== reorderSequence || !expanded.value || !optionsRef.value) return;
+  rowAnimations.forEach((animation) => animation.cancel());
+  rowAnimations.clear();
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  sortRows().forEach((row) => {
+    const previous = from.get(row.dataset.readingRole);
+    if (!previous || row.dataset.readingRole === draggedRole || typeof row.animate !== 'function') return;
+    const offset = previous.top - row.getBoundingClientRect().top;
+    if (Math.abs(offset) < 0.5) return;
+    const animation = row.animate([
+      { transform: `translateY(${offset}px)` }, { transform: 'translateY(0)' },
+    ], { duration: REORDER_DURATION, easing: 'cubic-bezier(.22, 1, .36, 1)' });
+    rowAnimations.set(row, animation);
+    const cleanup = () => { if (rowAnimations.get(row) === animation) rowAnimations.delete(row); };
+    void animation.finished.then(cleanup, cleanup);
+  });
+}
+
+function dragStyle(role: LyricsReadingRole) {
+  const active = drag.value;
+  if (!active || active.role !== role) return undefined;
+  const slot = active.slots[active.roles.indexOf(role)];
+  return { transform: `translateY(${active.originTop + active.offsetY - slot.top}px)` };
+}
+
 function startDrag(event: PointerEvent, role: LyricsReadingRole) {
   if (event.button !== 0 || !event.isPrimary || !expanded.value || !optionsRef.value || drag.value) return;
   event.preventDefault();
+  const previous = captureRowRects();
+  cancelRowAnimations();
   (event.currentTarget as HTMLButtonElement).focus({ preventScroll: true });
-  drag.value = { role, pointerId: event.pointerId, token: selectionToken.value, roles: [...selectedOption.value.roles] };
+  const startListTop = sortListTop();
+  const slots = sortRows().map((row) => {
+    const rect = row.getBoundingClientRect();
+    return { top: rect.top - startListTop, height: rect.height };
+  });
+  const roles = [...selectedOption.value.roles];
+  const originTop = slots[roles.indexOf(role)]!.top;
+  const offsetY = (previous.get(role)?.top ?? startListTop + originTop) - startListTop - originTop;
+  drag.value = {
+    role, pointerId: event.pointerId, token: selectionToken.value, roles,
+    startY: event.clientY - offsetY, startListTop, offsetY, originTop, slots,
+  };
   // Capture on the stable popup, not a row that moves while the list reorders.
   optionsRef.value.setPointerCapture(event.pointerId);
+  void animateRows(previous, role);
 }
 
 function moveDrag(event: PointerEvent) {
   const active = drag.value;
   if (!active || event.pointerId !== active.pointerId) return;
   event.preventDefault();
-  const rows = Array.from(optionsRef.value?.querySelectorAll<HTMLElement>('[data-reading-role]') ?? []);
+  // Hit-test the original slots, not rows that are animating into new positions.
+  const pointerOffset = event.clientY - active.startY - (sortListTop() - active.startListTop);
+  active.offsetY = Math.max(active.slots[0]!.top - active.originTop,
+    Math.min(active.slots[active.slots.length - 1]!.top - active.originTop, pointerOffset));
+  const currentIndex = active.roles.indexOf(active.role);
+  const center = active.originTop + active.offsetY + active.slots[currentIndex]!.height / 2;
   let closestIndex = -1;
   let closestDistance = Number.POSITIVE_INFINITY;
-  rows.forEach((row, index) => {
-    const rect = row.getBoundingClientRect();
-    const distance = Math.abs(event.clientY - rect.top - rect.height / 2);
+  active.slots.forEach((slot, index) => {
+    const distance = Math.abs(center - slot.top - slot.height / 2);
     if (distance < closestDistance) {
       closestIndex = index;
       closestDistance = distance;
     }
   });
-  const currentIndex = active.roles.indexOf(active.role);
   if (closestIndex < 0 || closestIndex === currentIndex) return;
+  const previous = captureRowRects();
   const roles = [...active.roles];
   roles.splice(currentIndex, 1);
   roles.splice(closestIndex, 0, active.role);
   drag.value = { ...active, roles };
+  void animateRows(previous, active.role);
 }
 
 function cancelDrag() {
   const active = drag.value;
+  if (!active) return;
+  const previous = captureRowRects();
   drag.value = null;
   if (active && optionsRef.value?.hasPointerCapture(active.pointerId)) {
     optionsRef.value.releasePointerCapture(active.pointerId);
   }
+  // Settings commit immediately; the visual landing is independent of capture.
+  void animateRows(previous);
 }
 
 function finishDrag(event: PointerEvent) {
+  if (!drag.value || event.pointerId !== drag.value.pointerId) return;
+  moveDrag(event);
   const active = drag.value;
   if (!active || event.pointerId !== active.pointerId) return;
   const rect = optionsRef.value?.getBoundingClientRect();
@@ -184,24 +264,33 @@ async function moveRole(role: LyricsReadingRole, direction: -1 | 1) {
   const index = roles.indexOf(role);
   const target = index + direction;
   if (index < 0 || target < 0 || target >= roles.length) return;
+  const previous = captureRowRects();
   roles.splice(index, 1);
   roles.splice(target, 0, role);
   const token = selectionToken.value;
   persistRoles(roles, token);
+  void animateRows(previous);
   await nextTick();
   if (expanded.value && token === selectionToken.value) {
     optionsRef.value?.querySelector<HTMLButtonElement>(`[data-reading-role="${role}"] button`)?.focus({ preventScroll: true });
   }
 }
 
-watch(expanded, (visible) => { if (!visible) cancelDrag(); }, { flush: 'sync' });
+watch(expanded, (visible) => {
+  if (!visible) {
+    cancelDrag();
+    cancelRowAnimations();
+  }
+}, { flush: 'sync' });
 watch(selectedOrder, cancelDrag, { flush: 'sync' });
 watch([songPath, scope], () => {
   cancelDrag();
+  cancelRowAnimations();
   if (props.inline) openOptions();
 }, { flush: 'sync' });
 watch(() => props.inline, (inline) => {
   cancelDrag();
+  cancelRowAnimations();
   if (inline) openOptions();
   else closeOptions();
   if (mounted) syncKeyboardListener();
@@ -224,6 +313,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   cancelDrag();
   closeOptions();
+  cancelRowAnimations();
   mounted = false;
   window.removeEventListener('mousedown', handleOutsidePointer, true);
   window.removeEventListener('click', handleOutsidePointer, true);
@@ -309,11 +399,12 @@ onBeforeUnmount(() => {
       @dragstart.prevent
     >
       <ol class="reading-order-sort-list">
-        <li v-for="(role, index) in displayedRoles" :key="role" :data-reading-role="role">
+        <li v-for="(role, index) in displayedRoles" :key="role" :data-reading-role="role" :class="{ 'reading-order-sort-row--dragging': drag?.role === role }">
           <button
             type="button"
             class="reading-order-drag-item"
             :class="{ 'reading-order-drag-item--dragging': drag?.role === role }"
+            :style="dragStyle(role)"
             :aria-label="`${roleLabels[role]}，第 ${index + 1} 项；可拖动或使用上下箭头调整顺序`"
             aria-keyshortcuts="ArrowUp ArrowDown"
             @pointerdown="startDrag($event, role)"
@@ -352,11 +443,12 @@ onBeforeUnmount(() => {
         @dragstart.prevent
       >
         <ol class="reading-order-sort-list">
-          <li v-for="(role, index) in displayedRoles" :key="role" :data-reading-role="role">
+          <li v-for="(role, index) in displayedRoles" :key="role" :data-reading-role="role" :class="{ 'reading-order-sort-row--dragging': drag?.role === role }">
             <button
               type="button"
               class="reading-order-drag-item"
               :class="{ 'reading-order-drag-item--dragging': drag?.role === role }"
+              :style="dragStyle(role)"
               :aria-label="`${roleLabels[role]}，第 ${index + 1} 项；可拖动或使用上下箭头调整顺序`"
               aria-keyshortcuts="ArrowUp ArrowDown"
               @pointerdown="startDrag($event, role)"
@@ -402,14 +494,17 @@ onBeforeUnmount(() => {
 .reading-order-chevron--expanded { transform: rotate(180deg); }
 .reading-order-popover { z-index: 120; overflow: auto; padding: 8px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 24px; background: rgb(0 0 0 / 30%); color: white; box-shadow: 0 28px 70px rgb(0 0 0 / 36%); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); overscroll-behavior: contain; }
 .reading-order-sort-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.reading-order-drag-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid transparent; border-radius: 16px; background: rgb(255 255 255 / 3%); color: rgb(255 255 255 / 80%); text-align: left; cursor: grab; touch-action: none; user-select: none; transition: background-color 160ms, border-color 160ms; }
+.reading-order-sort-list > li { position: relative; }
+.reading-order-sort-row--dragging { z-index: 1; }
+.reading-order-drag-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid transparent; border-radius: 16px; background: rgb(255 255 255 / 3%); color: rgb(255 255 255 / 80%); text-align: left; cursor: grab; touch-action: none; user-select: none; transition: background-color 160ms, border-color 160ms, box-shadow 220ms; }
 .reading-order-drag-item:hover { background: rgb(255 255 255 / 7%); }
-.reading-order-drag-item--dragging { border-color: rgb(255 255 255 / 25%); background: rgb(255 255 255 / 14%); color: white; cursor: grabbing; }
+.reading-order-drag-item--dragging { border-color: rgb(255 255 255 / 25%); background: rgb(255 255 255 / 14%); box-shadow: 0 8px 20px rgb(0 0 0 / 20%); color: white; cursor: grabbing; }
+.reading-order-sort-list:has(.reading-order-drag-item--dragging) .reading-order-drag-item { cursor: grabbing; }
 .reading-order-position { flex-shrink: 0; color: rgb(255 255 255 / 35%); font-size: 11px; font-variant-numeric: tabular-nums; }
 .reading-order-item-label { flex: 1; font-size: 13px; font-weight: 500; }
 .reading-order-grip { flex-shrink: 0; color: rgb(255 255 255 / 40%); }
 .reading-order-drag-item:focus-visible, .reading-order-trigger:focus-visible, .reading-order-scope button:focus-visible, .reading-order-reset:focus-visible { box-shadow: 0 0 0 2px rgb(255 255 255 / 65%); }
 .reading-order-popover-enter-active, .reading-order-popover-leave-active { transition: opacity 160ms ease, transform 160ms ease; }
 .reading-order-popover-enter-from, .reading-order-popover-leave-to { opacity: 0; transform: translateX(-8px); }
-@media (prefers-reduced-motion: reduce) { .reading-order-popover-enter-active, .reading-order-popover-leave-active { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .reading-order-drag-item, .reading-order-popover-enter-active, .reading-order-popover-leave-active { transition: none; } }
 </style>

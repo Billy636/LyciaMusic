@@ -3,7 +3,9 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { usePlayer } from '../../composables/player';
 import { useThemeSettings } from '../../composables/useThemeSettings';
 import { useRenderingPower } from '../../composables/renderingPower';
+import { normalizePlayerBackgroundSettings } from '../../features/settings/playerBackground';
 import MistBackground from '../layout/MistBackground.vue';
+import PlayerColorBackground from './PlayerColorBackground.vue';
 import PlayerAdaptiveForeground from './PlayerAdaptiveForeground.vue';
 import type { PlayerForeground } from './playerBackgroundReadability';
 
@@ -18,12 +20,13 @@ const emit = defineEmits<{ (event: 'foreground-change', foreground: PlayerForegr
 const { dominantColors, currentSong, currentCover, currentCoverPath } = usePlayer();
 const { theme } = useThemeSettings();
 const { isMainWindowLowPower } = useRenderingPower();
+const playerBackground = computed(() => normalizePlayerBackgroundSettings(theme.value));
 const usesMistBackground = computed(() => (
   theme.value.dynamicBgType === 'mist'
   && theme.value.mode !== 'custom'
   && theme.value.windowMaterial === 'none'
 ));
-const mistCoverSrc = computed(() => {
+const matchingCoverSrc = computed(() => {
   const song = currentSong.value;
   return song && currentCoverPath.value
     && (currentCoverPath.value === song.path || currentCoverPath.value === song.cue_source_path)
@@ -58,9 +61,18 @@ onUnmounted(() => {
     class="absolute inset-0 z-0 overflow-hidden pointer-events-none select-none"
     :style="{ opacity: props.bgOpacity ?? 1, transition: 'opacity 350ms cubic-bezier(0.4, 0, 0.2, 1)' }"
   >
+    <PlayerColorBackground
+      v-if="playerBackground.playerBackgroundMode !== 'original'"
+      :mode="playerBackground.playerBackgroundMode"
+      :palette="playerBackground.playerBackgroundPalette"
+      :motion="playerBackground.playerBackgroundMotion"
+      :cover-src="matchingCoverSrc"
+      :suspended="!(props.active ?? true) || isMainWindowLowPower"
+    />
+
     <MistBackground
-      v-if="usesMistBackground"
-      :cover-src="mistCoverSrc"
+      v-else-if="usesMistBackground"
+      :cover-src="matchingCoverSrc"
       :suspended="!(props.active ?? true) || isMainWindowLowPower"
       immersive
     />
@@ -95,7 +107,7 @@ onUnmounted(() => {
     <PlayerAdaptiveForeground
       :cover-src="thumbCoverUrl"
       :active="(props.active ?? true) && !isMainWindowLowPower"
-      :enabled="!usesMistBackground"
+      :enabled="playerBackground.playerBackgroundMode === 'original' && !usesMistBackground"
       :lyrics-element="props.lyricsElement"
       :layout-key="props.lyricsLayoutKey"
       :large-viewport="isLargeViewport"
