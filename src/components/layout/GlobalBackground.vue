@@ -176,6 +176,11 @@ const matchingCoverSrc = computed(() => {
     && (currentCoverPath.value === song.path || currentCoverPath.value === song.cue_source_path)
     ? currentCover.value : '';
 });
+const coverPending = computed(() => Boolean(
+  currentSong.value && currentCoverPath.value
+  && currentCoverPath.value !== currentSong.value.path
+  && currentCoverPath.value !== currentSong.value.cue_source_path
+));
 
 const activeBackgroundInfo = computed(() => {
   const currentTheme = theme.value;
@@ -527,6 +532,7 @@ const customBgTransform = computed(() => {
       <FlowBackground
         v-if="activeBackgroundInfo?.type === 'flow'"
         :cover-src="bgImageSrc"
+        :cover-pending="coverPending"
         :paused="reduceDynamicEffects || isMiniMode"
         :dark="isDarkTheme"
       />

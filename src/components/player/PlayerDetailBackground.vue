@@ -27,6 +27,11 @@ const matchingCoverSrc = computed(() => {
     && (currentCoverPath.value === song.path || currentCoverPath.value === song.cue_source_path)
     ? currentCover.value : '';
 });
+const coverPending = computed(() => Boolean(
+  currentSong.value && currentCoverPath.value
+  && currentCoverPath.value !== currentSong.value.path
+  && currentCoverPath.value !== currentSong.value.cue_source_path
+));
 
 const viewportArea = ref(
   typeof window !== 'undefined' ? window.innerWidth * window.innerHeight : 0
@@ -62,6 +67,7 @@ onUnmounted(() => {
       :palette="playerBackground.playerBackgroundPalette"
       :motion="playerBackground.playerBackgroundMotion"
       :cover-src="matchingCoverSrc"
+      :cover-pending="coverPending"
       :suspended="!(props.active ?? true) || isMainWindowLowPower"
     />
 

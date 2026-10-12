@@ -4,9 +4,10 @@ import PlayerColorBackground from '../player/PlayerColorBackground.vue';
 
 const props = withDefaults(defineProps<{
   coverSrc: string;
+  coverPending?: boolean;
   paused?: boolean;
   dark?: boolean;
-}>(), { paused: false, dark: false });
+}>(), { coverPending: false, paused: false, dark: false });
 
 const pageHidden = ref(typeof document !== 'undefined' && document.hidden);
 const renderingSuspended = computed(() => props.paused || pageHidden.value);
@@ -28,6 +29,7 @@ onBeforeUnmount(() => {
       palette="cover"
       :light="!dark"
       :cover-src="coverSrc"
+      :cover-pending="coverPending"
       :suspended="renderingSuspended"
     />
   </div>

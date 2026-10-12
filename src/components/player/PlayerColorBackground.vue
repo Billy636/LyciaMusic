@@ -1,18 +1,21 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { extractCoverColorProfile } from '../../composables/colorExtraction';
 import type { PlayerBackgroundMode, PlayerBackgroundPalette } from '../../types';
-import { createPlayerBackgroundPalette } from './playerBackgroundPalette';
+import { createPlayerBackgroundPalette, type PlayerBackgroundColors } from './playerBackgroundPalette';
+import { createPlayerColorRenderer, type PlayerColorRenderer } from './playerColorRenderer';
 
 const props = withDefaults(defineProps<{
   mode: Exclude<PlayerBackgroundMode, 'original'>;
   palette: PlayerBackgroundPalette;
   coverSrc?: string;
+  coverPending?: boolean;
   motion?: boolean;
   suspended?: boolean;
   light?: boolean;
 }>(), {
   coverSrc: '',
+  coverPending: false,
   motion: true,
   suspended: false,
   light: false,
@@ -20,7 +23,13 @@ const props = withDefaults(defineProps<{
 
 const emptyProfile = { colors: [] };
 const colors = shallowRef(createPlayerBackgroundPalette(props.palette, emptyProfile, props.light));
-const moving = computed(() => props.mode === 'soft' && props.motion && !props.suspended);
+const container = ref<HTMLElement | null>(null);
+const canvas = ref<HTMLCanvasElement | null>(null);
+const canvasReady = ref(false);
+const pageHidden = ref(typeof document !== 'undefined' && document.hidden);
+const reducedMotion = ref(false);
+const renderingSuspended = computed(() => props.suspended || pageHidden.value);
+const moving = computed(() => props.mode === 'soft' && props.motion && !reducedMotion.value);
 const paletteStyle = computed(() => ({
   '--player-bg-base': colors.value.base,
   '--player-bg-end': colors.value.end,
@@ -29,47 +38,167 @@ const paletteStyle = computed(() => ({
   '--player-bg-accent': colors.value.accent,
   '--player-bg-quiet': colors.value.quiet,
 }));
-const coverToSample = computed(() => (
-  props.palette === 'cover' && !props.suspended ? props.coverSrc : ''
-));
+const coverToSample = computed(() => props.palette === 'cover' ? props.coverSrc : '');
 
-watch([() => props.palette, coverToSample, () => props.suspended, () => props.light], async ([palette, coverSrc, suspended], _, onCleanup) => {
+watch([() => props.palette, coverToSample, () => props.coverPending, renderingSuspended, () => props.light], async ([palette, coverSrc, pending, suspended], _, onCleanup) => {
   let stale = false;
   onCleanup(() => { stale = true; });
 
+  if (suspended) return;
   if (palette !== 'cover') {
     colors.value = createPlayerBackgroundPalette(palette, emptyProfile, props.light);
     return;
   }
 
-  // Closed/hidden players skip sampling and use the shared cache on resume.
-  if (suspended) return;
-  if (!coverSrc) {
-    colors.value = createPlayerBackgroundPalette(palette, emptyProfile, props.light);
-    return;
-  }
-  const profile = await extractCoverColorProfile(coverSrc);
+  // Keep the displayed palette until the next song's thumbnail is ready.
+  // A confirmed missing cover still returns to the neutral palette.
+  if (!coverSrc && pending) return;
+  const profile = coverSrc ? await extractCoverColorProfile(coverSrc) : emptyProfile;
   if (!stale) colors.value = createPlayerBackgroundPalette(palette, profile, props.light);
 }, { immediate: true });
+
+const colorKeys = ['base', 'end', 'left', 'glow', 'accent', 'quiet'] as const;
+type ColorChannels = Record<typeof colorKeys[number], number[]>;
+const PALETTE_DURATION_MS = 1100;
+const FRAME_INTERVAL_MS = 1000 / 30;
+
+// The palette generator supplies HSL. Interpolate RGB on one opaque surface
+// instead of recreating full-window gradient layers during every song change.
+function paletteChannels(palette: PlayerBackgroundColors): ColorChannels {
+  const channels = {} as ColorChannels;
+  for (const key of colorKeys) {
+    const [h, s, l] = palette[key].match(/[\d.]+/g)!.map(Number);
+    const lightness = l / 100;
+    const amplitude = s / 100 * Math.min(lightness, 1 - lightness);
+    channels[key] = [0, 8, 4].map(offset => {
+      const sector = (offset + h / 30) % 12;
+      return 255 * (lightness - amplitude * Math.max(-1, Math.min(sector - 3, 9 - sector, 1)));
+    });
+  }
+  return channels;
+}
+
+const displayed = paletteChannels(colors.value);
+let from = displayed;
+let target = displayed;
+let paletteStartedAt: number | null = null;
+let renderer: PlayerColorRenderer | null = null;
+let observer: ResizeObserver | null = null;
+let motionQuery: MediaQueryList | null = null;
+let frameId: number | null = null;
+let lastPaintAt = 0;
+let lastMotionAt: number | null = null;
+let motionSeconds = 0;
+
+function samplePalette(now: number): PlayerBackgroundColors {
+  const progress = paletteStartedAt === null ? 1 : Math.min(1, (now - paletteStartedAt) / PALETTE_DURATION_MS);
+  const eased = progress * progress * (3 - 2 * progress);
+  const sampled = { key: colors.value.key } as PlayerBackgroundColors;
+  for (const key of colorKeys) {
+    displayed[key] = target[key].map((channel, index) => from[key][index] + (channel - from[key][index]) * eased);
+    sampled[key] = `rgb(${displayed[key].map(channel => channel.toFixed(2)).join(', ')})`;
+  }
+  if (progress === 1) paletteStartedAt = null;
+  return sampled;
+}
+
+function draw(now: number) {
+  if (!renderer) return;
+  if (moving.value && !renderingSuspended.value && lastMotionAt !== null) {
+    motionSeconds += Math.min(100, now - lastMotionAt) / 1000;
+  }
+  lastMotionAt = now;
+  renderer.render(samplePalette(now), props.mode, motionSeconds);
+  lastPaintAt = now;
+  canvasReady.value = true;
+}
+
+function scheduleFrame() {
+  if (frameId !== null || !renderer || renderingSuspended.value || (!moving.value && paletteStartedAt === null)) return;
+  frameId = requestAnimationFrame(onFrame);
+}
+
+function onFrame(now: number) {
+  frameId = null;
+  if (renderingSuspended.value) return;
+  if (now - lastPaintAt >= FRAME_INTERVAL_MS) draw(now);
+  scheduleFrame();
+}
+
+function stopFrames() {
+  if (frameId !== null) cancelAnimationFrame(frameId);
+  frameId = null;
+  lastMotionAt = null;
+}
+
+watch(colors, (palette, previous) => {
+  if (palette.key === previous.key) return;
+  const now = performance.now();
+  samplePalette(now);
+  from = Object.fromEntries(colorKeys.map(key => [key, [...displayed[key]]])) as ColorChannels;
+  target = paletteChannels(palette);
+  paletteStartedAt = reducedMotion.value || !renderer ? null : now;
+  draw(now);
+  scheduleFrame();
+});
+
+watch([renderingSuspended, moving, reducedMotion, () => props.mode], () => {
+  stopFrames();
+  if (renderingSuspended.value) return;
+  if (reducedMotion.value) paletteStartedAt = null;
+  draw(performance.now());
+  scheduleFrame();
+});
+
+const onVisibilityChanged = () => { pageHidden.value = document.hidden; };
+const onMotionPreferenceChanged = (event: MediaQueryListEvent) => { reducedMotion.value = event.matches; };
+
+onMounted(() => {
+  motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  reducedMotion.value = motionQuery.matches;
+  motionQuery.addEventListener('change', onMotionPreferenceChanged);
+  document.addEventListener('visibilitychange', onVisibilityChanged);
+  if (!canvas.value || !container.value) return;
+  renderer = createPlayerColorRenderer(canvas.value);
+  const resize = () => {
+    const bounds = container.value?.getBoundingClientRect();
+    if (!renderer || !bounds || bounds.width <= 0 || bounds.height <= 0) return;
+    // Resize clears a canvas. Repaint before the browser presents the frame.
+    renderer.resize(bounds.width, bounds.height);
+    draw(performance.now());
+    scheduleFrame();
+  };
+  observer = new ResizeObserver(resize);
+  observer.observe(container.value);
+  resize();
+});
+
+onBeforeUnmount(() => {
+  stopFrames();
+  observer?.disconnect();
+  renderer?.dispose();
+  renderer = null;
+  motionQuery?.removeEventListener('change', onMotionPreferenceChanged);
+  document.removeEventListener('visibilitychange', onVisibilityChanged);
+});
 </script>
 
 <template>
   <div
+    ref="container"
     class="player-color-background"
-    :class="{ 'is-moving': moving }"
-    :style="{ backgroundColor: colors.base }"
+    :style="paletteStyle"
     aria-hidden="true"
   >
-    <Transition name="player-palette-dissolve">
-      <div :key="`${colors.key}:${mode}`" class="player-color-layer" :class="mode" :style="paletteStyle">
-        <div class="player-color-foundation"></div>
-        <div class="player-color-field player-color-cover"></div>
-        <div class="player-color-field player-color-halo"></div>
-        <div class="player-color-field player-color-accent"></div>
-        <div class="player-color-field player-color-quiet"></div>
-        <div class="player-color-texture"></div>
-      </div>
-    </Transition>
+    <canvas ref="canvas" v-show="canvasReady" class="player-color-canvas"></canvas>
+    <div v-show="!canvasReady" class="player-color-layer" :class="mode">
+      <div class="player-color-foundation"></div>
+      <div class="player-color-field player-color-cover"></div>
+      <div class="player-color-field player-color-halo"></div>
+      <div class="player-color-field player-color-accent"></div>
+      <div class="player-color-field player-color-quiet"></div>
+    </div>
+    <div class="player-color-texture"></div>
   </div>
 </template>
 
@@ -80,8 +209,9 @@ watch([() => props.palette, coverToSample, () => props.suspended, () => props.li
   overflow: hidden;
   pointer-events: none;
   contain: strict;
-  transition: background-color 1100ms ease;
+  background: var(--player-bg-base);
 }
+.player-color-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .player-color-layer { position: absolute; inset: 0; overflow: hidden; }
 .player-color-foundation {
   position: absolute;
@@ -103,31 +233,4 @@ watch([() => props.palette, coverToSample, () => props.suspended, () => props.li
 .gradient .player-color-halo,
 .gradient .player-color-accent,
 .gradient .player-color-quiet { display: none; }
-.soft .player-color-cover { animation: player-cover-drift 36s ease-in-out infinite alternate; }
-.soft .player-color-halo { animation: player-halo-drift 42s ease-in-out infinite alternate; }
-.soft .player-color-accent { animation: player-accent-drift 46s ease-in-out infinite alternate; }
-.soft .player-color-field { animation-play-state: paused; }
-.is-moving .soft .player-color-field { animation-play-state: running; }
-.player-palette-dissolve-enter-active,
-.player-palette-dissolve-leave-active { transition: opacity 1100ms ease; }
-.player-palette-dissolve-enter-from,
-.player-palette-dissolve-leave-to { opacity: 0; }
-@keyframes player-cover-drift {
-  from { transform: translate(-2%, -2%) scale(1); }
-  to { transform: translate(2%, 3%) scale(1.06); }
-}
-@keyframes player-halo-drift {
-  from { transform: translate(-2%, 0); }
-  to { transform: translate(4%, 6%); }
-}
-@keyframes player-accent-drift {
-  from { transform: translate(0, -3%); }
-  to { transform: translate(-4%, 2%); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .soft .player-color-field { animation: none; }
-  .player-color-background,
-  .player-palette-dissolve-enter-active,
-  .player-palette-dissolve-leave-active { transition: none; }
-}
 </style>
