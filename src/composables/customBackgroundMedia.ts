@@ -168,8 +168,19 @@ export function loadCustomBackgroundMediaMetadata(
       }
     };
     video.onerror = () => {
+      // load() clears MediaError, so capture it before releasing the source.
+      const errorCode = video.error?.code;
       cleanup();
-      reject(new Error('视频无法解码，请选择 H.264 MP4 或 VP8/VP9 WebM 文件'));
+      let message = '无法加载所选视频，请确认文件存在且可读取';
+      if (errorCode === 1) {
+        message = '视频加载已中断，请重新选择文件';
+      } else if (errorCode === 3) {
+        message = '视频解码失败，请选择 H.264 MP4 或 VP8/VP9 WebM 文件';
+      } else if (errorCode === 4) {
+        // Unsupported sources also include blocked or inaccessible URLs.
+        message = '视频文件无法读取或格式不受支持，请选择 H.264 MP4 或 VP8/VP9 WebM 文件';
+      }
+      reject(new Error(message));
     };
     video.src = src;
     video.load();
