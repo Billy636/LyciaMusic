@@ -525,7 +525,14 @@ fn prepare_image(
         });
     }
 
-    let decoded = image::open(source_path).map_err(|error| format!("无法解码背景图片：{error}"))?;
+    // Downloaded wallpapers can have an extension that differs from their
+    // contents. Decode with the same content detection used for dimensions.
+    let decoded = ImageReader::open(source_path)
+        .map_err(|error| format!("无法打开背景图片：{error}"))?
+        .with_guessed_format()
+        .map_err(|error| format!("无法识别背景图片格式：{error}"))?
+        .decode()
+        .map_err(|error| format!("无法解码背景图片：{error}"))?;
     let resized = decoded.resize_exact(display_width, display_height, FilterType::Lanczos3);
     drop(decoded);
     let rendered = if blur_radius > 0.05 {

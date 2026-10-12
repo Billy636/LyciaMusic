@@ -27,6 +27,11 @@ const {
 const { setCustomBackgroundPreviewOpen } = useCustomBackgroundPreviewState();
 const { isMainWindowLowPower } = useRenderingPower();
 const mediaError = ref('');
+// Rust command failures reject with strings rather than JavaScript Errors.
+const getMediaErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  return typeof error === 'string' && error.trim() ? error : '背景文件无法加载';
+};
 const isPreparingMedia = ref(false);
 const showPreparingMediaStatus = ref(false);
 const previewDisplayPath = ref('');
@@ -384,7 +389,7 @@ watch(customBackgroundCacheResetVersion, async () => {
     }
   } catch (error) {
     if (isCurrentMediaOperation(operationId) && !isCustomBackgroundRequestSuperseded(error)) {
-      mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
+      mediaError.value = getMediaErrorMessage(error);
     }
   } finally {
     finishPreparingMedia(operationId);
@@ -410,7 +415,7 @@ onMounted(async () => {
       await applyMediaMetadata(preview.value.imagePath, previewMediaType.value);
     } catch (error) {
       if (isCurrentMediaOperation(operationId) && !isCustomBackgroundRequestSuperseded(error)) {
-        mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
+        mediaError.value = getMediaErrorMessage(error);
       }
     } finally {
       finishPreparingMedia(operationId);
@@ -453,7 +458,7 @@ const handleSelectNewMedia = async () => {
     preview.value.translateY = 0;
   } catch (error) {
     if (isCurrentMediaOperation(operationId) && !isCustomBackgroundRequestSuperseded(error)) {
-      mediaError.value = error instanceof Error ? error.message : '背景文件无法加载';
+      mediaError.value = getMediaErrorMessage(error);
     }
   } finally {
     finishPreparingMedia(operationId);
