@@ -64,6 +64,7 @@ wasapi = "0.23"
 
 [patch.crates-io]
 rodio = { path = "vendor/rodio-0.20.1" }
+tauri-runtime-wry = { path = "vendor/tauri-runtime-wry-2.9.3" }
 
 [profile.dev.package."*"]
 opt-level = 3
