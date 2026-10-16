@@ -35,6 +35,7 @@ import {
   createTaskbarLyricDisplayLines,
   projectTaskbarPlaybackTime,
   resolveTaskbarDoubleLyricLines,
+  resolveTaskbarLyricInterlude,
   resolveTaskbarLyricLine,
 } from '../../features/taskbarPlayer/lyrics';
 import type { LyricLine, LyricsStatus } from '../../composables/lyrics/types';
@@ -76,8 +77,15 @@ const playbackTime = ref(0);
 const playbackAnchor = shallowRef<TaskbarPlayerPlaybackPayload | null>(null);
 const lyricTime = computed(() => playbackTime.value - (playbackAnchor.value?.audioDelay ?? 0));
 const taskbarLyrics = computed(() => createTaskbarLyricDisplayLines(parsedLyrics.value));
+const lyricInterlude = computed(() => currentSong.value && lyricsStatus.value === 'ready'
+  ? resolveTaskbarLyricInterlude(parsedLyrics.value, lyricTime.value) : null);
+const interludeDotProgress = (index: number) => {
+  const gap = lyricInterlude.value;
+  if (!gap) return 0;
+  return Math.max(0, Math.min(1, (lyricTime.value - gap.start) / (gap.end - gap.start) * 3 - index));
+};
 const lyricRows = computed(() => {
-  if (!currentSong.value || lyricsStatus.value !== 'ready') return [];
+  if (!currentSong.value || lyricsStatus.value !== 'ready' || lyricInterlude.value) return [];
   // Keep selection on source cues so finishing the highlight does not clear the line.
   const current = contentMode.value === 'double-line'
     ? null : resolveTaskbarLyricLine(parsedLyrics.value, lyricTime.value);
@@ -402,8 +410,19 @@ onUnmounted(() => {
 
       <div class="taskbar-song-info">
         <div v-if="contentMode === 'title-lyrics'" class="taskbar-song-title" :title="songTitle">{{ songTitle }}</div>
+        <div
+          v-if="lyricInterlude"
+          class="taskbar-interlude"
+          role="img"
+          aria-label="等待下一句歌词"
+          title="等待下一句歌词"
+          :style="{ color: lyricHighlightColor ?? undefined }"
+        >
+          <span v-for="index in 3" :key="index" class="taskbar-interlude-dot" aria-hidden="true"
+            :style="{ '--dot-progress': interludeDotProgress(index - 1) }" />
+        </div>
         <TransitionGroup
-          v-if="contentMode === 'double-line' && currentLyric"
+          v-else-if="contentMode === 'double-line' && currentLyric"
           tag="div"
           name="taskbar-lyric-stack"
           class="taskbar-double-lyrics"
@@ -632,6 +651,29 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.taskbar-interlude {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 17px;
+  color: rgb(var(--taskbar-text-rgb, 255 255 255) / 95%);
+}
+.taskbar-interlude-dot {
+  position: relative;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgb(var(--taskbar-text-rgb, 255 255 255) / 30%);
+  transform: scale(calc(0.8 + var(--dot-progress) * 0.2));
+}
+.taskbar-interlude-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: var(--dot-progress);
+}
 .taskbar-fallback {
   color: rgb(var(--taskbar-text-rgb, 255 255 255) / 85%);
   font-size: 13px;
@@ -720,6 +762,7 @@ onUnmounted(() => {
   .taskbar-song-info, .taskbar-controls, .taskbar-control, .taskbar-play, .taskbar-close,
   .taskbar-close button, .taskbar-double-row, .taskbar-lyric-stack-move,
   .taskbar-lyric-stack-enter-active, .taskbar-lyric-stack-leave-active { transition: none; }
+  .taskbar-interlude-dot { transform: none; }
 }
 </style>
 

@@ -28,6 +28,40 @@ export function resolveTaskbarDoubleLyricLines(lines: LyricLine[], time: number)
   return next ? [current, next] : [current];
 }
 
+/** Resolve a source-timed rest without guessing where an inferred LRC phrase ends. */
+export function resolveTaskbarLyricInterlude(
+  lines: LyricLine[],
+  time: number,
+): { start: number; end: number } | null {
+  const target = Number.isFinite(time) ? time : 0;
+  const cues = foregroundLyricLines(lines).sort((left, right) => left.time - right.time);
+  let occupiedEnd = 0;
+
+  for (let index = 0; index < cues.length;) {
+    const start = Math.max(0, cues[index].time);
+    let groupEnd = index + 1;
+    while (groupEnd < cues.length && cues[groupEnd].time === cues[index].time) groupEnd++;
+    const group = cues.slice(index, groupEnd);
+    // A clear ends earlier voices, but never a meaningful row at this same cue.
+    // Repeated clears cannot move an already established rest's beginning.
+    if (group.some(line => !line.text.trim())) occupiedEnd = Math.min(occupiedEnd, start);
+    const vocals = group.filter(line => line.text.trim());
+
+    if (vocals.length && start > target) {
+      return start - occupiedEnd >= 6 && target >= occupiedEnd
+        ? { start: occupiedEnd, end: start } : null;
+    }
+    for (const line of vocals) {
+      const end = (line.words ?? []).reduce((latest, word) =>
+        Number.isFinite(word.end) ? Math.max(latest, word.end) : latest,
+      Number.isFinite(line.endTime) ? Math.max(start, line.endTime) : start);
+      occupiedEnd = Math.max(occupiedEnd, end);
+    }
+    index = groupEnd;
+  }
+  return null;
+}
+
 const MAX_ESTIMATED_LINE_DURATION = 15;
 const MAX_ESTIMATED_WORD_DURATION = 4;
 
