@@ -13,6 +13,8 @@ import {
   normalizeTaskbarWidth,
   normalizeTaskbarTextColor,
   normalizeTaskbarContentMode,
+  normalizeTaskbarLyricEffect,
+  normalizeTaskbarLyricHighlightColor,
   normalizeTaskbarCoverShape,
   normalizeTaskbarLeftOffset,
   type TaskbarPlayerAction,
@@ -20,14 +22,34 @@ import {
 
 const { settings, patchSettings } = useSettings();
 const contentMode = computed(() => normalizeTaskbarContentMode(settings.value.taskbarContentMode));
+const lyricEffect = computed(() => normalizeTaskbarLyricEffect(settings.value.taskbarLyricEffect));
+const lyricHighlightColor = computed(() => normalizeTaskbarLyricHighlightColor(settings.value.taskbarLyricHighlightColor));
+const translationKaraoke = computed(() => settings.value.taskbarTranslationKaraoke !== false);
 const coverShape = computed(() => normalizeTaskbarCoverShape(settings.value.taskbarCoverShape));
 const positionLocked = computed(() => settings.value.taskbarPositionLocked);
 const leftOffset = computed(() => normalizeTaskbarLeftOffset(settings.value.taskbarLeftOffset));
 const contentModeOptions = [
   { value: 'title-lyrics', label: '歌名＋歌词' },
   { value: 'bilingual', label: '双语歌词' },
+  { value: 'double-line', label: '双行歌词' },
   { value: 'lyrics-only', label: '仅歌词' },
 ];
+const lyricEffectOptions = [
+  { value: 'karaoke', label: '逐字渐进' },
+  { value: 'word', label: '逐词点亮' },
+  { value: 'none', label: '关闭' },
+];
+const lyricEffectDescriptions = {
+  karaoke: '逐词歌词按原始时间高亮，普通歌词按整句进度显示',
+  word: '按歌词时间整词点亮，无逐词时间时整句点亮',
+  none: '歌词保持完整显示，不进行进度高亮',
+};
+const translationEffectDescription = computed(() => {
+  if (lyricEffect.value === 'none') return '原文和翻译均完整显示，不进行高亮';
+  return translationKaraoke.value
+    ? '翻译跟随原文效果，无翻译时间时保持完整显示'
+    : '仅原文高亮，翻译保持完整显示';
+});
 const coverShapeOptions = [
   { value: 'square', label: '圆角方形' },
   { value: 'circle', label: '圆形' },
@@ -47,6 +69,12 @@ function setTextColor(value: string) {
 }
 function onColorInput(event: Event) {
   setTextColor((event.target as HTMLInputElement).value);
+}
+function setLyricHighlightColor(value: string | null) {
+  patchSettings({ taskbarLyricHighlightColor: normalizeTaskbarLyricHighlightColor(value) });
+}
+function onLyricHighlightColorInput(event: Event) {
+  setLyricHighlightColor((event.target as HTMLInputElement).value);
 }
 function setWidth(value: number) {
   patchSettings({ taskbarWindowWidth: normalizeTaskbarWidth(value) });
@@ -89,9 +117,48 @@ async function alignLeft() {
       <div class="taskbar-setting-row">
         <div>
           <label for="taskbar-content-mode" class="taskbar-setting-label">内容模式</label>
+          <p v-if="contentMode === 'double-line'" class="mt-1 text-xs app-text-secondary">显示当前句和下一句，随播放平滑切换</p>
         </div>
         <SettingsSelect class="taskbar-select" label="内容模式" hide-label trigger-id="taskbar-content-mode"
           :model-value="contentMode" :options="contentModeOptions" @update:model-value="patchSettings({ taskbarContentMode: normalizeTaskbarContentMode($event) })" />
+      </div>
+    </section>
+    <section>
+      <h2 class="taskbar-section-title"><span aria-hidden="true" />歌词效果</h2>
+      <div class="taskbar-setting-row">
+        <div>
+          <label for="taskbar-lyric-effect" class="taskbar-setting-label">卡拉 OK 效果</label>
+          <p class="mt-1 text-xs app-text-secondary">{{ lyricEffectDescriptions[lyricEffect] }}</p>
+        </div>
+        <SettingsSelect class="taskbar-select" label="卡拉 OK 效果" hide-label trigger-id="taskbar-lyric-effect"
+          :model-value="lyricEffect" :options="lyricEffectOptions" @update:model-value="patchSettings({ taskbarLyricEffect: normalizeTaskbarLyricEffect($event) })" />
+      </div>
+      <div v-if="contentMode === 'bilingual'" class="taskbar-setting-row">
+        <div>
+          <span id="taskbar-translation-karaoke-label" class="taskbar-setting-label">翻译卡拉 OK</span>
+          <p id="taskbar-translation-karaoke-description" class="mt-1 text-xs app-text-secondary">{{ translationEffectDescription }}</p>
+        </div>
+        <button type="button" role="switch" aria-labelledby="taskbar-translation-karaoke-label" aria-describedby="taskbar-translation-karaoke-description"
+          :aria-checked="translationKaraoke" :disabled="lyricEffect === 'none'" class="taskbar-switch"
+          :class="{ 'is-on': translationKaraoke }" @click="patchSettings({ taskbarTranslationKaraoke: !translationKaraoke })">
+          <span aria-hidden="true" />
+        </button>
+      </div>
+      <div v-if="lyricEffect !== 'none'" class="taskbar-setting-row">
+        <div>
+          <label for="taskbar-lyric-highlight-color" class="taskbar-setting-label">歌词高亮颜色</label>
+          <p class="mt-1 text-xs app-text-secondary">{{ lyricHighlightColor === null ? '跟随字体颜色' : '使用独立高亮颜色' }}</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <button v-for="preset in textColors" :key="preset.value" type="button" :aria-label="`歌词高亮：${preset.label}`" :title="preset.label" :aria-pressed="lyricHighlightColor === preset.value"
+            class="flex h-7 w-7 items-center justify-center rounded-full border border-black/10 transition-transform hover:scale-110 dark:border-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#EC4141]"
+            :style="{ backgroundColor: preset.value, color: preset.value === '#ffffff' || preset.value === '#fbbf24' ? '#273449' : '#ffffff' }" @click="setLyricHighlightColor(preset.value)">
+            <Check v-if="lyricHighlightColor === preset.value" :size="15" :stroke-width="2.5" />
+          </button>
+          <label for="taskbar-lyric-highlight-color" class="ml-2 text-sm app-text-secondary">自定义</label>
+          <input id="taskbar-lyric-highlight-color" type="color" aria-label="自定义歌词高亮颜色" class="taskbar-color-input" :value="lyricHighlightColor ?? textColor" @input="onLyricHighlightColorInput" @change="onLyricHighlightColorInput" />
+          <button type="button" class="taskbar-position-action" :disabled="lyricHighlightColor === null" @click="setLyricHighlightColor(null)"><RotateCcw :size="13" />跟随字体颜色</button>
+        </div>
       </div>
     </section>
     <section>

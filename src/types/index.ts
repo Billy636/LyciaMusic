@@ -1,4 +1,4 @@
-import type { TaskbarContentMode, TaskbarCoverShape } from '../features/taskbarPlayer/shared';
+import type { TaskbarContentMode, TaskbarCoverShape, TaskbarLyricEffect } from '../features/taskbarPlayer/shared';
 
 export interface SongCore {
   id?: number;       // 数据库主键 (用于播放记录关联)
@@ -510,6 +510,7 @@ export interface AppSettings {
   footer?: import('./footer').FooterSettings;
   closeToTray: boolean;
   showDesktopLyrics: boolean;
+  showSongNotification: boolean;
   showQualityBadges: boolean;
   showSongComments: boolean;
   enableScrollToTopButton: boolean;
@@ -538,6 +539,9 @@ export interface AppSettings {
   taskbarPlayerCanDrag: boolean;
   taskbarPositionLocked: boolean;
   taskbarContentMode: TaskbarContentMode;
+  taskbarLyricEffect: TaskbarLyricEffect;
+  taskbarLyricHighlightColor: string | null;
+  taskbarTranslationKaraoke: boolean;
   taskbarCoverShape: TaskbarCoverShape;
   taskbarCoverRotate: boolean;
   /** Null until a legacy absolute taskbar position has been migrated. */

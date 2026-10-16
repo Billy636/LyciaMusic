@@ -15,12 +15,15 @@ import {
   normalizeTaskbarTextColor,
   normalizeTaskbarContentMode,
   normalizeTaskbarCoverShape,
+  normalizeTaskbarLyricEffect,
+  normalizeTaskbarLyricHighlightColor,
   type TaskbarTrayGeometry,
   type TaskbarPlayerStatePayload,
   type TaskbarPlayerPlaybackPayload,
   type TaskbarPlayerAction,
   type TaskbarContentMode,
   type TaskbarCoverShape,
+  type TaskbarLyricEffect,
 } from '../../features/taskbarPlayer/shared';
 import {
   clampTaskbarLeftOffset,
@@ -31,6 +34,7 @@ import {
 import {
   createTaskbarLyricDisplayLines,
   projectTaskbarPlaybackTime,
+  resolveTaskbarDoubleLyricLines,
   resolveTaskbarLyricLine,
 } from '../../features/taskbarPlayer/lyrics';
 import type { LyricLine, LyricsStatus } from '../../composables/lyrics/types';
@@ -57,6 +61,9 @@ useCoverRotation(artwork, reflection,
   () => isPlaying.value && isVisible.value && isDocumentVisible.value);
 const backgroundOpacity = ref(0);
 const textColor = ref('#ffffff');
+const lyricEffect = ref<TaskbarLyricEffect>('karaoke');
+const lyricHighlightColor = ref<string | null>(null);
+const translationKaraoke = ref(true);
 const backgroundStyle = computed(() => ({
   // A fully transparent WebView2 surface can pass native mouse hit testing through.
   // Keep an imperceptible painted surface even at the transparent setting.
@@ -69,11 +76,23 @@ const playbackTime = ref(0);
 const playbackAnchor = shallowRef<TaskbarPlayerPlaybackPayload | null>(null);
 const lyricTime = computed(() => playbackTime.value - (playbackAnchor.value?.audioDelay ?? 0));
 const taskbarLyrics = computed(() => createTaskbarLyricDisplayLines(parsedLyrics.value));
-const currentLyric = computed(() => {
-  if (!currentSong.value || lyricsStatus.value !== 'ready') return null;
+const lyricRows = computed(() => {
+  if (!currentSong.value || lyricsStatus.value !== 'ready') return [];
   // Keep selection on source cues so finishing the highlight does not clear the line.
-  const sourceLine = resolveTaskbarLyricLine(parsedLyrics.value, lyricTime.value);
-  return sourceLine ? taskbarLyrics.value[parsedLyrics.value.indexOf(sourceLine)] : null;
+  const current = contentMode.value === 'double-line'
+    ? null : resolveTaskbarLyricLine(parsedLyrics.value, lyricTime.value);
+  const sourceLines = contentMode.value === 'double-line'
+    ? resolveTaskbarDoubleLyricLines(parsedLyrics.value, lyricTime.value)
+    : current ? [current] : [];
+  return sourceLines.map(sourceLine => {
+    const index = parsedLyrics.value.indexOf(sourceLine);
+    return { key: `${currentSong.value?.path}:${index}:source`, line: taskbarLyrics.value[index] };
+  });
+});
+const currentLyric = computed(() => lyricRows.value[0]?.line ?? null);
+const isReversingLyrics = ref(false);
+watch(() => currentLyric.value?.time, (time, previous) => {
+  isReversingLyrics.value = time !== undefined && previous !== undefined && time < previous;
 });
 const songTitle = computed(() => currentSong.value
   ? currentSong.value.title || currentSong.value.name
@@ -289,6 +308,9 @@ onMounted(async () => {
     currentSong.value = event.payload.currentSong;
     const opacity = event.payload.backgroundOpacity;
     textColor.value = normalizeTaskbarTextColor(event.payload.textColor);
+    lyricEffect.value = normalizeTaskbarLyricEffect(event.payload.lyricEffect);
+    lyricHighlightColor.value = normalizeTaskbarLyricHighlightColor(event.payload.lyricHighlightColor);
+    translationKaraoke.value = event.payload.translationKaraoke !== false;
     contentMode.value = normalizeTaskbarContentMode(event.payload.contentMode);
     coverShape.value = normalizeTaskbarCoverShape(event.payload.coverShape);
     coverRotate.value = event.payload.coverRotate === true;
@@ -380,14 +402,40 @@ onUnmounted(() => {
 
       <div class="taskbar-song-info">
         <div v-if="contentMode === 'title-lyrics'" class="taskbar-song-title" :title="songTitle">{{ songTitle }}</div>
-        <template v-if="currentLyric">
+        <TransitionGroup
+          v-if="contentMode === 'double-line' && currentLyric"
+          tag="div"
+          name="taskbar-lyric-stack"
+          class="taskbar-double-lyrics"
+          :class="{ 'is-reversing': isReversingLyrics }"
+        >
+          <div
+            v-for="(row, index) in lyricRows"
+            :key="row.key"
+            class="taskbar-double-row"
+            :class="{ 'is-upcoming': index > 0 }"
+          >
+            <TaskbarLyricLine
+              :text="row.line.text"
+              :words="row.line.words"
+              :time="row.line.time"
+              :end-time="row.line.endTime"
+              :playback-time="lyricTime"
+              :effect="lyricEffect"
+              :highlight-color="lyricHighlightColor"
+            />
+          </div>
+        </TransitionGroup>
+        <template v-else-if="currentLyric">
           <TaskbarLyricLine
-            :key="`${currentSong?.path}:${currentLyric.time}:source`"
+            :key="lyricRows[0].key"
             :text="currentLyric.text"
             :words="currentLyric.words"
             :time="currentLyric.time"
             :end-time="currentLyric.endTime"
             :playback-time="lyricTime"
+            :effect="lyricEffect"
+            :highlight-color="lyricHighlightColor"
           />
           <TaskbarLyricLine
             v-if="hasTranslation"
@@ -397,6 +445,8 @@ onUnmounted(() => {
             :time="currentLyric.time"
             :end-time="currentLyric.endTime"
             :playback-time="lyricTime"
+            :effect="translationKaraoke ? lyricEffect : 'none'"
+            :highlight-color="lyricHighlightColor"
             translation
           />
         </template>
@@ -544,6 +594,35 @@ onUnmounted(() => {
   flex: 1;
   transition: opacity 150ms ease;
 }
+.taskbar-double-lyrics {
+  position: relative;
+  height: 32px;
+  overflow: hidden;
+  --lyric-enter-offset: 16px;
+  --lyric-leave-offset: -16px;
+}
+.taskbar-double-lyrics.is-reversing {
+  --lyric-enter-offset: -16px;
+  --lyric-leave-offset: 16px;
+}
+.taskbar-double-row {
+  height: 16px;
+  min-width: 0;
+  transition: opacity 240ms ease;
+}
+.taskbar-double-row.is-upcoming { opacity: 0.62; }
+.taskbar-double-row :deep(.taskbar-lyric-viewport) {
+  font-size: 12px;
+  line-height: 16px;
+}
+.taskbar-lyric-stack-move,
+.taskbar-lyric-stack-enter-active,
+.taskbar-lyric-stack-leave-active {
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease;
+}
+.taskbar-lyric-stack-leave-active { position: absolute; left: 0; right: 0; }
+.taskbar-lyric-stack-enter-from { opacity: 0; transform: translateY(var(--lyric-enter-offset)); }
+.taskbar-lyric-stack-leave-to { opacity: 0; transform: translateY(var(--lyric-leave-offset)); }
 .taskbar-song-title {
   font-size: 11px;
   line-height: 14px;
@@ -639,7 +718,8 @@ onUnmounted(() => {
 @media (prefers-reduced-motion: reduce) {
   .taskbar-player, .taskbar-drag-grip, .taskbar-cover-overlay,
   .taskbar-song-info, .taskbar-controls, .taskbar-control, .taskbar-play, .taskbar-close,
-  .taskbar-close button { transition: none; }
+  .taskbar-close button, .taskbar-double-row, .taskbar-lyric-stack-move,
+  .taskbar-lyric-stack-enter-active, .taskbar-lyric-stack-leave-active { transition: none; }
 }
 </style>
 

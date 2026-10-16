@@ -30,6 +30,10 @@ export interface PlaybackFinishedPayload {
   playbackId: number;
 }
 
+export interface PlaybackStartedPayload {
+  playbackId: number;
+}
+
 interface CreatePlayerPlaybackDeps {
   getDisplaySongPaths?: () => string[];
   getDisplaySongList?: () => Song[];
@@ -100,10 +104,14 @@ export const createPlayerPlayback = ({
   const { showPlayerDetail } = storeToRefs(uiStore);
   let runtimeGeneration = 0;
   let pendingPlayRequest: number | null = null;
+  let activePlaybackRequest: number | null = null;
   let failedPlaybackId: number | null = null;
   let finishedPlaybackId: number | null = null;
+  let startedPlaybackId: number | null = null;
+  let lastStartedSongPath: string | null | undefined;
   const pendingPlaybackErrors = new Map<number, PlaybackErrorPayload>();
   const pendingPlaybackFinished = new Set<number>();
+  const pendingPlaybackStarted = new Set<number>();
 
   const buildQueueWithInsertedPath = (songPath: string, previousPath: string | null, queue: string[]) => {
     if (previousPath === songPath) {
@@ -311,6 +319,24 @@ export const createPlayerPlayback = ({
     }
   };
 
+  const handlePlaybackStarted = (payload: PlaybackStartedPayload) => {
+    const song = currentSong.value;
+    if (!song || payload.playbackId <= 0) return;
+    if (payload.playbackId === currentPlaybackId.value) {
+      if (activePlaybackRequest !== playRequestId || !isSongLoaded.value
+        || failedPlaybackId === payload.playbackId || startedPlaybackId === payload.playbackId) return;
+      startedPlaybackId = payload.playbackId;
+      const songChanged = lastStartedSongPath !== song.path;
+      lastStartedSongPath = song.path;
+      if (isPlaying.value && songChanged) {
+        playbackStore.songChangeRevision += 1;
+      }
+    } else if (pendingPlayRequest === playRequestId) {
+      // The worker may finish opening the track before IPC returns its ID.
+      pendingPlaybackStarted.add(payload.playbackId);
+    }
+  };
+
   const playSong = async (song: Song, options: PlaySongOptions = {}) => {
     const requestId = ++playRequestId;
     const resolvedSong = resolveSongForPlayback
@@ -321,13 +347,19 @@ export const createPlayerPlayback = ({
     }
     song = resolvedSong;
     const previousSong = currentSong.value;
+    if (lastStartedSongPath === undefined) {
+      // Restoring the selected song must not turn its first resume into a change.
+      lastStartedSongPath = previousSong?.path ?? null;
+    }
 
     currentPlaybackId.value = 0;
     pendingPlayRequest = null;
     pendingPlaybackErrors.clear();
     pendingPlaybackFinished.clear();
+    pendingPlaybackStarted.clear();
     failedPlaybackId = null;
     finishedPlaybackId = null;
+    startedPlaybackId = null;
     isSeeking = false;
     latestSeekRequestId += 1;
     flushPlaySession();
@@ -425,6 +457,7 @@ export const createPlayerPlayback = ({
 
     try {
       pendingPlayRequest = requestId;
+      activePlaybackRequest = requestId;
       const pId = await playbackApi.playAudio({
         path: audioFilePath,
         title: getSmtcTitle(song),
@@ -447,20 +480,27 @@ export const createPlayerPlayback = ({
       pendingPlayRequest = null;
       const pendingError = pendingPlaybackErrors.get(pId);
       const pendingFinished = pendingPlaybackFinished.has(pId);
+      const pendingStarted = pendingPlaybackStarted.has(pId);
       pendingPlaybackErrors.clear();
       pendingPlaybackFinished.clear();
+      pendingPlaybackStarted.clear();
       if (pendingError) {
         handlePlaybackError(pendingError);
         return;
       }
       isSongLoaded.value = true;
       if (pendingFinished) {
+        if (pendingStarted) lastStartedSongPath = song.path;
         handlePlaybackFinished({ playbackId: pId });
         return;
       }
       sessionStartTime = Date.now();
       loadLyrics();
       startPlaybackRuntime();
+
+      if (pendingStarted) {
+        handlePlaybackStarted({ playbackId: pId });
+      }
 
       void loadFullCoverPath(coverLookupPath)
         .then(async (fullCoverPath) => {
@@ -485,6 +525,7 @@ export const createPlayerPlayback = ({
       pendingPlayRequest = null;
       pendingPlaybackErrors.clear();
       pendingPlaybackFinished.clear();
+      pendingPlaybackStarted.clear();
       stopAfterPlaybackError(String(error));
     }
   };
@@ -615,8 +656,10 @@ export const createPlayerPlayback = ({
   const dispose = () => {
     stopPlaybackRuntime();
     pendingPlayRequest = null;
+    activePlaybackRequest = null;
     pendingPlaybackErrors.clear();
     pendingPlaybackFinished.clear();
+    pendingPlaybackStarted.clear();
     stopPowerModeWatcher();
   };
 
@@ -639,6 +682,7 @@ export const createPlayerPlayback = ({
     handleSeekCompleted,
     handlePlaybackError,
     handlePlaybackFinished,
+    handlePlaybackStarted,
     stopPlaybackRuntime,
     dispose,
   };

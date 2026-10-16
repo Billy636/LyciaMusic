@@ -235,6 +235,24 @@ const handleClearCaches = async () => {
 
         <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">切歌提示</div>
+            <div class="mt-1 text-xs app-text-secondary">切换歌曲时在桌面右下角显示</div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label="切歌提示"
+            :aria-checked="settings.showSongNotification"
+            @click="settings.showSongNotification = !settings.showSongNotification"
+            class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#EC4141]"
+            :class="settings.showSongNotification ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'"
+          >
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.showSongNotification ? 'translate-x-6' : 'translate-x-1'" />
+          </button>
+        </div>
+
+        <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+          <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">修改歌手头像时同步写回音频标签</div>
           </div>
           <div class="flex items-center gap-3 shrink-0">

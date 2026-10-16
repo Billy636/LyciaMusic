@@ -24,7 +24,7 @@ import { useSettingsStore } from '../features/settings/store';
 import { defaultDominantColors, useUiStore } from '../shared/stores/ui';
 import { isRemoteSong } from '../utils/remoteSong';
 import { FIXED_FLOW_PRESET } from '../constants/themeBackground';
-import type { PlaybackErrorPayload, PlaybackFinishedPayload } from './playerPlayback';
+import type { PlaybackErrorPayload, PlaybackFinishedPayload, PlaybackStartedPayload } from './playerPlayback';
 
 interface SeekCompletedPayload {
   request_id: number;
@@ -59,6 +59,7 @@ interface CreatePlayerLifecycleDeps {
   handleSeekCompleted: (payload: SeekCompletedPayload) => void;
   handlePlaybackError: (payload: PlaybackErrorPayload) => void;
   handlePlaybackFinished: (payload: PlaybackFinishedPayload) => void;
+  handlePlaybackStarted?: (payload: PlaybackStartedPayload) => void;
   schedulePersistedState: () => void;
   flushPersistedState: () => void;
   restorePathBackedState: () => Promise<void>;
@@ -200,6 +201,7 @@ export const createPlayerLifecycle = ({
   handleSeekCompleted,
   handlePlaybackError,
   handlePlaybackFinished,
+  handlePlaybackStarted,
   schedulePersistedState,
   flushPersistedState,
   restorePathBackedState,
@@ -364,6 +366,9 @@ export const createPlayerLifecycle = ({
       }),
       listen<PlaybackFinishedPayload>('playback-finished', event => {
         handlePlaybackFinished(event.payload);
+      }),
+      listen<PlaybackStartedPayload>('playback-started', event => {
+        handlePlaybackStarted?.(event.payload);
       }),
       listen<RemoteLyricsCacheReadyPayload>('remote-lyrics-cache-ready', event => {
         const payload = event.payload;

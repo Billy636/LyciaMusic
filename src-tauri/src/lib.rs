@@ -120,6 +120,7 @@ pub fn run() {
                     "mini-player",
                     "taskbar-player",
                     "tray-menu",
+                    "song-notification",
                 ])
                 .build(),
         )

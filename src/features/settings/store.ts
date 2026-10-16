@@ -4,6 +4,8 @@ import {
   normalizeTaskbarWidth,
   normalizeTaskbarTextColor,
   normalizeTaskbarContentMode,
+  normalizeTaskbarLyricEffect,
+  normalizeTaskbarLyricHighlightColor,
   normalizeTaskbarCoverShape,
   normalizeTaskbarLeftOffset,
 } from '../taskbarPlayer/shared';
@@ -145,6 +147,7 @@ export const defaultAudioSettings: AudioSettings = {
 export const defaultAppSettings: AppSettings = {
   closeToTray: true,
   showDesktopLyrics: false,
+  showSongNotification: false,
   showQualityBadges: true,
   showSongComments: true,
   enableScrollToTopButton: true,
@@ -172,6 +175,9 @@ export const defaultAppSettings: AppSettings = {
   taskbarPlayerCanDrag: false,
   taskbarPositionLocked: false,
   taskbarContentMode: 'title-lyrics',
+  taskbarLyricEffect: 'karaoke',
+  taskbarLyricHighlightColor: null,
+  taskbarTranslationKaraoke: true,
   taskbarCoverShape: 'square',
   taskbarCoverRotate: false,
   taskbarLeftOffset: null,
@@ -337,6 +343,8 @@ export const mergeAppSettings = (
     // Ignore removed legacy fields that may still exist in persisted settings.
     ...base,
     ...rest,
+    showSongNotification: typeof (patch.showSongNotification ?? base.showSongNotification) === 'boolean'
+      ? (patch.showSongNotification ?? base.showSongNotification) : false,
     ...(patch.footer || base.footer ? { footer: normalizeFooterSettings(patch.footer ?? base.footer) } : {}),
     libraryMinDurationSeconds: normalizeLibraryMinDurationSeconds(
       libraryMinDurationSeconds ?? base.libraryMinDurationSeconds,
@@ -360,6 +368,12 @@ export const mergeAppSettings = (
     taskbarPositionLocked: typeof (patch.taskbarPositionLocked ?? base.taskbarPositionLocked) === 'boolean'
       ? (patch.taskbarPositionLocked ?? base.taskbarPositionLocked) : false,
     taskbarContentMode: normalizeTaskbarContentMode(patch.taskbarContentMode ?? base.taskbarContentMode),
+    taskbarLyricEffect: normalizeTaskbarLyricEffect(patch.taskbarLyricEffect ?? base.taskbarLyricEffect),
+    taskbarLyricHighlightColor: normalizeTaskbarLyricHighlightColor(
+      patch.taskbarLyricHighlightColor === undefined ? base.taskbarLyricHighlightColor : patch.taskbarLyricHighlightColor,
+    ),
+    taskbarTranslationKaraoke: typeof (patch.taskbarTranslationKaraoke ?? base.taskbarTranslationKaraoke) === 'boolean'
+      ? (patch.taskbarTranslationKaraoke ?? base.taskbarTranslationKaraoke) : true,
     taskbarCoverShape: normalizeTaskbarCoverShape(patch.taskbarCoverShape ?? base.taskbarCoverShape),
     taskbarCoverRotate: typeof (patch.taskbarCoverRotate ?? base.taskbarCoverRotate) === 'boolean'
       ? (patch.taskbarCoverRotate ?? base.taskbarCoverRotate) : false,

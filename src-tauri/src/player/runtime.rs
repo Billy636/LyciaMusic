@@ -34,6 +34,12 @@ struct PlaybackErrorPayload {
     message: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlaybackStartedPayload {
+    playback_id: u64,
+}
+
 fn playback_failure(
     result: Result<(), String>,
     playback_id: u64,
@@ -862,6 +868,10 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                                         active_output_mode,
                                         fallback_reason.clone(),
                                     );
+                                    let _ = thread_app_handle.emit(
+                                        "playback-started",
+                                        PlaybackStartedPayload { playback_id },
+                                    );
                                     continue;
                                 }
                                 Err(error) => {
@@ -922,6 +932,12 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             current_duration_ms,
                             current_cue_start_offset_ms,
                         );
+                        if result.is_ok() && current_sink.is_some() {
+                            let _ = thread_app_handle.emit(
+                                "playback-started",
+                                PlaybackStartedPayload { playback_id },
+                            );
+                        }
                         report_playback_result(
                             result,
                             current_playback_id,

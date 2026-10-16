@@ -13,6 +13,21 @@ export function resolveTaskbarLyricLine(lines: LyricLine[], time: number): Lyric
   return line?.text.trim() ? line : null;
 }
 
+/** Preview the next foreground cue while explicit blank cues still clear both rows. */
+export function resolveTaskbarDoubleLyricLines(lines: LyricLine[], time: number): LyricLine[] {
+  const current = resolveTaskbarLyricLine(lines, time);
+  if (!current) return [];
+
+  const after = Math.max(current.time, Number.isFinite(time) ? time : 0);
+  let next: LyricLine | undefined;
+  for (const line of foregroundLyricLines(lines)) {
+    if (!line.text.trim() || line.time <= after) continue;
+    // Match the shared selector's last meaningful voice at the same timestamp.
+    if (!next || line.time <= next.time) next = line;
+  }
+  return next ? [current, next] : [current];
+}
+
 const MAX_ESTIMATED_LINE_DURATION = 15;
 const MAX_ESTIMATED_WORD_DURATION = 4;
 

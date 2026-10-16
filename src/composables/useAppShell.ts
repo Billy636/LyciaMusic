@@ -7,6 +7,7 @@ import { useExternalPathBridge } from './useExternalPathBridge';
 import { useAppShellTheme } from './useAppShellTheme';
 import { useMiniPlayerWindowBridge } from './useMiniPlayerWindowBridge';
 import { useTaskbarPlayerBridge } from './useTaskbarPlayerBridge';
+import { useSongNotificationBridge } from './useSongNotificationBridge';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
 import { useTrayMenuEvents } from './useTrayMenuEvents';
 import { useAddToPlaylistDialog } from '../features/collections/addToPlaylistDialog';
@@ -116,6 +117,7 @@ export function useAppShell() {
 
   useMiniPlayerWindowBridge();
   useTaskbarPlayerBridge();
+  useSongNotificationBridge();
   useKeyboardShortcuts();
   useTrayMenuEvents(router);
 

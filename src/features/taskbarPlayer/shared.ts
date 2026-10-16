@@ -16,11 +16,22 @@ export const TASKBAR_PLAYER_WINDOW_WIDTH = 280;
 export const TASKBAR_PLAYER_MIN_WIDTH = 220;
 export const TASKBAR_PLAYER_MAX_WIDTH = 600;
 export const TASKBAR_PLAYER_DEFAULT_TEXT_COLOR = '#ffffff';
-export type TaskbarContentMode = 'title-lyrics' | 'bilingual' | 'lyrics-only';
+export type TaskbarContentMode = 'title-lyrics' | 'bilingual' | 'double-line' | 'lyrics-only';
+export type TaskbarLyricEffect = 'karaoke' | 'word' | 'none';
 export type TaskbarCoverShape = 'square' | 'circle';
 
 export function normalizeTaskbarContentMode(value: unknown): TaskbarContentMode {
-  return value === 'bilingual' || value === 'lyrics-only' ? value : 'title-lyrics';
+  return value === 'bilingual' || value === 'double-line' || value === 'lyrics-only' ? value : 'title-lyrics';
+}
+
+export function normalizeTaskbarLyricEffect(value: unknown): TaskbarLyricEffect {
+  return value === 'word' || value === 'none' ? value : 'karaoke';
+}
+
+/** A null highlight follows the taskbar font color, including existing settings. */
+export function normalizeTaskbarLyricHighlightColor(value: unknown): string | null {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)
+    ? value.toLowerCase() : null;
 }
 
 export function normalizeTaskbarCoverShape(value: unknown): TaskbarCoverShape {
@@ -90,6 +101,9 @@ export interface TaskbarPlayerStatePayload extends TaskbarPlayerPlaybackPayload 
   backgroundOpacity?: number;
   textColor?: string;
   contentMode?: TaskbarContentMode;
+  lyricEffect?: TaskbarLyricEffect;
+  lyricHighlightColor?: string | null;
+  translationKaraoke?: boolean;
   coverShape?: TaskbarCoverShape;
   coverRotate?: boolean;
   canDrag?: boolean;

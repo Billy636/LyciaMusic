@@ -3,8 +3,9 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 
 import type { LyricWord } from '../../composables/lyrics/types';
 import { getTaskbarLyricWordProgress } from '../../features/taskbarPlayer/lyrics';
+import type { TaskbarLyricEffect } from '../../features/taskbarPlayer/shared';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   text: string;
   words?: LyricWord[];
   time: number;
@@ -12,17 +13,29 @@ const props = defineProps<{
   playbackTime: number;
   /** Untimed translations stay readable instead of inheriting source word timing. */
   translation?: boolean;
-}>();
+  effect?: TaskbarLyricEffect;
+  highlightColor?: string | null;
+}>(), {
+  effect: 'karaoke',
+  highlightColor: null,
+});
 
 const viewport = ref<HTMLElement | null>(null);
 const content = ref<HTMLElement | null>(null);
 let resizeObserver: ResizeObserver | null = null;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const lineProgress = () => {
+  if (!Number.isFinite(props.playbackTime)) return 0;
   if (props.playbackTime < props.time) return 0;
   if (props.endTime <= props.time) return 1;
   return clamp((props.playbackTime - props.time) / (props.endTime - props.time), 0, 1);
 };
+const lineHighlightProgress = () => props.effect === 'word'
+  ? Number(Number.isFinite(props.playbackTime) && props.playbackTime >= props.time)
+  : lineProgress();
+const wordProgress = (word: LyricWord) => props.effect === 'word'
+  ? Number(Number.isFinite(props.playbackTime) && props.playbackTime >= word.start)
+  : getTaskbarLyricWordProgress(word, props.playbackTime);
 
 const updateScroll = () => {
   if (!viewport.value || !content.value) return;
@@ -46,7 +59,7 @@ const updateScroll = () => {
 };
 
 watch(() => props.playbackTime, () => { void nextTick(updateScroll); });
-watch(() => [props.text, props.time, props.words], () => {
+watch(() => [props.text, props.time, props.words, props.effect], () => {
   if (viewport.value) viewport.value.scrollLeft = 0;
   void nextTick(updateScroll);
 }, { flush: 'post' });
@@ -61,25 +74,32 @@ onUnmounted(() => resizeObserver?.disconnect());
 </script>
 
 <template>
-  <div ref="viewport" class="taskbar-lyric-viewport" :class="{ 'is-translation': translation }" :title="text">
+  <div
+    ref="viewport"
+    class="taskbar-lyric-viewport"
+    :class="{ 'is-translation': translation }"
+    :style="{ '--taskbar-lyric-highlight': highlightColor ?? undefined }"
+    :title="text"
+  >
     <div ref="content" class="taskbar-lyric-content" role="group" :aria-label="text">
       <template v-if="words?.length">
         <span
           v-for="(word, index) in words"
           :key="index"
           class="taskbar-lyric-word"
+          :class="{ 'is-plain': effect === 'none' }"
           aria-hidden="true"
           :data-text="word.text"
-          :style="{ '--word-progress': `${getTaskbarLyricWordProgress(word, playbackTime) * 100}%` }"
+          :style="{ '--word-progress': `${wordProgress(word) * 100}%` }"
         >{{ word.text }}</span>
       </template>
       <span
         v-else
         aria-hidden="true"
         class="taskbar-lyric-word"
-        :class="{ 'is-untimed-translation': translation }"
+        :class="{ 'is-plain': effect === 'none', 'is-untimed-translation': translation && !words?.length }"
         :data-text="text"
-        :style="{ '--word-progress': `${lineProgress() * 100}%` }"
+        :style="{ '--word-progress': `${lineHighlightProgress() * 100}%` }"
       >{{ text }}</span>
     </div>
   </div>
@@ -115,9 +135,12 @@ onUnmounted(() => resizeObserver?.disconnect());
   content: attr(data-text);
   position: absolute;
   inset: 0;
-  color: rgb(var(--taskbar-text-rgb, 255 255 255) / 95%);
+  color: var(--taskbar-lyric-highlight, rgb(var(--taskbar-text-rgb, 255 255 255) / 95%));
   clip-path: inset(0 calc(100% - var(--word-progress, 0%)) 0 0);
 }
+.is-plain { color: rgb(var(--taskbar-text-rgb, 255 255 255) / 95%); }
+.is-translation .is-plain,
 .is-untimed-translation { color: rgb(var(--taskbar-text-rgb, 255 255 255) / 80%); }
+.is-plain::after,
 .is-untimed-translation::after { content: none; }
 </style>

@@ -596,6 +596,7 @@ function createPlayerCore() {
     handleSeekCompleted: payload => playerPlayback.handleSeekCompleted(payload),
     handlePlaybackError: payload => playerPlayback.handlePlaybackError(payload),
     handlePlaybackFinished: payload => playerPlayback.handlePlaybackFinished(payload),
+    handlePlaybackStarted: payload => playerPlayback.handlePlaybackStarted(payload),
     schedulePersistedState,
     flushPersistedState,
     restorePathBackedState,

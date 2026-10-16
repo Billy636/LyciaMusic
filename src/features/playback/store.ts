@@ -26,6 +26,7 @@ export const usePlaybackStore = defineStore('playback', () => {
   const playMode = ref(0);
   const isSongLoaded = ref(false);
   const currentPlaybackId = ref(0);
+  const songChangeRevision = ref(0);
   const playQueuePaths = shallowRef<string[]>([]);
   const tempQueuePaths = shallowRef<string[]>([]);
   const currentSongPath = ref<string | null>(null);
@@ -234,6 +235,7 @@ export const usePlaybackStore = defineStore('playback', () => {
     playMode,
     isSongLoaded,
     currentPlaybackId,
+    songChangeRevision,
     playQueue,
     playQueuePaths,
     tempQueue,
