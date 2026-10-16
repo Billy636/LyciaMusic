@@ -90,7 +90,11 @@ export const createPlayerLibraryRuntime = ({
         LIBRARY_SCAN_VISIBILITY_PRIORITY[next.visibility] >= LIBRARY_SCAN_VISIBILITY_PRIORITY[current.visibility]
           ? next.visibility
           : current.visibility,
-      sourcePath: next.sourcePath || current.sourcePath,
+      // Requests for different roots need a full scan when coalesced; retaining
+      // only the last root would leave another newly registered root unscanned.
+      sourcePath: current.sourcePath && current.sourcePath === next.sourcePath
+        ? current.sourcePath
+        : '',
     };
   };
 
@@ -227,9 +231,18 @@ export const createPlayerLibraryRuntime = ({
 
     libraryRefreshPromise = (async () => {
       try {
-        const scanEntries = await invoke<Array<string | { path: string }>>('scan_library', {
-          minimumDurationSeconds: settingsStore.settings.libraryMinDurationSeconds,
-        });
+        let scanEntries: Array<string | { path: string }>;
+        if (resolvedOptions.sourcePath) {
+          await invoke<string[]>('scan_music_folder_paths', {
+            folderPath: resolvedOptions.sourcePath,
+            minimumDurationSeconds: settingsStore.settings.libraryMinDurationSeconds,
+          });
+          scanEntries = await invoke<Array<string | { path: string }>>('get_library_song_paths_cached');
+        } else {
+          scanEntries = await invoke<Array<string | { path: string }>>('scan_library', {
+            minimumDurationSeconds: settingsStore.settings.libraryMinDurationSeconds,
+          });
+        }
         const paths = scanEntries
           .map(entry => typeof entry === 'string' ? entry : entry.path)
           .filter(Boolean);

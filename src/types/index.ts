@@ -184,6 +184,16 @@ export interface LibraryFolder {
   locked: boolean;
 }
 
+export type LibraryScanSource =
+  | { kind: 'local'; path: string }
+  | { kind: 'remote'; sourceId: string };
+
+export interface LibraryScanSettings {
+  includedExtensions: string[];
+  readCue: boolean;
+  excludedDirectories: string[];
+}
+
 export type RemoteSourceProvider = 'webdav';
 
 export interface RemoteSource {
@@ -283,6 +293,7 @@ export interface LibraryScanProgress {
   folder_index: number;
   folder_total: number;
   message: string | null;
+  warnings?: string[];
   done: boolean;
   failed: boolean;
 }

@@ -558,6 +558,11 @@ pub(crate) fn build_cue_track_song(
     };
 
     let flac_path_buf = std::path::PathBuf::from(flac_path);
+    let source_format = flac_path_buf
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("flac")
+        .to_ascii_lowercase();
     let (cover_thumb_path, bitrate, sample_rate, bit_depth, codec_name) =
         probe_flac_for_cue_metadata(&flac_path_buf);
 
@@ -585,8 +590,8 @@ pub(crate) fn build_cue_track_song(
         bitrate,
         sample_rate,
         bit_depth,
-        format: "flac".to_string(),
-        container: Some("flac".to_string()),
+        container: Some(normalize_container_from_extension(&source_format)),
+        format: source_format,
         codec: codec_name,
         file_size: std::fs::metadata(&flac_path_buf)
             .map(|m| m.len())

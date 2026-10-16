@@ -77,6 +77,7 @@ export const createPlayerLibraryBatch = ({
   const applyLibraryScanBatch = (payload: {
     songs: Song[];
     deleted_paths: string[];
+    excluded_paths?: string[];
   }) => {
     const incomingSongs = Array.isArray(payload.songs) ? payload.songs : [];
 
@@ -85,7 +86,10 @@ export const createPlayerLibraryBatch = ({
       pendingLibraryScanSongs.delete(deletedPath);
     }
 
-    const deletedPaths = Array.from(pendingLibraryScanDeletedPaths);
+    // Excluding files only changes library membership. Keep their collection
+    // and playback references so cancelling the exclusion can restore them.
+    const excludedPaths = new Set(payload.excluded_paths ?? []);
+    const deletedPaths = (payload.deleted_paths ?? []).filter(path => !excludedPaths.has(path));
     if (deletedPaths.length > 0) {
       const deletedSet = new Set(deletedPaths);
       removeSongPathsFromPlaybackState({

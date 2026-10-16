@@ -39,6 +39,7 @@ type RemoteLyricsCacheReadyPayload = string | {
 interface LibraryScanBatchPayload {
   songs: Song[];
   deleted_paths: string[];
+  excluded_paths?: string[];
   folder_path: string;
   folder_index: number;
   folder_total: number;
@@ -334,9 +335,17 @@ export const createPlayerLifecycle = ({
         applyLibraryScanBatch(event.payload);
       }),
       listen<LibraryScanProgressPayload>('library-scan-progress', event => {
+        const previous = libraryStore.libraryScanProgress;
+        const startsNewScan = previous?.done && !event.payload.done
+          && event.payload.phase === 'collecting' && event.payload.folder_index <= 1;
+        const warnings = [...new Set([
+          ...(startsNewScan ? [] : previous?.warnings ?? []),
+          ...(event.payload.warnings ?? []),
+        ])];
         libraryStore.setLibraryScanProgress({
           ...event.payload,
           message: event.payload.message ?? null,
+          warnings,
         });
 
         if (event.payload.failed) {

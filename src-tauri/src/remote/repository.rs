@@ -247,6 +247,12 @@ pub(crate) fn remove_source(
         .map_err(|error| error.to_string())?;
     tx.execute("DELETE FROM remote_sources WHERE id = ?1", [source_id])
         .map_err(|error| error.to_string())?;
+    crate::music::scan_settings::remove_settings(
+        &tx,
+        &crate::music::scan_settings::LibraryScanSource::Remote {
+            source_id: source_id.to_string(),
+        },
+    )?;
     delete_password_from_keyring(source_id);
     tx.execute(
         "DELETE FROM artists

@@ -4,6 +4,7 @@ use super::types::{
     RemoteFileEntry, RemoteSourceCredentials, RemoteSyncProgress, RemoteSyncResult,
 };
 use super::webdav;
+use crate::music::scan_settings::{load_settings, LibraryScanSource};
 use crate::music::scanner::{apply_scan_changes, parse_song_from_file};
 use crate::music::types::Song;
 use rusqlite::params;
@@ -471,6 +472,15 @@ pub(crate) async fn sync_source(
     db_conn: Arc<Mutex<rusqlite::Connection>>,
     source: RemoteSourceCredentials,
 ) -> Result<RemoteSyncResult, String> {
+    let settings = {
+        let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        load_settings(
+            &conn,
+            &LibraryScanSource::Remote {
+                source_id: source.id.clone(),
+            },
+        )?
+    };
     emit_sync_progress(
         &app,
         &source.id,
@@ -481,7 +491,7 @@ pub(crate) async fn sync_source(
         false,
         false,
     );
-    let files = match webdav::collect_audio_files(&source).await {
+    let files = match webdav::collect_audio_files(&source, &settings).await {
         Ok(files) => files,
         Err(error) => {
             if let Ok(conn) = db_conn.lock() {

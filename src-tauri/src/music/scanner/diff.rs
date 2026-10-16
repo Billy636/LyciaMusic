@@ -2,7 +2,7 @@ use super::super::cue;
 use super::super::types::Song;
 use super::super::utils::{
     descendant_like_patterns, describe_scan_io_error, is_cue_file_extension, is_dot_prefixed_path,
-    is_supported_library_extension, normalize_path,
+    normalize_path,
 };
 use super::parser::{
     build_cue_track_song, enrich_album_groups, parse_song_for_scan, preferred_parse_workers,
@@ -13,6 +13,7 @@ use super::{
     clamp_i64_to_u32, deserialize_string_list, i64_to_bool, i64_to_u64_opt, i64_to_u8_opt,
     ScanOptions,
 };
+use crate::music::scan_settings::LocalScanRules;
 use rayon::prelude::*;
 use rusqlite::params;
 use std::collections::HashMap;
@@ -33,6 +34,8 @@ pub(super) struct ScanDiff {
     pub(super) to_delete: Vec<String>,
     #[allow(dead_code)]
     pub(super) has_disk_songs: bool,
+    pub(super) warnings: Vec<String>,
+    pub(super) excluded_paths: Vec<String>,
 }
 
 struct DiskCandidate {
@@ -41,6 +44,7 @@ struct DiskCandidate {
     ext: String,
     disk_mtime: Option<i64>,
     disk_size: i64,
+    cue_audio_path: Option<String>,
 }
 
 struct ParseTask {
@@ -168,6 +172,10 @@ pub(super) fn load_db_snapshot_for_folder(
 fn collect_disk_candidates(
     normalized_folder: &str,
     reporter: Option<&ScanProgressReporter>,
+    rules: &LocalScanRules,
+    warnings: &mut Vec<String>,
+    preserved_cues: &mut Vec<String>,
+    replaced_audio_paths: &mut Vec<String>,
 ) -> Result<Vec<DiskCandidate>, String> {
     let mut candidates = Vec::new();
     let mut discovered = 0usize;
@@ -177,7 +185,7 @@ fn collect_disk_candidates(
     }
 
     let mut it = WalkDir::new(normalized_folder).into_iter();
-    while let Some(entry) = next_visible_walk_entry(&mut it)? {
+    while let Some(entry) = next_visible_walk_entry(&mut it, rules)? {
         let path = entry.path();
         if entry.file_type().is_dir() {
             continue;
@@ -188,7 +196,7 @@ fn collect_disk_candidates(
             None => continue,
         };
 
-        if !is_supported_library_extension(&ext) {
+        if !rules.includes_audio(path) {
             continue;
         }
 
@@ -214,6 +222,7 @@ fn collect_disk_candidates(
                 .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|duration| duration.as_secs() as i64),
             disk_size: metadata.len() as i64,
+            cue_audio_path: None,
         });
 
         if let Some(reporter) = reporter {
@@ -231,7 +240,10 @@ fn collect_disk_candidates(
     let mut cue_referenced_audio: Vec<String> = Vec::new();
 
     let mut it = WalkDir::new(normalized_folder).into_iter();
-    while let Some(entry) = next_visible_walk_entry(&mut it)? {
+    while rules.settings.read_cue {
+        let Some(entry) = next_visible_walk_entry(&mut it, rules)? else {
+            break;
+        };
         let path = entry.path();
         if entry.file_type().is_dir() {
             continue;
@@ -246,8 +258,14 @@ fn collect_disk_candidates(
             continue;
         }
 
-        let metadata = std::fs::metadata(path)
-            .map_err(|error| describe_scan_io_error(path, "读取 CUE 文件信息", &error))?;
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                warnings.push(describe_scan_io_error(path, "读取 CUE 文件信息", &error));
+                preserved_cues.push(normalize_path(&path.to_string_lossy()));
+                continue;
+            }
+        };
         if !metadata.is_file() {
             continue;
         }
@@ -262,16 +280,21 @@ fn collect_disk_candidates(
 
         let sheet = match cue::parse_cue_file(path) {
             Ok(sheet) => sheet,
-            Err(cue::CueParseError::Io(error)) => {
-                return Err(describe_scan_io_error(path, "读取 CUE", &error))
+            Err(error) => {
+                warnings.push(format!("已跳过 CUE：{}；{error}", path.display()));
+                // Only temporary I/O failures preserve old tracks. A confirmed
+                // invalid sheet or missing source no longer belongs in the library.
+                if matches!(error, cue::CueParseError::Io(_)) {
+                    preserved_cues.push(cue_path_str);
+                }
+                continue;
             }
-            Err(cue::CueParseError::AudioFileNotFound(audio)) => {
-                return Err(format!("CUE 音源不可访问：{audio}（{}）", path.display()))
-            }
-            Err(_) => continue, // Malformed sheets remain unsupported, not an I/O failure.
         };
+        if !rules.includes_audio(&sheet.resolved_audio_path) {
+            continue;
+        }
         let resolved = normalize_path(&sheet.resolved_audio_path.to_string_lossy());
-        cue_referenced_audio.push(resolved);
+        cue_referenced_audio.push(resolved.clone());
 
         for track in &sheet.tracks {
             let synthetic_path = format!("{}::track{:02}", cue_path_str, track.track_number);
@@ -281,6 +304,7 @@ fn collect_disk_candidates(
                 ext: "cue_track".to_string(),
                 disk_mtime: cue_file_mtime,
                 disk_size: cue_file_size,
+                cue_audio_path: Some(resolved.clone()),
             });
         }
     }
@@ -289,6 +313,7 @@ fn collect_disk_candidates(
     if !cue_referenced_audio.is_empty() {
         candidates.retain(|c| !cue_referenced_audio.contains(&c.path_str));
     }
+    *replaced_audio_paths = cue_referenced_audio;
 
     if let Some(reporter) = reporter {
         reporter.emit_collecting(
@@ -318,6 +343,7 @@ fn describe_walk_error(error: &walkdir::Error) -> String {
 
 fn next_visible_walk_entry(
     iter: &mut walkdir::IntoIter,
+    rules: &LocalScanRules,
 ) -> Result<Option<walkdir::DirEntry>, String> {
     loop {
         let entry = match iter.next() {
@@ -326,7 +352,9 @@ fn next_visible_walk_entry(
             Some(Ok(entry)) => entry,
         };
 
-        if should_skip_dot_prefixed_child_directory(&entry) {
+        if should_skip_dot_prefixed_child_directory(&entry)
+            || (entry.file_type().is_dir() && rules.excludes_directory(entry.path()))
+        {
             iter.skip_current_dir();
             continue;
         }
@@ -459,6 +487,9 @@ fn probe_audio_duration_ms(path: &Path) -> Result<Option<u32>, String> {
 fn process_cue_parse_tasks(
     tasks: &[ParseTask],
     options: ScanOptions,
+    warnings: &mut Vec<String>,
+    rules: &LocalScanRules,
+    excluded_paths: &mut Vec<String>,
 ) -> Result<Vec<ParsedTaskResult>, String> {
     if tasks.is_empty() {
         return Ok(Vec::new());
@@ -477,18 +508,43 @@ fn process_cue_parse_tasks(
         let cue_path_buf = PathBuf::from(&cue_path);
         let sheet = match cue::parse_cue_file(&cue_path_buf) {
             Ok(s) => s,
-            Err(cue::CueParseError::Io(error)) => {
-                return Err(describe_scan_io_error(&cue_path_buf, "读取 CUE", &error))
-            }
             Err(error) => {
-                return Err(format!(
-                    "扫描过程中 CUE 或音源发生变化：{cue_path}；{error}"
-                ))
+                warnings.push(format!("已跳过 CUE：{cue_path}；{error}"));
+                if !matches!(error, cue::CueParseError::Io(_)) {
+                    for task in group_tasks {
+                        if task.change == ChangeKind::Update {
+                            results.push(ParsedTaskResult::Delete {
+                                index: task.index,
+                                path: task.path_str.clone(),
+                            });
+                        }
+                    }
+                }
+                continue;
             }
         };
+        if !rules.includes_audio(&sheet.resolved_audio_path) {
+            for task in group_tasks {
+                if task.change == ChangeKind::Update {
+                    excluded_paths.push(task.path_str.clone());
+                    results.push(ParsedTaskResult::Delete {
+                        index: task.index,
+                        path: task.path_str.clone(),
+                    });
+                }
+            }
+            continue;
+        }
         let flac_path = sheet.resolved_audio_path.to_string_lossy().to_string();
-        let flac_duration_ms = probe_audio_duration_ms(&sheet.resolved_audio_path)?.unwrap_or(0);
+        let flac_duration_ms = match probe_audio_duration_ms(&sheet.resolved_audio_path) {
+            Ok(duration) => duration.unwrap_or(0),
+            Err(error) => {
+                warnings.push(format!("已跳过 CUE：{cue_path}；{error}"));
+                continue;
+            }
+        };
         let cue_path_normalized = normalize_path(&cue_path);
+        let mut warned_track_change = false;
 
         for task in group_tasks {
             // Extract track number from synthetic path
@@ -501,10 +557,19 @@ fn process_cue_parse_tasks(
 
             let track = match sheet.tracks.iter().find(|t| t.track_number == track_number) {
                 Some(t) => t,
-                None if options.force_metadata_refresh => {
-                    return Err(format!("扫描过程中 CUE 曲目发生变化：{}", task.path_str));
+                None => {
+                    if !warned_track_change {
+                        warnings.push(format!("扫描过程中 CUE 曲目发生变化：{cue_path}"));
+                        warned_track_change = true;
+                    }
+                    if task.change == ChangeKind::Update {
+                        results.push(ParsedTaskResult::Delete {
+                            index: task.index,
+                            path: task.path_str.clone(),
+                        });
+                    }
+                    continue;
                 }
-                None => continue,
             };
 
             if let Some(song) = build_cue_track_song(
@@ -534,22 +599,80 @@ fn process_cue_parse_tasks(
     Ok(results)
 }
 
+#[cfg(test)]
 pub(super) fn collect_scan_diff(
+    normalized_folder: &str,
+    db_snapshot: HashMap<String, DbSongSnapshot>,
+    reporter: Option<&ScanProgressReporter>,
+    options: ScanOptions,
+) -> Result<ScanDiff, String> {
+    collect_scan_diff_with_rules(
+        normalized_folder,
+        db_snapshot,
+        reporter,
+        options,
+        &LocalScanRules::defaults(normalized_folder),
+    )
+}
+
+pub(super) fn collect_scan_diff_with_rules(
     normalized_folder: &str,
     mut db_snapshot: HashMap<String, DbSongSnapshot>,
     reporter: Option<&ScanProgressReporter>,
     options: ScanOptions,
+    rules: &LocalScanRules,
 ) -> Result<ScanDiff, String> {
-    let candidates = collect_disk_candidates(normalized_folder, reporter)?;
+    let mut warnings = Vec::new();
+    let mut preserved_cues = Vec::new();
+    let mut replaced_audio_paths = Vec::new();
+    let candidates = collect_disk_candidates(
+        normalized_folder,
+        reporter,
+        rules,
+        &mut warnings,
+        &mut preserved_cues,
+        &mut replaced_audio_paths,
+    )?;
     let has_disk_songs = !candidates.is_empty();
+    let mut excluded_paths = db_snapshot
+        .iter()
+        .filter(|(path, snapshot)| {
+            rules.excludes_song(&snapshot.song) || replaced_audio_paths.contains(path)
+        })
+        .map(|(path, _)| path.clone())
+        .collect::<Vec<_>>();
     let mut songs_by_index: Vec<Option<Song>> = vec![None; candidates.len()];
     let mut changes_by_index = vec![None; candidates.len()];
     let mut parse_tasks = Vec::new();
     let mut to_delete = Vec::new();
 
+    let preserved_paths = db_snapshot
+        .iter()
+        .filter(|(path, snapshot)| {
+            rules.is_delegated_song(&snapshot.song)
+                || (path.split("::track").next().is_some_and(|cue| {
+                    preserved_cues.iter().any(|preserved| {
+                        if cfg!(windows) {
+                            cue.eq_ignore_ascii_case(preserved)
+                        } else {
+                            cue == preserved
+                        }
+                    })
+                }) && !excluded_paths.contains(path))
+        })
+        .map(|(path, _)| path.clone())
+        .collect::<Vec<_>>();
+    for path in preserved_paths {
+        if let Some(snapshot) = db_snapshot.remove(&path) {
+            songs_by_index.push(Some(snapshot.song));
+            changes_by_index.push(None);
+        }
+    }
+
     for (candidate_index, candidate) in candidates.into_iter().enumerate() {
         if let Some(db_info) = db_snapshot.remove(&candidate.path_str) {
             let needs_parse = options.force_metadata_refresh
+                || db_info.song.cue_source_path != candidate.cue_audio_path
                 || db_info.file_modified_at != candidate.disk_mtime
                 || db_info.file_size != candidate.disk_size
                 || song_identity_missing(&db_info.song)
@@ -588,7 +711,13 @@ pub(super) fn collect_scan_diff(
     parse_tasks = audio_tasks;
 
     // Process CUE tasks: group by CUE file, parse once, build all track songs
-    let cue_results = process_cue_parse_tasks(&cue_tasks, options)?;
+    let cue_results = process_cue_parse_tasks(
+        &cue_tasks,
+        options,
+        &mut warnings,
+        rules,
+        &mut excluded_paths,
+    )?;
 
     if let Some(reporter) = reporter {
         reporter.start_parsing(parse_tasks.len());
@@ -671,5 +800,7 @@ pub(super) fn collect_scan_diff(
         to_update,
         to_delete,
         has_disk_songs,
+        warnings,
+        excluded_paths,
     })
 }

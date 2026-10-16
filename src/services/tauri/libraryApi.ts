@@ -1,8 +1,12 @@
-import type { FolderNode, LibraryFolder } from '../../types';
+import type { FolderNode, LibraryFolder, LibraryScanSettings, LibraryScanSource } from '../../types';
 import { tauriInvoke } from './invoke';
 
 export const libraryApi = {
   getLibraryFolders: (): Promise<LibraryFolder[]> => tauriInvoke('get_library_folders'),
+  getLibraryScanSettings: (source: LibraryScanSource): Promise<LibraryScanSettings> =>
+    tauriInvoke('get_library_scan_settings', { source }),
+  setLibraryScanSettings: (source: LibraryScanSource, settings: LibraryScanSettings): Promise<LibraryScanSettings> =>
+    tauriInvoke('set_library_scan_settings', { source, settings }),
   getLibraryHierarchy: (): Promise<FolderNode[]> => tauriInvoke('get_library_hierarchy'),
   getFolderChildren: (folderPath: string): Promise<FolderNode[]> =>
     tauriInvoke('get_folder_children', { folderPath }),

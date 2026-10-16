@@ -6,6 +6,7 @@ pub mod files;
 pub mod folder_moves;
 pub mod library;
 pub mod scanner;
+pub mod scan_settings;
 pub mod search;
 pub mod sidebar;
 pub(crate) mod sorting;
@@ -39,6 +40,7 @@ pub use scanner::{
     get_folder_first_song, parse_audio_files, scan_folder_as_playlists, scan_music_folder,
     scan_music_folder_paths,
 };
+pub use scan_settings::{get_library_scan_settings, set_library_scan_settings};
 pub use search::{get_search_index_batch, get_search_index_status, upsert_search_index_batch};
 // Deprecated compatibility exports. Keep registered for legacy data/tools only.
 pub use sidebar::{

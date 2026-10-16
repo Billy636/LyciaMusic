@@ -261,12 +261,12 @@ fn extract_file_directive(line: &str) -> Option<(String, String)> {
         return None;
     }
     let remainder = line[prefix.len()..].trim();
-    if let Some(end_quote) = remainder[1..].find('"') {
-        let file_name = remainder[1..end_quote + 1].to_string();
-        let rest = remainder[end_quote + 2..].trim().to_string();
-        return Some((file_name, rest));
-    }
-    None
+    let quoted = remainder.strip_prefix('"')?;
+    let end_quote = quoted.find('"')?;
+    Some((
+        quoted[..end_quote].to_string(),
+        quoted[end_quote + 1..].trim().to_string(),
+    ))
 }
 
 fn extract_track_number(line: &str) -> Option<u32> {

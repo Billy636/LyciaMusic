@@ -2,12 +2,13 @@ use super::super::types::{FolderNode, GeneratedFolder, Song};
 use super::super::utils::{
     descendant_like_patterns, describe_scan_io_error, is_dot_prefixed_path, normalize_path,
 };
-use super::diff::{collect_scan_diff, load_db_snapshot_for_folder};
+use super::diff::{collect_scan_diff_with_rules, load_db_snapshot_for_folder};
 use super::parser::parse_audio_files_internal;
 use super::progress::ScanProgressReporter;
 use super::repository::apply_scan_changes;
 use super::ScanOptions;
 use crate::database::DbState;
+use crate::music::scan_settings::load_local_rules;
 use rusqlite::{params, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -123,17 +124,28 @@ fn scan_single_directory_with_mode(
         ));
     }
 
-    let db_snapshot = {
+    let (db_snapshot, rules) = {
         let conn = db_conn.lock().map_err(|error| error.to_string())?;
-        load_db_snapshot_for_folder(&conn, &normalized_folder)?
+        (
+            load_db_snapshot_for_folder(&conn, &normalized_folder)?,
+            load_local_rules(&conn, &normalized_folder)?,
+        )
     };
 
-    let mut scan_diff =
-        match collect_scan_diff(&normalized_folder, db_snapshot, reporter.as_ref(), options) {
-            Ok(diff) => diff,
-            Err(error) => return retain_existing(error),
-        };
+    let mut scan_diff = match collect_scan_diff_with_rules(
+        &normalized_folder,
+        db_snapshot,
+        reporter.as_ref(),
+        options,
+        &rules,
+    ) {
+        Ok(diff) => diff,
+        Err(error) => return retain_existing(error),
+    };
     let song_count = scan_diff.songs.len();
+    if let Some(reporter) = reporter.as_ref() {
+        reporter.set_excluded_paths(&scan_diff.excluded_paths);
+    }
     let paths = (result_mode == ScanResultMode::Paths).then(|| {
         scan_diff
             .songs
@@ -219,7 +231,10 @@ fn scan_single_directory_with_mode(
     }
 
     if let Some(reporter) = reporter.as_ref() {
-        reporter.emit_complete(song_count);
+        reporter.emit_complete(song_count, &scan_diff.warnings);
+    }
+    for warning in &scan_diff.warnings {
+        eprintln!("[扫描警告] {warning}");
     }
 
     #[cfg(debug_assertions)]

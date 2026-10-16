@@ -86,6 +86,7 @@ const finalizeLibraryScanProgress = (songs: ArrayLike<unknown>, failed = false, 
     folder_index: existing?.folder_index ?? 0,
     folder_total: existing?.folder_total ?? Math.max(1, libraryStore.libraryFolders.length),
     message: message ?? (failed ? 'Library scan failed' : `Scan completed, ${songs.length} songs indexed`),
+    warnings: existing?.warnings ?? [],
     done: true,
     failed,
   });

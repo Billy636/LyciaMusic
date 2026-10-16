@@ -56,6 +56,8 @@ commands.allow = [
   "set_output_device",
   "set_audio_output_mode",
   "get_library_folders",
+  "get_library_scan_settings",
+  "set_library_scan_settings",
   "is_directory",
   "add_library_folder",
   "remove_library_folder",

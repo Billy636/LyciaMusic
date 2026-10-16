@@ -654,6 +654,9 @@ const displayHeroProgressNote = computed(() => {
 
 const displayHeroProgressDetail = computed(() => {
   const progress = libraryScanProgress.value;
+  if (progress?.done && !progress.failed && progress.warnings?.length) {
+    return progress.warnings.join('；');
+  }
   if (progress && progress.total > 0) {
     const folderPath = progress.folder_path?.trim();
     return folderPath || libraryScanPhaseLabel.value;

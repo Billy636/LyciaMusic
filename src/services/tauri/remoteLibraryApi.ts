@@ -28,4 +28,6 @@ export const remoteLibraryApi = {
     tauriInvoke('clear_remote_cache'),
   listRemoteDirectory: (sourceId: string, path: string): Promise<RemoteFileEntry[]> =>
     tauriInvoke('list_remote_directory', { sourceId, path }),
+  previewRemoteDirectory: (source: RemoteSourceInput, path: string): Promise<RemoteFileEntry[]> =>
+    tauriInvoke('list_remote_directory', { source, path }),
 };

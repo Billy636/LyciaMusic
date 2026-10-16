@@ -122,6 +122,12 @@ fn remove_library_folder_from_conn(
 
     tx.execute(delete_folder_sql, [folder_path])
         .map_err(|e| e.to_string())?;
+    super::scan_settings::remove_settings(
+        &tx,
+        &super::scan_settings::LibraryScanSource::Local {
+            path: folder_path.to_string(),
+        },
+    )?;
 
     let remaining_roots = {
         let mut stmt = tx

@@ -32,6 +32,7 @@ pub async fn clear_all_app_data(
                 DELETE FROM artists;
                 DELETE FROM songs;
                 DELETE FROM library_folders;
+                DELETE FROM library_scan_settings;
                 DELETE FROM sidebar_folders;
                 ",
             )
