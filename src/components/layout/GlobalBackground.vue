@@ -36,21 +36,50 @@ const { currentSongPath } = storeToRefs(playbackStore);
 const isBackgroundPreparationSuspended = computed(() => isMainWindowLowPower.value || isMiniMode.value);
 
 // --- 大背景物理尺寸动态测量 ---
+const backgroundRoot = ref<HTMLElement | null>(null);
 const containerWidth = ref(window.innerWidth);
 const containerHeight = ref(window.innerHeight);
+let containerResizeObserver: ResizeObserver | null = null;
+let containerSizeFrame = 0;
+let containerSizeTimer: ReturnType<typeof setTimeout> | null = null;
 
 const updateContainerSize = () => {
-  const bgEl = document.querySelector('[data-global-background]');
-  if (bgEl) {
-    const rect = bgEl.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      containerWidth.value = rect.width;
-      containerHeight.value = rect.height;
-      return;
-    }
+  if (isBackgroundPreparationSuspended.value) return;
+  const bgEl = backgroundRoot.value;
+  if (!bgEl) return;
+  // Layout dimensions exclude the scale used by the window-restore transition.
+  // Keep the last valid size while a hidden/minimized WebView has no layout.
+  const width = bgEl.clientWidth;
+  const height = bgEl.clientHeight;
+  if (width > 0 && height > 0) {
+    containerWidth.value = width;
+    containerHeight.value = height;
   }
-  containerWidth.value = window.innerWidth;
-  containerHeight.value = window.innerHeight;
+};
+
+const cancelContainerSizeRefresh = () => {
+  if (containerSizeFrame) window.cancelAnimationFrame(containerSizeFrame);
+  containerSizeFrame = 0;
+  if (containerSizeTimer !== null) clearTimeout(containerSizeTimer);
+  containerSizeTimer = null;
+};
+
+const refreshContainerSizeAfterRestore = () => {
+  cancelContainerSizeRefresh();
+  if (isBackgroundPreparationSuspended.value) return;
+  updateContainerSize();
+  containerSizeFrame = window.requestAnimationFrame(() => {
+    updateContainerSize();
+    containerSizeFrame = window.requestAnimationFrame(() => {
+      containerSizeFrame = 0;
+      updateContainerSize();
+    });
+  });
+  // Native show/focus can arrive before WebView2 finishes restoring its bounds.
+  containerSizeTimer = setTimeout(() => {
+    containerSizeTimer = null;
+    updateContainerSize();
+  }, 120);
 };
 
 // --- 图片物理原始宽高元数据管理 ---
@@ -389,21 +418,21 @@ watch(
   { immediate: true },
 );
 
-watch(isMiniMode, async (mini, prevMini) => {
-  if (prevMini && !mini) {
-    await nextTick();
-    updateContainerSize();
-    setTimeout(updateContainerSize, 100);
-  }
-});
+watch(isBackgroundPreparationSuspended, refreshContainerSizeAfterRestore, { flush: 'post' });
 
 onMounted(() => {
   updateContainerSize();
+  containerResizeObserver = new ResizeObserver(updateContainerSize);
+  if (backgroundRoot.value) containerResizeObserver.observe(backgroundRoot.value);
   window.addEventListener('resize', updateContainerSize);
+  window.addEventListener('focus', refreshContainerSizeAfterRestore);
 });
 
 onBeforeUnmount(() => {
+  cancelContainerSizeRefresh();
+  containerResizeObserver?.disconnect();
   window.removeEventListener('resize', updateContainerSize);
+  window.removeEventListener('focus', refreshContainerSizeAfterRestore);
   fullCoverRequestId += 1;
   preblurRequestId += 1;
   customMediaRequestId += 1;
@@ -511,6 +540,7 @@ const customBgTransform = computed(() => {
 
 <template>
   <div
+    ref="backgroundRoot"
     data-global-background
     class="fixed inset-0 z-0 overflow-hidden pointer-events-none transition-colors duration-500"
     :class="[

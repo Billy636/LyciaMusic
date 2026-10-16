@@ -72,18 +72,22 @@ export function useMainWindowRenderingPower() {
   const appWindow = getCurrentWindow();
   const { isMiniMode } = storeToRefs(useUiStore());
   const unlisteners: Array<() => void> = [];
+  let windowStateGeneration = 0;
 
   const syncDocumentVisibility = () => {
     setMainWindowRenderingSnapshot({ documentHidden: document.hidden });
   };
 
   const syncWindowState = async () => {
+    const generation = ++windowStateGeneration;
     try {
       const [windowFocused, windowVisible, windowMinimized] = await Promise.all([
         appWindow.isFocused(),
         appWindow.isVisible(),
         appWindow.isMinimized(),
       ]);
+      // A delayed hide/blur sample must not overwrite a newer restore sample.
+      if (generation !== windowStateGeneration) return;
 
       setMainWindowRenderingSnapshot({
         windowFocused,
@@ -114,6 +118,7 @@ export function useMainWindowRenderingPower() {
   });
 
   onUnmounted(() => {
+    windowStateGeneration++;
     document.removeEventListener('visibilitychange', syncDocumentVisibility);
     window.removeEventListener('focus', syncWindowState);
     window.removeEventListener('blur', syncWindowState);
