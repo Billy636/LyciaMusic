@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
 
 import type { LyricWord } from '../../composables/lyrics/types';
 import { getTaskbarLyricWordProgress } from '../../features/taskbarPlayer/lyrics';
@@ -23,6 +23,9 @@ const props = withDefaults(defineProps<{
 const viewport = ref<HTMLElement | null>(null);
 const content = ref<HTMLElement | null>(null);
 let resizeObserver: ResizeObserver | null = null;
+let viewportWidth = 0;
+let overflow = 0;
+let wordBounds: { left: number; width: number }[] = [];
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const lineProgress = () => {
   if (!Number.isFinite(props.playbackTime)) return 0;
@@ -33,36 +36,45 @@ const lineProgress = () => {
 
 const updateScroll = () => {
   if (!viewport.value || !content.value) return;
-  const overflow = Math.max(0, content.value.scrollWidth - viewport.value.clientWidth);
   let scrollLeft = 0;
   if (overflow > 0 && props.playbackTime > props.time) {
     const words = props.words ?? [];
     if (words.length) {
       const nextIndex = words.findIndex(word => word.end > props.playbackTime);
       const wordIndex = nextIndex === -1 ? words.length - 1 : nextIndex;
-      const element = content.value.children[wordIndex] as HTMLElement | undefined;
-      if (element) {
+      const bounds = wordBounds[wordIndex];
+      if (bounds) {
         const progress = getTaskbarLyricWordProgress(words[wordIndex], props.playbackTime);
-        scrollLeft = element.offsetLeft + element.offsetWidth * progress - viewport.value.clientWidth * 0.65;
+        scrollLeft = bounds.left + bounds.width * progress - viewportWidth * 0.65;
       }
     } else {
       scrollLeft = overflow * lineProgress();
     }
   }
-  viewport.value.scrollLeft = Math.round(clamp(scrollLeft, 0, overflow));
+  content.value.style.transform = `translate3d(${-clamp(scrollLeft, 0, overflow)}px, 0, 0)`;
 };
 
-watch(() => props.playbackTime, () => { void nextTick(updateScroll); });
-watch(() => [props.text, props.time, props.words, props.effect], () => {
-  if (viewport.value) viewport.value.scrollLeft = 0;
-  void nextTick(updateScroll);
-}, { flush: 'post' });
+const measureContent = () => {
+  if (!viewport.value || !content.value) return;
+  viewportWidth = viewport.value.clientWidth;
+  const contentRect = content.value.getBoundingClientRect();
+  overflow = Math.max(0, contentRect.width - viewportWidth);
+  wordBounds = Array.from(content.value.children, element => {
+    const rect = element.getBoundingClientRect();
+    return { left: rect.left - contentRect.left, width: rect.width };
+  });
+  content.value.style.willChange = overflow > 0 ? 'transform' : '';
+  updateScroll();
+};
+
+watch(() => props.playbackTime, updateScroll, { flush: 'post' });
+watch(() => [props.text, props.time, props.words, props.effect], measureContent, { flush: 'post' });
 
 onMounted(() => {
-  resizeObserver = new ResizeObserver(updateScroll);
+  resizeObserver = new ResizeObserver(measureContent);
   if (viewport.value) resizeObserver.observe(viewport.value);
   if (content.value) resizeObserver.observe(content.value);
-  updateScroll();
+  measureContent();
 });
 onUnmounted(() => resizeObserver?.disconnect());
 </script>

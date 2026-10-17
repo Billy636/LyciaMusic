@@ -117,8 +117,6 @@ const lyricFallbackText = computed(() => {
 const hasTranslation = computed(() => contentMode.value === 'bilingual' && !!currentLyric.value?.translation?.trim());
 const coverTitle = computed(() => `${songTitle.value}${currentSong.value?.artist ? ` · ${currentSong.value.artist}` : ''}\n显示/收起主窗口`);
 let lyricFrame = 0;
-let lastLyricFrameAt = 0;
-const LYRIC_FRAME_INTERVAL_MS = 1000 / 30;
 let isFinishingDrag = false;
 let activeDragBounds: TaskbarHorizontalPosition | null = null;
 let activeDragScaleFactor = 1;
@@ -268,16 +266,14 @@ const refreshTaskbarWindowTopmost = async () => {
 const stopLyricClock = () => {
   if (lyricFrame !== 0) window.cancelAnimationFrame(lyricFrame);
   lyricFrame = 0;
-  lastLyricFrameAt = 0;
 };
 
 const refreshLyricClock = () => {
   stopLyricClock();
   if (!isVisible.value || !isPlaying.value || document.hidden || !parsedLyrics.value.length) return;
 
-  const tick = (now: number) => {
-    if (now - lastLyricFrameAt >= LYRIC_FRAME_INTERVAL_MS && playbackAnchor.value) {
-      lastLyricFrameAt = now;
+  const tick = () => {
+    if (playbackAnchor.value) {
       playbackTime.value = projectTaskbarPlaybackTime(playbackAnchor.value);
     }
     lyricFrame = window.requestAnimationFrame(tick);
@@ -434,6 +430,7 @@ onUnmounted(() => {
             :key="row.key"
             class="taskbar-double-row"
             :class="{ 'is-upcoming': index > 0 }"
+            :style="{ '--lyric-row-index': index }"
           >
             <TaskbarLyricLine
               :text="row.line.text"
@@ -615,34 +612,44 @@ onUnmounted(() => {
   transition: opacity 150ms ease;
 }
 .taskbar-double-lyrics {
+  --lyric-row-height: 16px;
+  --lyric-transition: 280ms cubic-bezier(0.22, 1, 0.36, 1);
   position: relative;
-  height: 32px;
+  height: calc(var(--lyric-row-height) * 2);
   overflow: hidden;
-  --lyric-enter-offset: 16px;
-  --lyric-leave-offset: -16px;
+  --lyric-enter-offset: var(--lyric-row-height);
+  --lyric-leave-offset: calc(var(--lyric-row-height) * -1);
 }
 .taskbar-double-lyrics.is-reversing {
-  --lyric-enter-offset: -16px;
-  --lyric-leave-offset: 16px;
+  --lyric-enter-offset: calc(var(--lyric-row-height) * -1);
+  --lyric-leave-offset: var(--lyric-row-height);
 }
 .taskbar-double-row {
-  height: 16px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--lyric-row-height);
   min-width: 0;
-  transition: opacity 240ms ease;
+  transform: translateY(calc(var(--lyric-row-index) * var(--lyric-row-height)));
+  transition: transform var(--lyric-transition), opacity var(--lyric-transition);
+  will-change: transform;
 }
 .taskbar-double-row.is-upcoming { opacity: 0.62; }
 .taskbar-double-row :deep(.taskbar-lyric-viewport) {
   font-size: 12px;
-  line-height: 16px;
+  line-height: var(--lyric-row-height);
 }
-.taskbar-lyric-stack-move,
-.taskbar-lyric-stack-enter-active,
-.taskbar-lyric-stack-leave-active {
-  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease;
+/* Row offsets own the movement; per-frame lyric updates must not restart FLIP. */
+.taskbar-lyric-stack-move { transition: none; }
+.taskbar-double-row.taskbar-lyric-stack-enter-from {
+  opacity: 0;
+  transform: translateY(calc(var(--lyric-row-index) * var(--lyric-row-height) + var(--lyric-enter-offset)));
 }
-.taskbar-lyric-stack-leave-active { position: absolute; left: 0; right: 0; }
-.taskbar-lyric-stack-enter-from { opacity: 0; transform: translateY(var(--lyric-enter-offset)); }
-.taskbar-lyric-stack-leave-to { opacity: 0; transform: translateY(var(--lyric-leave-offset)); }
+.taskbar-double-row.taskbar-lyric-stack-leave-to {
+  opacity: 0;
+  transform: translateY(calc(var(--lyric-row-index) * var(--lyric-row-height) + var(--lyric-leave-offset)));
+}
 .taskbar-song-title {
   font-size: 11px;
   line-height: 14px;
