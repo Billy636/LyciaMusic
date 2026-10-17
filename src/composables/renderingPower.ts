@@ -76,6 +76,7 @@ export function useMainWindowRenderingPower() {
 
   const syncDocumentVisibility = () => {
     setMainWindowRenderingSnapshot({ documentHidden: document.hidden });
+    if (!document.hidden) void syncWindowState();
   };
 
   const syncWindowState = async () => {
@@ -90,6 +91,7 @@ export function useMainWindowRenderingPower() {
       if (generation !== windowStateGeneration) return;
 
       setMainWindowRenderingSnapshot({
+        documentHidden: windowFocused && windowVisible && !windowMinimized ? false : document.hidden,
         windowFocused,
         windowVisible,
         windowMinimized,
@@ -97,12 +99,14 @@ export function useMainWindowRenderingPower() {
     } catch {}
   };
 
-  onMounted(async () => {
-    syncDocumentVisibility();
-    await syncWindowState();
+  const handleWindowFocus = () => {
+    setMainWindowFocusState(true);
+    void syncWindowState();
+  };
 
+  onMounted(async () => {
     document.addEventListener('visibilitychange', syncDocumentVisibility);
-    window.addEventListener('focus', syncWindowState);
+    window.addEventListener('focus', handleWindowFocus);
     window.addEventListener('blur', syncWindowState);
 
     unlisteners.push(await appWindow.onFocusChanged(({ payload }) => {
@@ -115,12 +119,14 @@ export function useMainWindowRenderingPower() {
     unlisteners.push(await appWindow.onResized(() => {
       void syncWindowState();
     }));
+    syncDocumentVisibility();
+    await syncWindowState();
   });
 
   onUnmounted(() => {
     windowStateGeneration++;
     document.removeEventListener('visibilitychange', syncDocumentVisibility);
-    window.removeEventListener('focus', syncWindowState);
+    window.removeEventListener('focus', handleWindowFocus);
     window.removeEventListener('blur', syncWindowState);
     unlisteners.splice(0).forEach((unlisten) => unlisten());
   });

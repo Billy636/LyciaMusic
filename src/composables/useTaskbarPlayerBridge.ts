@@ -10,6 +10,7 @@ import { usePlayer } from './player';
 import { useLyrics } from './lyrics';
 import { useThemeSettings } from './useThemeSettings';
 import { toggleMainWindowVisibility } from './mainWindowVisibility';
+import { APP_SHOW_MAIN_EVENT } from '../features/miniPlayer/shared';
 import { useSettings } from '../features/settings/useSettings';
 import { createTaskbarPlaybackClockTracker } from '../features/taskbarPlayer/lyrics';
 import {
@@ -309,6 +310,7 @@ export function useTaskbarPlayerBridge() {
     currentSong,
     currentTime,
     isPlaying,
+    isMiniMode,
     togglePlay,
     prevSong,
     nextSong,
@@ -550,6 +552,10 @@ export function useTaskbarPlayerBridge() {
   const handleAction = async (action: TaskbarPlayerAction) => {
     switch (action.type) {
       case 'toggle-main-window':
+        if (isMiniMode.value) {
+          await emitTo('main', APP_SHOW_MAIN_EVENT);
+          break;
+        }
         await toggleMainWindowVisibility(mainWindow);
         break;
       case 'toggle-play':

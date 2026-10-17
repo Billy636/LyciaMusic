@@ -26,10 +26,17 @@ export async function showMainWindowAfterStartup(
   appWindow: StartupWindow,
   hooks: StartupWindowHooks = {},
 ) {
-  await hooks.beforeShow?.();
-  await appWindow.show();
-  await appWindow.setFocus();
-  await hooks.afterShow?.();
+  try {
+    await hooks.beforeShow?.();
+  } catch (error) {
+    console.warn('Failed to prepare startup composition:', error);
+  }
+  try {
+    await appWindow.show();
+    await appWindow.setFocus();
+  } finally {
+    await hooks.afterShow?.();
+  }
 }
 
 export function useExternalPathBridge({

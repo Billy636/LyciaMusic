@@ -1,16 +1,6 @@
 import { nextTick, type Ref } from 'vue';
 import type { Router } from 'vue-router';
-
-const waitForRoutePaint = () => new Promise<void>((resolve) => {
-  if (typeof requestAnimationFrame !== 'function') {
-    setTimeout(resolve, 16);
-    return;
-  }
-
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => resolve());
-  });
-});
+import { waitForWindowPaint } from './windowPaint';
 
 export interface StartupRouteRepaintOptions {
   router: Router;
@@ -35,11 +25,11 @@ export async function runStartupRouteRepaint({
   try {
     await router.replace(repaintRoute);
     await nextTick();
-    await waitForRoutePaint();
+    await waitForWindowPaint();
 
     await router.replace(originalRoute);
     await nextTick();
-    await waitForRoutePaint();
+    await waitForWindowPaint();
   } finally {
     skipNextPageTransition.value = false;
   }
