@@ -10,6 +10,7 @@ import {
   TASKBAR_PLAYER_MAX_WIDTH,
   TASKBAR_PLAYER_WINDOW_WIDTH,
   TASKBAR_PLAYER_DEFAULT_TEXT_COLOR,
+  TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
   normalizeTaskbarWidth,
   normalizeTaskbarTextColor,
   normalizeTaskbarContentMode,
@@ -30,28 +31,12 @@ const positionLocked = computed(() => settings.value.taskbarPositionLocked);
 const leftOffset = computed(() => normalizeTaskbarLeftOffset(settings.value.taskbarLeftOffset));
 const contentModeOptions = [
   { value: 'title-lyrics', label: '歌名＋歌词' },
-  { value: 'bilingual', label: '双语歌词' },
-  { value: 'double-line', label: '双行歌词' },
-  { value: 'lyrics-only', label: '仅歌词' },
+  { value: 'bilingual', label: '原文＋译文' },
+  { value: 'double-line', label: '当前句＋下一句' },
+  { value: 'lyrics-only', label: '仅当前句' },
 ];
-const lyricEffectOptions = [
-  { value: 'karaoke', label: '逐字渐进' },
-  { value: 'word', label: '逐词点亮' },
-  { value: 'none', label: '关闭' },
-];
-const lyricEffectDescriptions = {
-  karaoke: '逐词歌词按原始时间高亮，普通歌词按整句进度显示',
-  word: '按歌词时间整词点亮，无逐词时间时整句点亮',
-  none: '歌词保持完整显示，不进行进度高亮',
-};
-const translationEffectDescription = computed(() => {
-  if (lyricEffect.value === 'none') return '原文和翻译均完整显示，不进行高亮';
-  return translationKaraoke.value
-    ? '翻译跟随原文效果，无翻译时间时保持完整显示'
-    : '仅原文高亮，翻译保持完整显示';
-});
 const coverShapeOptions = [
-  { value: 'square', label: '圆角方形' },
+  { value: 'square', label: '方形' },
   { value: 'circle', label: '圆形' },
 ];
 const opacity = computed(() => settings.value.taskbarBackgroundOpacity);
@@ -111,72 +96,70 @@ async function alignLeft() {
 </script>
 
 <template>
-  <div class="taskbar-settings space-y-8 text-gray-800 dark:text-gray-100">
+  <div class="taskbar-settings text-gray-800 dark:text-gray-100">
     <section>
-      <h2 class="taskbar-section-title"><span aria-hidden="true" />显示内容</h2>
+      <h2 class="taskbar-section-title"><span aria-hidden="true" />内容与封面</h2>
       <div class="taskbar-setting-row">
         <div>
-          <label for="taskbar-content-mode" class="taskbar-setting-label">内容模式</label>
-          <p v-if="contentMode === 'double-line'" class="mt-1 text-xs app-text-secondary">显示当前句和下一句，随播放平滑切换</p>
+          <label for="taskbar-content-mode" class="taskbar-setting-label">显示内容</label>
         </div>
-        <SettingsSelect class="taskbar-select" label="内容模式" hide-label trigger-id="taskbar-content-mode"
+        <SettingsSelect class="taskbar-select" label="显示内容" hide-label trigger-id="taskbar-content-mode"
           :model-value="contentMode" :options="contentModeOptions" @update:model-value="patchSettings({ taskbarContentMode: normalizeTaskbarContentMode($event) })" />
       </div>
-    </section>
-    <section>
-      <h2 class="taskbar-section-title"><span aria-hidden="true" />歌词效果</h2>
-      <div class="taskbar-setting-row">
-        <div>
-          <label for="taskbar-lyric-effect" class="taskbar-setting-label">卡拉 OK 效果</label>
-          <p class="mt-1 text-xs app-text-secondary">{{ lyricEffectDescriptions[lyricEffect] }}</p>
-        </div>
-        <SettingsSelect class="taskbar-select" label="卡拉 OK 效果" hide-label trigger-id="taskbar-lyric-effect"
-          :model-value="lyricEffect" :options="lyricEffectOptions" @update:model-value="patchSettings({ taskbarLyricEffect: normalizeTaskbarLyricEffect($event) })" />
-      </div>
-      <div v-if="contentMode === 'bilingual'" class="taskbar-setting-row">
-        <div>
-          <span id="taskbar-translation-karaoke-label" class="taskbar-setting-label">翻译卡拉 OK</span>
-          <p id="taskbar-translation-karaoke-description" class="mt-1 text-xs app-text-secondary">{{ translationEffectDescription }}</p>
-        </div>
-        <button type="button" role="switch" aria-labelledby="taskbar-translation-karaoke-label" aria-describedby="taskbar-translation-karaoke-description"
-          :aria-checked="translationKaraoke" :disabled="lyricEffect === 'none'" class="taskbar-switch"
-          :class="{ 'is-on': translationKaraoke }" @click="patchSettings({ taskbarTranslationKaraoke: !translationKaraoke })">
-          <span aria-hidden="true" />
-        </button>
-      </div>
-      <div v-if="lyricEffect !== 'none'" class="taskbar-setting-row">
-        <div>
-          <label for="taskbar-lyric-highlight-color" class="taskbar-setting-label">歌词高亮颜色</label>
-          <p class="mt-1 text-xs app-text-secondary">{{ lyricHighlightColor === null ? '跟随字体颜色' : '使用独立高亮颜色' }}</p>
-        </div>
-        <div class="flex flex-wrap items-center gap-3">
-          <button v-for="preset in textColors" :key="preset.value" type="button" :aria-label="`歌词高亮：${preset.label}`" :title="preset.label" :aria-pressed="lyricHighlightColor === preset.value"
-            class="flex h-7 w-7 items-center justify-center rounded-full border border-black/10 transition-transform hover:scale-110 dark:border-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#EC4141]"
-            :style="{ backgroundColor: preset.value, color: preset.value === '#ffffff' || preset.value === '#fbbf24' ? '#273449' : '#ffffff' }" @click="setLyricHighlightColor(preset.value)">
-            <Check v-if="lyricHighlightColor === preset.value" :size="15" :stroke-width="2.5" />
-          </button>
-          <label for="taskbar-lyric-highlight-color" class="ml-2 text-sm app-text-secondary">自定义</label>
-          <input id="taskbar-lyric-highlight-color" type="color" aria-label="自定义歌词高亮颜色" class="taskbar-color-input" :value="lyricHighlightColor ?? textColor" @input="onLyricHighlightColorInput" @change="onLyricHighlightColorInput" />
-          <button type="button" class="taskbar-position-action" :disabled="lyricHighlightColor === null" @click="setLyricHighlightColor(null)"><RotateCcw :size="13" />跟随字体颜色</button>
-        </div>
-      </div>
-    </section>
-    <section>
-      <h2 class="taskbar-section-title"><span aria-hidden="true" />封面样式</h2>
       <div class="taskbar-setting-row">
         <label for="taskbar-cover-shape" class="taskbar-setting-label">封面形状</label>
         <SettingsSelect class="taskbar-select" label="封面形状" hide-label trigger-id="taskbar-cover-shape"
           :model-value="coverShape" :options="coverShapeOptions" @update:model-value="patchSettings({ taskbarCoverShape: normalizeTaskbarCoverShape($event) })" />
       </div>
       <div class="taskbar-setting-row">
-        <div>
-          <span id="taskbar-cover-rotate-label" class="taskbar-setting-label">播放时旋转封面</span>
-        </div>
+        <span id="taskbar-cover-rotate-label" class="taskbar-setting-label">播放时旋转封面</span>
         <button type="button" role="switch" aria-labelledby="taskbar-cover-rotate-label"
           :aria-checked="settings.taskbarCoverRotate" :disabled="coverShape !== 'circle'" class="taskbar-switch"
           :class="{ 'is-on': settings.taskbarCoverRotate }" @click="patchSettings({ taskbarCoverRotate: !settings.taskbarCoverRotate })">
           <span aria-hidden="true" />
         </button>
+      </div>
+    </section>
+    <section>
+      <h2 class="taskbar-section-title"><span aria-hidden="true" />歌词效果</h2>
+      <div class="taskbar-setting-row taskbar-lyric-effect-row">
+        <span id="taskbar-lyric-effect-label" class="taskbar-setting-label">逐字效果</span>
+        <button id="taskbar-lyric-effect" type="button" role="switch" aria-labelledby="taskbar-lyric-effect-label"
+          aria-controls="taskbar-lyric-subsettings" :aria-checked="lyricEffect !== 'none'" class="taskbar-switch"
+          :class="{ 'is-on': lyricEffect !== 'none' }" @click="patchSettings({ taskbarLyricEffect: lyricEffect === 'none' ? 'karaoke' : 'none' })">
+          <span aria-hidden="true" />
+        </button>
+      </div>
+      <div id="taskbar-lyric-subsettings" class="taskbar-lyric-subsettings" :class="{ 'is-expanded': lyricEffect !== 'none' }"
+        :aria-hidden="lyricEffect === 'none'" :inert="lyricEffect === 'none'">
+        <div class="taskbar-lyric-subsettings-inner">
+          <div class="taskbar-lyric-subsettings-panel" role="group" aria-label="逐字效果子设置">
+            <div v-if="contentMode === 'bilingual'" class="taskbar-setting-row">
+              <span id="taskbar-translation-karaoke-label" class="taskbar-setting-label">翻译跟随高亮</span>
+              <button type="button" role="switch" aria-labelledby="taskbar-translation-karaoke-label"
+                :aria-checked="translationKaraoke" :disabled="lyricEffect === 'none'" class="taskbar-switch"
+                :class="{ 'is-on': translationKaraoke }" @click="patchSettings({ taskbarTranslationKaraoke: !translationKaraoke })">
+                <span aria-hidden="true" />
+              </button>
+            </div>
+            <div class="taskbar-setting-row">
+              <label for="taskbar-lyric-highlight-color" class="taskbar-setting-label">高亮颜色</label>
+              <div class="taskbar-color-controls">
+                <div class="taskbar-color-presets" role="group" aria-label="高亮预设颜色">
+                  <button v-for="preset in textColors" :key="preset.value" type="button" :aria-label="`歌词高亮：${preset.label}`" :title="preset.label" :aria-pressed="lyricHighlightColor === preset.value"
+                    class="taskbar-color-preset"
+                    :style="{ backgroundColor: preset.value, color: preset.value === '#ffffff' || preset.value === '#fbbf24' ? '#273449' : '#ffffff' }" @click="setLyricHighlightColor(preset.value)">
+                    <Check v-if="lyricHighlightColor === preset.value" :size="14" :stroke-width="2.5" />
+                  </button>
+                </div>
+                <label for="taskbar-lyric-highlight-color" class="taskbar-custom-color">自定义
+                  <input id="taskbar-lyric-highlight-color" type="color" aria-label="自定义歌词高亮颜色" class="taskbar-color-input" :value="lyricHighlightColor ?? textColor" @input="onLyricHighlightColorInput" @change="onLyricHighlightColorInput" />
+                </label>
+                <button type="button" class="taskbar-color-follow" :aria-pressed="lyricHighlightColor === null" @click="setLyricHighlightColor(null)">跟随字体</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
     <section>
@@ -208,12 +191,10 @@ async function alignLeft() {
       </div>
     </section>
     <section>
-      <h2 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">
-        <span class="h-4 w-1 rounded-full bg-[#EC4141]" aria-hidden="true" />窗口样式
-      </h2>
+      <h2 class="taskbar-section-title"><span aria-hidden="true" />窗口样式</h2>
       <div class="taskbar-setting-row">
         <div>
-          <label for="taskbar-background-transparency" class="text-sm font-medium text-gray-800 dark:text-gray-100">背景透明度</label>
+          <label for="taskbar-background-transparency" class="taskbar-setting-label">背景透明度</label>
         </div>
         <div class="taskbar-slider-controls">
           <button type="button" aria-label="降低背景透明度" :disabled="transparency === 0" class="p-2 app-text-secondary disabled:opacity-30" @click="setTransparency(transparency - 5)"><Minus :size="16" /></button>
@@ -221,12 +202,12 @@ async function alignLeft() {
             :aria-valuetext="`${transparency}% 透明`" class="taskbar-transparency-slider" :style="{ '--fill': `${transparency}%` }" @input="onInput" />
           <button type="button" aria-label="提高背景透明度" :disabled="transparency === 100" class="p-2 app-text-secondary disabled:opacity-30" @click="setTransparency(transparency + 5)"><Plus :size="16" /></button>
           <span class="text-right text-sm tabular-nums text-gray-800 dark:text-gray-100">{{ transparency }}%</span>
-          <button type="button" aria-label="恢复默认透明度" title="恢复默认" :disabled="opacity === 0" class="p-2 app-text-secondary disabled:opacity-30" @click="setTransparency(100)"><RotateCcw :size="16" /></button>
+          <button type="button" aria-label="恢复默认透明度" title="恢复默认" :disabled="opacity === TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY" class="p-2 app-text-secondary disabled:opacity-30" @click="setTransparency(100 - TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY)"><RotateCcw :size="16" /></button>
         </div>
       </div>
       <div class="taskbar-setting-row">
         <div>
-          <label for="taskbar-window-width" class="text-sm font-medium text-gray-800 dark:text-gray-100">窗口长度</label>
+          <label for="taskbar-window-width" class="taskbar-setting-label">窗口长度</label>
         </div>
         <div class="taskbar-slider-controls">
           <button type="button" aria-label="缩短窗口" :disabled="width === TASKBAR_PLAYER_MIN_WIDTH" class="p-2 app-text-secondary disabled:opacity-30" @click="setWidth(width - 10)"><Minus :size="16" /></button>
@@ -239,16 +220,19 @@ async function alignLeft() {
       </div>
       <div class="taskbar-setting-row">
         <div>
-          <label for="taskbar-text-color" class="text-sm font-medium text-gray-800 dark:text-gray-100">字体颜色</label>
+          <label for="taskbar-text-color" class="taskbar-setting-label">字体颜色</label>
         </div>
-        <div class="flex flex-wrap items-center gap-3">
-          <button v-for="preset in textColors" :key="preset.value" type="button" :aria-label="preset.label" :title="preset.label" :aria-pressed="textColor === preset.value"
-            class="flex h-7 w-7 items-center justify-center rounded-full border border-black/10 transition-transform hover:scale-110 dark:border-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#EC4141]"
-            :style="{ backgroundColor: preset.value, color: preset.value === '#ffffff' || preset.value === '#fbbf24' ? '#273449' : '#ffffff' }" @click="setTextColor(preset.value)">
-            <Check v-if="textColor === preset.value" :size="15" :stroke-width="2.5" />
-          </button>
-          <label for="taskbar-text-color" class="ml-2 text-sm app-text-secondary">自定义</label>
-          <input id="taskbar-text-color" type="color" aria-label="自定义任务栏字体颜色" class="taskbar-color-input" :value="textColor" @input="onColorInput" @change="onColorInput" />
+        <div class="taskbar-color-controls">
+          <div class="taskbar-color-presets" role="group" aria-label="字体预设颜色">
+            <button v-for="preset in textColors" :key="preset.value" type="button" :aria-label="preset.label" :title="preset.label" :aria-pressed="textColor === preset.value"
+              class="taskbar-color-preset"
+              :style="{ backgroundColor: preset.value, color: preset.value === '#ffffff' || preset.value === '#fbbf24' ? '#273449' : '#ffffff' }" @click="setTextColor(preset.value)">
+              <Check v-if="textColor === preset.value" :size="14" :stroke-width="2.5" />
+            </button>
+          </div>
+          <label for="taskbar-text-color" class="taskbar-custom-color">自定义
+            <input id="taskbar-text-color" type="color" aria-label="自定义任务栏字体颜色" class="taskbar-color-input" :value="textColor" @input="onColorInput" @change="onColorInput" />
+          </label>
           <button type="button" aria-label="恢复默认字体颜色" title="恢复默认" :disabled="textColor === TASKBAR_PLAYER_DEFAULT_TEXT_COLOR" class="p-2 app-text-secondary disabled:opacity-30" @click="setTextColor(TASKBAR_PLAYER_DEFAULT_TEXT_COLOR)"><RotateCcw :size="16" /></button>
         </div>
       </div>
@@ -257,11 +241,21 @@ async function alignLeft() {
 </template>
 
 <style scoped>
+.taskbar-settings { display: flex; flex-direction: column; gap: 24px; }
 .taskbar-section-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
 .taskbar-section-title > span { height: 16px; width: 4px; border-radius: 999px; background: #ec4141; }
-.taskbar-setting-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; min-height: 66px; padding: 16px 2px; border-bottom: 1px solid var(--settings-divider); }
+.taskbar-setting-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; min-height: 58px; padding: 10px 2px; border-bottom: 1px solid var(--settings-divider); }
 .taskbar-setting-row:last-child { border-bottom: 0; }
 .taskbar-setting-label { font-size: 14px; font-weight: 500; }
+.taskbar-lyric-effect-row { border-bottom: 0; }
+.taskbar-lyric-subsettings { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 200ms ease, opacity 160ms ease; }
+.taskbar-lyric-subsettings.is-expanded { grid-template-rows: 1fr; opacity: 1; }
+.taskbar-lyric-subsettings-inner { min-height: 0; overflow: hidden; }
+.taskbar-lyric-subsettings-panel { margin-left: 16px; padding: 0 14px; border-radius: 10px; background: rgb(128 128 128 / .04); }
+.taskbar-lyric-subsettings-panel .taskbar-setting-row { min-height: 54px; padding: 10px 0; }
+@media (prefers-reduced-motion: reduce) {
+  .taskbar-lyric-subsettings { transition: none; }
+}
 .taskbar-select { width: 224px; max-width: 100%; flex-shrink: 0; }
 .taskbar-select :deep(.settings-select-trigger:not(:hover):not(:focus-visible):not(.is-open)) { background: transparent; border-color: transparent; box-shadow: none; }
 .taskbar-switch { width: 44px; height: 24px; padding: 3px; border-radius: 999px; flex-shrink: 0; background: #d1d5db; transition: background-color 160ms; }
@@ -293,7 +287,15 @@ async function alignLeft() {
 @media (max-width: 640px) {
   .taskbar-slider-controls { grid-template-columns: 28px minmax(0, 1fr) 28px 56px 28px; gap: 8px; }
 }
-.taskbar-color-input { width: 36px; height: 28px; padding: 2px; border: 1px solid rgb(128 128 128 / 25%); border-radius: 6px; background: transparent; cursor: pointer; }
+.taskbar-color-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px 12px; width: min(100%, 432px); margin-left: auto; }
+.taskbar-color-presets { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.taskbar-color-preset { display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid rgb(128 128 128 / .2); border-radius: 50%; transition: transform 160ms; }
+.taskbar-color-preset:hover { transform: scale(1.1); }
+.taskbar-color-preset:focus-visible, .taskbar-color-follow:focus-visible { outline: 2px solid #ec4141; outline-offset: 4px; }
+.taskbar-custom-color { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--app-text-secondary); }
+.taskbar-color-follow { min-height: 30px; padding: 4px 8px; border-radius: 6px; font-size: 12px; color: var(--app-text-secondary); transition: color 160ms, background-color 160ms; }
+.taskbar-color-follow:hover, .taskbar-color-follow[aria-pressed="true"] { color: #ec4141; background: rgb(236 65 65 / .08); }
+.taskbar-color-input { width: 30px; height: 26px; padding: 2px; border: 1px solid rgb(128 128 128 / 25%); border-radius: 6px; background: transparent; cursor: pointer; }
 .taskbar-transparency-slider {
   width: 100%;
   min-width: 0;

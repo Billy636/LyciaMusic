@@ -30,12 +30,6 @@ const lineProgress = () => {
   if (props.endTime <= props.time) return 1;
   return clamp((props.playbackTime - props.time) / (props.endTime - props.time), 0, 1);
 };
-const lineHighlightProgress = () => props.effect === 'word'
-  ? Number(Number.isFinite(props.playbackTime) && props.playbackTime >= props.time)
-  : lineProgress();
-const wordProgress = (word: LyricWord) => props.effect === 'word'
-  ? Number(Number.isFinite(props.playbackTime) && props.playbackTime >= word.start)
-  : getTaskbarLyricWordProgress(word, props.playbackTime);
 
 const updateScroll = () => {
   if (!viewport.value || !content.value) return;
@@ -90,7 +84,7 @@ onUnmounted(() => resizeObserver?.disconnect());
           :class="{ 'is-plain': effect === 'none' }"
           aria-hidden="true"
           :data-text="word.text"
-          :style="{ '--word-progress': `${wordProgress(word) * 100}%` }"
+          :style="{ '--word-progress': `${getTaskbarLyricWordProgress(word, playbackTime) * 100}%` }"
         >{{ word.text }}</span>
       </template>
       <span
@@ -99,7 +93,7 @@ onUnmounted(() => resizeObserver?.disconnect());
         class="taskbar-lyric-word"
         :class="{ 'is-plain': effect === 'none', 'is-untimed-translation': translation && !words?.length }"
         :data-text="text"
-        :style="{ '--word-progress': `${lineHighlightProgress() * 100}%` }"
+        :style="{ '--word-progress': `${lineProgress() * 100}%` }"
       >{{ text }}</span>
     </div>
   </div>

@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import {
+  TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
   normalizeTaskbarWidth,
   normalizeTaskbarTextColor,
   normalizeTaskbarContentMode,
@@ -169,7 +170,7 @@ export const defaultAppSettings: AppSettings = {
   shortcuts: createDefaultShortcutSettings(),
   showTaskbarPlayer: false,
   showTaskbarPlayerIcon: true,
-  taskbarBackgroundOpacity: 0,
+  taskbarBackgroundOpacity: TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
   taskbarWindowWidth: 280,
   taskbarTextColor: '#ffffff',
   taskbarPlayerCanDrag: false,
@@ -358,7 +359,7 @@ export const mergeAppSettings = (
     audio: mergeAudioSettings(base.audio ?? createDefaultAudioSettings(), patch.audio ?? {}),
     taskbarBackgroundOpacity: typeof (patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity) === 'number'
       && Number.isFinite(patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity)
-      ? Math.min(100, Math.max(0, Math.round(patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity))) : 0,
+      ? Math.min(100, Math.max(0, Math.round(patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity))) : TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
     taskbarWindowWidth: normalizeTaskbarWidth(patch.taskbarWindowWidth ?? base.taskbarWindowWidth),
     taskbarTextColor: normalizeTaskbarTextColor(patch.taskbarTextColor ?? base.taskbarTextColor),
     taskbarPlayerCanDrag: typeof (patch.taskbarPlayerCanDrag ?? base.taskbarPlayerCanDrag) === 'boolean'

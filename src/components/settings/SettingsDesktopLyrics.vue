@@ -734,7 +734,7 @@ function updateFontPresetMenuPosition() {
   const rect = trigger.getBoundingClientRect();
   const viewportPadding = 16;
   const gap = 10;
-  const preferredWidth = Math.max(rect.width, 320);
+  const preferredWidth = Math.max(rect.width, 260);
   const menuWidth = Math.min(preferredWidth, window.innerWidth - viewportPadding * 2);
 
   let left = rect.right - menuWidth;
@@ -1400,18 +1400,20 @@ onUnmounted(() => {
 
           <div class="desktop-compact-cell flex items-center justify-between gap-4">
             <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">字体方案</div>
-            <div ref="fontPresetFieldRef" class="desktop-font-picker flex-1 min-w-0">
+            <div ref="fontPresetFieldRef" class="desktop-font-picker desktop-font-picker--inline min-w-0">
               <button
                 ref="fontPresetTriggerRef"
                 type="button"
+                aria-label="字体方案"
+                :aria-expanded="isFontPresetMenuOpen"
                 class="desktop-font-trigger desktop-font-trigger--compact flex items-center justify-between w-full"
                 :class="isFontPresetMenuOpen ? 'desktop-font-trigger--open' : ''"
                 @click="toggleFontPresetMenu"
               >
-                <span class="truncate text-[14px] font-semibold text-gray-800 dark:text-gray-100 flex-1 text-right mr-1.5" :style="{ fontFamily: selectedFontFamily }">
+                <span class="truncate text-[14px] font-medium flex-1 text-left" :title="selectedFontLabel" :style="{ fontFamily: selectedFontFamily }">
                   {{ selectedFontLabel }}
                 </span>
-                <ChevronDown :size="14" class="text-gray-400 shrink-0" />
+                <ChevronDown :size="14" class="shrink-0 opacity-70" />
               </button>
 
               <Teleport to="body">
@@ -1445,7 +1447,7 @@ onUnmounted(() => {
                         <Check
                           v-if="localSettings.playerFontPreset === option.value"
                           :size="16"
-                          class="shrink-0 text-[#EC4141]"
+                          class="shrink-0"
                         />
                       </button>
                     </div>
@@ -1669,16 +1671,17 @@ onUnmounted(() => {
   --desktop-chip-active-border: rgba(236, 65, 65, 0.28);
   --desktop-chip-active-text: #ec4141;
 
-  --desktop-font-trigger-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.68));
-  --desktop-font-trigger-border: rgba(148, 163, 184, 0.2);
-  --desktop-font-trigger-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 10px 26px rgba(15, 23, 42, 0.05);
+  --desktop-font-trigger-bg: #f5f6f9;
+  --desktop-font-trigger-text: #273449;
+  --desktop-font-trigger-border: #d7dce5;
+  --desktop-font-trigger-shadow: none;
 
-  --desktop-font-trigger-active-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 244, 244, 0.78));
+  --desktop-font-trigger-active-bg: #fff5f5;
   --desktop-font-trigger-active-border: rgba(236, 65, 65, 0.32);
   --desktop-font-trigger-active-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 14px 30px rgba(236, 65, 65, 0.08);
 
-  --desktop-font-menu-bg: rgba(255, 255, 255, 0.88);
-  --desktop-font-menu-border: rgba(255, 255, 255, 0.5);
+  --desktop-font-menu-bg: #fafbfc;
+  --desktop-font-menu-border: #d7dce5;
   --desktop-font-menu-shadow: 0 24px 60px rgba(15, 23, 42, 0.16), 0 10px 24px rgba(15, 23, 42, 0.08);
   --desktop-font-menu-header-color: rgba(71, 85, 105, 0.92);
   --desktop-font-menu-header-border: rgba(148, 163, 184, 0.12);
@@ -1690,10 +1693,12 @@ onUnmounted(() => {
 
   --desktop-font-option-active-bg: linear-gradient(180deg, rgba(236, 65, 65, 0.12), rgba(236, 65, 65, 0.06));
   --desktop-font-option-active-border: rgba(236, 65, 65, 0.2);
-  --desktop-font-option-active-text: #ec4141;
+  --desktop-font-option-active-text: #c83232;
 }
 
-.dark :is(.desktop-lyrics-settings, .desktop-font-menu, .desktop-custom-modal) {
+.dark .desktop-lyrics-settings,
+.dark .desktop-font-menu,
+.dark .desktop-custom-modal {
   /* 桌面歌词设置组件 - 深色模式 CSS 变量重写 */
   --desktop-chip-bg: rgba(255, 255, 255, 0.04);
   --desktop-chip-border: rgba(255, 255, 255, 0.08);
@@ -1703,18 +1708,19 @@ onUnmounted(() => {
   --desktop-chip-active-border: rgba(236, 65, 65, 0.35);
   --desktop-chip-active-text: #ff8b8b;
 
-  --desktop-font-trigger-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.04));
-  --desktop-font-trigger-border: rgba(255, 255, 255, 0.08);
-  --desktop-font-trigger-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 12px 28px rgba(0, 0, 0, 0.18);
+  --desktop-font-trigger-bg: #30343e;
+  --desktop-font-trigger-text: #edf0f5;
+  --desktop-font-trigger-border: #4a5160;
+  --desktop-font-trigger-shadow: none;
 
-  --desktop-font-trigger-active-bg: linear-gradient(180deg, rgba(236, 65, 65, 0.16), rgba(255, 255, 255, 0.05));
+  --desktop-font-trigger-active-bg: #3b2d35;
   --desktop-font-trigger-active-border: rgba(236, 65, 65, 0.34);
   --desktop-font-trigger-active-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 16px 36px rgba(0, 0, 0, 0.24);
 
-  --desktop-font-menu-bg: rgba(17, 17, 19, 0.88);
-  --desktop-font-menu-border: rgba(255, 255, 255, 0.08);
+  --desktop-font-menu-bg: #24262d;
+  --desktop-font-menu-border: #414652;
   --desktop-font-menu-shadow: 0 24px 60px rgba(0, 0, 0, 0.34), 0 10px 24px rgba(0, 0, 0, 0.24);
-  --desktop-font-menu-header-color: rgba(255, 255, 255, 0.58);
+  --desktop-font-menu-header-color: #b5bfce;
   --desktop-font-menu-header-border: rgba(255, 255, 255, 0.06);
 
   --desktop-font-option-text: rgba(255, 255, 255, 0.84);
@@ -1904,8 +1910,8 @@ onUnmounted(() => {
 }
 
 .desktop-font-picker--inline {
-  width: min(185px, 100%);
-  flex-shrink: 0;
+  width: min(224px, 100%);
+  flex: 0 1 224px;
 }
 
 .desktop-font-trigger {
@@ -1918,6 +1924,7 @@ onUnmounted(() => {
   border: 1px solid var(--desktop-font-trigger-border);
   border-radius: 18px;
   background: var(--desktop-font-trigger-bg);
+  color: var(--desktop-font-trigger-text);
   box-shadow: var(--desktop-font-trigger-shadow);
   transition:
     border-color 180ms ease,
@@ -1944,13 +1951,13 @@ onUnmounted(() => {
 }
 
 .desktop-font-menu {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--desktop-font-menu-border);
-  border-radius: 20px;
+  border-radius: 12px;
   background: var(--desktop-font-menu-bg);
   box-shadow: var(--desktop-font-menu-shadow);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
   z-index: 120;
 }
 
@@ -1959,7 +1966,8 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 16px 12px;
+  padding: 12px 14px;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--desktop-font-menu-header-border);
   color: var(--desktop-font-menu-header-color);
   font-size: 12px;
@@ -1968,6 +1976,7 @@ onUnmounted(() => {
 }
 
 .desktop-font-menu-list {
+  min-height: 0;
   max-height: 320px;
   overflow-y: auto;
   padding: 8px;
@@ -1978,9 +1987,9 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 12px 14px;
+  padding: 9px 10px;
   border: 1px solid transparent;
-  border-radius: 16px;
+  border-radius: 8px;
   text-align: left;
   color: var(--desktop-font-option-text);
   transition:
@@ -2455,10 +2464,6 @@ onUnmounted(() => {
 
   .desktop-inline-actions {
     justify-content: flex-start;
-  }
-
-  .desktop-font-picker--inline {
-    width: 100%;
   }
 
   .desktop-custom-modal {

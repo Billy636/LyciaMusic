@@ -12,6 +12,7 @@ import {
   TASKBAR_PLAYER_STATE_APPLIED_EVENT,
   TASKBAR_PLAYER_VISIBILITY_EVENT,
   TASKBAR_PLAYER_DRAG_EVENT,
+  TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
   normalizeTaskbarTextColor,
   normalizeTaskbarContentMode,
   normalizeTaskbarCoverShape,
@@ -60,7 +61,7 @@ const isDocumentVisible = ref(!document.hidden);
 useCoverRotation(artwork, reflection,
   () => coverShape.value === 'circle' && coverRotate.value,
   () => isPlaying.value && isVisible.value && isDocumentVisible.value);
-const backgroundOpacity = ref(0);
+const backgroundOpacity = ref(TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY);
 const textColor = ref('#ffffff');
 const lyricEffect = ref<TaskbarLyricEffect>('karaoke');
 const lyricHighlightColor = ref<string | null>(null);
@@ -110,7 +111,7 @@ const lyricFallbackText = computed(() => {
   if (!currentSong.value) return '享受音乐时光';
   if (lyricsStatus.value === 'loading') return '歌词加载中…';
   if (lyricsStatus.value === 'error') return '歌词暂不可用';
-  if (lyricsStatus.value === 'ready' && parsedLyrics.value.length) return '等待歌词';
+  if (lyricsStatus.value === 'ready' && parsedLyrics.value.length) return '';
   return '暂无歌词';
 });
 const hasTranslation = computed(() => contentMode.value === 'bilingual' && !!currentLyric.value?.translation?.trim());
@@ -324,7 +325,7 @@ onMounted(async () => {
     coverRotate.value = event.payload.coverRotate === true;
     canDrag.value = event.payload.canDrag !== false;
     backgroundOpacity.value = typeof opacity === 'number' && Number.isFinite(opacity)
-      ? Math.min(100, Math.max(0, opacity)) : 0;
+      ? Math.min(100, Math.max(0, opacity)) : TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY;
     localCoverUrl.value = event.payload.coverUrl;
     parsedLyrics.value = event.payload.parsedLyrics;
     lyricsStatus.value = event.payload.lyricsStatus;

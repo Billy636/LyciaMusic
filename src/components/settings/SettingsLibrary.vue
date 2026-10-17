@@ -24,10 +24,6 @@
         </div>
       </button>
 
-      <div class="configured-import-row">
-        <button type="button" class="configured-import-button" :disabled="isScanning || scanSettingsBusy" @click="handleConfiguredImport">设置后导入</button>
-      </div>
-
       <div class="short-audio-filter">
         <div class="short-audio-copy">
           <div class="short-audio-title">排除短音频</div>
@@ -81,7 +77,7 @@
             <div v-if="folder.locked" class="folder-stats" title="目录或网络共享暂时不可访问，已有歌曲记录已保留">暂不可访问</div>
             <div v-else class="folder-stats">{{ folder.song_count }} 首歌曲</div>
           </div>
-          <button type="button" class="scan-settings-trigger" :disabled="isScanning || scanSettingsBusy" @click="openScanSettings(folder.path, 'edit')"><SlidersHorizontal :size="15" aria-hidden="true" /><span>扫描设置</span></button>
+          <button type="button" class="scan-settings-trigger" :disabled="isScanning || scanSettingsBusy" @click="openScanSettings(folder.path)"><SlidersHorizontal :size="15" aria-hidden="true" /><span>扫描设置</span></button>
           <button type="button" class="remove-btn" title="移除文件夹" @click="requestRemove(folder.path)">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="3 6 5 6 21 6"/>
@@ -133,7 +129,7 @@
             <LibraryScanOptions v-else-if="!scanSettingsLoadFailed" v-model="scanSettingsDraft" :source="{ kind: 'local', path: scanSettingsPath }" :root-path="scanSettingsPath" :disabled="scanSettingsBusy" />
             <p v-if="scanSettingsError" class="scan-dialog-error" role="alert">{{ scanSettingsError }}</p>
           </div>
-          <footer class="scan-dialog-actions"><button type="button" class="scan-dialog-cancel" :disabled="scanSettingsBusy" @click="closeScanSettings()">取消</button><button type="button" class="scan-dialog-save" :disabled="scanSettingsBusy || scanSettingsLoading || scanSettingsLoadFailed || !hasLibraryScanFormats(scanSettingsDraft, 'local')" @click="saveScanSettings">{{ scanSettingsBusy ? '处理中…' : scanSettingsMode === 'import' ? '开始导入' : '保存并重新扫描' }}</button></footer>
+          <footer class="scan-dialog-actions"><button type="button" class="scan-dialog-cancel" :disabled="scanSettingsBusy" @click="closeScanSettings()">取消</button><button type="button" class="scan-dialog-save" :disabled="scanSettingsBusy || scanSettingsLoading || scanSettingsLoadFailed || !hasLibraryScanFormats(scanSettingsDraft, 'local')" @click="saveScanSettings">{{ scanSettingsBusy ? '处理中…' : '保存并重新扫描' }}</button></footer>
         </section>
       </div>
     </Teleport>
@@ -158,7 +154,6 @@ import { useLibraryStore } from '../../features/library/store';
 import { useLibraryRuntimeActions } from '../../features/library/useLibraryRuntimeActions';
 import { libraryApi } from '../../services/tauri/libraryApi';
 import type { LibraryScanSettings } from '../../types';
-import { folderPathKey } from '../../utils/folderMove';
 import { useToast } from '../../composables/toast';
 import {
   normalizeLibraryMinDurationSeconds,
@@ -204,7 +199,6 @@ const showConfirm = ref(false);
 const folderToRemove = ref('');
 const confirmContent = ref('');
 const scanSettingsPath = ref('');
-const scanSettingsMode = ref<'import' | 'edit'>('edit');
 const scanSettingsDraft = ref<LibraryScanSettings>(defaultLibraryScanSettings('local'));
 const scanSettingsLoading = ref(false);
 const scanSettingsLoadFailed = ref(false);
@@ -216,12 +210,11 @@ const scanDialogTitleId = useId();
 let scanSettingsRequest = 0;
 let scanReturnFocus: HTMLElement | null = null;
 
-const openScanSettings = async (path: string, mode: 'import' | 'edit') => {
+const openScanSettings = async (path: string) => {
   if (isScanning.value || scanSettingsBusy.value) return;
   const request = ++scanSettingsRequest;
   scanReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   scanSettingsPath.value = path;
-  scanSettingsMode.value = mode;
   scanSettingsDraft.value = defaultLibraryScanSettings('local');
   scanSettingsError.value = '';
   scanSettingsLoadFailed.value = false;
@@ -249,33 +242,15 @@ const closeScanSettings = (force = false) => {
   scanReturnFocus = null;
 };
 
-const handleConfiguredImport = async () => {
-  if (isScanning.value || scanSettingsBusy.value) return;
-  const selected = await open({ directory: true, multiple: false, title: '选择音乐文件夹' });
-  if (typeof selected !== 'string') return;
-  const exists = libraryFolders.value.some(folder => folderPathKey(folder.path) === folderPathKey(selected));
-  await openScanSettings(selected, exists ? 'edit' : 'import');
-};
-
 const saveScanSettings = async () => {
   const path = scanSettingsPath.value;
-  const mode = scanSettingsMode.value;
   if (!path || scanSettingsBusy.value || !hasLibraryScanFormats(scanSettingsDraft.value, 'local')) return;
   scanSettingsBusy.value = true;
   scanSettingsError.value = '';
   try {
     await libraryApi.setLibraryScanSettings({ kind: 'local', path }, copyLibraryScanSettings(scanSettingsDraft.value));
     closeScanSettings(true);
-    const exists = libraryFolders.value.some(folder => folderPathKey(folder.path) === folderPathKey(path));
-    if (mode === 'import' && !exists) {
-      const isFirstImport = libraryFolders.value.length === 0;
-      await addLibraryFolderLinked(path, {
-        showToast: !isFirstImport,
-        scanOptions: { trigger: isFirstImport ? 'first-import' : 'folder-add', visibility: isFirstImport ? 'hero' : 'silent', sourcePath: path },
-      });
-    } else {
-      await scanLibrary({ trigger: 'manual-rescan', visibility: 'inline', sourcePath: path });
-    }
+    await scanLibrary({ trigger: 'manual-rescan', visibility: 'inline', sourcePath: path });
     if (libraryStore.lastLibraryScanError || libraryStore.libraryScanProgress?.failed) {
       throw new Error(libraryStore.lastLibraryScanError || '扫描失败，请重新扫描');
     }
@@ -405,16 +380,13 @@ const confirmRemove = async () => {
   font-size: 1rem;
 }
 
-.configured-import-row { display: flex; justify-content: flex-end; margin: -8px 0 16px; }
-.configured-import-button { border: 0; border-radius: 6px; background: transparent; padding: 4px 0 4px 8px; color: var(--app-text-secondary); font: inherit; font-size: 12px; cursor: pointer; }
-.configured-import-button:hover { color: #ec4141; }
 .scan-settings-trigger { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; border: 0; border-radius: 8px; background: transparent; color: var(--app-text-secondary); padding: 8px; font: inherit; font-size: 12px; cursor: pointer; }
 .scan-settings-trigger:hover { background: rgb(236 65 65 / .07); color: #ec4141; }
-.configured-import-button:disabled, .scan-settings-trigger:disabled { opacity: .5; cursor: not-allowed; }
+.scan-settings-trigger:disabled { opacity: .5; cursor: not-allowed; }
 .scan-warning-card { margin-top: 14px; border-radius: 12px; padding: 14px 16px; background: rgb(236 65 65 / .055); border: 1px solid rgb(236 65 65 / .14); }
 .scan-warning-list { margin: 8px 0 0; padding-left: 18px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .scan-dialog-backdrop { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgb(0 0 0 / .3); backdrop-filter: blur(6px); }
-.scan-dialog { display: flex; flex-direction: column; width: min(100%, 600px); max-height: 85vh; overflow: hidden; border: 1px solid rgb(148 163 184 / .2); border-radius: 12px; background: rgb(255 255 255 / .96); color: #29292f; box-shadow: 0 18px 60px rgb(0 0 0 / .2); }
+.scan-dialog { --app-text-secondary: #5b6473; --settings-divider: #e3e7ee; display: flex; flex-direction: column; width: min(100%, 600px); max-height: 85vh; overflow: hidden; border: 1px solid #e3e7ee; border-radius: 12px; background: #fafbfc; color: #29292f; color-scheme: light; box-shadow: 0 18px 60px rgb(0 0 0 / .2); }
 .scan-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 25px 16px; }
 .scan-dialog-heading h2 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 17px; font-weight: 500; }
 .scan-dialog-heading h2 span { width: 4px; height: 16px; border-radius: 10px; background: #ec4141; }
@@ -433,9 +405,10 @@ const confirmRemove = async () => {
 .scan-dialog-cancel { background: transparent; color: inherit; }
 .scan-dialog-actions .scan-dialog-save { background: #ec4141; border-color: #ec4141; color: white; }
 .scan-dialog button:disabled { opacity: .5; cursor: not-allowed; }
-.scan-dialog button:focus-visible, .scan-settings-trigger:focus-visible, .configured-import-button:focus-visible { outline: 2px solid rgb(236 65 65 / .65); outline-offset: 3px; }
-:global(.dark) .scan-dialog { border-color: rgb(255 255 255 / .1); background: rgb(32 32 34 / .98); color: #eeeeef; }
-:global(.dark) .scan-dialog-source { background: rgb(255 255 255 / .04); }
+.scan-dialog button:focus-visible, .scan-settings-trigger:focus-visible { outline: 2px solid rgb(236 65 65 / .65); outline-offset: 3px; }
+.dark .scan-dialog { --app-text-secondary: #b5bfce; --settings-divider: #3a3e48; border-color: #3a3e48; background: #24262d; color: #eeeeef; color-scheme: dark; }
+.dark .scan-dialog-source { background: rgb(255 255 255 / .05); }
+.dark .scan-dialog-heading button:hover { background: rgb(255 255 255 / .08); }
 @media (max-width: 420px) { .scan-dialog-backdrop { padding: 12px; } .scan-dialog-heading { padding: 18px 17px; } .scan-dialog-scroll { padding: 0 17px; } .scan-dialog-actions { padding: 14px 17px 18px; } .library-item { flex-wrap: wrap; } }
 
 .library-list {

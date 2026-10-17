@@ -16,8 +16,9 @@ export const TASKBAR_PLAYER_WINDOW_WIDTH = 280;
 export const TASKBAR_PLAYER_MIN_WIDTH = 220;
 export const TASKBAR_PLAYER_MAX_WIDTH = 600;
 export const TASKBAR_PLAYER_DEFAULT_TEXT_COLOR = '#ffffff';
+export const TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY = 50;
 export type TaskbarContentMode = 'title-lyrics' | 'bilingual' | 'double-line' | 'lyrics-only';
-export type TaskbarLyricEffect = 'karaoke' | 'word' | 'none';
+export type TaskbarLyricEffect = 'karaoke' | 'none';
 export type TaskbarCoverShape = 'square' | 'circle';
 
 export function normalizeTaskbarContentMode(value: unknown): TaskbarContentMode {
@@ -25,7 +26,7 @@ export function normalizeTaskbarContentMode(value: unknown): TaskbarContentMode 
 }
 
 export function normalizeTaskbarLyricEffect(value: unknown): TaskbarLyricEffect {
-  return value === 'word' || value === 'none' ? value : 'karaoke';
+  return value === 'none' ? value : 'karaoke';
 }
 
 /** A null highlight follows the taskbar font color, including existing settings. */
