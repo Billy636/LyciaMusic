@@ -30,6 +30,7 @@ const coverShape = computed(() => normalizeTaskbarCoverShape(settings.value.task
 const positionLocked = computed(() => settings.value.taskbarPositionLocked);
 const leftOffset = computed(() => normalizeTaskbarLeftOffset(settings.value.taskbarLeftOffset));
 const contentModeOptions = [
+  { value: 'adaptive', label: '自适应' },
   { value: 'title-lyrics', label: '歌名＋歌词' },
   { value: 'bilingual', label: '原文＋译文' },
   { value: 'double-line', label: '当前句＋下一句' },
@@ -102,6 +103,7 @@ async function alignLeft() {
       <div class="taskbar-setting-row">
         <div>
           <label for="taskbar-content-mode" class="taskbar-setting-label">显示内容</label>
+          <p v-if="contentMode === 'adaptive'" class="mt-1 text-xs app-text-secondary">有译文时显示原文与译文，否则显示当前句与下一句</p>
         </div>
         <SettingsSelect class="taskbar-select" label="显示内容" hide-label trigger-id="taskbar-content-mode"
           :model-value="contentMode" :options="contentModeOptions" @update:model-value="patchSettings({ taskbarContentMode: normalizeTaskbarContentMode($event) })" />
@@ -134,7 +136,7 @@ async function alignLeft() {
         :aria-hidden="lyricEffect === 'none'" :inert="lyricEffect === 'none'">
         <div class="taskbar-lyric-subsettings-inner">
           <div class="taskbar-lyric-subsettings-panel" role="group" aria-label="逐字效果子设置">
-            <div v-if="contentMode === 'bilingual'" class="taskbar-setting-row">
+            <div v-if="contentMode === 'bilingual' || contentMode === 'adaptive'" class="taskbar-setting-row">
               <span id="taskbar-translation-karaoke-label" class="taskbar-setting-label">翻译跟随高亮</span>
               <button type="button" role="switch" aria-labelledby="taskbar-translation-karaoke-label"
                 :aria-checked="translationKaraoke" :disabled="lyricEffect === 'none'" class="taskbar-switch"

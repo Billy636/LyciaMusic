@@ -85,14 +85,18 @@ const interludeDotProgress = (index: number) => {
   if (!gap) return 0;
   return Math.max(0, Math.min(1, (lyricTime.value - gap.start) / (gap.end - gap.start) * 3 - index));
 };
+const sourceLyric = computed(() => currentSong.value && lyricsStatus.value === 'ready'
+  ? resolveTaskbarLyricLine(parsedLyrics.value, lyricTime.value) : null);
+const resolvedContentMode = computed(() => {
+  if (contentMode.value !== 'adaptive') return contentMode.value;
+  return sourceLyric.value?.translation?.trim() ? 'bilingual' : 'double-line';
+});
 const lyricRows = computed(() => {
   if (!currentSong.value || lyricsStatus.value !== 'ready' || lyricInterlude.value) return [];
   // Keep selection on source cues so finishing the highlight does not clear the line.
-  const current = contentMode.value === 'double-line'
-    ? null : resolveTaskbarLyricLine(parsedLyrics.value, lyricTime.value);
-  const sourceLines = contentMode.value === 'double-line'
+  const sourceLines = resolvedContentMode.value === 'double-line'
     ? resolveTaskbarDoubleLyricLines(parsedLyrics.value, lyricTime.value)
-    : current ? [current] : [];
+    : sourceLyric.value ? [sourceLyric.value] : [];
   return sourceLines.map(sourceLine => {
     const index = parsedLyrics.value.indexOf(sourceLine);
     return { key: `${currentSong.value?.path}:${index}:source`, line: taskbarLyrics.value[index] };
@@ -114,7 +118,7 @@ const lyricFallbackText = computed(() => {
   if (lyricsStatus.value === 'ready' && parsedLyrics.value.length) return '';
   return '暂无歌词';
 });
-const hasTranslation = computed(() => contentMode.value === 'bilingual' && !!currentLyric.value?.translation?.trim());
+const hasTranslation = computed(() => resolvedContentMode.value === 'bilingual' && !!currentLyric.value?.translation?.trim());
 const coverTitle = computed(() => `${songTitle.value}${currentSong.value?.artist ? ` · ${currentSong.value.artist}` : ''}\n显示/收起主窗口`);
 let lyricFrame = 0;
 let isFinishingDrag = false;
@@ -419,7 +423,7 @@ onUnmounted(() => {
             :style="{ '--dot-progress': interludeDotProgress(index - 1) }" />
         </div>
         <TransitionGroup
-          v-else-if="contentMode === 'double-line' && currentLyric"
+          v-else-if="resolvedContentMode === 'double-line' && currentLyric"
           tag="div"
           name="taskbar-lyric-stack"
           class="taskbar-double-lyrics"

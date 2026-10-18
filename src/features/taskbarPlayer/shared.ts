@@ -17,12 +17,13 @@ export const TASKBAR_PLAYER_MIN_WIDTH = 220;
 export const TASKBAR_PLAYER_MAX_WIDTH = 600;
 export const TASKBAR_PLAYER_DEFAULT_TEXT_COLOR = '#ffffff';
 export const TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY = 50;
-export type TaskbarContentMode = 'title-lyrics' | 'bilingual' | 'double-line' | 'lyrics-only';
+export type TaskbarContentMode = 'adaptive' | 'title-lyrics' | 'bilingual' | 'double-line' | 'lyrics-only';
 export type TaskbarLyricEffect = 'karaoke' | 'none';
 export type TaskbarCoverShape = 'square' | 'circle';
 
 export function normalizeTaskbarContentMode(value: unknown): TaskbarContentMode {
-  return value === 'bilingual' || value === 'double-line' || value === 'lyrics-only' ? value : 'title-lyrics';
+  return value === 'adaptive' || value === 'bilingual' || value === 'double-line' || value === 'lyrics-only'
+    ? value : 'title-lyrics';
 }
 
 export function normalizeTaskbarLyricEffect(value: unknown): TaskbarLyricEffect {
