@@ -12,6 +12,7 @@ export const playerStorageKeys = {
   settings: 'player_settings',
   volume: 'player_volume',
   playMode: 'player_mode',
+  shuffleState: 'player_shuffle_state_v1',
   lastTime: 'player_last_time',
   outputDevice: 'player_output_device',
   outputDeviceMode: 'player_output_device_mode',
