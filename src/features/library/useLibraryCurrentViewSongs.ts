@@ -405,9 +405,13 @@ export function useLibraryCurrentViewSongs({
       libraryFolderSongPathCacheVersion,
       searchRevision,
     ],
-    async ([viewMode, folderFilter, query, sortMode, recursive]) => {
+    async ([viewMode, folderFilter, query, sortMode, recursive], previous) => {
       const requestId = ++folderViewRequestId;
-      folderViewSongPaths.value = [];
+      // Cache fills and metadata hydration can re-run this watcher for the same folder.
+      // Keep its visible rows until the replacement is ready; never carry rows into another folder.
+      if (viewMode !== previous?.[0] || folderFilter !== previous?.[1]) {
+        folderViewSongPaths.value = [];
+      }
       folderSearchHasMore.value = false;
 
       if (viewMode !== 'folder' || !folderFilter) {

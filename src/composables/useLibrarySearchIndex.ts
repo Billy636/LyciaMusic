@@ -11,6 +11,7 @@ import { useLibraryDetailSongPathCache } from './useLibraryDetailSongPathCache';
 import { useLibraryFolderSongPathCache } from './useLibraryFolderSongPathCache';
 
 const SEARCH_INDEX_BATCH_SIZE = 128;
+const SEARCH_INDEX_PROGRESS_DELAY_MS = 300;
 const indexed = ref(0);
 const total = ref(0);
 const isBuilding = ref(false);
@@ -39,12 +40,19 @@ export function useLibrarySearchIndex() {
     }
 
     activeBuild = (async () => {
-      isBuilding.value = true;
       lastError.value = null;
       let wasIncomplete = false;
+      let progressTimer: ReturnType<typeof window.setTimeout> | undefined;
       try {
         applyStatus(await tauriInvoke('get_search_index_status'));
         wasIncomplete = indexed.value < total.value;
+        if (!wasIncomplete) {
+          return;
+        }
+        // Completed checks and short builds should not flash a progress label.
+        progressTimer = window.setTimeout(() => {
+          isBuilding.value = indexed.value < total.value;
+        }, SEARCH_INDEX_PROGRESS_DELAY_MS);
 
         while (indexed.value < total.value) {
           const sources = await tauriInvoke('get_search_index_batch', {
@@ -70,6 +78,7 @@ export function useLibrarySearchIndex() {
         lastError.value = error;
         console.warn('Failed to build pinyin search index:', error);
       } finally {
+        if (progressTimer !== undefined) window.clearTimeout(progressTimer);
         isBuilding.value = false;
         activeBuild = null;
       }
@@ -90,9 +99,9 @@ export function useLibrarySearchIndex() {
   return {
     searchIndexIndexed: computed(() => indexed.value),
     searchIndexTotal: computed(() => total.value),
-    searchIndexBuilding: computed(() => isBuilding.value),
+    searchIndexBuilding: computed(() => isBuilding.value && indexed.value < total.value),
     searchIndexProgress: computed(() => (
-      total.value > 0 ? Math.min(100, Math.round(indexed.value / total.value * 100)) : 100
+      total.value > 0 ? Math.min(100, Math.floor(indexed.value / total.value * 100)) : 100
     )),
     searchIndexError: computed(() => lastError.value),
     rebuildSearchIndex: buildIndex,
