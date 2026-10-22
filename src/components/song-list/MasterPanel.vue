@@ -144,7 +144,7 @@ const {
 
 watch(
   folderTree,
-  async newTree => {
+  newTree => {
     if (newTree.length === 0) {
       activeRootPath.value = null;
       return;
@@ -165,11 +165,6 @@ watch(
     // Keep an explicit collection target while its folder tree is unavailable.
     if (!collectionTarget && selectedRoot && selectedRoot.children.length === 0 && selectedRoot.song_count > 0) {
       currentFolderFilter.value = selectedRoot.path;
-      try {
-        await refreshFolder(selectedRoot.path, false);
-      } catch (error) {
-        console.error('Failed to auto-load root folder songs:', error);
-      }
     }
   },
   { immediate: true },

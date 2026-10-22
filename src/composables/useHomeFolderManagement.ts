@@ -69,17 +69,11 @@ export function useHomeFolderManagement({
 
   const syncRootSelection = async (path: string | null, options: { forceRefresh?: boolean } = {}) => {
     const normalizedPath = path || '';
-    const shouldRefresh =
-      !!normalizedPath && (
-        options.forceRefresh ||
-        activeRootPath.value !== normalizedPath ||
-        currentFolderFilter.value !== normalizedPath
-      );
-
     activeRootPath.value = path;
     currentFolderFilter.value = normalizedPath;
 
-    if (!shouldRefresh) {
+    // Browsing uses cached library paths; only explicit mutation flows request a rescan.
+    if (!normalizedPath || !options.forceRefresh) {
       return;
     }
 
@@ -91,7 +85,7 @@ export function useHomeFolderManagement({
   };
 
   const handleActiveRootChange = (path: string | null) => {
-    void syncRootSelection(path, { forceRefresh: true });
+    void syncRootSelection(path);
   };
 
   watch(activeRootPath, (newPath, oldPath) => {
