@@ -323,9 +323,6 @@ const openFooterContextMenu = (event: MouseEvent) => {
 };
 const openFooterMenuFromKeyboard = (event: KeyboardEvent) => {
   if (event.defaultPrevented) return;
-  if (event.target === footerRef.value && (event.key === 'Enter' || event.key === ' ')) {
-    event.preventDefault(); event.stopPropagation(); handleOpenDetail(); return;
-  }
   if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
   event.preventDefault(); event.stopPropagation();
   const anchor = event.target instanceof HTMLElement ? event.target : footerRef.value;
@@ -418,7 +415,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <footer ref="footerRef" class="player-footer relative z-[60] h-20 select-none bg-transparent" :tabindex="currentSong || isIdle ? 0 : -1" aria-label="播放底栏，按 Enter 切换播放页"
+  <footer ref="footerRef" class="player-footer relative z-[60] h-20 select-none bg-transparent" aria-label="播放底栏"
     :class="showPlayerDetail ? 'text-white' : 'text-gray-800 dark:text-white'"
     @click="handleFooterClick"
     @mouseenter="handleFooterMouseEnter" @mousemove="handleFooterMouseEnter" @mouseleave="handleFooterMouseLeave"
