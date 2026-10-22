@@ -543,15 +543,13 @@ onBeforeUnmount(() => {
   background: transparent;
   opacity: 0.35;
   transform: scale(0.98); /* 非激活行平面轻微缩小 */
-  transform-origin: left center; /* 明确默认以靠左为放大原点，防止使用非法的 flex-start 导致浏览器回退到 center 发生向左溢出裁剪 */
+  transform-origin: var(--lyrics-line-transform-origin, 0%) center;
   transition: opacity 550ms ease, transform 760ms cubic-bezier(0.34, 1.56, 0.64, 1); /* 物理缩放与滚动曲线联动，带有极微幅超调弹性 */
 }
 
 /* 制作团队信息置顶排版样式 */
 .light-lyric-line--credit {
   font-size: 0.72em !important;
-  align-items: flex-start !important;
-  text-align: left !important;
   color: rgba(255, 255, 255, 0.45);
   opacity: 0.45;
   cursor: pointer;
@@ -567,14 +565,6 @@ onBeforeUnmount(() => {
   opacity: 1 !important;
   transform: scale(1.04) !important; /* 活跃行微幅平面放大 */
   text-shadow: 0 0 20px rgba(255, 255, 255, 0.12); /* 亮白高级微阴影 */
-}
-
-/* 适配不同的对齐方式，由 CSS 容器层自适应设定 transform-origin */
-:deep(.lyrics-align-center) .light-lyric-line {
-  transform-origin: center center;
-}
-:deep(.lyrics-align-right) .light-lyric-line {
-  transform-origin: right center;
 }
 
 .light-lyric-main {
