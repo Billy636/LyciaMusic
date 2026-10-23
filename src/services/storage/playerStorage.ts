@@ -2,7 +2,7 @@ import type { AppSettings, HistoryItem, Playlist, Song, EqualizerPreset } from '
 import { localStore } from './localStore';
 
 export type ArtistSortMode = 'count' | 'count_asc' | 'name' | 'name_desc';
-export type AlbumSortMode = 'count' | 'name' | 'artist' | 'custom';
+export type AlbumSortMode = 'count' | 'count_asc' | 'name' | 'name_desc' | 'artist' | 'artist_desc';
 export type FolderSortMode = 'title' | 'name' | 'artist' | 'track_number' | 'added_at' | 'added_at_asc' | 'custom';
 export type LocalSortMode = 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc' | 'custom';
 export type AlbumDetailSortMode = 'track_number' | 'track_number_desc' | 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
@@ -200,7 +200,6 @@ export const playerStorage = {
     playlists: Playlist[];
     settings: AppSettings;
     playQueuePaths: string[];
-    albumCustomOrder: string[];
     folderCustomOrder: Record<string, string[]>;
     localCustomOrder: string[];
   }) {
@@ -210,7 +209,6 @@ export const playerStorage = {
     localStore.setJson(playerStorageKeys.playlists, options.playlists);
     localStore.setJson(playerStorageKeys.settings, options.settings);
     localStore.setJson(options.queuePathKey, options.playQueuePaths);
-    localStore.setJson(playerStorageKeys.albumCustomOrder, options.albumCustomOrder);
     localStore.setJson(playerStorageKeys.folderCustomOrder, options.folderCustomOrder);
     localStore.setJson(playerStorageKeys.localCustomOrder, options.localCustomOrder);
     localStore.remove(options.legacyPlaylistKey);

@@ -85,7 +85,6 @@ interface SortSettingsRefs {
   albumArtistSortMode?: Ref<ArtistSortMode>;
   albumSortMode: Ref<AlbumSortMode>;
   albumDetailSortMode: Ref<AlbumDetailSortMode>;
-  albumCustomOrder: Ref<string[]>;
   folderSortMode: Ref<FolderSortMode>;
   folderCustomOrder: Ref<Record<string, string[]>>;
   localSortMode: Ref<LocalSortMode>;
@@ -114,7 +113,6 @@ const restoreSortSettings = ({
   albumArtistSortMode,
   albumSortMode,
   albumDetailSortMode,
-  albumCustomOrder,
   folderSortMode,
   folderCustomOrder,
   localSortMode,
@@ -138,8 +136,10 @@ const restoreSortSettings = ({
   }
 
   const storedAlbumSort = playerStorage.getString(playerStorageKeys.albumSortMode);
-  if (storedAlbumSort && ['count', 'name', 'artist', 'custom'].includes(storedAlbumSort)) {
-    albumSortMode.value = storedAlbumSort as AlbumSortMode;
+  albumSortMode.value = storedAlbumSort && ['name', 'name_desc', 'count', 'count_asc', 'artist', 'artist_desc'].includes(storedAlbumSort)
+    ? storedAlbumSort as AlbumSortMode : 'name';
+  if (storedAlbumSort && storedAlbumSort !== albumSortMode.value) {
+    playerStorage.setString(playerStorageKeys.albumSortMode, albumSortMode.value);
   }
 
   const storedAlbumDetailSort = playerStorage.getString(playerStorageKeys.albumDetailSortMode);
@@ -150,10 +150,7 @@ const restoreSortSettings = ({
   playerStorage.remove(playerStorageKeys.artistCustomOrder);
   playerStorage.remove(playerStorageKeys.albumArtistCustomOrder);
 
-  const storedAlbumOrder = playerStorage.readStringArray(playerStorageKeys.albumCustomOrder);
-  if (storedAlbumOrder) {
-    albumCustomOrder.value = storedAlbumOrder;
-  }
+  playerStorage.remove(playerStorageKeys.albumCustomOrder);
 
   const storedFolderSort = playerStorage.getString(playerStorageKeys.folderSortMode);
   if (storedFolderSort && ['title', 'name', 'artist', 'track_number', 'added_at', 'added_at_asc', 'custom'].includes(storedFolderSort)) {
@@ -225,7 +222,6 @@ export const createPlayerLifecycle = ({
     albumArtistSortMode,
     albumSortMode,
     albumDetailSortMode,
-    albumCustomOrder,
     folderSortMode,
     folderCustomOrder,
     localSortMode,
@@ -404,7 +400,6 @@ export const createPlayerLifecycle = ({
       },
       { deep: true }
     );
-    watch(albumCustomOrder, scheduleStatePersistence, { deep: true });
     watch(folderCustomOrder, scheduleStatePersistence, { deep: true });
     watch(localCustomOrder, scheduleStatePersistence, { deep: true });
 
@@ -614,7 +609,6 @@ export const createPlayerLifecycle = ({
         albumArtistSortMode,
         albumSortMode,
         albumDetailSortMode,
-        albumCustomOrder,
         folderSortMode,
         folderCustomOrder,
         localSortMode,

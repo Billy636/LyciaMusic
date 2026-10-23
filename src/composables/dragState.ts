@@ -2,7 +2,7 @@ import { reactive } from 'vue';
 
 import type { Song } from '../types';
 
-export type DragSessionType = 'song' | 'playlist' | 'folder' | 'album';
+export type DragSessionType = 'song' | 'playlist' | 'folder';
 
 export interface DragSessionState {
   active: boolean;

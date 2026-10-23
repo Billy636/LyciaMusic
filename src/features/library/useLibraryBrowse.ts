@@ -28,7 +28,6 @@ export function useLibraryBrowse() {
     artistSortMode: trackArtistSortMode,
     albumArtistSortMode,
     albumSortMode,
-    albumCustomOrder,
   } = storeToRefs(libraryStore);
 
   const artistSortMode = computed({
@@ -38,13 +37,6 @@ export function useLibraryBrowse() {
       else trackArtistSortMode.value = mode;
     },
   });
-
-  const updateAlbumOrder = (newOrder: string[]) => {
-    albumCustomOrder.value = newOrder;
-    if (albumSortMode.value !== 'custom') {
-      albumSortMode.value = 'custom';
-    }
-  };
 
   const reorderWatchedFolders = (from: number, to: number) => {
     libraryStore.reorderWatchedFolders(from, to);
@@ -82,7 +74,6 @@ export function useLibraryBrowse() {
     folderTree: libraryView.libraryHierarchy,
     librarySongs: libraryView.canonicalSongs,
     displaySongList: libraryView.currentViewSongs,
-    updateAlbumOrder,
     reorderWatchedFolders,
   };
 }

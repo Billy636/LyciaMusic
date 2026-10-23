@@ -5,6 +5,7 @@ import { compareByAlphabetIndex } from '../../utils/alphabetIndex';
 import type { AlbumSortMode, ArtistSortMode } from '../../services/storage/playerStorage';
 import { matchesPinyinSearch } from '../../utils/pinyinSearch';
 import {
+  compareAlbumsByMode,
   type AlbumListItem,
   type ArtistListItem,
 } from './playerLibraryViewShared';
@@ -17,7 +18,6 @@ interface UseLibraryCatalogSelectorsOptions {
   artistSortMode: Ref<ArtistSortMode>;
   albumSortMode: Ref<AlbumSortMode>;
   albumArtistSortMode: Ref<ArtistSortMode>;
-  albumCustomOrder: Ref<string[]>;
 }
 
 export function useLibraryCatalogSelectors({
@@ -28,7 +28,6 @@ export function useLibraryCatalogSelectors({
   artistSortMode,
   albumSortMode,
   albumArtistSortMode,
-  albumCustomOrder,
 }: UseLibraryCatalogSelectorsOptions) {
   const sortArtists = (items: ArtistListItem[], mode: ArtistSortMode) => {
     const list = [...items];
@@ -79,23 +78,7 @@ export function useLibraryCatalogSelectors({
   const albumList = computed<AlbumListItem[]>(() => {
     const list = [...albumCatalog.value];
 
-    if (albumSortMode.value === 'name') {
-      list.sort((a, b) => compareByAlphabetIndex(a.name, b.name));
-    } else if (albumSortMode.value === 'custom') {
-      const orderMap = new Map(albumCustomOrder.value.map((key, index) => [key, index]));
-      list.sort((a, b) => {
-        const left = orderMap.has(a.key) ? orderMap.get(a.key)! : Number.MAX_SAFE_INTEGER;
-        const right = orderMap.has(b.key) ? orderMap.get(b.key)! : Number.MAX_SAFE_INTEGER;
-        return left - right;
-      });
-    } else if (albumSortMode.value === 'count') {
-      list.sort((a, b) => b.count - a.count || compareByAlphabetIndex(a.artist, b.artist));
-    } else {
-      list.sort((a, b) => {
-        const artistDiff = compareByAlphabetIndex(a.artist, b.artist);
-        return artistDiff !== 0 ? artistDiff : compareByAlphabetIndex(a.name, b.name);
-      });
-    }
+    list.sort((a, b) => compareAlbumsByMode(a, b, albumSortMode.value));
 
     return list;
   });

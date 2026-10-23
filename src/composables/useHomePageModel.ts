@@ -37,7 +37,6 @@ export function useHomePageModel() {
     sourceSongPaths,
     albumCatalog,
     albumSortMode,
-    albumCustomOrder,
   } = storeToRefs(libraryStore);
 
   const {
@@ -263,7 +262,6 @@ export function useHomePageModel() {
     currentArtistBrowseMode,
     librarySongs,
     albumSortMode,
-    albumCustomOrder,
   });
 
   const handlePlayAll = async () => {

@@ -1,8 +1,29 @@
 import type { AlbumCatalogItem, ArtistCatalogItem, Song } from '../../types';
-import { getAlphabetIndexKey, getAlphabetSortKey, INDEX_ORDER } from '../../utils/alphabetIndex';
+import type { AlbumSortMode } from '../../services/storage/playerStorage';
+import { compareByAlphabetIndex, getAlphabetIndexKey, getAlphabetSortKey, INDEX_ORDER } from '../../utils/alphabetIndex';
 
 export type ArtistListItem = ArtistCatalogItem;
 export type AlbumListItem = AlbumCatalogItem;
+
+export const compareAlbumsByMode = (
+  left: Pick<AlbumCatalogItem, 'name' | 'artist' | 'count'>,
+  right: Pick<AlbumCatalogItem, 'name' | 'artist' | 'count'>,
+  mode: AlbumSortMode,
+) => {
+  if (mode === 'count' || mode === 'count_asc') {
+    const countDiff = mode === 'count_asc' ? left.count - right.count : right.count - left.count;
+    return countDiff || compareByAlphabetIndex(left.artist, right.artist)
+      || compareByAlphabetIndex(left.name, right.name);
+  }
+  if (mode === 'artist' || mode === 'artist_desc') {
+    const artistDiff = compareByAlphabetIndex(left.artist, right.artist);
+    return (mode === 'artist_desc' ? -artistDiff : artistDiff)
+      || compareByAlphabetIndex(left.name, right.name);
+  }
+  const nameDiff = compareByAlphabetIndex(left.name, right.name);
+  return (mode === 'name_desc' ? -nameDiff : nameDiff)
+    || compareByAlphabetIndex(left.artist, right.artist);
+};
 
 export const isDirectParent = (parentPath: string, childPath: string) => {
   if (!parentPath || !childPath) return false;

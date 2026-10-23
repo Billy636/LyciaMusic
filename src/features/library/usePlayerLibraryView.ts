@@ -52,7 +52,6 @@ const createPlayerLibraryView = () => {
     artistSortMode,
     albumArtistSortMode,
     albumSortMode,
-    albumCustomOrder,
     folderSortMode,
     folderCustomOrder,
     localSortMode,
@@ -79,7 +78,6 @@ const createPlayerLibraryView = () => {
     artistSortMode,
     albumSortMode,
     albumArtistSortMode,
-    albumCustomOrder,
   });
 
   const { includeSubfolders } = useFolderSongScope();

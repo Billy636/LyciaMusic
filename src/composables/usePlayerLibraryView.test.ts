@@ -227,7 +227,6 @@ describe('player library view', () => {
     const collectionsStore = useCollectionsStore();
     libraryStore.artistSortMode = 'count';
     libraryStore.albumSortMode = 'artist';
-    libraryStore.albumCustomOrder = [];
     libraryStore.folderSortMode = 'title';
     libraryStore.folderCustomOrder = {};
     libraryStore.localSortMode = 'title';

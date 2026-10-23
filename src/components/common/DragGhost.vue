@@ -33,14 +33,7 @@ watch([isGhostVisible, () => dragSession.type], async ([active, type]) => {
         ghostCover.value = '';
       }
     } 
-    // 2. 专辑类型 (如果有 data.name) - 这里假设 data 包含 name
-    else if (type === 'album' && dragSession.data?.name) {
-       // 专辑可以尝试获取第一首歌的封面，或者显示默认图标
-       // 暂时显示默认图标或尝试获取封面(如果有路径)
-       // 如果 data 里有 firstSongPath，可以尝试加载
-       ghostCover.value = ''; 
-    }
-    // 3. 其他类型 (Folder/Playlist/Artist) 暂不需要异步加载图片，使用默认图标
+    // 文件夹和歌单使用默认图标。
     else {
        ghostCover.value = '';
     }
@@ -125,7 +118,6 @@ const title = computed(() => {
   if (dragSession.type === 'song' && dragSession.songs.length > 0) return dragSession.songs[0].title || dragSession.songs[0].name;
   if (dragSession.type === 'playlist') return dragSession.data?.name || '未知歌单';
   if (dragSession.type === 'folder') return dragSession.data?.name || '未知文件夹';
-  if (dragSession.type === 'album') return dragSession.data?.name || '未知专辑';
   return '移动中...';
 });
 
@@ -136,7 +128,6 @@ const subtitle = computed(() => {
   if (dragSession.type === 'playlist') return '歌单';
   if (dragSession.type === 'folder') return dragSession.targetFolder
     ? `移动到 ${dragSession.targetFolder.name}` : '拖到目标文件夹以移动';
-  if (dragSession.type === 'album') return '专辑';
   return '';
 });
 
@@ -176,8 +167,6 @@ const badgeCount = computed(() => {
              <svg v-else-if="dragSession.type === 'folder'" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-400 dark:text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
              </svg>
-             <!-- Album Default -->
-             <div v-else-if="dragSession.type === 'album'" class="text-2xl">💿</div>
           </template>
 
           <div class="absolute inset-0 bg-black/5"></div>

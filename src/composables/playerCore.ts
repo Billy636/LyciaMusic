@@ -195,9 +195,7 @@ function createPlayerCore() {
   const { playlistSortMode, setPlaylistSortMode } = usePlaylistSort();
 
   const {
-    albumSortMode,
     albumDetailSortMode,
-    albumCustomOrder,
     folderSortMode,
     folderCustomOrder,
     localSortMode,
@@ -969,12 +967,6 @@ function createPlayerCore() {
   const sortingDomain = {
     reorderWatchedFolders: (from: number, to: number) => libraryStore.reorderWatchedFolders(from, to),
     reorderPlaylists: (from: number, to: number) => collectionsStore.reorderPlaylists(from, to),
-    updateAlbumOrder: (newOrder: string[]) => {
-      albumCustomOrder.value = newOrder;
-      if (albumSortMode.value !== 'custom') {
-        albumSortMode.value = 'custom';
-      }
-    },
     updateFolderOrder: (folderPath: string, newOrder: string[]) => {
       folderCustomOrder.value = {
         ...folderCustomOrder.value,

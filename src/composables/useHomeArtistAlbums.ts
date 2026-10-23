@@ -2,7 +2,8 @@ import { ref, watch, type Ref } from 'vue';
 
 import type { AlbumCatalogItem, Song } from '../types';
 import { tauriInvoke } from '../services/tauri/invoke';
-import { compareByAlphabetIndex } from '../utils/alphabetIndex';
+import { compareAlbumsByMode } from '../features/library/playerLibraryViewShared';
+import type { AlbumSortMode } from '../services/storage/playerStorage';
 import type { ArtistBrowseMode } from '../shared/stores/navigation';
 
 interface ArtistAlbumItem {
@@ -18,8 +19,7 @@ interface UseHomeArtistAlbumsOptions {
   filterCondition: Ref<string>;
   currentArtistBrowseMode: Ref<ArtistBrowseMode>;
   librarySongs: Ref<Song[]>;
-  albumSortMode: Ref<'count' | 'name' | 'artist' | 'custom'>;
-  albumCustomOrder: Ref<string[]>;
+  albumSortMode: Ref<AlbumSortMode>;
 }
 
 const songHasArtistName = (song: Song, artistName: string) =>
@@ -35,7 +35,6 @@ export function useHomeArtistAlbums({
   currentArtistBrowseMode,
   librarySongs,
   albumSortMode,
-  albumCustomOrder,
 }: UseHomeArtistAlbumsOptions) {
   const artistAlbumList = ref<ArtistAlbumItem[]>([]);
   let requestId = 0;
@@ -76,32 +75,7 @@ export function useHomeArtistAlbums({
   const sortAlbums = (items: AlbumCatalogItem[] | ArtistAlbumItem[]) => {
     const albums: ArtistAlbumItem[] = items.map(item => ({ ...item }));
 
-    if (albumSortMode.value === 'name') {
-      albums.sort((left, right) => compareByAlphabetIndex(left.name, right.name));
-    } else if (albumSortMode.value === 'custom') {
-      const orderMap = new Map(albumCustomOrder.value.map((key, index) => [key, index]));
-      albums.sort((left, right) => {
-        const leftIndex = orderMap.has(left.key)
-          ? orderMap.get(left.key)!
-          : Number.MAX_SAFE_INTEGER;
-        const rightIndex = orderMap.has(right.key)
-          ? orderMap.get(right.key)!
-          : Number.MAX_SAFE_INTEGER;
-        return leftIndex - rightIndex;
-      });
-    } else if (albumSortMode.value === 'artist') {
-      albums.sort((left, right) => {
-        const artistDiff = compareByAlphabetIndex(left.artist, right.artist);
-        return artistDiff !== 0
-          ? artistDiff
-          : compareByAlphabetIndex(left.name, right.name);
-      });
-    } else {
-      albums.sort(
-        (left, right) =>
-          right.count - left.count || compareByAlphabetIndex(left.artist, right.artist),
-      );
-    }
+    albums.sort((left, right) => compareAlbumsByMode(left, right, albumSortMode.value));
 
     return albums;
   };
@@ -135,11 +109,10 @@ export function useHomeArtistAlbums({
   );
 
   watch(
-    [albumSortMode, albumCustomOrder],
+    albumSortMode,
     () => {
       artistAlbumList.value = sortAlbums(artistAlbumList.value);
     },
-    { deep: true },
   );
 
   return {
