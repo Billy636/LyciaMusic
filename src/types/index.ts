@@ -516,6 +516,7 @@ export interface AppSettings {
   enableScrollToTopButton: boolean;
   libraryMinDurationSeconds: number;
   folderIncludeSubfolders: boolean;
+  preferFolderCover?: boolean;
   artistImageFolder?: string;
   // Deprecated compat field. Retained only for legacy config deserialization.
   linkFoldersToLibrary: boolean;

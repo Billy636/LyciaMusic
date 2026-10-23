@@ -65,6 +65,23 @@
         </button>
       </div>
 
+      <div class="folder-scope-setting">
+        <div class="folder-scope-copy">
+          <div id="folder-cover-label" class="folder-scope-title">优先使用文件夹封面</div>
+          <div id="folder-cover-description" class="folder-scope-desc">使用同目录的 cover.jpg、folder.jpg、front.jpg 等图片统一歌曲封面，仅作用于图片所在目录。关闭时优先使用歌曲内嵌和同名封面，缺失时仍会使用文件夹封面。支持 JPG、JPEG、PNG、WebP、GIF、BMP。</div>
+        </div>
+        <button
+          type="button" role="switch" aria-labelledby="folder-cover-label" aria-describedby="folder-cover-description"
+          :aria-checked="!!settings.preferFolderCover"
+          @click="settings.preferFolderCover = !settings.preferFolderCover"
+          class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#EC4141]"
+          :class="settings.preferFolderCover ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'"
+        >
+          <span aria-hidden="true" class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm"
+            :class="settings.preferFolderCover ? 'translate-x-6' : 'translate-x-1'" />
+        </button>
+      </div>
+
       <div v-if="libraryFolders.length > 0" class="library-list">
         <div v-for="folder in libraryFolders" :key="folder.path" class="library-item">
           <div class="folder-icon">

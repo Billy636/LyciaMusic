@@ -154,6 +154,7 @@ export const defaultAppSettings: AppSettings = {
   enableScrollToTopButton: true,
   libraryMinDurationSeconds: 0,
   folderIncludeSubfolders: false,
+  preferFolderCover: false,
   artistImageFolder: '',
   // Deprecated compat field. Main folder-source behavior no longer depends on it.
   linkFoldersToLibrary: false,
@@ -352,6 +353,8 @@ export const mergeAppSettings = (
     ),
     folderIncludeSubfolders: typeof patch.folderIncludeSubfolders === 'boolean'
       ? patch.folderIncludeSubfolders : base.folderIncludeSubfolders,
+    preferFolderCover: typeof patch.preferFolderCover === 'boolean'
+      ? patch.preferFolderCover : base.preferFolderCover ?? false,
     artistImageFolder: typeof (patch.artistImageFolder ?? base.artistImageFolder) === 'string'
       ? (patch.artistImageFolder ?? base.artistImageFolder ?? '').trim() : '',
     lyrics: mergeLyricsSettings(base.lyrics, patch.lyrics ?? {}),

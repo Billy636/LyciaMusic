@@ -365,8 +365,8 @@ export interface TauriCommandMap {
     };
     response: void;
   };
-  get_song_cover_thumbnail: { payload: { path: string }; response: string };
-  get_song_cover: { payload: { path: string }; response: string };
+  get_song_cover_thumbnail: { payload: { path: string; edge?: number; preferFolderCover?: boolean }; response: string };
+  get_song_cover: { payload: { path: string; preferFolderCover?: boolean }; response: string };
   clear_cover_cache: { payload: undefined; response: void };
   prepare_custom_background_image: {
     payload: {

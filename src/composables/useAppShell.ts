@@ -1,4 +1,4 @@
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 
 import { usePlayer } from './player';
@@ -22,17 +22,37 @@ import { clearStartupThemePaint } from './startupTheme';
 import { useUiStore } from '../shared/stores/ui';
 import { useMainWindowRenderingPower } from './renderingPower';
 import { useLibrarySearchIndex } from './useLibrarySearchIndex';
+import { useSettingsStore } from '../features/settings/store';
+import { useCoverCache } from './useCoverCache';
 
 export function useAppShell() {
   const {
     init,
     playQueuePaths,
     currentSong,
+    currentCover,
+    currentCoverFull,
+    currentCoverPath,
     isMiniMode,
     showPlayerDetail,
     handleExternalPaths,
     libraryScanProgress,
   } = usePlayer();
+  const settingsStore = useSettingsStore();
+  const { clearCoverCaches, loadCover, loadFullCover } = useCoverCache();
+  watch(() => settingsStore.settings.preferFolderCover, async (preferFolderCover, _previous, onCleanup) => {
+    let active = true;
+    onCleanup(() => { active = false; });
+    clearCoverCaches();
+    const song = currentSong.value;
+    if (!song) return;
+    const path = song.cue_source_path || song.path;
+    const [cover, fullCover] = await Promise.all([loadCover(path), loadFullCover(path)]);
+    if (!active || currentSong.value?.path !== song.path || settingsStore.settings.preferFolderCover !== preferFolderCover) return;
+    currentCover.value = cover || '';
+    currentCoverFull.value = fullCover || cover || '';
+    currentCoverPath.value = cover ? path : '';
+  });
   const {
     showAddToPlaylistModal,
     playlistAddTargetSongs,

@@ -1,5 +1,7 @@
 import { reactive, readonly, shallowRef } from 'vue';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { getActivePinia } from 'pinia';
+import { useSettingsStore } from '../features/settings/store';
 import { MemoryCache } from '../utils/MemoryCache';
 
 export type CoverKind = 'thumbnail' | 'card' | 'full';
@@ -18,6 +20,7 @@ const PRELOAD_CONCURRENCY = 4;
 const BACKGROUND_PRELOAD_CONCURRENCY = 1;
 const BACKGROUND_FULL_PRELOAD_CONCURRENCY = 1;
 const FAILURE_RETRY_MS = 10_000;
+const prefersFolderCover = () => !!getActivePinia() && !!useSettingsStore().settings.preferFolderCover;
 
 // Small in-memory LRU for thumbnail URLs. The actual image files live on disk.
 const thumbnailCache = reactive(new Map<string, string>());
@@ -349,8 +352,12 @@ const loadCoverInternal = (path: string, kind: CoverKind): Promise<string> => {
     loadingSet.add(requestKey);
     try {
       const command = kind === 'full' ? 'get_song_cover' : 'get_song_cover_thumbnail';
-      const coverPath = await invoke<string>(command,
-        kind === 'card' ? { path, edge: cardEdge } : { path });
+      const options = {
+        path,
+        ...(kind === 'card' ? { edge: cardEdge } : {}),
+        ...(prefersFolderCover() ? { preferFolderCover: true } : {}),
+      };
+      const coverPath = await invoke<string>(command, options);
       if (!isCurrentRequest()) {
         return '';
       }
@@ -686,7 +693,8 @@ export function useCoverCache() {
   };
 
   const primeCoverPath = (path: string | undefined, rawPath: string | undefined | null) => {
-    if (!path || !rawPath) {
+    // Persisted thumbnails use the default policy, so they cannot override a folder-first request.
+    if (!path || !rawPath || prefersFolderCover()) {
       return '';
     }
 

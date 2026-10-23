@@ -256,23 +256,28 @@ fn full_cover_alias_path(cache_dir: &Path, source_hash: &str) -> PathBuf {
 }
 
 pub(crate) fn invalidate_song_cover_cache(path: &Path, app: &AppHandle) -> Result<(), String> {
-    let source_hash = generate_source_hash(path);
     let cache_dir = get_cover_cache_dir(app);
-
-    // Only discard source aliases. Their content-addressed targets may also be
-    // used by other songs or artist avatars and must remain untouched.
-    let thumbnail_aliases = THUMBNAIL_EDGES_PX
-        .into_iter()
-        .map(|edge| thumbnail_alias_path(&cache_dir, &source_hash, edge));
-    for alias_path in thumbnail_aliases.chain([
-        cache_dir.join(format!(
-            "{source_hash}_thumb_{THUMBNAIL_EDGE_PX}.{CACHE_ALIAS_EXT}"
-        )),
-        full_cover_alias_path(&cache_dir, &source_hash),
-    ]) {
-        if let Err(error) = fs::remove_file(&alias_path) {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                return Err(format!("刷新歌曲封面缓存失败：{}；{error}", path.display()));
+    let images = external_cover_images(path);
+    for source_hash in [
+        generate_source_hash(path),
+        cover_source_hash(path, false, &images),
+        cover_source_hash(path, true, &images),
+    ] {
+        // Only discard source aliases. Their content-addressed targets may also be
+        // used by other songs or artist avatars and must remain untouched.
+        let thumbnail_aliases = THUMBNAIL_EDGES_PX
+            .into_iter()
+            .map(|edge| thumbnail_alias_path(&cache_dir, &source_hash, edge));
+        for alias_path in thumbnail_aliases.chain([
+            cache_dir.join(format!(
+                "{source_hash}_thumb_{THUMBNAIL_EDGE_PX}.{CACHE_ALIAS_EXT}"
+            )),
+            full_cover_alias_path(&cache_dir, &source_hash),
+        ]) {
+            if let Err(error) = fs::remove_file(&alias_path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    return Err(format!("刷新歌曲封面缓存失败：{}；{error}", path.display()));
+                }
             }
         }
     }
@@ -343,36 +348,74 @@ fn find_cached_full_cover(cache_dir: &Path, stem: &str) -> Option<String> {
 }
 
 const SIDECAR_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp"];
+const FOLDER_COVER_NAMES: &[&str] = &["cover", "folder", "front"];
 
-/// 查找与音频文件同名的外部封面图片：优先 `歌曲名.jpg`，其次 `歌曲名.mp3.jpg` 这类
-/// 带原始音频扩展名的形式。两种命名都按 SIDECAR_EXTENSIONS 顺序匹配。
-fn find_sidecar_image(path: &Path) -> Option<PathBuf> {
-    let parent = path.parent()?;
-    for base in [
-        path.file_stem().and_then(|s| s.to_str()),
-        path.file_name().and_then(|s| s.to_str()),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        for ext in SIDECAR_EXTENSIONS {
-            let candidate = parent.join(format!("{base}.{ext}"));
-            if candidate.is_file() {
-                return Some(candidate);
+struct ExternalCoverImages {
+    sidecars: Vec<PathBuf>,
+    folder: Vec<PathBuf>,
+}
+
+fn external_cover_images(path: &Path) -> ExternalCoverImages {
+    let mut images = ExternalCoverImages {
+        sidecars: Vec::new(),
+        folder: Vec::new(),
+    };
+    let Some(parent) = path.parent() else {
+        return images;
+    };
+    #[cfg(not(windows))]
+    let mut files: Vec<PathBuf> = fs::read_dir(parent)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .collect();
+    #[cfg(not(windows))]
+    files.sort();
+    let find = |bases: &[&str]| -> Vec<PathBuf> {
+        let mut result = Vec::new();
+        for base in bases {
+            for ext in SIDECAR_EXTENSIONS {
+                let name = format!("{base}.{ext}");
+                #[cfg(windows)]
+                let candidate = parent.join(&name);
+                #[cfg(not(windows))]
+                let candidate = files
+                    .iter()
+                    .find(|file| {
+                        file.file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|value| value.eq_ignore_ascii_case(&name))
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| parent.join(&name));
+                if candidate.is_file() && !result.contains(&candidate) {
+                    result.push(candidate);
+                }
             }
         }
+        result
+    };
+    let bases: Vec<&str> = [path.file_stem(), path.file_name()]
+        .into_iter()
+        .flatten()
+        .filter_map(|name| name.to_str())
+        .collect();
+    images.sidecars = find(&bases);
+    images.folder = find(FOLDER_COVER_NAMES);
+    images
+}
+
+fn cover_source_hash(path: &Path, prefer_folder: bool, images: &ExternalCoverImages) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"external-covers-v1");
+    hasher.update(generate_source_hash(path).as_bytes());
+    hasher.update([u8::from(prefer_folder)]);
+    for image in images.sidecars.iter().chain(&images.folder) {
+        hasher.update(generate_source_hash(image).as_bytes());
     }
-    None
-}
-
-fn read_sidecar_image(path: &Path) -> Option<(DynamicImage, String)> {
-    let bytes = fs::read(find_sidecar_image(path)?).ok()?;
-    let image = image::load_from_memory(&bytes).ok()?;
-    Some((image, generate_content_hash(&bytes)))
-}
-
-pub fn get_or_create_thumbnail(path: &Path, app: &AppHandle) -> Option<String> {
-    get_or_create_thumbnail_for_edge(path, app, THUMBNAIL_EDGE_PX)
+    hex::encode(hasher.finalize())
 }
 
 fn cache_thumbnail_from_bytes(
@@ -405,13 +448,34 @@ fn cache_thumbnail_from_bytes(
     Some(persisted)
 }
 
-fn get_or_create_thumbnail_for_edge(path: &Path, app: &AppHandle, edge: u32) -> Option<String> {
-    let source_hash = generate_source_hash(path);
+fn get_or_create_thumbnail_for_edge(
+    path: &Path,
+    app: &AppHandle,
+    edge: u32,
+    prefer_folder: bool,
+    allow_folder: bool,
+) -> Option<String> {
+    let mut images = external_cover_images(path);
+    if !allow_folder {
+        images.folder.clear();
+    }
+    let source_hash = cover_source_hash(path, prefer_folder, &images);
     let cache_dir = get_cover_cache_dir(app);
     let alias_path = thumbnail_alias_path(&cache_dir, &source_hash, edge);
 
     if let Some(existing) = resolve_alias_target(&cache_dir, &alias_path) {
         return Some(existing);
+    }
+
+    if prefer_folder {
+        for image in &images.folder {
+            if let Some(cover) = fs::read(image)
+                .ok()
+                .and_then(|bytes| cache_thumbnail_from_bytes(&bytes, &cache_dir, &alias_path, edge))
+            {
+                return Some(cover);
+            }
+        }
     }
 
     if let Ok(tagged_file) = read_tagged_file_from_path(path) {
@@ -425,19 +489,45 @@ fn get_or_create_thumbnail_for_edge(path: &Path, app: &AppHandle, edge: u32) -> 
     }
 
     // 内嵌封面缺失时回退到同名外部图片（如 song.mp3 旁的 song.jpg）
-    if let Some(bytes) = find_sidecar_image(path).and_then(|sidecar| fs::read(sidecar).ok()) {
-        return cache_thumbnail_from_bytes(&bytes, &cache_dir, &alias_path, edge);
+    for image in images
+        .sidecars
+        .iter()
+        .chain(images.folder.iter().filter(|_| !prefer_folder))
+    {
+        if let Some(cover) = fs::read(image)
+            .ok()
+            .and_then(|bytes| cache_thumbnail_from_bytes(&bytes, &cache_dir, &alias_path, edge))
+        {
+            return Some(cover);
+        }
     }
     None
 }
 
-pub fn get_or_create_full_cover(path: &Path, app: &AppHandle) -> Option<String> {
-    let source_hash = generate_source_hash(path);
+pub fn get_or_create_full_cover(
+    path: &Path,
+    app: &AppHandle,
+    prefer_folder: bool,
+    allow_folder: bool,
+) -> Option<String> {
+    let mut images = external_cover_images(path);
+    if !allow_folder {
+        images.folder.clear();
+    }
+    let source_hash = cover_source_hash(path, prefer_folder, &images);
     let cache_dir = get_cover_cache_dir(app);
     let alias_path = full_cover_alias_path(&cache_dir, &source_hash);
 
     if let Some(existing) = resolve_alias_target(&cache_dir, &alias_path) {
         return Some(existing);
+    }
+
+    if prefer_folder {
+        for image in &images.folder {
+            if let Some(cover) = cache_external_full_cover(image, &cache_dir, &alias_path) {
+                return Some(cover);
+            }
+        }
     }
 
     if let Ok(tagged_file) = read_tagged_file_from_path(path) {
@@ -496,43 +586,76 @@ pub fn get_or_create_full_cover(path: &Path, app: &AppHandle) -> Option<String> 
     }
 
     // 内嵌封面缺失时回退到同名外部图片（如 song.mp3 旁的 song.jpg）
-    if let Some((img, content_hash)) = read_sidecar_image(path) {
-        let should_resize = img.width() > FULL_COVER_EDGE_PX || img.height() > FULL_COVER_EDGE_PX;
-        let display_img = if should_resize {
-            img.resize(
-                FULL_COVER_EDGE_PX,
-                FULL_COVER_EDGE_PX,
-                image::imageops::FilterType::Lanczos3,
-            )
-        } else {
-            img
-        };
-        let cache_stem = full_cover_cache_stem(&content_hash);
-        let cache_path = cache_dir.join(format!("{cache_stem}.{FULL_COVER_FALLBACK_EXT}"));
-        if let Some(persisted) =
-            persist_image_atomically(&display_img, ImageFormat::Png, &cache_path)
-        {
-            let _ = persist_alias_target(&alias_path, &cache_path);
-            return Some(persisted);
+    for image in images
+        .sidecars
+        .iter()
+        .chain(images.folder.iter().filter(|_| !prefer_folder))
+    {
+        if let Some(cover) = cache_external_full_cover(image, &cache_dir, &alias_path) {
+            return Some(cover);
         }
     }
     None
+}
+
+fn cache_external_full_cover(path: &Path, cache_dir: &Path, alias_path: &Path) -> Option<String> {
+    let bytes = fs::read(path).ok()?;
+    let content_hash = generate_content_hash(&bytes);
+    let cache_stem = full_cover_cache_stem(&content_hash);
+    if let Some(existing) = find_cached_full_cover(cache_dir, &cache_stem) {
+        let _ = persist_alias_target(alias_path, Path::new(&existing));
+        return Some(existing);
+    }
+    let img = image::load_from_memory(&bytes).ok()?;
+    let should_resize = img.width() > FULL_COVER_EDGE_PX || img.height() > FULL_COVER_EDGE_PX;
+    let display_img = if should_resize {
+        img.resize(
+            FULL_COVER_EDGE_PX,
+            FULL_COVER_EDGE_PX,
+            image::imageops::FilterType::Lanczos3,
+        )
+    } else {
+        img
+    };
+    let cache_path = cache_dir.join(format!("{cache_stem}.{FULL_COVER_FALLBACK_EXT}"));
+    if let Some(persisted) = persist_image_atomically(&display_img, ImageFormat::Png, &cache_path) {
+        let _ = persist_alias_target(&alias_path, &cache_path);
+        return Some(persisted);
+    }
+    None
+}
+
+fn local_cover_audio_path(path: &str, db_state: &DbState) -> String {
+    if path.contains("::track") {
+        if let Ok(conn) = db_state.conn.lock() {
+            if let Ok(Some(source)) = conn.query_row(
+                "SELECT cue_source_path FROM songs WHERE path = ?1",
+                [path],
+                |row| row.get::<_, Option<String>>(0),
+            ) {
+                return source;
+            }
+        }
+    }
+    path.to_string()
 }
 
 #[tauri::command]
 pub async fn get_song_cover_thumbnail(
     path: String,
     edge: Option<u32>,
+    prefer_folder_cover: Option<bool>,
     app: AppHandle,
     semaphore: State<'_, ThumbnailImageConcurrencyLimit>,
     db_state: State<'_, DbState>,
 ) -> Result<String, String> {
     let edge = normalized_thumbnail_edge(edge);
     let _permit = semaphore.0.acquire().await.map_err(|e| e.to_string())?;
-    let source_path = if is_remote_uri(&path) {
+    let allow_folder = !is_remote_uri(&path);
+    let source_path = if !allow_folder {
         ensure_cached_path(&app, &db_state, &path).await?
     } else {
-        path.clone()
+        local_cover_audio_path(&path, &db_state)
     };
 
     let p = Path::new(&source_path);
@@ -540,17 +663,22 @@ pub async fn get_song_cover_thumbnail(
     let p_buf = p.to_path_buf();
 
     let result = tauri::async_runtime::spawn_blocking(move || {
-        if edge == THUMBNAIL_EDGE_PX {
-            get_or_create_thumbnail(&p_buf, &app_clone)
-        } else {
-            get_or_create_thumbnail_for_edge(&p_buf, &app_clone, edge)
-        }
+        get_or_create_thumbnail_for_edge(
+            &p_buf,
+            &app_clone,
+            edge,
+            prefer_folder_cover.unwrap_or(false),
+            allow_folder,
+        )
     })
     .await
     .map_err(|e| e.to_string())?;
 
     if let Some(cache_path_str) = result {
-        if edge == THUMBNAIL_EDGE_PX && !cache_path_str.is_empty() {
+        if edge == THUMBNAIL_EDGE_PX
+            && !prefer_folder_cover.unwrap_or(false)
+            && !cache_path_str.is_empty()
+        {
             if let Ok(conn) = db_state.conn.lock() {
                 let _ = conn.execute(
                     "UPDATE songs SET cover_thumb_path = ?1 WHERE path = ?2",
@@ -566,25 +694,33 @@ pub async fn get_song_cover_thumbnail(
 #[tauri::command]
 pub async fn get_song_cover(
     path: String,
+    prefer_folder_cover: Option<bool>,
     app: AppHandle,
     semaphore: State<'_, FullCoverImageConcurrencyLimit>,
     db_state: State<'_, DbState>,
 ) -> Result<String, String> {
     let _permit = semaphore.0.acquire().await.map_err(|e| e.to_string())?;
-    let source_path = if is_remote_uri(&path) {
+    let allow_folder = !is_remote_uri(&path);
+    let source_path = if !allow_folder {
         ensure_cached_path(&app, &db_state, &path).await?
     } else {
-        path.clone()
+        local_cover_audio_path(&path, &db_state)
     };
 
     let p = Path::new(&source_path);
     let app_clone = app.clone();
     let p_buf = p.to_path_buf();
 
-    let result =
-        tauri::async_runtime::spawn_blocking(move || get_or_create_full_cover(&p_buf, &app_clone))
-            .await
-            .map_err(|e| e.to_string())?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        get_or_create_full_cover(
+            &p_buf,
+            &app_clone,
+            prefer_folder_cover.unwrap_or(false),
+            allow_folder,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     if let Some(cache_path_str) = result {
         return Ok(cache_path_str);
