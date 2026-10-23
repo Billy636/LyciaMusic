@@ -85,8 +85,6 @@ interface SortSettingsRefs {
   albumArtistSortMode?: Ref<ArtistSortMode>;
   albumSortMode: Ref<AlbumSortMode>;
   albumDetailSortMode: Ref<AlbumDetailSortMode>;
-  artistCustomOrder: Ref<string[]>;
-  albumArtistCustomOrder?: Ref<string[]>;
   albumCustomOrder: Ref<string[]>;
   folderSortMode: Ref<FolderSortMode>;
   folderCustomOrder: Ref<Record<string, string[]>>;
@@ -116,8 +114,6 @@ const restoreSortSettings = ({
   albumArtistSortMode,
   albumSortMode,
   albumDetailSortMode,
-  artistCustomOrder,
-  albumArtistCustomOrder,
   albumCustomOrder,
   folderSortMode,
   folderCustomOrder,
@@ -126,13 +122,19 @@ const restoreSortSettings = ({
   playlistSortMode,
 }: SortSettingsRefs) => {
   const storedArtistSort = playerStorage.getString(playerStorageKeys.artistSortMode);
-  if (storedArtistSort) {
-    artistSortMode.value = storedArtistSort as ArtistSortMode;
+  artistSortMode.value = storedArtistSort && ['name', 'name_desc', 'count', 'count_asc'].includes(storedArtistSort)
+    ? storedArtistSort as ArtistSortMode : 'name';
+  if (storedArtistSort && storedArtistSort !== artistSortMode.value) {
+    playerStorage.setString(playerStorageKeys.artistSortMode, artistSortMode.value);
   }
 
   const storedAlbumArtistSort = playerStorage.getString(playerStorageKeys.albumArtistSortMode);
-  if (albumArtistSortMode && storedAlbumArtistSort && ['count', 'name', 'custom'].includes(storedAlbumArtistSort)) {
-    albumArtistSortMode.value = storedAlbumArtistSort as ArtistSortMode;
+  if (albumArtistSortMode) {
+    albumArtistSortMode.value = storedAlbumArtistSort && ['name', 'name_desc', 'count', 'count_asc'].includes(storedAlbumArtistSort)
+      ? storedAlbumArtistSort as ArtistSortMode : 'name';
+    if (storedAlbumArtistSort && storedAlbumArtistSort !== albumArtistSortMode.value) {
+      playerStorage.setString(playerStorageKeys.albumArtistSortMode, albumArtistSortMode.value);
+    }
   }
 
   const storedAlbumSort = playerStorage.getString(playerStorageKeys.albumSortMode);
@@ -145,15 +147,8 @@ const restoreSortSettings = ({
     albumDetailSortMode.value = storedAlbumDetailSort as AlbumDetailSortMode;
   }
 
-  const storedArtistOrder = playerStorage.readStringArray(playerStorageKeys.artistCustomOrder);
-  if (storedArtistOrder) {
-    artistCustomOrder.value = storedArtistOrder;
-  }
-
-  const storedAlbumArtistOrder = playerStorage.readStringArray(playerStorageKeys.albumArtistCustomOrder);
-  if (albumArtistCustomOrder && storedAlbumArtistOrder) {
-    albumArtistCustomOrder.value = storedAlbumArtistOrder;
-  }
+  playerStorage.remove(playerStorageKeys.artistCustomOrder);
+  playerStorage.remove(playerStorageKeys.albumArtistCustomOrder);
 
   const storedAlbumOrder = playerStorage.readStringArray(playerStorageKeys.albumCustomOrder);
   if (storedAlbumOrder) {
@@ -230,8 +225,6 @@ export const createPlayerLifecycle = ({
     albumArtistSortMode,
     albumSortMode,
     albumDetailSortMode,
-    artistCustomOrder,
-    albumArtistCustomOrder,
     albumCustomOrder,
     folderSortMode,
     folderCustomOrder,
@@ -411,8 +404,6 @@ export const createPlayerLifecycle = ({
       },
       { deep: true }
     );
-    watch(artistCustomOrder, scheduleStatePersistence, { deep: true });
-    watch(albumArtistCustomOrder, scheduleStatePersistence, { deep: true });
     watch(albumCustomOrder, scheduleStatePersistence, { deep: true });
     watch(folderCustomOrder, scheduleStatePersistence, { deep: true });
     watch(localCustomOrder, scheduleStatePersistence, { deep: true });
@@ -623,8 +614,6 @@ export const createPlayerLifecycle = ({
         albumArtistSortMode,
         albumSortMode,
         albumDetailSortMode,
-        artistCustomOrder,
-        albumArtistCustomOrder,
         albumCustomOrder,
         folderSortMode,
         folderCustomOrder,

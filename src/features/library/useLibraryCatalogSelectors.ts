@@ -16,9 +16,7 @@ interface UseLibraryCatalogSelectorsOptions {
   searchQuery: Ref<string>;
   artistSortMode: Ref<ArtistSortMode>;
   albumSortMode: Ref<AlbumSortMode>;
-  artistCustomOrder: Ref<string[]>;
   albumArtistSortMode: Ref<ArtistSortMode>;
-  albumArtistCustomOrder: Ref<string[]>;
   albumCustomOrder: Ref<string[]>;
 }
 
@@ -29,32 +27,25 @@ export function useLibraryCatalogSelectors({
   searchQuery,
   artistSortMode,
   albumSortMode,
-  artistCustomOrder,
   albumArtistSortMode,
-  albumArtistCustomOrder,
   albumCustomOrder,
 }: UseLibraryCatalogSelectorsOptions) {
-  const sortArtists = (items: ArtistListItem[], mode: ArtistSortMode, order: string[]) => {
+  const sortArtists = (items: ArtistListItem[], mode: ArtistSortMode) => {
     const list = [...items];
 
-    if (mode === 'name') {
-      list.sort((a, b) => compareByAlphabetIndex(a.name, b.name));
-    } else if (mode === 'custom') {
-      const orderMap = new Map(order.map((name, index) => [name, index]));
-      list.sort((a, b) => {
-        const left = orderMap.has(a.name) ? orderMap.get(a.name)! : Number.MAX_SAFE_INTEGER;
-        const right = orderMap.has(b.name) ? orderMap.get(b.name)! : Number.MAX_SAFE_INTEGER;
-        return left - right;
-      });
+    if (mode === 'name' || mode === 'name_desc') {
+      const direction = mode === 'name_desc' ? -1 : 1;
+      list.sort((a, b) => direction * compareByAlphabetIndex(a.name, b.name));
     } else {
-      list.sort((a, b) => b.count - a.count || compareByAlphabetIndex(a.name, b.name));
+      list.sort((a, b) => (mode === 'count_asc' ? a.count - b.count : b.count - a.count)
+        || compareByAlphabetIndex(a.name, b.name));
     }
 
     return list;
   };
 
   const artistList = computed(() => sortArtists(
-    artistCatalog.value, artistSortMode.value, artistCustomOrder.value,
+    artistCatalog.value, artistSortMode.value,
   ));
 
   const albumArtistList = computed<ArtistListItem[]>(() => {
@@ -82,7 +73,7 @@ export function useLibraryCatalogSelectors({
       });
     }
 
-    return sortArtists([...artists.values()], albumArtistSortMode.value, albumArtistCustomOrder.value);
+    return sortArtists([...artists.values()], albumArtistSortMode.value);
   });
 
   const albumList = computed<AlbumListItem[]>(() => {

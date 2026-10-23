@@ -52,8 +52,6 @@ const createPlayerLibraryView = () => {
     artistSortMode,
     albumArtistSortMode,
     albumSortMode,
-    artistCustomOrder,
-    albumArtistCustomOrder,
     albumCustomOrder,
     folderSortMode,
     folderCustomOrder,
@@ -80,9 +78,7 @@ const createPlayerLibraryView = () => {
     searchQuery,
     artistSortMode,
     albumSortMode,
-    artistCustomOrder,
     albumArtistSortMode,
-    albumArtistCustomOrder,
     albumCustomOrder,
   });
 

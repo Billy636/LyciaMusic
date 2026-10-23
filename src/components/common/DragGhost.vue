@@ -125,7 +125,6 @@ const title = computed(() => {
   if (dragSession.type === 'song' && dragSession.songs.length > 0) return dragSession.songs[0].title || dragSession.songs[0].name;
   if (dragSession.type === 'playlist') return dragSession.data?.name || '未知歌单';
   if (dragSession.type === 'folder') return dragSession.data?.name || '未知文件夹';
-  if (dragSession.type === 'artist') return dragSession.data?.name || '未知歌手';
   if (dragSession.type === 'album') return dragSession.data?.name || '未知专辑';
   return '移动中...';
 });
@@ -137,7 +136,6 @@ const subtitle = computed(() => {
   if (dragSession.type === 'playlist') return '歌单';
   if (dragSession.type === 'folder') return dragSession.targetFolder
     ? `移动到 ${dragSession.targetFolder.name}` : '拖到目标文件夹以移动';
-  if (dragSession.type === 'artist') return '歌手';
   if (dragSession.type === 'album') return '专辑';
   return '';
 });
@@ -159,8 +157,7 @@ const badgeCount = computed(() => {
       >
         <!-- Icon / Cover Area -->
         <div 
-          class="w-12 h-12 bg-gray-200/50 dark:bg-white/10 flex items-center justify-center overflow-hidden shrink-0 shadow-sm relative"
-          :class="dragSession.type === 'artist' ? 'rounded-full' : 'rounded'"
+          class="w-12 h-12 bg-gray-200/50 dark:bg-white/10 flex items-center justify-center overflow-hidden shrink-0 shadow-sm relative rounded"
         >
           <!-- Song Cover -->
           <img v-if="dragSession.type === 'song' && ghostCover" :src="ghostCover" class="w-full h-full object-cover" />
@@ -179,8 +176,6 @@ const badgeCount = computed(() => {
              <svg v-else-if="dragSession.type === 'folder'" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-400 dark:text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
              </svg>
-             <!-- Artist Default -->
-             <div v-else-if="dragSession.type === 'artist'" class="text-2xl">👤</div>
              <!-- Album Default -->
              <div v-else-if="dragSession.type === 'album'" class="text-2xl">💿</div>
           </template>
