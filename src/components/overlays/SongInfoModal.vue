@@ -9,10 +9,16 @@ import { useCoverCache } from '../../composables/useCoverCache';
 import { usePlayer } from '../../composables/player';
 import { ensureMusicTagPath } from '../../composables/musicTag';
 import { useSongDetailCache } from '../../composables/useSongDetailCache';
+import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver';
+import { useLibraryAllSongPathCache } from '../../composables/useLibraryAllSongPathCache';
+import { useLibraryCollectionSongPathCache } from '../../composables/useLibraryCollectionSongPathCache';
+import { useLibraryDetailSongPathCache } from '../../composables/useLibraryDetailSongPathCache';
+import { useLibraryFolderSongPathCache } from '../../composables/useLibraryFolderSongPathCache';
 import { useThemeSettings } from '../../composables/useThemeSettings';
 import { useToast } from '../../composables/toast';
 import { useLibraryStore } from '../../features/library/store';
 import { useSettingsStore } from '../../features/settings/store';
+import { useNavigationStore } from '../../shared/stores/navigation';
 import {
   createLyricsReadingOrderOverridePatch,
   resolveLyricsReadingOrder,
@@ -30,12 +36,18 @@ const props = defineProps<{
 const emit = defineEmits(['close']);
 
 const { loadCover, clearCoverCaches } = useCoverCache();
-const { loadSongDetail } = useSongDetailCache();
+const { loadSongDetail, clearSongDetailCache } = useSongDetailCache();
+const { clearResolvedSongCache, rememberSongs } = useLibrarySongResolver();
+const { clearLibraryAllSongPathCache } = useLibraryAllSongPathCache();
+const { clearLibraryCollectionSongPathCache } = useLibraryCollectionSongPathCache();
+const { clearLibraryDetailSongPathCache } = useLibraryDetailSongPathCache();
+const { clearLibraryFolderSongPathCache } = useLibraryFolderSongPathCache();
 const { openInFinder, refreshSongMetadata, trackExternalSongEdit } = usePlayer();
 const { isDarkTheme } = useThemeSettings();
 const { showToast } = useToast();
 const libraryStore = useLibraryStore();
 const settingsStore = useSettingsStore();
+const navigationStore = useNavigationStore();
 
 interface SongInfoEditForm {
   title: string;
@@ -511,7 +523,18 @@ const handleSaveSongInfo = async () => {
       },
     });
 
+    // Invalidate saved metadata and ordering even if the dialog closed during saving.
+    for (const path of new Set([songPath, result.song.path])) {
+      clearSongDetailCache(path);
+      clearResolvedSongCache(path);
+    }
+    rememberSongs([result.song]);
     libraryStore.setSongRecord(result.song);
+    clearLibraryAllSongPathCache();
+    clearLibraryCollectionSongPathCache();
+    clearLibraryDetailSongPathCache();
+    clearLibraryFolderSongPathCache();
+    navigationStore.refreshSearch();
     if (!isCurrentRequest()) return;
     savedSongOverride.value = result.song;
     currentSongDetail.value = result.detail;
