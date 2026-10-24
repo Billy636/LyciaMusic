@@ -7,7 +7,7 @@ import { useToast } from '../../composables/toast';
 import { usePlayerViewState } from '../../composables/usePlayerViewState';
 import { dragSession } from '../../composables/dragState';
 import { useAddToPlaylistDialog } from '../../features/collections/addToPlaylistDialog';
-import { useLibraryRuntimeActions } from '../../features/library/useLibraryRuntimeActions';
+import { useLibraryFolderSongPathCache } from '../../composables/useLibraryFolderSongPathCache';
 
 const { folderSortMode, setFolderSortMode } = usePlayerViewState();
 
@@ -38,6 +38,8 @@ const emit = defineEmits([
 ]);
 
 const toast = useToast();
+const { loadFolderViewSongPaths } = useLibraryFolderSongPathCache();
+const { openAddToPlaylistDialog } = useAddToPlaylistDialog();
 
 const targetRootPath = ref('');
 const showRootMenu = ref(false);
@@ -120,7 +122,7 @@ const emitRootCreatePlaylist = () => {
   emit('rootCreatePlaylist', rootNode.path, rootNode.name);
 };
 
-const emitRootAddToPlaylist = () => {
+const emitRootAddToPlaylist = async () => {
   const rootNode = props.folderTree.find(node => node.path === targetRootPath.value);
   if (!rootNode) {
     showRootMenu.value = false;
@@ -128,14 +130,20 @@ const emitRootAddToPlaylist = () => {
   }
 
   showRootMenu.value = false;
-  const { getSongsInFolder } = useLibraryRuntimeActions();
-  const { openAddToPlaylistDialog } = useAddToPlaylistDialog();
-  const songs = getSongsInFolder(rootNode.path);
-  if (songs.length === 0) {
-    toast.showToast('该文件夹下没有可用于添加到歌单的歌曲', 'info');
-    return;
+  try {
+    const songPaths = await loadFolderViewSongPaths({
+      folderPath: rootNode.path,
+      sortMode: 'title',
+      includeSubfolders: false,
+    });
+    if (songPaths.length === 0) {
+      toast.showToast('该文件夹下没有可用于添加到歌单的歌曲', 'info');
+      return;
+    }
+    openAddToPlaylistDialog(songPaths);
+  } catch (error) {
+    toast.showToast(`读取文件夹歌曲失败：${error instanceof Error ? error.message : String(error)}`, 'error');
   }
-  openAddToPlaylistDialog(songs.map(song => song.path));
 };
 
 onMounted(() => window.addEventListener('click', handleGlobalClick));

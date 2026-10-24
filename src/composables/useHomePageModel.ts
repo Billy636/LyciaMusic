@@ -23,6 +23,7 @@ import { useFolderSongScope } from '../features/library/useFolderSongScope';
 import { usePlaybackController } from '../features/playback/usePlaybackController';
 import { useLibraryStore } from '../features/library/store';
 import { useLibrarySongResolver } from './useLibrarySongResolver';
+import { useLibraryFolderSongPathCache } from './useLibraryFolderSongPathCache';
 
 export function useHomePageModel() {
   const route = useRoute();
@@ -55,12 +56,12 @@ export function useHomePageModel() {
   } = usePlayerLibraryView();
   const { playSong } = usePlaybackController();
   const { loadSong } = useLibrarySongResolver();
+  const { loadFolderViewSongPaths } = useLibraryFolderSongPathCache();
   const {
     moveFilesToFolder,
     refreshAllFolders,
     deleteFromDisk,
     addLibraryFolder,
-    getSongsInFolder,
     createFolder,
     deleteFolder,
     expandFolderPath,
@@ -321,15 +322,24 @@ export function useHomePageModel() {
     }
   };
 
-  const handleRootCreatePlaylistRequest = (folderPath: string, folderName: string) => {
-    const songs = getSongsInFolder(folderPath);
-    if (songs.length === 0) {
-      showToast('该文件夹下没有可用于创建歌单的歌曲', 'info');
-      return;
-    }
+  const handleRootCreatePlaylistRequest = async (folderPath: string, folderName: string) => {
+    try {
+      // Query all paths: song details may only be loaded for the visible rows.
+      const songPaths = await loadFolderViewSongPaths({
+        folderPath,
+        sortMode: 'title',
+        includeSubfolders: false,
+      });
+      if (songPaths.length === 0) {
+        showToast('该文件夹下没有可用于创建歌单的歌曲', 'info');
+        return;
+      }
 
-    createPlaylist(folderName, songs.map(song => song.path));
-    showToast('已根据文件夹创建歌单', 'success');
+      createPlaylist(folderName, songPaths);
+      showToast(`已根据文件夹创建歌单，共 ${songPaths.length} 首歌曲`, 'success');
+    } catch (error) {
+      showToast(`创建歌单失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    }
   };
 
   const handleArtistAlbumClick = (albumKey: string) => {
