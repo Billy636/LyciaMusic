@@ -513,6 +513,7 @@ export interface AppSettings {
   showSongNotification: boolean;
   showQualityBadges: boolean;
   showSongComments: boolean;
+  doubleClickCurrentSongToPause: boolean;
   enableScrollToTopButton: boolean;
   libraryMinDurationSeconds: number;
   folderIncludeSubfolders: boolean;
@@ -533,6 +534,7 @@ export interface AppSettings {
   shortcuts: ShortcutSettings;
   showTaskbarPlayer: boolean;
   showTaskbarPlayerIcon: boolean;
+  showMiniPlayerIcon: boolean;
   taskbarBackgroundOpacity: number;
   taskbarWindowWidth: number;
   taskbarTextColor: string;

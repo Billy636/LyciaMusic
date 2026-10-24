@@ -151,6 +151,7 @@ export const defaultAppSettings: AppSettings = {
   showSongNotification: false,
   showQualityBadges: true,
   showSongComments: true,
+  doubleClickCurrentSongToPause: false,
   enableScrollToTopButton: true,
   libraryMinDurationSeconds: 0,
   folderIncludeSubfolders: false,
@@ -171,6 +172,7 @@ export const defaultAppSettings: AppSettings = {
   shortcuts: createDefaultShortcutSettings(),
   showTaskbarPlayer: false,
   showTaskbarPlayerIcon: true,
+  showMiniPlayerIcon: true,
   taskbarBackgroundOpacity: TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
   taskbarWindowWidth: 280,
   taskbarTextColor: '#ffffff',
@@ -345,6 +347,10 @@ export const mergeAppSettings = (
     // Ignore removed legacy fields that may still exist in persisted settings.
     ...base,
     ...rest,
+    doubleClickCurrentSongToPause: typeof patch.doubleClickCurrentSongToPause === 'boolean'
+      ? patch.doubleClickCurrentSongToPause : base.doubleClickCurrentSongToPause,
+    showMiniPlayerIcon: typeof patch.showMiniPlayerIcon === 'boolean'
+      ? patch.showMiniPlayerIcon : base.showMiniPlayerIcon,
     showSongNotification: typeof (patch.showSongNotification ?? base.showSongNotification) === 'boolean'
       ? (patch.showSongNotification ?? base.showSongNotification) : false,
     ...(patch.footer || base.footer ? { footer: normalizeFooterSettings(patch.footer ?? base.footer) } : {}),

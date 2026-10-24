@@ -28,7 +28,7 @@ import { isProfilingEnabled } from '../../utils/profiling';
 const { settings } = useSettings();
 const libraryStore = useLibraryStore();
 const { libraryScanProgress, lastLibraryScanError, libraryDataVersion } = storeToRefs(libraryStore);
-const { currentSong, isPlaying, formatDuration } = usePlaybackController();
+const { currentSong, isPlaying, formatDuration, togglePlay } = usePlaybackController();
 
 const props = defineProps<{
   songs: Song[];
@@ -44,6 +44,14 @@ const emit = defineEmits<{
   (e: 'update:selectedPaths', newSet: Set<string>): void;
   (e: 'drag-start', payload: { event: PointerEvent; song: Song; index: number }): void;
 }>();
+
+const handleSongDoubleClick = (song: Song) => {
+  if (props.isBatchMode) return;
+  if (settings.value.doubleClickCurrentSongToPause && currentSong.value?.path === song.path) {
+    return togglePlay();
+  }
+  emit('play', song);
+};
 
 const {
   currentViewMode,
@@ -801,7 +809,7 @@ const getRowStyle = (songIndex: number, songPath: string) => {
           :key="song.path"
           :data-index="song.virtualIndex"
           @pointerdown="handlePointerDown($event, song, song.virtualIndex)"
-          @dblclick="!isBatchMode && emit('play', song)"
+          @dblclick="handleSongDoubleClick(song)"
           @contextmenu.prevent="emit('contextmenu', $event, song)"
           @dragstart.prevent
           class="group w-full min-w-0 border-b border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5 select-none cursor-default relative flex items-center px-2 gap-3 [touch-action:none]"

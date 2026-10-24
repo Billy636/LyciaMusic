@@ -197,7 +197,16 @@ function moveItem(id: SidebarNavigationId, direction: -1 | 1) {
           <input v-model="settings.showTaskbarPlayerIcon" type="checkbox" />
           <span>任务栏播控入口</span>
         </label>
+        <label class="display-element-option">
+          <input v-model="settings.showMiniPlayerIcon" type="checkbox" />
+          <span>迷你窗口入口</span>
+        </label>
+        <label class="display-element-option" title="开启后，双击当前歌曲可暂停或继续；关闭后，双击会从头播放。双击其他歌曲始终从头播放。">
+          <input v-model="settings.doubleClickCurrentSongToPause" type="checkbox" />
+          <span>双击当前歌曲暂停 / 继续</span>
+        </label>
       </div>
+      <p class="px-4 text-xs app-text-secondary">开启“双击当前歌曲暂停 / 继续”后保留播放进度，关闭时双击从头播放。</p>
     </section>
   </div>
 </template>
