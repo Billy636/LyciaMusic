@@ -1,4 +1,5 @@
 use crate::player::equalizer::EqualizerHandle;
+use crate::player::loudness::{VolumeNormalizer, VolumeNormalizerHandle};
 use crate::player::output::{OutputBackend, OutputError};
 use crate::player::types::{SharedProgress, TimedSource};
 use cpal::traits::{DeviceTrait, HostTrait};
@@ -77,11 +78,14 @@ pub(crate) fn restore_current_playback(
     current_path: &str,
     is_playing_flag: bool,
     progress: &Arc<SharedProgress>,
+    volume_balance_gain: f32,
+    current_normalizer_handle: &mut Option<VolumeNormalizerHandle>,
     equalizer_handle: Arc<EqualizerHandle>,
     user_volume: Arc<AtomicU32>,
     cue_start_offset: Duration,
     total_duration: Option<Duration>,
 ) -> Result<(), String> {
+    *current_normalizer_handle = None;
     if current_path.is_empty() {
         return Ok(());
     }
@@ -105,10 +109,13 @@ pub(crate) fn restore_current_playback(
         let sink = output.create_sink().map_err(|error| error.to_string())?;
 
         // Media time advances only as decoded samples leave the prefetch source.
-        let eq_source = crate::player::equalizer::Equalizer::new(
+        let (normalized_source, handle) = VolumeNormalizer::new(
             prefetch_source.with_progress(progress.samples_played.clone()),
-            equalizer_handle,
+            volume_balance_gain,
+            100,
         );
+        let eq_source =
+            crate::player::equalizer::Equalizer::new(normalized_source, equalizer_handle);
         let vol_source = crate::player::equalizer::UserVolumeSource::new(eq_source, user_volume);
         let clip_source = crate::player::equalizer::ClipGuardSource::new(vol_source);
         let timed_source = TimedSource::new(clip_source, progress.visualizer.clone());
@@ -119,6 +126,7 @@ pub(crate) fn restore_current_playback(
         }
         sink.append(timed_source);
         *current_sink = Some(sink);
+        *current_normalizer_handle = Some(handle);
     }
     Ok(())
 }
