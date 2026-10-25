@@ -29,10 +29,11 @@ pub use files::{
 pub use library::{
     add_library_folder, get_folder_children, get_library_album_catalog,
     get_library_album_catalog_by_artist, get_library_artist_catalog, get_library_folders,
+    get_library_genre_catalog, get_library_genre_groups,
     get_library_hierarchy, get_library_song_artist_index_keys, get_library_song_labels_for_all_view,
     get_library_song_page,
     get_library_song_path_page_for_all_view, get_library_song_paths_by_album,
-    get_library_song_paths_by_artist, get_library_song_paths_cached,
+    get_library_song_paths_by_artist, get_library_song_paths_by_genre, get_library_song_paths_cached,
     get_library_song_paths_for_all_view, get_library_song_paths_for_folder_view,
     get_library_songs_by_paths, get_library_songs_cached, remove_library_folder, scan_library,
 };

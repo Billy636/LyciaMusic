@@ -78,7 +78,7 @@ export function useLibraryCurrentViewSongs({
 
   const { loadAllViewSongPaths } = useLibraryAllSongPathCache();
   const { loadFavoriteSongPaths, loadRecentSongPaths } = useLibraryCollectionSongPathCache();
-  const { loadAlbumSongPaths } = useLibraryDetailSongPathCache();
+  const { loadAlbumSongPaths, loadGenreSongPaths } = useLibraryDetailSongPathCache();
   const { loadFolderViewSongPaths, libraryFolderSongPathCacheVersion } = useLibraryFolderSongPathCache();
   const allViewSongPaths = ref<string[]>([]);
   const allSearchTotal = ref(0);
@@ -89,6 +89,7 @@ export function useLibraryCurrentViewSongs({
   const folderViewSongPaths = ref<string[]>([]);
   const playlistViewSongPaths = ref<string[]>([]);
   const detailViewSongPaths = ref<string[]>([]);
+  const genreViewSongPaths = ref<string[]>([]);
   const favoriteSearchHasMore = ref(false);
   const recentSearchHasMore = ref(false);
   const folderSearchHasMore = ref(false);
@@ -101,6 +102,7 @@ export function useLibraryCurrentViewSongs({
   let folderViewRequestId = 0;
   let playlistViewRequestId = 0;
   let detailViewRequestId = 0;
+  let genreViewRequestId = 0;
   const canonicalPathSet = computed(() => new Set(canonicalSongPaths.value));
 
   watch(
@@ -594,6 +596,46 @@ export function useLibraryCurrentViewSongs({
     { immediate: true },
   );
 
+  watch(
+    [
+      currentViewMode,
+      filterCondition,
+      searchQuery,
+      localSortMode,
+      canonicalSongPaths,
+      searchRevision,
+      () => libraryStore.genreCatalog,
+    ],
+    async ([viewMode, filter, query, sortMode], previous) => {
+      const requestId = ++genreViewRequestId;
+
+      if (viewMode !== 'genre' || !filter) {
+        genreViewSongPaths.value = [];
+        return;
+      }
+
+      // A different selection must never briefly play or display the previous genre.
+      if (filter !== previous?.[1] || viewMode !== previous?.[0]) {
+        genreViewSongPaths.value = [];
+      }
+
+      try {
+        const paths = await loadGenreSongPaths(filter, query, sortMode === 'custom' ? 'title' : sortMode);
+        if (requestId !== genreViewRequestId) {
+          return;
+        }
+        // 库同步窗口内过滤掉已不存在的路径，避免残留幽灵行。
+        genreViewSongPaths.value = paths.filter(path => canonicalPathSet.value.has(path));
+      } catch {
+        if (requestId !== genreViewRequestId) {
+          return;
+        }
+        genreViewSongPaths.value = [];
+      }
+    },
+    { immediate: true },
+  );
+
   const materializeSongPaths = (paths: string[]) =>
     paths
       .map(path => songLookup.value.get(path))
@@ -723,6 +765,10 @@ export function useLibraryCurrentViewSongs({
         return playlistViewSongPaths.value;
       }
 
+      if (currentViewMode.value === 'genre') {
+        return genreViewSongPaths.value;
+      }
+
       return canonicalSongPaths.value.filter(matchesQuery);
     }
 
@@ -768,6 +814,14 @@ export function useLibraryCurrentViewSongs({
         return detailViewSongPaths.value;
       }
       return sortSongPathsByAlbumDetailMode(detailViewSongPaths.value, albumDetailSortMode.value);
+    }
+
+    if (currentViewMode.value === 'genre') {
+      if (!filterCondition.value) {
+        return [];
+      }
+      // Query and ordering cover the complete genre, independent of the metadata window.
+      return genreViewSongPaths.value;
     }
 
     if (currentViewMode.value === 'recent') {

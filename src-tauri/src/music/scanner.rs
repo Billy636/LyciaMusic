@@ -276,6 +276,7 @@ mod tests {
             cue_start_offset: None,
             cue_end_offset: None,
             comment: None,
+            genre: Some(String::new()),
             artist_avatar_path: None,
         }
     }
@@ -315,7 +316,8 @@ mod tests {
                 cue_source_path TEXT,
                 cue_start_offset INTEGER,
                 cue_end_offset INTEGER,
-                comment TEXT
+                comment TEXT,
+                genre TEXT
             );
             CREATE TABLE artists (
                 id INTEGER PRIMARY KEY,

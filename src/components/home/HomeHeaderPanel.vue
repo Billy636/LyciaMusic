@@ -4,6 +4,7 @@ import { computed } from 'vue';
 import type { FolderNode, Song } from '../../types';
 import DetailHeader from '../headers/DetailHeader.vue';
 import FoldersHeader from '../headers/FoldersHeader.vue';
+import GenreHeader from '../headers/GenreHeader.vue';
 import LocalMusicHeader from '../headers/LocalMusicHeader.vue';
 
 interface PlaylistDetail {
@@ -93,6 +94,8 @@ const isManagementModeModel = computed({
     @batchDelete="$emit('batchDelete')"
     @rename="$emit('renamePlaylist')"
   />
+
+  <GenreHeader v-else-if="localViewMode === 'genre'" />
 
   <LocalMusicHeader
     v-else-if="!['statistics', 'artist', 'album'].includes(localViewMode)"

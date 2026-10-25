@@ -1,14 +1,23 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 
-import type { Song } from '../../types';
+import type { GenreGroups, Song } from '../../types';
+import { tauriInvoke } from '../../services/tauri/invoke';
+import { useNavigationStore } from '../../shared/stores/navigation';
 import AlbumDetailHeader from '../headers/AlbumDetailHeader.vue';
 import ArtistDetailHeader from '../headers/ArtistDetailHeader.vue';
 import MasterPanel from '../song-list/MasterPanel.vue';
 import SongTable from '../song-list/SongTable.vue';
 import StatisticsPage from '../statistics/StatisticsPage.vue';
 import ArtistAlbumGrid from './ArtistAlbumGrid.vue';
+import GenreArtistList from './GenreArtistList.vue';
+import GenreOverview from './GenreOverview.vue';
+import GenreSidebar from './GenreSidebar.vue';
+import GenreTabs from './GenreTabs.vue';
 import HomeEmptyState from './HomeEmptyState.vue';
+import { useLibraryStore } from '../../features/library/store';
+import type { GenreTabId } from '../../composables/useHomeViewState';
 
 interface ArtistAlbumItem {
   key: string;
@@ -23,6 +32,7 @@ interface Props {
   isBatchMode: boolean;
   isManagementMode: boolean;
   artistActiveTab: 'songs' | 'albums' | 'details';
+  genreActiveTab: GenreTabId;
   localFilterCondition: string;
   songTableMemoryScopeKey: string;
   localSongList: Song[];
@@ -39,6 +49,7 @@ const props = defineProps<Props>();
 const emit = defineEmits<{
   (event: 'update:isBatchMode', value: boolean): void;
   (event: 'update:artistActiveTab', value: 'songs' | 'albums' | 'details'): void;
+  (event: 'update:genreActiveTab', value: GenreTabId): void;
   (event: 'update:selectedPaths', value: Set<string>): void;
   (event: 'playAll'): void;
   (event: 'batchPlay'): void;
@@ -51,6 +62,42 @@ const emit = defineEmits<{
   (event: 'artistAlbumClick', albumKey: string): void;
 }>();
 
+const { genreCatalog } = storeToRefs(useLibraryStore());
+const { searchQuery, searchRevision } = storeToRefs(useNavigationStore());
+const genreGroups = shallowRef<GenreGroups>({ albums: [], artists: [] });
+
+const activeGenreItem = computed(() => {
+  if (props.localViewMode !== 'genre' || !props.localFilterCondition) {
+    return null;
+  }
+  const key = props.localFilterCondition.trim().toLowerCase();
+  return genreCatalog.value.find(item => item.name.toLowerCase() === key) ?? null;
+});
+
+const genreAlbumList = computed(() => [...genreGroups.value.albums]
+  .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN')));
+const genreArtistList = computed(() => [...genreGroups.value.artists]
+  .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name, 'zh-CN')));
+const genreGroupFilter = computed(() => props.localViewMode === 'genre' && props.genreActiveTab !== 'songs'
+  ? props.localFilterCondition : '');
+
+watch(
+  [genreGroupFilter, searchQuery, searchRevision, genreCatalog],
+  async ([genre, query], _previous, onCleanup) => {
+    let cancelled = false;
+    onCleanup(() => { cancelled = true; });
+    genreGroups.value = { albums: [], artists: [] };
+    if (!genre) return;
+    try {
+      const groups = await tauriInvoke('get_library_genre_groups', { genre, query });
+      if (!cancelled) genreGroups.value = groups;
+    } catch (error) {
+      if (!cancelled) console.warn('Failed to load genre groups:', error);
+    }
+  },
+  { immediate: true },
+);
+
 const isBatchModeModel = computed({
   get: () => props.isBatchMode,
   set: (value: boolean) => emit('update:isBatchMode', value),
@@ -59,6 +106,11 @@ const isBatchModeModel = computed({
 const artistActiveTabModel = computed({
   get: () => props.artistActiveTab,
   set: (value: 'songs' | 'albums' | 'details') => emit('update:artistActiveTab', value),
+});
+
+const genreActiveTabModel = computed({
+  get: () => props.genreActiveTab,
+  set: (value: GenreTabId) => emit('update:genreActiveTab', value),
 });
 
 const localSongTableRef = ref<any>(null);
@@ -86,6 +138,8 @@ const handleTableDragStart = (...args: any[]) => {
       v-if="localViewMode === 'folder'"
       :isManagementMode="isManagementMode"
     />
+
+    <GenreSidebar v-if="localViewMode === 'genre'" />
 
     <section class="flex-1 min-w-0 min-h-0 flex flex-col overflow-x-hidden relative">
       <ArtistDetailHeader
@@ -118,12 +172,35 @@ const handleTableDragStart = (...args: any[]) => {
         @batchMove="$emit('batchMove')"
       />
 
+      <GenreTabs
+        v-if="localViewMode === 'genre' && localFilterCondition"
+        :genre="activeGenreItem"
+        :tab="genreActiveTab"
+        @update:tab="genreActiveTabModel = $event"
+        @playAll="$emit('playAll')"
+      />
+
       <Transition name="tab-slide" mode="out-in">
         <StatisticsPage v-if="localViewMode === 'statistics'" />
+
+        <GenreOverview
+          v-else-if="localViewMode === 'genre' && !localFilterCondition"
+        />
 
         <ArtistAlbumGrid
           v-else-if="localViewMode === 'artist' && artistActiveTab === 'albums'"
           :albums="artistAlbumList"
+          @openAlbum="$emit('artistAlbumClick', $event)"
+        />
+
+        <GenreArtistList
+          v-else-if="localViewMode === 'genre' && genreActiveTab === 'artists'"
+          :artists="genreArtistList"
+        />
+
+        <ArtistAlbumGrid
+          v-else-if="localViewMode === 'genre' && genreActiveTab === 'albums'"
+          :albums="genreAlbumList"
           @openAlbum="$emit('artistAlbumClick', $event)"
         />
 

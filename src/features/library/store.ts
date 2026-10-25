@@ -13,6 +13,7 @@ import type {
   AlbumCatalogItem,
   ArtistCatalogItem,
   FolderNode,
+  GenreCatalogItem,
   LibraryFolder,
   LibrarySong,
   LibraryScanProgress,
@@ -132,6 +133,7 @@ export const useLibraryStore = defineStore('library', () => {
   const sourceSongPaths = shallowRef<string[]>([]);
   const artistCatalog = shallowRef<ArtistCatalogItem[]>([]);
   const albumCatalog = shallowRef<AlbumCatalogItem[]>([]);
+  const genreCatalog = shallowRef<GenreCatalogItem[]>([]);
 
   const internString = (value: string | undefined) => {
     if (!value) {
@@ -454,6 +456,10 @@ export const useLibraryStore = defineStore('library', () => {
     albumCatalog.value = items;
   };
 
+  const setGenreCatalog = (items: GenreCatalogItem[]) => {
+    genreCatalog.value = items;
+  };
+
   const setLibraryScanProgress = (progress: LibraryScanProgress | null) => {
     libraryScanProgress.value = progress;
   };
@@ -634,6 +640,7 @@ export const useLibraryStore = defineStore('library', () => {
     libraryHierarchy,
     artistCatalog,
     albumCatalog,
+    genreCatalog,
     songList: sourceSongs,
     librarySongs: canonicalSongs,
     folderTree: libraryHierarchy,
@@ -656,6 +663,7 @@ export const useLibraryStore = defineStore('library', () => {
     setLibraryHierarchy,
     setArtistCatalog,
     setAlbumCatalog,
+    setGenreCatalog,
     setSongList: setSourceSongs,
     setLibrarySongs: setCanonicalSongs,
     setFolderTree: setLibraryHierarchy,

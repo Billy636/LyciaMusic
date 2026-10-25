@@ -143,6 +143,7 @@ fn song_from_remote_file(source: &RemoteSourceCredentials, file: &RemoteFileEntr
         cue_start_offset: None,
         cue_end_offset: None,
         comment: None,
+        genre: Some(String::new()),
         artist_avatar_path: None,
     };
     apply_filename_metadata_fallback(&mut song, file);
@@ -379,6 +380,7 @@ fn load_remote_song_snapshots(
                         cue_start_offset: None,
                         cue_end_offset: None,
                         comment: row.get::<_, Option<String>>(28)?,
+                        genre: Some(String::new()),
                         artist_avatar_path: None,
                     })
                 }

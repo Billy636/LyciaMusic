@@ -184,9 +184,10 @@ fn apply_insert_batch(
                 cue_source_path,
                 cue_start_offset,
                 cue_end_offset,
-                comment
+                comment,
+                genre
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
              ON CONFLICT(path) DO UPDATE SET
                 title = excluded.title,
                 artist = excluded.artist,
@@ -213,7 +214,8 @@ fn apply_insert_batch(
                 cue_source_path = excluded.cue_source_path,
                 cue_start_offset = excluded.cue_start_offset,
                 cue_end_offset = excluded.cue_end_offset,
-                comment = excluded.comment",
+                comment = excluded.comment,
+                genre = excluded.genre",
             )
             .map_err(|error| error.to_string())?;
 
@@ -251,7 +253,8 @@ fn apply_insert_batch(
                     &song.cue_source_path,
                     song.cue_start_offset.map(|v| v as i64),
                     song.cue_end_offset.map(|v| v as i64),
-                    &song.comment
+                    &song.comment,
+                    &song.genre
                 ])
                 .map_err(|error| format!("insert failed for '{}': {}", song.path, error))?;
         }
@@ -312,10 +315,11 @@ fn apply_update_batch(
                   disc_number = ?20,
                   added_at = ?21,
                   file_modified_at = ?22,
-                  cue_source_path = ?24,
-                  cue_start_offset = ?25,
-                  cue_end_offset = ?26,
-                  comment = ?27
+                 cue_source_path = ?24,
+                 cue_start_offset = ?25,
+                 cue_end_offset = ?26,
+                 comment = ?27,
+                 genre = ?28
               WHERE path = ?23",
             )
             .map_err(|error| error.to_string())?;
@@ -354,7 +358,8 @@ fn apply_update_batch(
                     &song.cue_source_path,
                     song.cue_start_offset.map(|v| v as i64),
                     song.cue_end_offset.map(|v| v as i64),
-                    &song.comment
+                    &song.comment,
+                    &song.genre
                 ])
                 .map_err(|error| format!("update failed for '{}': {}", song.path, error))?;
         }

@@ -158,6 +158,23 @@ export interface RecentAlbumCatalogItem {
   firstSongPath: string;
 }
 
+export interface GenreCatalogItem {
+  name: string;
+  songCount: number;
+  artistCount: number;
+  albumCount: number;
+}
+
+export interface GenreArtistItem {
+  name: string;
+  count: number;
+}
+
+export interface GenreGroups {
+  albums: AlbumCatalogItem[];
+  artists: GenreArtistItem[];
+}
+
 export interface RecentPlaylistCatalogItem {
   id: string;
   name: string;
@@ -347,6 +364,7 @@ export type SidebarNavigationId =
   | 'localMusic'
   | 'artists'
   | 'albums'
+  | 'genres'
   | 'playlists'
   | 'favorites'
   | 'recent'
@@ -360,6 +378,7 @@ export interface SidebarSettings {
   showPlaylistLibrary: boolean;
   showArtists: boolean;
   showAlbums: boolean;
+  showGenres: boolean;
   showFavorites: boolean;
   showRecent: boolean;
   showFolders: boolean;

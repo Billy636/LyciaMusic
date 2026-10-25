@@ -10,13 +10,13 @@ use super::sorting::{
     ARTIST_SONG_ORDER,
 };
 use super::types::{
-    AlbumCatalogItem, ArtistCatalogItem, FolderNode, LibraryFolder, LibrarySong, LibrarySongLabel,
-    LibrarySongPage, LibrarySongPathPage,
+    AlbumCatalogItem, ArtistCatalogItem, FolderNode, GenreArtistItem, GenreCatalogItem, GenreGroups,
+    LibraryFolder, LibrarySong, LibrarySongLabel, LibrarySongPage, LibrarySongPathPage,
 };
 use super::utils::{descendant_like_patterns, is_dot_prefixed_path, normalize_path};
 use crate::database::DbState;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::SystemTime;
 use tauri::{AppHandle, State};
@@ -1044,6 +1044,240 @@ pub async fn get_library_song_paths_by_artist(
     .map_err(|e| e.to_string())??;
 
     Ok(result)
+}
+
+const GENRE_TAG_SEPARATORS: [char; 6] = [';', '；', ',', '，', '、', '/'];
+
+/// 拆分复合流派标签（如 "Pop; Rock" / "民谣/独立"），去重并丢弃空段。
+fn split_genre_tags(raw: &str) -> impl Iterator<Item = &str> {
+    let mut seen = HashSet::new();
+    raw.split(|ch| GENRE_TAG_SEPARATORS.contains(&ch))
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .filter(move |tag| seen.insert(tag.to_lowercase()))
+}
+
+fn register_genre_filter(conn: &rusqlite::Connection, genre: &str) -> Result<(), String> {
+    let wanted = genre.trim().to_lowercase();
+    conn.create_scalar_function(
+        "lycia_has_genre",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        move |context| {
+            let raw = context.get::<Option<String>>(0)?.unwrap_or_default();
+            Ok(
+                !wanted.is_empty()
+                    && split_genre_tags(&raw).any(|tag| tag.to_lowercase() == wanted),
+            )
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
+const GENRE_SONG_COLUMNS: &str = "songs.genre, songs.path,
+    COALESCE(NULLIF(TRIM(songs.album), ''), 'Unknown'),
+    COALESCE(NULLIF(TRIM(songs.album_artist), ''), NULLIF(TRIM(songs.artist), ''), 'Unknown'),
+    COALESCE(NULLIF(TRIM(songs.album_key), ''), ''),
+    songs.effective_artist_names, songs.artist_names,
+    COALESCE(NULLIF(TRIM(songs.artist), ''), 'Unknown')";
+
+struct GenreSongRow {
+    genre: String,
+    album: AlbumCatalogItem,
+    artists: Vec<String>,
+}
+
+fn map_genre_song_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GenreSongRow> {
+    let name = row.get::<_, String>(2)?;
+    let artist = row.get::<_, String>(3)?;
+    let mut key = row.get::<_, String>(4)?;
+    if key.is_empty() {
+        key = format!(
+            "{}::{}",
+            name.to_ascii_lowercase(),
+            artist.to_ascii_lowercase()
+        );
+    }
+    let mut artists = deserialize_string_list(row.get(5)?);
+    if artists.is_empty() {
+        artists = deserialize_string_list(row.get(6)?);
+    }
+    if artists.is_empty() {
+        artists.push(row.get(7)?);
+    }
+    artists.sort();
+    artists.dedup();
+    Ok(GenreSongRow {
+        genre: row.get(0)?,
+        album: AlbumCatalogItem {
+            key,
+            name,
+            artist,
+            count: 1,
+            first_song_path: row.get(1)?,
+            folder_path: None,
+        },
+        artists,
+    })
+}
+
+#[tauri::command]
+pub async fn get_library_genre_catalog(
+    db_state: State<'_, DbState>,
+) -> Result<Vec<GenreCatalogItem>, String> {
+    let db_conn = db_state.conn.clone();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let conn = db_conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {GENRE_SONG_COLUMNS} FROM songs
+                 WHERE songs.genre IS NOT NULL AND TRIM(songs.genre) <> ''"
+            ))
+            .map_err(|e| e.to_string())?;
+
+        struct GenreAccumulator {
+            name: String,
+            song_count: u32,
+            artists: HashSet<String>,
+            albums: HashSet<String>,
+        }
+
+        let mut genres: HashMap<String, GenreAccumulator> = HashMap::new();
+        let rows = stmt
+            .query_map([], map_genre_song_row)
+            .map_err(|e| e.to_string())?;
+
+        for row in rows {
+            let row = row.map_err(|error| error.to_string())?;
+            for tag in split_genre_tags(&row.genre) {
+                let entry = genres
+                    .entry(tag.to_lowercase())
+                    .or_insert_with(|| GenreAccumulator {
+                        name: tag.to_string(),
+                        song_count: 0,
+                        artists: HashSet::new(),
+                        albums: HashSet::new(),
+                    });
+                // Keep display casing deterministic regardless of database row order.
+                if tag < entry.name.as_str() {
+                    entry.name = tag.to_string();
+                }
+                entry.song_count = entry.song_count.saturating_add(1);
+                entry.artists.extend(row.artists.iter().cloned());
+                entry.albums.insert(row.album.key.clone());
+            }
+        }
+
+        let mut items: Vec<GenreCatalogItem> = genres
+            .into_iter()
+            .map(|(_, entry)| GenreCatalogItem {
+                name: entry.name,
+                song_count: entry.song_count,
+                artist_count: clamp_i64_to_u32_count(entry.artists.len() as i64),
+                album_count: clamp_i64_to_u32_count(entry.albums.len() as i64),
+            })
+            .collect();
+
+        items.sort_by(|left, right| {
+            right
+                .song_count
+                .cmp(&left.song_count)
+                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+        });
+
+        Ok::<Vec<GenreCatalogItem>, String>(items)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn get_library_song_paths_by_genre(
+    genre: String,
+    query: Option<String>,
+    sort_mode: Option<LibrarySongSortMode>,
+    db_state: State<'_, DbState>,
+) -> Result<Vec<String>, String> {
+    let db_conn = db_state.conn.clone();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let conn = db_conn.lock().map_err(|e| e.to_string())?;
+        register_genre_filter(&conn, &genre)?;
+        let sort_mode = sort_mode.unwrap_or(LibrarySongSortMode::Title);
+        if matches!(sort_mode, LibrarySongSortMode::Artist) {
+            register_song_sorting(&conn)?;
+        }
+        let (search_predicate, params) =
+            build_song_search_predicate("songs", query.as_deref(), search_index_is_complete(&conn));
+        let sql = format!(
+            "SELECT songs.path FROM songs WHERE lycia_has_genre(songs.genre){search_predicate}{}",
+            all_view_page_order(&sort_mode),
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(params), |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| e.to_string())?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn get_library_genre_groups(
+    genre: String,
+    query: Option<String>,
+    db_state: State<'_, DbState>,
+) -> Result<GenreGroups, String> {
+    let db_conn = db_state.conn.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        register_genre_filter(&conn, &genre)?;
+        let (search_predicate, params) =
+            build_song_search_predicate("songs", query.as_deref(), search_index_is_complete(&conn));
+        let sql = format!(
+            "SELECT {GENRE_SONG_COLUMNS} FROM songs
+             WHERE lycia_has_genre(songs.genre){search_predicate} ORDER BY songs.path"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(params), map_genre_song_row)
+            .map_err(|error| error.to_string())?;
+        let mut albums: HashMap<String, AlbumCatalogItem> = HashMap::new();
+        let mut artists: HashMap<String, u32> = HashMap::new();
+        for row in rows {
+            let row = row.map_err(|error| error.to_string())?;
+            for name in row.artists {
+                let count = artists.entry(name).or_default();
+                *count = count.saturating_add(1);
+            }
+            if let Some(album) = albums.get_mut(&row.album.key) {
+                album.count = album.count.saturating_add(1);
+            } else {
+                albums.insert(row.album.key.clone(), row.album);
+            }
+        }
+        Ok(GenreGroups {
+            albums: albums.into_values().collect(),
+            artists: artists
+                .into_iter()
+                .map(|(name, count)| GenreArtistItem { name, count })
+                .collect(),
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

@@ -86,6 +86,7 @@ export function useHomePageModel() {
     localViewMode,
     localFilterCondition,
     artistActiveTab,
+    genreActiveTab,
     viewTransitionKey: baseViewTransitionKey,
   } = useHomeViewState({
     currentViewMode,
@@ -275,7 +276,7 @@ export function useHomePageModel() {
   const handlePlaySong = (song: Song) => {
     const shouldInsertAfterCurrent =
       searchQuery.value.trim().length > 0 &&
-      ['all', 'artist', 'album', 'folder'].includes(currentViewMode.value);
+      ['all', 'artist', 'album', 'folder', 'genre'].includes(currentViewMode.value);
 
     void playSong(song, shouldInsertAfterCurrent ? { insertAfterCurrent: true } : undefined);
   };
@@ -359,6 +360,7 @@ export function useHomePageModel() {
     localSongList,
     localSongPaths,
     artistActiveTab,
+    genreActiveTab,
     localFilterCondition,
     selectedAlbumSong,
     artistAlbumList,

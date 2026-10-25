@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 
 import { tauriInvoke } from '../services/tauri/invoke';
+import type { LocalSortMode } from '../services/storage/playerStorage';
 import {
   activateLibrarySongPathCacheEntry,
   clearLibrarySongPathCacheNamespace,
@@ -86,6 +87,17 @@ export function useLibraryDetailSongPathCache() {
   return {
     loadArtistSongPaths,
     loadAlbumSongPaths,
+    loadGenreSongPaths: (
+      genre: string,
+      query: string,
+      sortMode: Exclude<LocalSortMode, 'custom'>,
+    ) => {
+      const loader = () => tauriInvoke('get_library_song_paths_by_genre', { genre, query, sortMode });
+      // Search results depend on the evolving search index; cache only browsing queries.
+      return query.trim()
+        ? loader()
+        : loadWithCache(`genre::${JSON.stringify([genre, sortMode])}`, loader);
+    },
     clearLibraryDetailSongPathCache: () => {
       cacheGeneration += 1;
       clearLibrarySongPathCacheNamespace(DETAIL_PATH_CACHE_NAMESPACE);

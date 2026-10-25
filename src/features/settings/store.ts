@@ -123,6 +123,7 @@ export const defaultSidebarSettings: SidebarSettings = {
   showPlaylistLibrary: true,
   showArtists: true,
   showAlbums: true,
+  showGenres: true,
   showFavorites: true,
   showRecent: true,
   showFolders: true,

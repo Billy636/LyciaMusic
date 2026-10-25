@@ -51,6 +51,7 @@ const router = useRouter();
 const {
   openHomeAll,
   openHomeFolder,
+  openHomeGenre,
   openHomePlaylist,
   openHomeStatistics,
   openArtists,
@@ -236,6 +237,10 @@ const handleOpenAlbumsView = () => {
   void openAlbums();
 };
 
+const handleOpenGenresView = () => {
+  void openHomeGenre();
+};
+
 const handleOpenPlaylistsView = () => {
   void openPlaylists();
 };
@@ -288,6 +293,7 @@ const handleOpenStatisticsView = () => {
         @openAll="handleOpenAllView"
         @openArtists="handleOpenArtistsView"
         @openAlbums="handleOpenAlbumsView"
+        @openGenres="handleOpenGenresView"
         @openPlaylists="handleOpenPlaylistsView"
         @openFavorites="handleOpenFavoritesView"
         @openRecent="handleOpenRecentView"

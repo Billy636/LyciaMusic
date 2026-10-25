@@ -86,7 +86,7 @@ pub(super) fn load_db_snapshot_for_folder(
 
     let mut stmt = conn
         .prepare(
-                "SELECT id, path, title, artist, artist_names, effective_artist_names, album, album_artist, album_key, is_various_artists_album, collapse_artist_credits, duration, cover_thumb_path, bitrate, sample_rate, bit_depth, format, container, codec, file_size, track_number, disc_number, added_at, file_modified_at, cue_source_path, cue_start_offset, cue_end_offset, comment
+                "SELECT id, path, title, artist, artist_names, effective_artist_names, album, album_artist, album_key, is_various_artists_album, collapse_artist_credits, duration, cover_thumb_path, bitrate, sample_rate, bit_depth, format, container, codec, file_size, track_number, disc_number, added_at, file_modified_at, cue_source_path, cue_start_offset, cue_end_offset, comment, genre
              FROM songs
              WHERE path = ?1
                 OR path LIKE ?2 ESCAPE '^'
@@ -154,6 +154,7 @@ pub(super) fn load_db_snapshot_for_folder(
                             cue_start_offset: row.get::<_, Option<i64>>(25)?.map(|v| v as u32),
                             cue_end_offset: row.get::<_, Option<i64>>(26)?.map(|v| v as u32),
                             comment: row.get::<_, Option<String>>(27)?,
+                            genre: row.get::<_, Option<String>>(28)?,
                             artist_avatar_path: None,
                         },
                     },
@@ -676,7 +677,9 @@ pub(super) fn collect_scan_diff_with_rules(
                 || db_info.file_modified_at != candidate.disk_mtime
                 || db_info.file_size != candidate.disk_size
                 || song_identity_missing(&db_info.song)
-                || song_metadata_incomplete(&db_info.song);
+                || song_metadata_incomplete(&db_info.song)
+                // NULL 流派表示旧版本扫描的存量歌曲，借机回填一次流派标签。
+                || db_info.song.genre.is_none();
 
             if needs_parse {
                 // Retain the persisted identity and keep the existing record if an

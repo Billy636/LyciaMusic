@@ -7,6 +7,7 @@ type HomeNavigationTarget =
   | { view: 'all' }
   | { view: 'artist'; filter: string; artistMode?: ArtistBrowseMode }
   | { view: 'album' | 'playlist'; filter: string }
+  | { view: 'genre'; filter?: string }
   | { view: 'folder'; folder?: string; collection?: boolean }
   | { view: 'statistics' };
 
@@ -49,6 +50,13 @@ const buildHomeLocation = (target: HomeNavigationTarget): RouteLocationRaw => {
               view: 'folder',
             },
       };
+    case 'genre':
+      return {
+        path: '/',
+        query: target.filter
+          ? { view: 'genre', filter: target.filter }
+          : { view: 'genre' },
+      };
     case 'statistics':
       return {
         path: '/',
@@ -89,6 +97,7 @@ const sidebarTargets: Record<SidebarNavigationId, AppNavigationTarget> = {
   localMusic: { section: 'home', target: { view: 'all' } },
   artists: { section: 'artists' },
   albums: { section: 'albums' },
+  genres: { section: 'home', target: { view: 'genre' } },
   playlists: { section: 'playlists' },
   favorites: { section: 'favorites' },
   recent: { section: 'recent' },
@@ -134,6 +143,9 @@ export function useHomeNavigation(router: Router) {
   const openHomeFolder = (folderPath?: string, options?: { replace?: boolean; collection?: boolean }) =>
     openHome({ view: 'folder', folder: folderPath, collection: options?.collection }, options);
 
+  const openHomeGenre = (genre?: string, options?: { replace?: boolean }) =>
+    openHome({ view: 'genre', filter: genre }, options);
+
   const openHomeStatistics = (options?: { replace?: boolean }) =>
     openHome({ view: 'statistics' }, options);
 
@@ -164,6 +176,7 @@ export function useHomeNavigation(router: Router) {
     openHomeAlbum,
     openHomePlaylist,
     openHomeFolder,
+    openHomeGenre,
     openHomeStatistics,
     openArtists,
     openAlbums,

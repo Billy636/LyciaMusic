@@ -30,6 +30,7 @@ interface Props {
   localSongList: Song[];
   localSongPaths: string[];
   artistActiveTab: 'songs' | 'albums' | 'details';
+  genreActiveTab: 'songs' | 'albums' | 'artists';
   localFilterCondition: string;
   selectedAlbumSong: Song | null;
   artistAlbumList: ArtistAlbumItem[];
@@ -43,6 +44,7 @@ const emit = defineEmits<{
   (event: 'update:isBatchMode', value: boolean): void;
   (event: 'update:isManagementMode', value: boolean): void;
   (event: 'update:artistActiveTab', value: 'songs' | 'albums' | 'details'): void;
+  (event: 'update:genreActiveTab', value: 'songs' | 'albums' | 'artists'): void;
   (event: 'update:selectedPaths', value: Set<string>): void;
   (event: 'playAll'): void;
   (event: 'batchPlay'): void;
@@ -85,6 +87,7 @@ const songTableMemoryScopeKey = computed(() =>
       case 'artist':
       case 'album':
       case 'playlist':
+      case 'genre':
         return [
           props.localViewMode,
           props.localFilterCondition || '',
@@ -135,6 +138,7 @@ const songTableMemoryScopeKey = computed(() =>
         :isBatchMode="isBatchMode"
         :isManagementMode="isManagementMode"
         :artistActiveTab="artistActiveTab"
+        :genreActiveTab="genreActiveTab"
         :localFilterCondition="localFilterCondition"
         :songTableMemoryScopeKey="songTableMemoryScopeKey"
         :localSongList="localSongList"
@@ -146,6 +150,7 @@ const songTableMemoryScopeKey = computed(() =>
         :setSongTableRef="setSongTableRef"
         @update:isBatchMode="$emit('update:isBatchMode', $event)"
         @update:artistActiveTab="$emit('update:artistActiveTab', $event)"
+        @update:genreActiveTab="$emit('update:genreActiveTab', $event)"
         @update:selectedPaths="$emit('update:selectedPaths', $event)"
         @playAll="$emit('playAll')"
         @batchPlay="$emit('batchPlay')"

@@ -13,6 +13,7 @@
       :localSongList="localSongList"
       :localSongPaths="localSongPaths"
       :artistActiveTab="artistActiveTab"
+      :genreActiveTab="genreActiveTab"
       :localFilterCondition="localFilterCondition"
       :selectedAlbumSong="selectedAlbumSong"
       :artistAlbumList="artistAlbumList"
@@ -21,6 +22,7 @@
       @update:isBatchMode="isBatchMode = $event"
       @update:isManagementMode="isManagementMode = $event"
       @update:artistActiveTab="artistActiveTab = $event"
+      @update:genreActiveTab="genreActiveTab = $event"
       @update:selectedPaths="selectedPaths = $event"
       @playAll="handlePlayAll"
       @batchPlay="handleBatchPlay"
@@ -136,6 +138,7 @@ const {
   localSongList,
   localSongPaths,
   artistActiveTab,
+  genreActiveTab,
   localFilterCondition,
   selectedAlbumSong,
   artistAlbumList,

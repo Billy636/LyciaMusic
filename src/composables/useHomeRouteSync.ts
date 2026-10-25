@@ -8,7 +8,7 @@ import type {
 import type { FolderNode } from '../types';
 import type { ArtistBrowseMode } from '../shared/stores/navigation';
 
-type SyncedHomeViewMode = 'all' | 'folder' | 'artist' | 'album' | 'playlist' | 'statistics';
+type SyncedHomeViewMode = 'all' | 'folder' | 'artist' | 'album' | 'genre' | 'playlist' | 'statistics';
 
 interface HomeRouteState {
   viewMode: SyncedHomeViewMode;
@@ -65,6 +65,9 @@ const parseHomeRouteState = (query: LocationQuery): HomeRouteState => {
       };
     case 'folder':
       return { viewMode: 'folder', filter: '', folder, artistMode: 'artist' };
+    case 'genre':
+      // filter 为空表示流派总览。
+      return { viewMode: 'genre', filter, folder: '', artistMode: 'artist' };
     case 'statistics':
       return { viewMode: 'statistics', filter: '', folder: '', artistMode: 'artist' };
     default:
@@ -108,6 +111,10 @@ const buildHomeRouteQuery = (
       } : {};
     case 'statistics':
       return { view: 'statistics' };
+    case 'genre':
+      return filterCondition
+        ? { view: 'genre', filter: filterCondition }
+        : { view: 'genre' };
     case 'folder':
       return currentFolderFilter ? {
         view: 'folder',

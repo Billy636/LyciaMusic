@@ -2,6 +2,8 @@ import type {
   AlbumCatalogItem,
   ArtistCatalogItem,
   FolderNode,
+  GenreCatalogItem,
+  GenreGroups,
   LibraryFolder,
   LibraryScanSettings,
   LibraryScanSource,
@@ -27,6 +29,7 @@ import type {
   SaveArtistAvatarResponse,
 } from '../../types';
 import type { AudioOutputMode } from '../../types';
+import type { LocalSortMode } from '../storage/playerStorage';
 import type {
   DuplicateDeleteGroup,
   DuplicateDeleteResult,
@@ -266,6 +269,9 @@ export interface TauriCommandMap {
   get_library_album_catalog_by_artist: { payload: { artistName: string; albumArtist?: boolean }; response: AlbumCatalogItem[] };
   get_library_song_paths_by_artist: { payload: { artistName: string; albumArtist?: boolean }; response: string[] };
   get_library_song_paths_by_album: { payload: { albumKey: string; sortMode?: 'title' | 'track_number' | 'track_number_desc' }; response: string[] };
+  get_library_genre_catalog: { payload: undefined; response: GenreCatalogItem[] };
+  get_library_song_paths_by_genre: { payload: { genre: string; query?: string; sortMode?: Exclude<LocalSortMode, 'custom'> }; response: string[] };
+  get_library_genre_groups: { payload: { genre: string; query?: string }; response: GenreGroups };
   get_library_song_paths_for_all_view: {
     payload: {
       query?: string;

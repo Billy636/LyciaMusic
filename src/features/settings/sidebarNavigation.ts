@@ -12,6 +12,7 @@ export const sidebarNavigationItems: readonly SidebarNavigationItem[] = [
   { id: 'localMusic', label: '本地音乐', visibilityKey: 'showLocalMusic' },
   { id: 'artists', label: '歌手', visibilityKey: 'showArtists' },
   { id: 'albums', label: '专辑', visibilityKey: 'showAlbums' },
+  { id: 'genres', label: '流派', visibilityKey: 'showGenres' },
   { id: 'playlists', label: '歌单', visibilityKey: 'showPlaylistLibrary' },
   { id: 'favorites', label: '我的收藏', visibilityKey: 'showFavorites' },
   { id: 'recent', label: '最近播放', visibilityKey: 'showRecent' },

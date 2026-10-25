@@ -139,6 +139,9 @@ export function createDuplicateDeletion(deps: DuplicateDeletionDependencies) {
         attempt('刷新专辑目录', async () => {
           libraryStore.setAlbumCatalog(await tauriInvoke('get_library_album_catalog'));
         }),
+        attempt('刷新流派目录', async () => {
+          libraryStore.setGenreCatalog(await tauriInvoke('get_library_genre_catalog'));
+        }),
       ]);
     } catch (cause) {
       result.warnings.push(`文件处理结果已确认，但部分状态未能同步：${describeError(cause)}`);

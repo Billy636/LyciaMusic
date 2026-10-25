@@ -17,6 +17,7 @@ const emit = defineEmits<{
   (event: 'openAll'): void;
   (event: 'openArtists'): void;
   (event: 'openAlbums'): void;
+  (event: 'openGenres'): void;
   (event: 'openPlaylists'): void;
   (event: 'openFavorites'): void;
   (event: 'openRecent'): void;
@@ -34,6 +35,7 @@ const openItem: Record<SidebarNavigationId, () => void> = {
   localMusic: () => emit('openAll'),
   artists: () => emit('openArtists'),
   albums: () => emit('openAlbums'),
+  genres: () => emit('openGenres'),
   playlists: () => emit('openPlaylists'),
   favorites: () => emit('openFavorites'),
   recent: () => emit('openRecent'),
@@ -45,6 +47,7 @@ function isActive(id: SidebarNavigationId) {
   if (id === 'localMusic') return props.currentPath === '/' && props.currentViewMode === 'all';
   if (id === 'folders') return props.currentPath === '/' && props.currentViewMode === 'folder';
   if (id === 'statistics') return props.currentPath === '/' && props.currentViewMode === 'statistics';
+  if (id === 'genres') return props.currentPath === '/' && props.currentViewMode === 'genre';
   return props.currentPath === `/${id}`;
 }
 

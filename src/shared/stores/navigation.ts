@@ -8,6 +8,7 @@ export type NavigationViewMode =
   | 'folder'
   | 'artist'
   | 'album'
+  | 'genre'
   | 'playlist'
   | 'recent'
   | 'favorites'
