@@ -103,7 +103,7 @@ const songTableMemoryScopeKey = computed(() =>
 
 <template>
   <transition name="home-view-fade" mode="out-in">
-    <div :key="viewTransitionKey" class="flex flex-1 flex-col min-h-0 min-w-0">
+    <div :key="localViewMode === 'genre' ? 'genre' : viewTransitionKey" class="flex flex-1 flex-col min-h-0 min-w-0">
       <HomeHeaderPanel
         :localViewMode="localViewMode"
         :isBatchMode="isBatchMode"

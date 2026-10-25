@@ -28,9 +28,6 @@ const selectGenre = (name: string) => {
 
 <template>
   <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-1 pb-6" aria-label="流派总览">
-    <p class="px-2 pb-3 text-xs text-gray-500 dark:text-gray-400">
-      标签总览 · {{ genreCatalog.length }} 个流派
-    </p>
     <div v-if="visibleGenres.length" class="genre-tag-grid">
       <button
         v-for="genre in visibleGenres"

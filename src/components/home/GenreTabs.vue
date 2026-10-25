@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { Play } from 'lucide-vue-next';
 import type { GenreTabId } from '../../composables/useHomeViewState';
 import type { GenreCatalogItem } from '../../types';
 
@@ -15,10 +14,10 @@ const emit = defineEmits<{
   (event: 'playAll'): void;
 }>();
 
-const tabs: Array<{ id: GenreTabId; label: string; countKey: 'songCount' | 'albumCount' | 'artistCount' }> = [
-  { id: 'songs', label: '歌曲', countKey: 'songCount' },
-  { id: 'albums', label: '专辑', countKey: 'albumCount' },
-  { id: 'artists', label: '歌手', countKey: 'artistCount' },
+const tabs: Array<{ id: GenreTabId; label: string }> = [
+  { id: 'songs', label: '歌曲' },
+  { id: 'albums', label: '专辑' },
+  { id: 'artists', label: '歌手' },
 ];
 
 const handleTabClick = (id: GenreTabId) => {
@@ -42,17 +41,18 @@ const handleTabClick = (id: GenreTabId) => {
         @click="handleTabClick(item.id)"
       >
         {{ item.label }}
-        <span class="genre-tab-count">{{ genre[item.countKey] }}</span>
       </button>
     </div>
     <button
       type="button"
-      class="genre-playall"
+      class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white w-7 h-7 shrink-0 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
       :title="`播放「${genre.name}」全部歌曲`"
       :aria-label="`播放「${genre.name}」全部歌曲`"
       @click="$emit('playAll')"
     >
-      <Play :size="14" aria-hidden="true" />
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 5.5v13l10-6.5-10-6.5Z" />
+      </svg>
     </button>
   </div>
 </template>
@@ -89,31 +89,4 @@ const handleTabClick = (id: GenreTabId) => {
   font-weight: 600;
 }
 
-.genre-tab-count {
-  margin-left: 3px;
-  font-size: 11px;
-  opacity: 0.75;
-  font-variant-numeric: tabular-nums;
-}
-
-.genre-playall {
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 999px;
-  background: #EC4141;
-  color: #fff;
-  cursor: pointer;
-  box-shadow: 0 3px 9px rgb(236 65 65 / 32%);
-  transition: transform 150ms, background-color 150ms;
-}
-
-.genre-playall:hover {
-  transform: scale(1.08);
-  background: #d93a3a;
-}
 </style>

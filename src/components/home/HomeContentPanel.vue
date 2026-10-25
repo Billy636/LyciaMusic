@@ -172,19 +172,25 @@ const handleTableDragStart = (...args: any[]) => {
         @batchMove="$emit('batchMove')"
       />
 
-      <GenreTabs
-        v-if="localViewMode === 'genre' && localFilterCondition"
-        :genre="activeGenreItem"
-        :tab="genreActiveTab"
-        @update:tab="genreActiveTabModel = $event"
-        @playAll="$emit('playAll')"
-      />
+      <Transition name="genre-toolbar">
+        <div v-if="localViewMode === 'genre' && activeGenreItem" class="genre-toolbar">
+          <div class="min-h-0 overflow-hidden">
+            <GenreTabs
+              :genre="activeGenreItem"
+              :tab="genreActiveTab"
+              @update:tab="genreActiveTabModel = $event"
+              @playAll="$emit('playAll')"
+            />
+          </div>
+        </div>
+      </Transition>
 
-      <Transition name="tab-slide" mode="out-in">
+      <Transition :name="localViewMode === 'genre' ? 'genre-content' : 'tab-slide'" mode="out-in">
         <StatisticsPage v-if="localViewMode === 'statistics'" />
 
         <GenreOverview
           v-else-if="localViewMode === 'genre' && !localFilterCondition"
+          key="genre-overview"
         />
 
         <ArtistAlbumGrid
@@ -195,11 +201,13 @@ const handleTableDragStart = (...args: any[]) => {
 
         <GenreArtistList
           v-else-if="localViewMode === 'genre' && genreActiveTab === 'artists'"
+          :key="`genre-artists:${localFilterCondition}`"
           :artists="genreArtistList"
         />
 
         <ArtistAlbumGrid
           v-else-if="localViewMode === 'genre' && genreActiveTab === 'albums'"
+          :key="`genre-albums:${localFilterCondition}`"
           :albums="genreAlbumList"
           @openAlbum="$emit('artistAlbumClick', $event)"
         />
@@ -212,6 +220,7 @@ const handleTableDragStart = (...args: any[]) => {
 
         <SongTable
           v-else
+          :key="localViewMode === 'genre' ? `genre-songs:${localFilterCondition}` : 'songs'"
           ref="localSongTableRef"
           :songs="localSongList"
           :songPaths="localSongPaths"
@@ -230,6 +239,45 @@ const handleTableDragStart = (...args: any[]) => {
 </template>
 
 <style scoped>
+.genre-toolbar {
+  display: grid;
+  grid-template-rows: 1fr;
+  flex-shrink: 0;
+}
+
+.genre-toolbar-enter-active {
+  transition: grid-template-rows 180ms cubic-bezier(0.2, 0, 0, 1), opacity 120ms ease-out 40ms;
+}
+
+.genre-toolbar-leave-active {
+  pointer-events: none;
+  transition: grid-template-rows 160ms ease-in-out, opacity 80ms ease-in;
+}
+
+.genre-toolbar-enter-from,
+.genre-toolbar-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.genre-content-enter-active {
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+
+.genre-content-leave-active {
+  transition: opacity 100ms ease-in, transform 100ms ease-in;
+}
+
+.genre-content-enter-from {
+  opacity: 0;
+  transform: translateX(8px);
+}
+
+.genre-content-leave-to {
+  opacity: 0;
+  transform: translateX(-8px);
+}
+
 .tab-slide-enter-active,
 .tab-slide-leave-active {
   transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -243,5 +291,14 @@ const handleTableDragStart = (...args: any[]) => {
 .tab-slide-leave-to {
   opacity: 0;
   transform: translateX(-15px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genre-toolbar-enter-active,
+  .genre-toolbar-leave-active,
+  .genre-content-enter-active,
+  .genre-content-leave-active {
+    transition: none;
+  }
 }
 </style>
