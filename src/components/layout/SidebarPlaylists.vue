@@ -8,6 +8,7 @@ interface DragState {
   type: string;
   data: any;
   targetPlaylist: { id: string } | null;
+  completedPlaylistId?: string;
 }
 
 interface Props {
@@ -51,7 +52,7 @@ const getPlaylistCover = (playlistId: string) => {
 <template>
   <div class="mt-6">
     <div class="px-4 pr-3 py-2 flex items-center justify-between group">
-      <button type="button" :aria-expanded="isOpen" aria-controls="sidebar-playlist-shortcuts" class="flex items-center gap-1 cursor-pointer text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors" @click.stop="isOpenModel = !isOpenModel">
+      <button type="button" :data-playlist-expand="!isOpen ? '' : undefined" :aria-expanded="isOpen" aria-controls="sidebar-playlist-shortcuts" class="flex items-center gap-1 cursor-pointer text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors" @click.stop="isOpenModel = !isOpenModel">
         <svg xmlns="http://www.w3.org/2000/svg" :class="['h-3 w-3 transition-transform duration-200', isOpen ? 'rotate-90' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
         <span class="text-xs font-bold tracking-wide">快捷歌单</span>
       </button>
@@ -81,6 +82,7 @@ const getPlaylistCover = (playlistId: string) => {
               selectedPlaylistIds.has(list.id) || activeId === list.id ? 'bg-black/10 dark:bg-white/10 text-black dark:text-white font-medium shadow-sm translate-x-1' : 'hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-300 hover:translate-x-1',
               (dragState.active && dragState.type === 'playlist' && dragState.data?.id === list.id) ? 'opacity-50 bg-gray-100 dark:bg-white/5' : '',
               (dragState.active && dragState.targetPlaylist?.id === list.id && dragState.type === 'song') ? '!bg-red-500/10 !ring-2 !ring-[#EC4141] ring-inset' : '',
+              { 'song-drop-active': dragState.active && dragState.type === 'song', 'song-drop-confirm': dragState.completedPlaylistId === list.id },
               (dragState.type === 'playlist' && dragOverId === list.id && dragPosition === 'top') ? '!border-t-[#EC4141]' : '',
               (dragState.type === 'playlist' && dragOverId === list.id && dragPosition === 'bottom') ? '!border-b-[#EC4141]' : ''
             ]"
@@ -91,8 +93,10 @@ const getPlaylistCover = (playlistId: string) => {
             </div>
             <div class="flex-1 min-w-0 flex flex-col justify-center">
               <span class="text-xs line-clamp-2 break-all leading-tight" :title="list.name">{{ list.name }}</span>
-              <span class="mt-0.5 text-[10px] app-text-secondary">{{ list.songPaths.length }} 首</span>
+              <span v-if="dragState.active && dragState.type === 'song' && dragState.targetPlaylist?.id === list.id" class="mt-0.5 text-[10px] text-[#EC4141]">松开以添加</span>
+              <span v-else class="mt-0.5 text-[10px] app-text-secondary">{{ list.songPaths.length }} 首</span>
             </div>
+            <span v-if="dragState.active && dragState.type === 'song' && dragState.targetPlaylist?.id === list.id" class="ml-1 shrink-0 text-lg text-[#EC4141]" aria-hidden="true">＋</span>
             <svg v-if="pinnedIds.includes(list.id)" xmlns="http://www.w3.org/2000/svg" class="ml-1 h-3 w-3 shrink-0 text-[#EC4141]/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" role="img" aria-label="已置顶"><title>已置顶</title><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 9V4l1-1V2H7v1l1 1v5l-2 3v1h12v-1l-2-3M12 13v9" /></svg>
           </li>
         </TransitionGroup>
@@ -107,6 +111,18 @@ const getPlaylistCover = (playlistId: string) => {
 </template>
 
 <style scoped>
+.song-drop-active { transform: none !important; transition: background-color 150ms ease, box-shadow 150ms ease; }
+.song-drop-active:hover > div:first-child { transform: none; }
+.song-drop-confirm { animation: song-drop-confirm 650ms ease-out; }
+@keyframes song-drop-confirm {
+  0%, 55% { background-color: rgb(236 65 65 / 12%); box-shadow: inset 0 0 0 1px #EC4141; }
+  100% { box-shadow: inset 0 0 0 1px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .song-drop-confirm { animation: none; }
+  .song-drop-active { transition: none; }
+}
+
 .playlist-item-enter-active,
 .playlist-item-leave-active {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);

@@ -11,6 +11,8 @@ export interface DragSessionState {
   songs: Song[];
   // Full drag payload, including selected rows outside the loaded metadata window.
   songPaths?: string[];
+  songSourceIndices?: number[];
+  completedPlaylistId?: string;
   data: any;
   mouseX: number;
   mouseY: number;

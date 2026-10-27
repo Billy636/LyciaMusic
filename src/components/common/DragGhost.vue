@@ -123,8 +123,8 @@ const title = computed(() => {
 
 const subtitle = computed(() => {
   if (dragSession.type === 'song' && dragSession.targetFolder) return `移动到 ${dragSession.targetFolder.name}`;
-  if (dragSession.type === 'song' && songCount.value > 1) return `共 ${songCount.value} 首歌曲`;
-  if (dragSession.type === 'song' && dragSession.songs.length > 0) return dragSession.songs[0].artist;
+  if (dragSession.type === 'song' && dragSession.targetPlaylist) return `添加到「${dragSession.targetPlaylist.name}」`;
+  if (dragSession.type === 'song') return dragSession.insertIndex >= 0 ? '松开以调整顺序' : '拖到歌单以添加';
   if (dragSession.type === 'playlist') return '歌单';
   if (dragSession.type === 'folder') return dragSession.targetFolder
     ? `移动到 ${dragSession.targetFolder.name}` : '拖到目标文件夹以移动';
@@ -144,6 +144,7 @@ const badgeCount = computed(() => {
         v-if="isGhostVisible"
         ref="ghostElement"
         class="fixed w-max z-[9999] pointer-events-none p-3 bg-white/90 dark:bg-[#1a1a1a]/90 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 dark:border-white/10 flex items-center gap-3 select-none transition-transform"
+        :class="{ 'song-drag-card': dragSession.type === 'song', 'song-drag-card-adding': dragSession.type === 'song' && dragSession.targetPlaylist }"
         :style="ghostStyle"
       >
         <!-- Icon / Cover Area -->
@@ -173,9 +174,10 @@ const badgeCount = computed(() => {
         </div>
 
         <div class="flex flex-col min-w-0">
-          <span class="text-sm font-bold text-gray-900 dark:text-white truncate max-w-[200px] drop-shadow-sm">{{ title }}</span>
+          <span class="text-sm font-medium text-gray-900 dark:text-white truncate max-w-[200px] drop-shadow-sm">{{ title }}</span>
           <span class="text-xs text-gray-500 dark:text-white/60 truncate max-w-[200px]">{{ subtitle }}</span>
         </div>
+        <span v-if="dragSession.type === 'song' && dragSession.targetPlaylist" class="text-xl text-[#EC4141] shrink-0" aria-hidden="true">＋</span>
         
         <div v-if="badgeCount > 1" class="absolute -top-2 -right-2 w-6 h-6 bg-[#EC4141] text-white rounded-full flex items-center justify-center text-xs font-bold shadow-md border-2 border-white dark:border-[#222]">
            {{ badgeCount }}
@@ -186,6 +188,15 @@ const badgeCount = computed(() => {
 </template>
 
 <style scoped>
+.song-drag-card { width: 240px; gap: 10px; padding: 11px 12px; border-color: rgb(128 128 128 / 20%); }
+.song-drag-card > div:first-child { width: 36px; height: 36px; }
+.song-drag-card > div:nth-child(2) { flex: 1; }
+.song-drag-card-adding { border-color: #EC4141; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-enter-active, .fade-leave-active { transition: none !important; }
+}
+
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.15s ease, transform 0.15s ease;

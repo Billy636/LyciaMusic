@@ -284,7 +284,7 @@ const handleOpenStatisticsView = () => {
 
     <SidebarBrand />
 
-    <nav class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4" @click="handleBackgroundClick">
+    <nav data-song-drop-scroll class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4" @click="handleBackgroundClick">
       <SidebarNavigation
         :sidebar="settings.sidebar"
         :currentViewMode="currentViewMode"

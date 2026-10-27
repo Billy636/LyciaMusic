@@ -737,53 +737,42 @@ onUnmounted(() => {
 
 defineExpose({ containerRef });
 
-const getRowStyle = (songIndex: number, songPath: string) => {
-  const baseStyle: Record<string, string | number> = { height: `${ROW_HEIGHT}px` };
-
-  if (!dragSession.active || dragSession.insertIndex === -1) {
-    return baseStyle;
-  }
-
-  const dragSourcePath = dragSession.songs[0]?.path;
-  const dragIndex = props.songs.findIndex(song => song.path === dragSourcePath);
-  const targetIndex = dragSession.insertIndex;
-
-  if (songPath === dragSourcePath) {
-    const diff = targetIndex - dragIndex;
-    return {
-      ...baseStyle,
-      transform: `translateY(${diff * 100}%)`,
-      transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)',
-      opacity: 0,
-      zIndex: 0,
-    };
-  }
-
-  let translateY = 0;
-
-  if (targetIndex > dragIndex) {
-    if (songIndex > dragIndex && songIndex <= targetIndex) {
-      translateY = -100;
+const songDragLayout = computed(() => {
+  if (!dragSession.active || dragSession.type !== 'song') return null;
+  const indices = dragSession.songSourceIndices;
+  const paths = dragSession.songPaths;
+  if (!indices?.length || !paths?.length) return null;
+  // Metadata windows need not contain the first row of the drag selection.
+  const sourcePath = props.songPaths?.[indices[0]] ?? props.songs[indices[0]]?.path;
+  if (sourcePath !== paths[0]) return null;
+  const countBefore = (index: number) => {
+    let left = 0, right = indices.length;
+    while (left < right) {
+      const middle = (left + right) >>> 1;
+      if (indices[middle] < index) left = middle + 1;
+      else right = middle;
     }
-  } else if (targetIndex < dragIndex) {
-    if (songIndex >= targetIndex && songIndex < dragIndex) {
-      translateY = 100;
-    }
-  }
-
-  if (translateY !== 0) {
-    return {
-      ...baseStyle,
-      transform: `translateY(${translateY}%)`,
-      transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)',
-      zIndex: 1,
-    };
-  }
-
-  return {
-    ...baseStyle,
-    transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)',
+    return left;
   };
+  return {
+    paths: new Set(paths),
+    ranks: new Map(indices.map((index, rank) => [index, rank])),
+    countBefore,
+    count: indices.length,
+    slot: dragSession.insertIndex - countBefore(dragSession.insertIndex),
+  };
+});
+
+const isDraggedSong = (path: string) => songDragLayout.value?.paths.has(path) ?? false;
+const getRowStyle = (songIndex: number, songPath: string) => {
+  const layout = songDragLayout.value;
+  const baseStyle: Record<string, string | number> = { height: `${ROW_HEIGHT}px` };
+  if (!layout || dragSession.insertIndex < 0) return baseStyle;
+  const rank = layout.ranks.get(songIndex);
+  const remainingIndex = songIndex - layout.countBefore(songIndex);
+  const nextIndex = layout.paths.has(songPath) && rank !== undefined ? layout.slot + rank
+    : remainingIndex + (remainingIndex >= layout.slot ? layout.count : 0);
+  return { ...baseStyle, transform: `translate3d(0, ${(nextIndex - songIndex) * ROW_HEIGHT}px, 0)`, zIndex: rank === undefined ? 1 : 0 };
 };
 </script>
 
@@ -813,12 +802,19 @@ const getRowStyle = (songIndex: number, songPath: string) => {
           @contextmenu.prevent="emit('contextmenu', $event, song)"
           @dragstart.prevent
           class="group w-full min-w-0 border-b border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5 select-none cursor-default relative flex items-center px-2 gap-3 [touch-action:none]"
-          :class="{ 'bg-red-500/10 dark:bg-red-500/20': selectedPaths.has(song.path) }"
+          :class="{
+            'bg-red-500/10 dark:bg-red-500/20': selectedPaths.has(song.path),
+            'song-drag-source': isDraggedSong(song.path),
+            'song-reorder-slot': isDraggedSong(song.path) && dragSession.insertIndex >= 0,
+          }"
           :style="getRowStyle(song.virtualIndex, song.path)"
         >
           <div class="w-10 shrink-0 flex items-center justify-center" :data-selection-control="isBatchMode ? '' : undefined">
-            <div v-if="isBatchMode" class="flex items-center justify-center">
+            <div v-if="isBatchMode" class="flex items-center justify-center gap-1">
               <input type="checkbox" :checked="selectedPaths.has(song.path)" class="rounded text-[#EC4141] focus:ring-[#EC4141] pointer-events-none" />
+              <button type="button" data-song-drag-handle class="cursor-grab text-gray-400 hover:text-[#EC4141] active:cursor-grabbing p-0.5" aria-label="拖动选中的歌曲" title="拖动选中的歌曲" @click.stop>
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-4" fill="currentColor" viewBox="0 0 12 16" aria-hidden="true"><circle cx="3" cy="3" r="1"/><circle cx="9" cy="3" r="1"/><circle cx="3" cy="8" r="1"/><circle cx="9" cy="8" r="1"/><circle cx="3" cy="13" r="1"/><circle cx="9" cy="13" r="1"/></svg>
+              </button>
             </div>
             <div v-else-if="currentSong?.path === song.path && isPlaying" class="flex items-center justify-center gap-[3px] w-5 h-5">
               <span class="spectrum-bar w-[3px] rounded-full bg-[#EC4141]" style="animation-delay: 0s"></span>
@@ -1072,6 +1068,22 @@ const getRowStyle = (songIndex: number, songPath: string) => {
 </template>
 
 <style scoped>
+.song-list-scroll-container [data-index] {
+  transition: transform 180ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 150ms ease;
+}
+
+.song-drag-source { opacity: 0.3; }
+.song-reorder-slot {
+  outline: 1px dashed #EC4141;
+  outline-offset: -4px;
+  background: rgb(236 65 65 / 8%);
+  border-radius: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .song-list-scroll-container [data-index] { transition: none; }
+}
+
 /* 搜索结果刷新过渡：新列表淡入上移，旧列表立即移除保持实时 */
 .search-refresh-enter-active {
   transition: opacity 0.2s ease, transform 0.2s ease;
