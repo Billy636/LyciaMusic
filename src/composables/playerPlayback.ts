@@ -103,6 +103,7 @@ export const createPlayerPlayback = ({
   } = storeToRefs(playbackStore);
   const { showPlayerDetail } = storeToRefs(uiStore);
   let runtimeGeneration = 0;
+  let playbackIntentId = 0;
   let pendingPlayRequest: number | null = null;
   let activePlaybackRequest: number | null = null;
   let failedPlaybackId: number | null = null;
@@ -338,6 +339,7 @@ export const createPlayerPlayback = ({
   };
 
   const playSong = async (song: Song, options: PlaySongOptions = {}) => {
+    playbackIntentId += 1;
     const requestId = ++playRequestId;
     const resolvedSong = resolveSongForPlayback
       ? await resolveSongForPlayback(song).catch(() => song)
@@ -459,6 +461,7 @@ export const createPlayerPlayback = ({
       pendingPlayRequest = requestId;
       activePlaybackRequest = requestId;
       const pId = await playbackApi.playAudio({
+        fadeEnabled: settingsStore.settings.audio.playbackFadeEnabled !== false,
         path: audioFilePath,
         title: getSmtcTitle(song),
         artist: song.artist || 'Unknown Artist',
@@ -531,6 +534,7 @@ export const createPlayerPlayback = ({
   };
 
   const pauseSong = async () => {
+    playbackIntentId += 1;
     if (isPlaying.value && sessionStartTime) {
       accumulatedTime += (Date.now() - sessionStartTime) / 1000;
       sessionStartTime = null;
@@ -538,21 +542,14 @@ export const createPlayerPlayback = ({
 
     isPlaying.value = false;
     stopPlaybackRuntime();
-    await playbackApi.pauseAudio();
+    await playbackApi.pauseAudio(settingsStore.settings.audio.playbackFadeEnabled !== false);
   };
 
   const togglePlay = async () => {
     if (!currentSong.value) return;
 
     if (isPlaying.value) {
-      if (sessionStartTime) {
-        accumulatedTime += (Date.now() - sessionStartTime) / 1000;
-        sessionStartTime = null;
-      }
-
-      await playbackApi.pauseAudio();
-      isPlaying.value = false;
-      stopPlaybackRuntime();
+      await pauseSong();
       return;
     }
 
@@ -562,16 +559,32 @@ export const createPlayerPlayback = ({
         preserveQueue: true,
       });
       return;
-    } else {
-      const requestId = playRequestId;
-      const playbackId = currentPlaybackId.value;
-      await playbackApi.resumeAudio();
-      if (requestId !== playRequestId || playbackId !== currentPlaybackId.value || !isSongLoaded.value) return;
-      sessionStartTime = Date.now();
     }
 
+    const requestId = playRequestId;
+    const playbackId = currentPlaybackId.value;
+    const intentId = ++playbackIntentId;
+    const seekRequestId = latestSeekRequestId;
+    // Reflect intent immediately so another click can reverse an in-flight fade.
     isPlaying.value = true;
+    sessionStartTime = Date.now();
     startPlaybackRuntime();
+    try {
+      await playbackApi.resumeAudio(settingsStore.settings.audio.playbackFadeEnabled !== false);
+    } catch (error) {
+      if (intentId === playbackIntentId && requestId === playRequestId) {
+        stopAfterPlaybackError(String(error));
+      }
+      return;
+    }
+    // The backend continues advancing briefly during fade-out. Resume from its
+    // actual position, without letting stale responses overwrite a newer action.
+    const rawTime = await playbackApi.getPlaybackProgress().catch(() => null);
+    if (rawTime === null || intentId !== playbackIntentId || requestId !== playRequestId
+      || playbackId !== currentPlaybackId.value || !isSongLoaded.value
+      || seekRequestId !== latestSeekRequestId || isSeeking) return;
+    const offsetSec = (currentSong.value?.cue_start_offset || 0) / 1000;
+    reanchorPlaybackClock(Math.max(0, rawTime - offsetSec));
   };
 
   const seekTo = async (newTime: number) => {

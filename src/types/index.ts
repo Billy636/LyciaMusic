@@ -483,6 +483,7 @@ export interface EqualizerSettings {
 
 export interface AudioSettings {
   outputMode: AudioOutputMode;
+  playbackFadeEnabled?: boolean;
   volumeBalance: {
     enabled: boolean;
     gainOffsetDb: number;

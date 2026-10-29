@@ -133,6 +133,7 @@ export const defaultSidebarSettings: SidebarSettings = {
 
 export const defaultAudioSettings: AudioSettings = {
   outputMode: 'shared',
+  playbackFadeEnabled: true,
   volumeBalance: {
     enabled: false,
     gainOffsetDb: 0,
@@ -319,6 +320,8 @@ export const mergeAudioSettings = (
   return {
     ...base,
     outputMode: nextOutputMode,
+    playbackFadeEnabled: typeof patch.playbackFadeEnabled === 'boolean'
+      ? patch.playbackFadeEnabled : base.playbackFadeEnabled ?? true,
     volumeBalance: {
       enabled,
       gainOffsetDb,

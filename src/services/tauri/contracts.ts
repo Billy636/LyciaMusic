@@ -190,6 +190,7 @@ export interface LoudnessRecord {
 }
 
 export interface PlayAudioOptions {
+  fadeEnabled?: boolean;
   path: string;
   title: string;
   artist: string;
@@ -453,9 +454,9 @@ export interface TauriCommandMap {
   };
   play_audio: { payload: PlayAudioOptions; response: number };
   update_playback_metadata: { payload: UpdatePlaybackMetadataOptions; response: void };
-  pause_audio: { payload: undefined; response: void };
+  pause_audio: { payload: { fadeEnabled: boolean }; response: void };
   stop_audio: { payload: undefined; response: void };
-  resume_audio: { payload: undefined; response: void };
+  resume_audio: { payload: { fadeEnabled: boolean }; response: void };
   seek_audio: { payload: SeekAudioOptions; response: void };
   set_audio_output_mode: { payload: { outputMode: AudioOutputMode }; response: void };
   set_output_device: { payload: { deviceId: string | null }; response: void };

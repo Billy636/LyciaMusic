@@ -269,6 +269,7 @@ mod shared_progress_tests {
 
 pub enum AudioCommand {
     Play {
+        fade_enabled: bool,
         source: AudioSource,
         output_mode: AudioOutputMode,
         start_offset_ms: Option<u64>,
@@ -277,9 +278,13 @@ pub enum AudioCommand {
         cue_start_offset_ms: Option<u64>,
         playback_id: u64,
     },
-    Pause,
+    Pause {
+        fade_enabled: bool,
+    },
     Stop,
-    Resume,
+    Resume {
+        fade_enabled: bool,
+    },
     Seek {
         time: f64,
         is_playing: bool,

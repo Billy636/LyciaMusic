@@ -83,6 +83,7 @@ pub async fn play_audio(
     volume_balance_enabled: Option<bool>,
     gain_offset_db: Option<f32>,
     prevent_clipping: Option<bool>,
+    fade_enabled: Option<bool>,
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbState>,
     state: tauri::State<'_, PlayerState>,
@@ -137,6 +138,7 @@ pub async fn play_audio(
     // state overwritten by the Playing initialization below.
     let mut controls_guard = state.controls.lock().ok();
     tx.send(AudioCommand::Play {
+        fade_enabled: fade_enabled.unwrap_or(false),
         source,
         output_mode: selected_output_mode,
         start_offset_ms,
@@ -304,9 +306,15 @@ pub fn update_playback_metadata(
 }
 
 #[tauri::command]
-pub fn pause_audio(state: tauri::State<PlayerState>) -> Result<(), String> {
+pub fn pause_audio(
+    fade_enabled: Option<bool>,
+    state: tauri::State<PlayerState>,
+) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
-    tx.send(AudioCommand::Pause).map_err(|e| e.to_string())?;
+    tx.send(AudioCommand::Pause {
+        fade_enabled: fade_enabled.unwrap_or(false),
+    })
+    .map_err(|e| e.to_string())?;
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
             let _ = mc.set_playback(MediaPlayback::Paused {
@@ -332,9 +340,15 @@ pub fn stop_audio(state: tauri::State<PlayerState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn resume_audio(state: tauri::State<PlayerState>) -> Result<(), String> {
+pub fn resume_audio(
+    fade_enabled: Option<bool>,
+    state: tauri::State<PlayerState>,
+) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
-    tx.send(AudioCommand::Resume).map_err(|e| e.to_string())?;
+    tx.send(AudioCommand::Resume {
+        fade_enabled: fade_enabled.unwrap_or(false),
+    })
+    .map_err(|e| e.to_string())?;
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
             let _ = mc.set_playback(MediaPlayback::Playing {

@@ -271,6 +271,28 @@ onScopeDispose(() => {
         音频处理
       </h2>
       <div class="flex flex-col">
+        <div class="desktop-setting-row">
+          <div class="flex-1 space-y-1">
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">播放淡入淡出</div>
+            <div class="text-xs app-text-secondary max-w-xl">
+              播放和继续播放时缓缓响起，暂停时逐渐安静，约 0.3 秒完成过渡。
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label="播放淡入淡出"
+            :aria-checked="settings.audio.playbackFadeEnabled !== false"
+            class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#EC4141]"
+            :class="settings.audio.playbackFadeEnabled !== false ? 'bg-[#EC4141]' : 'bg-gray-300 dark:bg-gray-700'"
+            @click="settings.audio.playbackFadeEnabled = settings.audio.playbackFadeEnabled === false"
+          >
+            <span
+              class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm"
+              :class="settings.audio.playbackFadeEnabled !== false ? 'translate-x-6' : 'translate-x-1'"
+            />
+          </button>
+        </div>
         <!-- 音量平衡主开关行 -->
         <div class="desktop-setting-row">
           <div>

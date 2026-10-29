@@ -21,11 +21,67 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 const ACTIVE_PLAYER_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const IDLE_PLAYER_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const FADE_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const PLAYBACK_FADE_DURATION: Duration = Duration::from_millis(300);
+// Let the volume smoother and queued output samples reach silence before pausing.
+const FADE_DRAIN_DURATION: Duration = Duration::from_millis(80);
+
+struct PlaybackFade {
+    gain: f32,
+    transition: Option<(Instant, f32, f32)>,
+}
+
+impl PlaybackFade {
+    fn reset(&mut self, gain: f32) {
+        self.gain = gain;
+        self.transition = None;
+    }
+
+    fn start(&mut self, target: f32) {
+        self.transition = Some((Instant::now(), self.gain, target));
+    }
+
+    // Return true only when a fade-out has drained and the output can pause.
+    fn update(&mut self) -> bool {
+        let Some((started, from, target)) = self.transition else {
+            return false;
+        };
+        let elapsed = started.elapsed();
+        let t = (elapsed.as_secs_f32() / PLAYBACK_FADE_DURATION.as_secs_f32()).min(1.0);
+        self.gain = from + (target - from) * t * t * (3.0 - 2.0 * t);
+        let duration = PLAYBACK_FADE_DURATION
+            + if target == 0.0 {
+                FADE_DRAIN_DURATION
+            } else {
+                Duration::ZERO
+            };
+        if elapsed >= duration {
+            self.gain = target;
+            self.transition = None;
+            return target == 0.0;
+        }
+        false
+    }
+}
+
+fn pause_output(
+    current_sink: &Option<Sink>,
+    #[cfg(target_os = "windows")] exclusive_playback: &Option<WasapiExclusivePlayback>,
+) {
+    #[cfg(target_os = "windows")]
+    if let Some(playback) = exclusive_playback {
+        playback.pause();
+        return;
+    }
+    if let Some(sink) = current_sink {
+        sink.pause();
+    }
+}
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -754,6 +810,10 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
         let mut current_path = String::new();
         let mut current_source: Option<AudioSource> = None;
         let mut current_volume = 1.0;
+        let mut playback_fade = PlaybackFade {
+            gain: 1.0,
+            transition: None,
+        };
         let mut is_playing_flag = false;
         let mut current_duration_ms: Option<u64> = None;
         let mut current_cue_start_offset_ms: Option<u64> = None;
@@ -783,7 +843,24 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
         );
 
         loop {
-            match rx.recv_timeout(player_poll_interval(is_playing_flag)) {
+            let pause_ready = playback_fade.update();
+            thread_user_volume.store(
+                (current_volume * playback_fade.gain).to_bits(),
+                Ordering::Relaxed,
+            );
+            if pause_ready {
+                pause_output(
+                    &current_sink,
+                    #[cfg(target_os = "windows")]
+                    &exclusive_playback,
+                );
+            }
+            let poll_interval = if playback_fade.transition.is_some() {
+                FADE_POLL_INTERVAL
+            } else {
+                player_poll_interval(is_playing_flag)
+            };
+            match rx.recv_timeout(poll_interval) {
                 Ok(cmd) => match cmd {
                     AudioCommand::RelocatePaths(relocation) => {
                         if let Some(path) = relocation.relocated_path(&current_path) {
@@ -800,6 +877,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         }
                     }
                     AudioCommand::Play {
+                        fade_enabled,
                         source,
                         output_mode,
                         start_offset_ms,
@@ -827,6 +905,12 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         #[cfg(target_os = "windows")]
                         stop_exclusive_playback(&mut exclusive_playback);
 
+                        playback_fade.reset(if fade_enabled { 0.0 } else { 1.0 });
+                        thread_user_volume.store(
+                            (current_volume * playback_fade.gain).to_bits(),
+                            Ordering::Relaxed,
+                        );
+
                         #[cfg(target_os = "windows")]
                         if output_mode == AudioOutputMode::WasapiExclusive && !source_is_remote {
                             let exclusive_start =
@@ -842,7 +926,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             match start_exclusive_playback(
                                 display_path.clone(),
                                 selected_device_name.clone(),
-                                current_volume,
+                                current_volume * playback_fade.gain,
                                 true,
                                 exclusive_start,
                                 &thread_progress,
@@ -866,6 +950,9 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                                     exclusive_playback = Some(playback);
                                     current_sink = None;
                                     output = None;
+                                    if fade_enabled {
+                                        playback_fade.start(1.0);
+                                    }
 
                                     emit_output_status(
                                         &thread_app_handle,
@@ -940,11 +1027,12 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             current_duration_ms,
                             current_cue_start_offset_ms,
                         );
+                        if result.is_ok() && fade_enabled {
+                            playback_fade.start(1.0);
+                        }
                         if result.is_ok() && current_sink.is_some() {
-                            let _ = thread_app_handle.emit(
-                                "playback-started",
-                                PlaybackStartedPayload { playback_id },
-                            );
+                            let _ = thread_app_handle
+                                .emit("playback-started", PlaybackStartedPayload { playback_id });
                         }
                         report_playback_result(
                             result,
@@ -956,20 +1044,24 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             &thread_controls,
                         );
                     }
-                    AudioCommand::Pause => {
+                    AudioCommand::Pause { fade_enabled } => {
+                        if fade_enabled && !is_playing_flag {
+                            continue;
+                        }
+                        if fade_enabled {
+                            playback_fade.start(0.0);
+                        } else {
+                            playback_fade.reset(0.0);
+                            pause_output(
+                                &current_sink,
+                                #[cfg(target_os = "windows")]
+                                &exclusive_playback,
+                            );
+                        }
                         is_playing_flag = false;
-                        #[cfg(target_os = "windows")]
-                        if let Some(playback) = &exclusive_playback {
-                            playback.pause();
-                        } else if let Some(sink) = &current_sink {
-                            sink.pause();
-                        }
-                        #[cfg(not(target_os = "windows"))]
-                        if let Some(sink) = &current_sink {
-                            sink.pause();
-                        }
                     }
                     AudioCommand::Stop => {
+                        playback_fade.reset(1.0);
                         is_playing_flag = false;
                         current_path.clear();
                         current_source = None;
@@ -981,7 +1073,19 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         #[cfg(target_os = "windows")]
                         stop_exclusive_playback(&mut exclusive_playback);
                     }
-                    AudioCommand::Resume => {
+                    AudioCommand::Resume { fade_enabled } => {
+                        if is_playing_flag {
+                            continue;
+                        }
+                        if fade_enabled {
+                            playback_fade.start(1.0);
+                        } else {
+                            playback_fade.reset(1.0);
+                        }
+                        thread_user_volume.store(
+                            (current_volume * playback_fade.gain).to_bits(),
+                            Ordering::Relaxed,
+                        );
                         is_playing_flag = true;
                         #[cfg(target_os = "windows")]
                         if let Some(playback) = &exclusive_playback {
@@ -999,6 +1103,11 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         is_playing,
                         request_id,
                     } => {
+                        playback_fade.reset(if is_playing { 1.0 } else { 0.0 });
+                        thread_user_volume.store(
+                            (current_volume * playback_fade.gain).to_bits(),
+                            Ordering::Relaxed,
+                        );
                         #[cfg(target_os = "windows")]
                         if let Some(playback) = &exclusive_playback {
                             let clamped_time = time.max(0.0);
@@ -1043,9 +1152,13 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                     }
                     AudioCommand::SetVolume(vol) => {
                         current_volume = vol;
-                        thread_user_volume.store(vol.to_bits(), Ordering::Relaxed);
                     }
                     AudioCommand::SetDevice(device_name) => {
+                        playback_fade.reset(if is_playing_flag { 1.0 } else { 0.0 });
+                        thread_user_volume.store(
+                            (current_volume * playback_fade.gain).to_bits(),
+                            Ordering::Relaxed,
+                        );
                         selected_device_name = device_name;
 
                         if let Some(sink) = &current_sink {
@@ -1075,7 +1188,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             &mut fallback_reason,
                             requested_output_mode,
                             &current_path,
-                            current_volume,
+                            current_volume * playback_fade.gain,
                             is_playing_flag,
                             &thread_progress,
                             current_volume_balance_gain,
@@ -1109,6 +1222,11 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                         );
                     }
                     AudioCommand::SetOutputMode(output_mode) => {
+                        playback_fade.reset(if is_playing_flag { 1.0 } else { 0.0 });
+                        thread_user_volume.store(
+                            (current_volume * playback_fade.gain).to_bits(),
+                            Ordering::Relaxed,
+                        );
                         requested_output_mode = output_mode;
 
                         if let Some(sink) = &current_sink {
@@ -1138,7 +1256,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             &mut fallback_reason,
                             requested_output_mode,
                             &current_path,
-                            current_volume,
+                            current_volume * playback_fade.gain,
                             is_playing_flag,
                             &thread_progress,
                             current_volume_balance_gain,
@@ -1196,6 +1314,10 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                     }
                 },
                 Err(RecvTimeoutError::Timeout) => {
+                    // Fade ticks only adjust gain; device checks retain their normal cadence.
+                    if playback_fade.transition.is_some() {
+                        continue;
+                    }
                     #[cfg(target_os = "windows")]
                     let exclusive_finished = if let Some(result) = exclusive_playback
                         .as_ref()
@@ -1342,7 +1464,7 @@ pub fn init_player(app: &AppHandle) -> PlayerState {
                             &mut fallback_reason,
                             requested_output_mode,
                             &current_path,
-                            current_volume,
+                            current_volume * playback_fade.gain,
                             is_playing_flag,
                             &thread_progress,
                             current_volume_balance_gain,
