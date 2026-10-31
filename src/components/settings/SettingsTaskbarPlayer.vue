@@ -31,8 +31,8 @@ const positionLocked = computed(() => settings.value.taskbarPositionLocked);
 const leftOffset = computed(() => normalizeTaskbarLeftOffset(settings.value.taskbarLeftOffset));
 const contentModeOptions = [
   { value: 'adaptive', label: '自适应' },
+  { value: 'bilingual', label: '原文＋翻译' },
   { value: 'title-lyrics', label: '歌名＋歌词' },
-  { value: 'bilingual', label: '原文＋译文' },
   { value: 'double-line', label: '当前句＋下一句' },
   { value: 'lyrics-only', label: '仅当前句' },
 ];

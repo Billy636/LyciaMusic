@@ -22,8 +22,8 @@ export type TaskbarLyricEffect = 'karaoke' | 'none';
 export type TaskbarCoverShape = 'square' | 'circle';
 
 export function normalizeTaskbarContentMode(value: unknown): TaskbarContentMode {
-  return value === 'adaptive' || value === 'bilingual' || value === 'double-line' || value === 'lyrics-only'
-    ? value : 'title-lyrics';
+  return value === 'title-lyrics' || value === 'bilingual' || value === 'double-line' || value === 'lyrics-only'
+    ? value : 'adaptive';
 }
 
 export function normalizeTaskbarLyricEffect(value: unknown): TaskbarLyricEffect {

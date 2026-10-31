@@ -180,7 +180,7 @@ export const defaultAppSettings: AppSettings = {
   taskbarTextColor: '#ffffff',
   taskbarPlayerCanDrag: false,
   taskbarPositionLocked: false,
-  taskbarContentMode: 'title-lyrics',
+  taskbarContentMode: 'adaptive',
   taskbarLyricEffect: 'karaoke',
   taskbarLyricHighlightColor: null,
   taskbarTranslationKaraoke: true,
