@@ -12,7 +12,7 @@ use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 const COVER_CACHE_MAX_SIZE_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4 GB
 const THUMBNAIL_EDGE_PX: u32 = 150;
@@ -36,7 +36,7 @@ mod tests {
 }
 
 pub fn get_cover_cache_dir(app: &AppHandle) -> PathBuf {
-    let dir = app.path().app_data_dir().unwrap().join("covers");
+    let dir = crate::data_storage::data_dir(app).join("covers");
     if !dir.exists() {
         let _ = fs::create_dir_all(&dir);
     }

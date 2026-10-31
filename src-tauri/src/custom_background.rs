@@ -349,11 +349,7 @@ fn preparation_consumer(
 }
 
 pub fn get_custom_background_cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|error| error.to_string())?
-        .join("custom-backgrounds");
+    let dir = crate::data_storage::cache_dir(app).join("custom-backgrounds");
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     Ok(dir)
 }

@@ -1,6 +1,7 @@
 import { LogicalPosition } from '@tauri-apps/api/dpi';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getWebviewDataDirectory } from '../services/storage/dataStorage';
 import { availableMonitors, getCurrentWindow } from '@tauri-apps/api/window';
 import { onMounted, onUnmounted, ref, watch, type Ref } from 'vue';
 
@@ -144,6 +145,7 @@ async function ensureMiniPlayerWindow() {
     miniPlayerWindowPromise = (async () => {
       const bounds = await normalizeMiniPlayerBounds(readMiniPlayerBounds());
       const windowInstance = new WebviewWindow(MINI_PLAYER_WINDOW_LABEL, {
+        dataDirectory: getWebviewDataDirectory(),
         url: '/',
         title: 'Lycia Mini Player',
         width: MINI_PLAYER_WINDOW_WIDTH,

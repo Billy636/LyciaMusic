@@ -6,7 +6,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 use windows::{
     core::{w, Result as WinResult},
     Win32::{
@@ -536,11 +536,7 @@ unsafe fn run(
     )?;
     let _window = NativeWindow(hwnd);
     let scale = GetDpiForWindow(hwnd).max(96) as f32 / 96.;
-    let custom_dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_default()
-        .join("custom-lyrics-fonts");
+    let custom_dir = crate::data_storage::data_dir(&app).join("custom-lyrics-fonts");
     let mut renderer = Renderer::new(initial.width, initial.height, scale, custom_dir.clone())?;
     let mut clock = Clock::new(state.playback.clone());
     let mut last_state_sequence = state.playback.sample_sequence;

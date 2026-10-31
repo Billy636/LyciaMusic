@@ -1,6 +1,7 @@
 import { LogicalSize, PhysicalPosition } from '@tauri-apps/api/dpi';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getWebviewDataDirectory } from '../services/storage/dataStorage';
 import { availableMonitors, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { onMounted, onUnmounted, ref, toRaw, watch } from 'vue';
@@ -207,6 +208,7 @@ async function ensureTaskbarPlayerWindow() {
     taskbarPlayerWindowPromise = (async () => {
       // 预创建时的默认虚拟定位，展示时会被 updatePosition 进行秒级精准对齐纠正
       const windowInstance = new WebviewWindow(TASKBAR_PLAYER_WINDOW_LABEL, {
+        dataDirectory: getWebviewDataDirectory(),
         url: '/',
         title: 'Lycia Taskbar Player',
         width: configuredWindowWidth,

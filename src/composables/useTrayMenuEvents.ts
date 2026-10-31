@@ -2,6 +2,7 @@ import { LogicalSize } from '@tauri-apps/api/dpi';
 import { invoke } from '@tauri-apps/api/core';
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getWebviewDataDirectory } from '../services/storage/dataStorage';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { storeToRefs } from 'pinia';
 import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
@@ -62,6 +63,7 @@ async function ensureTrayMenuWindow() {
     trayMenuReadyPromise = null;
     resolveTrayMenuReady = null;
     const windowInstance = new WebviewWindow(TRAY_MENU_WINDOW_LABEL, {
+      dataDirectory: getWebviewDataDirectory(),
       url: '/',
       title: 'Lycia Tray Menu',
       width: TRAY_MENU_WINDOW_WIDTH,

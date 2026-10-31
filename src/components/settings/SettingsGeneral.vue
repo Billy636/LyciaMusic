@@ -10,6 +10,7 @@ import { clearPaletteCache } from '../../composables/colorExtraction';
 import { clearImageCaches } from '../../caches/imageCaches';
 import { appApi } from '../../services/tauri/appApi';
 import ConfirmModal from '../overlays/ConfirmModal.vue';
+import SettingsDataStorage from './SettingsDataStorage.vue';
 
 const { settings } = useSettings();
 const {
@@ -279,6 +280,7 @@ const handleClearCaches = async () => {
         存储空间
       </h2>
       <div class="flex flex-col rounded-xl overflow-hidden">
+        <SettingsDataStorage :busy="isLibraryScanActive || isClearingAllData || isClearingCache" />
          <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">清除缓存</div>

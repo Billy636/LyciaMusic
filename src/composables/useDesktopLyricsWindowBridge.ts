@@ -1,6 +1,7 @@
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { PhysicalPosition, PhysicalSize } from '@tauri-apps/api/dpi';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getWebviewDataDirectory } from '../services/storage/dataStorage';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { onMounted, onUnmounted, watch, toRaw } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -254,10 +255,13 @@ async function ensureDesktopLyricsWindow(alwaysOnTop: boolean) {
   if (!desktopLyricsWindowPromise) {
     desktopLyricsReadyGate.reset();
     const bounds = readDesktopLyricsBounds();
-    const windowInstance = new WebviewWindow(DESKTOP_LYRICS_WINDOW_LABEL, createDesktopLyricsWindowOptions({
-      alwaysOnTop,
-      hasStoredBounds: !!bounds,
-    }));
+    const windowInstance = new WebviewWindow(DESKTOP_LYRICS_WINDOW_LABEL, {
+      dataDirectory: getWebviewDataDirectory(),
+      ...createDesktopLyricsWindowOptions({
+        alwaysOnTop,
+        hasStoredBounds: !!bounds,
+      }),
+    });
 
     desktopLyricsWindowPromise = new Promise<WebviewWindow>((resolve, reject) => {
       let settled = false;

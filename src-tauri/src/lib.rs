@@ -4,6 +4,7 @@ mod custom_background;
 mod artist_images;
 mod custom_fonts;
 mod database;
+mod data_storage;
 mod desktop_lyrics;
 mod duplicates;
 pub mod error;
@@ -114,22 +115,32 @@ pub fn run() {
                 }
             }
         })
-        .plugin(
-            tauri_plugin_window_state::Builder::default()
-                .with_denylist(&[
-                    "desktop-lyrics",
-                    "mini-player",
-                    "taskbar-player",
-                    "tray-menu",
-                    "song-notification",
-                ])
-                .build(),
-        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| setup_app(app))
+        .setup(|app| {
+            // Initialize storage after the single-instance guard, before opening any files or WebViews.
+            if let Err(error) = data_storage::initialize(app.handle()) {
+                use tauri_plugin_dialog::DialogExt;
+                app.dialog().message(&error).title("无法打开应用数据")
+                    .kind(tauri_plugin_dialog::MessageDialogKind::Error).blocking_show();
+                return Err(error.into());
+            }
+            let state_path = app.state::<data_storage::DataStorage>().paths.config.join(".window-state.json");
+            app.handle().plugin(
+                tauri_plugin_window_state::Builder::default()
+                    .with_filename(state_path.to_string_lossy())
+                    .with_denylist(&["desktop-lyrics", "mini-player", "taskbar-player", "tray-menu", "song-notification"])
+                    .build(),
+            )?;
+            for config in &app.config().app.windows {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
+                    .data_directory(data_storage::webview_dir(app.handle()))
+                    .build()?;
+            }
+            setup_app(app)
+        })
         .invoke_handler(tauri::generate_handler![
             desktop_lyrics::native_desktop_lyrics_open,
             desktop_lyrics::native_desktop_lyrics_state,
@@ -256,6 +267,11 @@ pub fn run() {
             get_quality_distribution,
             get_format_distribution,
             clear_all_app_data,
+            data_storage::get_data_storage_info,
+            data_storage::set_data_storage_directory,
+            data_storage::cancel_data_storage_migration,
+            data_storage::complete_data_storage_migration,
+            data_storage::restart_app,
             open_external_program,
             file_exists,
             refresh_folder_songs,
@@ -289,6 +305,11 @@ pub fn run() {
             download_update_file,
             run_installer
         ])
-        .run(tauri::generate_context!())
+        .run({
+            let mut context = tauri::generate_context!();
+            // Build windows in setup only after pending migrations have finished.
+            for window in &mut context.config_mut().app.windows { window.create = false; }
+            context
+        })
         .expect("error while running tauri application");
 }

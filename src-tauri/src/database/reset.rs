@@ -1,6 +1,6 @@
 use crate::database::DbState;
 use std::fs;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub async fn clear_all_app_data(
@@ -8,10 +8,7 @@ pub async fn clear_all_app_data(
     db_state: State<'_, DbState>,
 ) -> Result<(), String> {
     let db_conn = db_state.conn.clone();
-    let app_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let app_dir = crate::data_storage::data_dir(&app_handle);
 
     #[cfg(target_os = "windows")]
     crate::autostart::set_launch_on_startup(app_handle, false)

@@ -36,6 +36,15 @@ import type {
   DuplicateScanResult,
 } from '../../features/duplicates/types';
 
+export interface DataStorageInfo {
+  path: string;
+  webviewPath: string;
+  portable: boolean;
+  pendingPath: string | null;
+  warning: string | null;
+  pathMappings: [string, string][];
+}
+
 export interface AudioDevice {
   id: string;
   name: string;
@@ -556,6 +565,11 @@ export interface TauriCommandMap {
   refresh_taskbar_window_topmost: { payload: undefined; response: boolean };
   start_topmost_guard: { payload: undefined; response: void };
   stop_topmost_guard: { payload: undefined; response: void };
+  get_data_storage_info: { payload: undefined; response: DataStorageInfo };
+  set_data_storage_directory: { payload: { path: string }; response: DataStorageInfo };
+  cancel_data_storage_migration: { payload: undefined; response: DataStorageInfo };
+  complete_data_storage_migration: { payload: undefined; response: DataStorageInfo };
+  restart_app: { payload: undefined; response: void };
   clear_all_app_data: { payload: undefined; response: void };
   get_launch_on_startup: { payload: undefined; response: boolean };
   set_launch_on_startup: { payload: { enabled: boolean }; response: boolean };

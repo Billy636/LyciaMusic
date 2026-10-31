@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,7 +30,6 @@ function runCommand(command, cwd) {
 async function main() {
   // 1. Backup original tauri.conf.json
   const originalConfigContent = fs.readFileSync(tauriConfigPath, 'utf8');
-  const originalConfig = JSON.parse(originalConfigContent);
 
   // Ensure output directory exists
   if (!fs.existsSync(outputDir)) {
@@ -46,8 +45,8 @@ async function main() {
     const buildTargets = [
       {
         type: 'skip',
-        suffix: 'portable',
-        label: 'Portable版本 (跳过 WebView2 检测)'
+        suffix: 'no-webview-check',
+        label: '免检测安装版 (跳过 WebView2 检测)'
       },
       {
         type: 'downloadBootstrapper',
@@ -115,6 +114,28 @@ async function main() {
         console.log(`  源文件: ${srcPath}`);
         console.log(`  目标文件: ${destPath}`);
         fs.copyFileSync(srcPath, destPath);
+      }
+
+      if (target.type === 'skip') {
+        const staging = fs.mkdtempSync(path.join(outputDir, '.portable-'));
+        try {
+          fs.copyFileSync(
+            path.join(rootDir, 'src-tauri', 'target', 'release', 'lycia_music.exe'),
+            path.join(staging, 'Lycia Player.exe'),
+          );
+          // An explicit marker also enables portable mode when an uninstaller happens to be nearby.
+          fs.writeFileSync(path.join(staging, 'portable'), '', 'utf8');
+          const zipPath = path.join(outputDir, `Lycia.Player_${version}_x64-portable.zip`);
+          const psQuote = value => `'${value.replaceAll("'", "''")}'`;
+          execFileSync('powershell.exe', [
+            '-NoProfile', '-NonInteractive', '-Command',
+            `Compress-Archive -LiteralPath ${psQuote(path.join(staging, 'Lycia Player.exe'))},${psQuote(path.join(staging, 'portable'))} -DestinationPath ${psQuote(zipPath)} -Force`,
+          ], { cwd: rootDir, stdio: 'inherit', windowsHide: true });
+          console.log(`便携版 ZIP 已生成: ${zipPath}`);
+        } finally {
+          // mkdtemp creates this exact directory inside releases; no user data is included.
+          fs.rmSync(staging, { recursive: true, force: true });
+        }
       }
       
       console.log(`构建成功: ${target.label}`);

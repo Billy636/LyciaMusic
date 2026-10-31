@@ -1,6 +1,7 @@
 import { PhysicalPosition, PhysicalSize } from '@tauri-apps/api/dpi';
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getWebviewDataDirectory } from '../services/storage/dataStorage';
 import { currentMonitor, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window';
 import { storeToRefs } from 'pinia';
 import { onUnmounted, watch } from 'vue';
@@ -135,6 +136,7 @@ export function useSongNotificationBridge() {
       if (orphan) await orphan.destroy();
       const ready = new Promise<void>(resolve => { resolveReady = resolve; });
       const target = new WebviewWindow(SONG_NOTIFICATION_WINDOW_LABEL, {
+        dataDirectory: getWebviewDataDirectory(),
         url: '/',
         title: 'Lycia Player',
         width: SONG_NOTIFICATION_WINDOW_WIDTH,

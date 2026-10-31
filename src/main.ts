@@ -6,6 +6,8 @@ import { loadWindowRoot, resolveWindowKind, windowUsesPinia, windowUsesRouter } 
 import { installTouchClickSupport } from './utils/touchClickSupport'
 import { createWindowScriptErrorHandler } from './utils/windowScriptErrors'
 import { getApplicationStyleNonce } from './utils/styleNonce'
+import { initializeDataStorage } from './services/storage/dataStorage'
+import { tauriInvoke } from './services/tauri/invoke'
 
 getApplicationStyleNonce()
 installTouchClickSupport()
@@ -17,10 +19,6 @@ const currentWindowLabel = (() => {
     return 'main'
   }
 })()
-
-if (shouldApplyStartupThemePaint(currentWindowLabel)) {
-  applyPersistedStartupTheme()
-}
 
 const escapeHtml = (value: unknown) =>
   String(value ?? '')
@@ -83,6 +81,10 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 const bootstrapApp = async () => {
+  let storage = await initializeDataStorage()
+  if (shouldApplyStartupThemePaint(currentWindowLabel)) {
+    applyPersistedStartupTheme()
+  }
   const windowKind = resolveWindowKind(currentWindowLabel)
   const [rootModule, routerModule, piniaModule] = await Promise.all([
     loadWindowRoot(windowKind),
@@ -102,6 +104,18 @@ const bootstrapApp = async () => {
   }
 
   app.mount('#app')
+  if (currentWindowLabel === 'main' && storage) {
+    try {
+      storage = await tauriInvoke('complete_data_storage_migration')
+    } catch (error) {
+      const { useToast } = await import('./composables/toast')
+      useToast().showToast(`原目录清理未完成：${String(error)}`, 'error')
+    }
+  }
+  if (currentWindowLabel === 'main' && storage?.warning) {
+    const { useToast } = await import('./composables/toast')
+    useToast().showToast(storage.warning, 'error')
+  }
 }
 
 void bootstrapApp().catch(error => {

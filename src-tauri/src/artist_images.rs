@@ -1,7 +1,6 @@
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, path::Path, time::UNIX_EPOCH};
-use tauri::Manager;
 
 static SCAN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -24,11 +23,7 @@ pub async fn scan_artist_images(
         if !directory.is_absolute() || !directory.is_dir() {
             return Err("头像文件夹不存在或无法访问".into());
         }
-        let cache = app
-            .path()
-            .app_data_dir()
-            .map_err(|e| e.to_string())?
-            .join("covers");
+        let cache = crate::data_storage::data_dir(&app).join("covers");
         fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
         let mut paths = Vec::new();
         let mut skipped = 0;

@@ -31,6 +31,7 @@ fn write_password_to_keyring_verified(source_id: &str, password: &str) -> bool {
 }
 
 fn delete_password_from_keyring(source_id: &str) {
+    if crate::data_storage::is_portable() { return; }
     if let Ok(entry) = keyring_entry(source_id) {
         let _ = entry.delete_credential();
     }
@@ -44,6 +45,7 @@ fn attach_keyring_password(mut source: RemoteSourceCredentials) -> RemoteSourceC
 }
 
 fn migrate_db_password_to_keyring(conn: &rusqlite::Connection, source: &RemoteSourceCredentials) {
+    if crate::data_storage::is_portable() { return; }
     let Some(password) = source.password.as_deref() else {
         return;
     };
@@ -53,6 +55,20 @@ fn migrate_db_password_to_keyring(conn: &rusqlite::Connection, source: &RemoteSo
             params![&source.id],
         );
     }
+}
+
+// Portable profiles must carry their WebDAV credentials to the next computer.
+pub(crate) fn preserve_portable_credentials(conn: &rusqlite::Connection) -> Result<(), String> {
+    if !crate::data_storage::is_portable() { return Ok(()); }
+    let mut stmt = conn.prepare("SELECT id FROM remote_sources WHERE password IS NULL").map_err(|e| e.to_string())?;
+    let ids = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
+    for id in ids {
+        let id = id.map_err(|e| e.to_string())?;
+        if let Some(password) = read_password_from_keyring(&id) {
+            conn.execute("UPDATE remote_sources SET password = ?1 WHERE id = ?2", params![password, id]).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 fn now_seconds() -> i64 {
@@ -202,7 +218,7 @@ pub(crate) fn save_source(
         .or_else(|| existing.as_ref().and_then(|source| source.password.clone()));
     let created_at = existing.map(|source| source.created_at).unwrap_or(now);
     let db_password = match password.as_deref() {
-        Some(password) if write_password_to_keyring_verified(&id, password) => None,
+        Some(password) if !crate::data_storage::is_portable() && write_password_to_keyring_verified(&id, password) => None,
         Some(password) => Some(password.to_string()),
         None => None,
     };
