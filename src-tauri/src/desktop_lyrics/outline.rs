@@ -20,7 +20,7 @@ struct OutlineRenderer {
 pub unsafe fn renderer(
     target: &ID2D1RenderTarget,
     brush: &ID2D1SolidColorBrush,
-    radius: f32,
+    width: f32,
     scale: f32,
 ) -> Result<IDWriteTextRenderer> {
     let factory = target.GetFactory()?;
@@ -41,7 +41,8 @@ pub unsafe fn renderer(
         factory,
         brush: brush.clone(),
         style,
-        width: radius * 2.,
+        // CSS -webkit-text-stroke specifies the full stroke width, not its radius.
+        width,
         scale,
     }
     .into())

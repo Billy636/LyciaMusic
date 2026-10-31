@@ -3,8 +3,10 @@
 use super::flow::{self, Cue};
 use super::model::*;
 use std::{mem::size_of, path::Path, time::Instant};
+#[cfg(test)]
+use windows::core::w;
 use windows::{
-    core::{w, Interface, Result, PCWSTR},
+    core::{Interface, Result, PCWSTR},
     Win32::{
         Foundation::{COLORREF, HWND, POINT, RECT, SIZE},
         Graphics::{
@@ -42,6 +44,161 @@ fn color(hex: &str, alpha: f32) -> D2D1_COLOR_F {
     }
 }
 
+fn mix_color(a: D2D1_COLOR_F, b: D2D1_COLOR_F, amount: f32) -> D2D1_COLOR_F {
+    let alpha = a.a * amount + b.a * (1. - amount);
+    let channel = |x: f32, y: f32| (x * a.a * amount + y * b.a * (1. - amount)) / alpha.max(0.001);
+    D2D1_COLOR_F {
+        r: channel(a.r, b.r),
+        g: channel(a.g, b.g),
+        b: channel(a.b, b.b),
+        a: alpha,
+    }
+}
+
+fn font_locale(family: &str) -> &'static str {
+    // Pan-CJK fonts use the locale for their localized Han glyph substitutions.
+    // Honor an explicitly selected regional face, even in fragments without kana.
+    let tokens: Vec<_> = family.split(|c: char| !c.is_ascii_alphanumeric()).collect();
+    for (region, locale) in [
+        ("JP", "ja-JP"),
+        ("KR", "ko-KR"),
+        ("SC", "zh-CN"),
+        ("TC", "zh-TW"),
+        ("HK", "zh-HK"),
+    ] {
+        if tokens
+            .iter()
+            .any(|token| token.eq_ignore_ascii_case(region))
+        {
+            return locale;
+        }
+    }
+    "zh-CN"
+}
+
+fn shadow_padding(strength: f32) -> f32 {
+    (strength.clamp(0., 100.) * 0.24)
+        .round()
+        .mul_add(3., 3.)
+        .max(8.)
+}
+
+unsafe fn blurred_shadow(
+    target: &ID2D1RenderTarget,
+    text: &Text,
+    scale: f32,
+    bounds: D2D_RECT_F,
+    settings: &Settings,
+) -> Result<ID2D1Bitmap> {
+    let sigma = ((text.shadow.clamp(0., 100.) * 0.24).round() * text.shadow_style.blur_scale)
+        .max(0.5)
+        * scale;
+    // Rasterize beyond each tile before blurring, then crop. Otherwise long lines
+    // acquire visible seams where their cached tiles meet.
+    let margin = (sigma * 3. + 6. * scale).ceil() as u32 + 2;
+    let width = ((bounds.right - bounds.left) * scale).round().max(1.) as u32;
+    let height = ((bounds.bottom - bounds.top) * scale).round().max(1.) as u32;
+    let source_width = width + 2 * margin;
+    let source_height = height + 2 * margin;
+    let surface = Surface::new(source_width as i32, source_height as i32)?;
+    let raster = target
+        .GetFactory()?
+        .CreateDCRenderTarget(&D2D1_RENDER_TARGET_PROPERTIES {
+            r#type: D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96. * scale,
+            dpiY: 96. * scale,
+            ..Default::default()
+        })?;
+    raster.BindDC(
+        surface.dc,
+        &RECT {
+            left: 0,
+            top: 0,
+            right: source_width as i32,
+            bottom: source_height as i32,
+        },
+    )?;
+    raster.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    let white = raster.CreateSolidColorBrush(&color("#ffffff", 1.), None)?;
+    raster.BeginDraw();
+    raster.Clear(Some(&color("#000000", 0.)));
+    let origin = point(
+        text.x - bounds.left + margin as f32 / scale,
+        text.y - bounds.top + margin as f32 / scale,
+    );
+    if settings.text_stroke_depth > 0. {
+        let outline = super::outline::renderer(
+            &raster,
+            &white,
+            settings.text_stroke_depth.clamp(0., 100.) * 0.03,
+            scale,
+        )?;
+        text.layout.Draw(None, &outline, origin.X, origin.Y)?;
+    }
+    white.SetColor(&color("#ffffff", text.base.a));
+    raster.DrawTextLayout(origin, &text.layout, &white, D2D1_DRAW_TEXT_OPTIONS_NONE);
+    raster.EndDraw(None, None)?;
+    let pixels = std::slice::from_raw_parts(
+        surface.bits,
+        source_width as usize * source_height as usize * 4,
+    );
+    let alpha = image::GrayImage::from_raw(
+        source_width,
+        source_height,
+        pixels.chunks_exact(4).map(|pixel| pixel[3]).collect(),
+    )
+    .unwrap();
+    let near = image::imageops::blur(&alpha, 2. * scale);
+    let strength = text.shadow.clamp(0., 100.) / 100.;
+    // CSS filters run in order: the broad shadow also receives the preceding
+    // near shadow. Blurring two independent copies misses that soft outer halo.
+    let combined = image::GrayImage::from_fn(source_width, source_height, |x, y| {
+        let fill = alpha.get_pixel(x, y)[0] as f32 / 255.;
+        let near_y = y.saturating_sub(scale.round() as u32);
+        let close =
+            near.get_pixel(x, near_y)[0] as f32 / 255. * strength * text.shadow_style.near_alpha;
+        image::Luma([((fill + close * (1. - fill)) * 255.).round() as u8])
+    });
+    let soft = image::imageops::blur(&combined, sigma);
+    let rgb = css_rgb(&settings.text_shadow_color).unwrap_or([0., 0., 0.]);
+    let mut bgra = Vec::with_capacity(width as usize * height as usize * 4);
+    for y in 0..height {
+        for x in 0..width {
+            let broad = soft.get_pixel(x + margin, y + margin)[0] as f32 / 255.
+                * strength
+                * text.shadow_style.far_alpha;
+            let close_y = (y + margin).saturating_sub(scale.round() as u32);
+            let close = near.get_pixel(x + margin, close_y)[0] as f32 / 255.
+                * strength
+                * text.shadow_style.near_alpha;
+            let a = (1. - (1. - broad) * (1. - close)) * 255.;
+            bgra.extend_from_slice(&[
+                (rgb[2] * a).round() as u8,
+                (rgb[1] * a).round() as u8,
+                (rgb[0] * a).round() as u8,
+                a.round() as u8,
+            ]);
+        }
+    }
+    target.CreateBitmap(
+        D2D_SIZE_U { width, height },
+        Some(bgra.as_ptr().cast()),
+        width * 4,
+        &D2D1_BITMAP_PROPERTIES {
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96. * scale,
+            dpiY: 96. * scale,
+        },
+    )
+}
+
 unsafe fn text_baseline(layout: &IDWriteTextLayout) -> Result<f32> {
     // Each timed fragment has its own fallback font runs. Its layout origin is
     // therefore not a shared baseline, even when every fragment uses one size.
@@ -55,7 +212,6 @@ struct Surface {
     dc: HDC,
     bitmap: HBITMAP,
     previous: HGDIOBJ,
-    #[cfg(test)]
     bits: *const u8,
 }
 impl Surface {
@@ -82,7 +238,6 @@ impl Surface {
                 dc,
                 bitmap,
                 previous: SelectObject(dc, bitmap.into()),
-                #[cfg(test)]
                 bits: bits.cast(),
             }),
             Err(error) => {
@@ -102,6 +257,35 @@ impl Drop for Surface {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ShadowStyle {
+    blur_scale: f32,
+    near_alpha: f32,
+    far_alpha: f32,
+}
+impl ShadowStyle {
+    const MAIN: Self = Self {
+        blur_scale: 1.,
+        near_alpha: 0.55,
+        far_alpha: 1.,
+    };
+    const NEXT: Self = Self {
+        blur_scale: 1.,
+        near_alpha: 0.48,
+        far_alpha: 0.86,
+    };
+    const ROMAJI: Self = Self {
+        blur_scale: 0.86,
+        near_alpha: 0.48,
+        far_alpha: 0.86,
+    };
+    const TRANSLATION: Self = Self {
+        blur_scale: 0.82,
+        near_alpha: 0.48,
+        far_alpha: 0.82,
+    };
+}
+
 struct Text {
     layout: IDWriteTextLayout,
     x: f32,
@@ -113,6 +297,7 @@ struct Text {
     base: D2D1_COLOR_F,
     played: D2D1_COLOR_F,
     shadow: f32,
+    shadow_style: ShadowStyle,
 }
 
 struct Lane {
@@ -124,6 +309,7 @@ struct Lane {
     start: f64,
     end: f64,
     phase: i8, // -1 upcoming, 0 current, 1 completed
+    opacity: f32,
 }
 impl Lane {
     fn offset(&self, time: f64, available: f32) -> f32 {
@@ -197,7 +383,7 @@ impl GlyphMask {
         settings: &Settings,
     ) -> Result<Vec<Self>> {
         let overhang = text.layout.GetOverhangMetrics()?;
-        let pad = 8.; // Includes stroke/shadow overhang, not just the fill.
+        let pad = shadow_padding(text.shadow);
         let left = ((text.x - overhang.left.max(0.) - pad) * scale).floor();
         let top = ((text.y - overhang.top.max(0.) - pad) * scale).floor();
         let right = ((text.x + text.width.max(text.layout.GetMaxWidth() + overhang.right) + pad)
@@ -289,26 +475,17 @@ impl GlyphMask {
             let x = text.x - bounds.left;
             let y = text.y - bounds.top;
             if text.shadow > 0. {
-                let strength = text.shadow.clamp(0., 100.) / 100.;
-                brush.SetColor(&color(
-                    &settings.text_shadow_color,
-                    text.base.a * strength / 5.,
-                ));
-                for i in 0..12 {
-                    let angle = i as f32 * std::f32::consts::TAU / 12.;
-                    decoration_target.DrawTextLayout(
-                        point(
-                            x + angle.cos() * (1. + strength * 5.),
-                            y + 1. + angle.sin() * (1. + strength * 5.),
-                        ),
-                        &text.layout,
-                        &brush,
-                        D2D1_DRAW_TEXT_OPTIONS_NONE,
-                    );
-                }
+                let shadow = blurred_shadow(target, text, scale, bounds, settings)?;
+                decoration_target.DrawBitmap(
+                    &shadow,
+                    Some(&rect(0., 0., size.width, size.height)),
+                    1.,
+                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                    None,
+                );
             }
             if let Some(outline) = &outline {
-                brush.SetColor(&color(&settings.text_stroke_color, text.base.a));
+                brush.SetColor(&color(&settings.text_stroke_color, 1.));
                 text.layout.Draw(None, outline, x, y)?;
             }
             decoration_target.EndDraw(None, None)?;
@@ -363,6 +540,9 @@ pub struct Renderer {
     fade_layer: ID2D1Layer,
     font_key: String,
     family: String,
+    weight: Option<DWRITE_FONT_WEIGHT>,
+    style: DWRITE_FONT_STYLE,
+    stretch: DWRITE_FONT_STRETCH,
     collection: Option<IDWriteFontCollection>,
     custom_dir: std::path::PathBuf,
 }
@@ -417,6 +597,9 @@ impl Renderer {
             fade_layer,
             font_key: String::new(),
             family: "Segoe UI".into(),
+            weight: None,
+            style: DWRITE_FONT_STYLE_NORMAL,
+            stretch: DWRITE_FONT_STRETCH_NORMAL,
             collection: None,
             custom_dir,
         })
@@ -462,6 +645,9 @@ impl Renderer {
         }
         self.collection = None;
         self.family = font_family(preset).into();
+        self.weight = None;
+        self.style = DWRITE_FONT_STYLE_NORMAL;
+        self.stretch = DWRITE_FONT_STRETCH_NORMAL;
         if let Some(font) = imported {
             // Do not allow the IPC payload to load arbitrary files as fonts.
             let path = Path::new(&font.file_path)
@@ -489,6 +675,47 @@ impl Renderer {
             names.GetString(0, &mut name)?;
             self.family = String::from_utf16_lossy(&name[..name.len() - 1]);
             self.collection = Some(collection.cast()?);
+        } else {
+            let mut system = None;
+            self.write.GetSystemFontCollection(&mut system, true)?;
+            let system = system.unwrap();
+            let name = wide(&self.family);
+            let mut index = 0;
+            let mut exists = windows::core::BOOL(0);
+            system.FindFamilyName(PCWSTR(name.as_ptr()), &mut index, &mut exists)?;
+            if !exists.as_bool() {
+                // The picker also exposes full face names (e.g. "Arial Bold").
+                // CreateTextFormat only accepts family names, so resolve the face first.
+                let factory: IDWriteFactory3 = self.write.cast()?;
+                let fonts = factory.GetSystemFontSet()?;
+                for property in [
+                    DWRITE_FONT_PROPERTY_ID_FULL_NAME,
+                    DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME,
+                    DWRITE_FONT_PROPERTY_ID_POSTSCRIPT_NAME,
+                ] {
+                    let matching = fonts.GetMatchingFonts2(&[DWRITE_FONT_PROPERTY {
+                        propertyId: property,
+                        propertyValue: PCWSTR(name.as_ptr()),
+                        localeName: PCWSTR::null(),
+                    }])?;
+                    if matching.GetFontCount() == 0 {
+                        continue;
+                    }
+                    let collection: IDWriteFontCollection =
+                        factory.CreateFontCollectionFromFontSet(&matching)?.cast()?;
+                    let family = collection.GetFontFamily(0)?;
+                    let names = family.GetFamilyNames()?;
+                    let mut value = vec![0; names.GetStringLength(0)? as usize + 1];
+                    names.GetString(0, &mut value)?;
+                    self.family = String::from_utf16_lossy(&value[..value.len() - 1]);
+                    let face = family.GetFont(0)?;
+                    self.weight = Some(face.GetWeight());
+                    self.style = face.GetStyle();
+                    self.stretch = face.GetStretch();
+                    self.collection = Some(collection);
+                    break;
+                }
+            }
         }
         self.font_key = key;
         Ok(())
@@ -500,16 +727,18 @@ impl Renderer {
         size: f32,
         width: f32,
         wrap: bool,
+        weight: DWRITE_FONT_WEIGHT,
     ) -> Result<(IDWriteTextLayout, f32, f32)> {
         let family = wide(&self.family);
+        let locale = wide(font_locale(&self.family));
         let format = self.write.CreateTextFormat(
             PCWSTR(family.as_ptr()),
             self.collection.as_ref(),
-            DWRITE_FONT_WEIGHT_BOLD,
-            DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL,
+            self.weight.unwrap_or(weight),
+            self.style,
+            self.stretch,
             size,
-            w!("zh-CN"),
+            PCWSTR(locale.as_ptr()),
         )?;
         format.SetWordWrapping(if wrap {
             DWRITE_WORD_WRAPPING_WRAP
@@ -617,6 +846,9 @@ impl Renderer {
             eprintln!("Native lyrics font unavailable, using Segoe UI: {error}");
             self.family = "Segoe UI".into();
             self.collection = None;
+            self.weight = None;
+            self.style = DWRITE_FONT_STYLE_NORMAL;
+            self.stretch = DWRITE_FONT_STRETCH_NORMAL;
             self.font_key = format!(
                 "{}:{}",
                 state.settings.player_font_preset,
@@ -647,15 +879,16 @@ impl Renderer {
             .filter(|c| css_rgb(c).is_some())
             .collect();
         let palette = match s.color_scheme.as_str() {
-            "pink" => ["#f472b6", "#fb7185", "#f9a8d4"],
-            "blue" => ["#60a5fa", "#38bdf8", "#93c5fd"],
-            "green" => ["#34d399", "#22c55e", "#6ee7b7"],
-            "white" => ["#ffffff", "#f3f4f6", "#d1d5db"],
-            "default" => ["#EC4141", "#ff8364", "#f7b267"],
+            "pink" => ["#f472b6", "#fb7185", "#f9a8d4", "#fbcfe8"],
+            "blue" => ["#60a5fa", "#38bdf8", "#93c5fd", "#bfdbfe"],
+            "green" => ["#34d399", "#22c55e", "#6ee7b7", "#bbf7d0"],
+            "white" => ["#ffffff", "#f3f4f6", "#d1d5db", "#9ca3af"],
+            "default" => ["#EC4141", "#ff8364", "#f7b267", "#ffd166"],
             "custom" => [
                 s.custom_played_color.as_str(),
                 s.custom_romaji_played_color.as_str(),
                 s.custom_translation_color.as_str(),
+                s.custom_unplayed_color.as_str(),
             ],
             _ => [
                 theme_colors
@@ -672,6 +905,11 @@ impl Renderer {
                     .or(theme_colors.last())
                     .map(|c| c.as_str())
                     .unwrap_or("#88f3c2"),
+                theme_colors
+                    .get(3)
+                    .or(theme_colors.last())
+                    .map(|c| c.as_str())
+                    .unwrap_or("#ffe07d"),
             ],
         };
         let mut y = 0.;
@@ -686,7 +924,17 @@ impl Renderer {
             let line_top = y;
             let line = &state.parsed_lyrics[index];
             let is_active = index == active;
-            let opacity = alpha * if is_active { 1. } else { 0.74 };
+            let row_opacity = alpha * if is_active { 1. } else { 0.74 };
+            let main_weight = if is_active {
+                DWRITE_FONT_WEIGHT_BOLD
+            } else {
+                DWRITE_FONT_WEIGHT(650)
+            };
+            let shadow_style = if is_active {
+                ShadowStyle::MAIN
+            } else {
+                ShadowStyle::NEXT
+            };
             let mut font_size = if is_active {
                 26_f32.max((width * 0.048).min(height * 0.06))
             } else {
@@ -698,24 +946,25 @@ impl Renderer {
             } else {
                 s.second_line_text_shadow_strength
             };
-            let played = color(palette[0], opacity);
+            let played = color(palette[0], 1.);
             let base = color(
                 if s.color_scheme == "custom" {
                     &s.custom_unplayed_color
                 } else {
                     "#ffffff"
                 },
-                opacity,
+                if s.color_scheme == "custom" { 1. } else { 0.98 },
             );
-            let roman_base = color(
-                if s.color_scheme == "custom" {
-                    &s.custom_romaji_unplayed_color
-                } else {
-                    "#dddddd"
-                },
-                opacity,
-            );
-            let roman_played = color(palette[1], opacity);
+            let roman_base = if s.color_scheme == "custom" {
+                color(&s.custom_romaji_unplayed_color, 1.)
+            } else {
+                mix_color(color(palette[3], 1.), color("#ffffff", 0.88), 0.42)
+            };
+            let roman_played = if s.color_scheme == "custom" {
+                color(&s.custom_romaji_played_color, 1.)
+            } else {
+                mix_color(color(palette[1], 1.), roman_base, 0.58)
+            };
             let words = display_words(state, index);
             let relevant: Vec<_> = words.iter().filter(|w| !w.text.trim().is_empty()).collect();
             let aligned = s.show_romaji
@@ -725,7 +974,9 @@ impl Renderer {
                     .all(|w| w.romaji.as_ref().is_some_and(|r| !r.trim().is_empty()));
             let mut widths = Vec::new();
             if words.is_empty() {
-                let measured = self.layout(&line.text, font_size, available, false)?.1;
+                let measured = self
+                    .layout(&line.text, font_size, available, false, main_weight)?
+                    .1;
                 if wrap {
                     widths.extend([measured / 2.; 2]);
                 } else {
@@ -733,7 +984,9 @@ impl Renderer {
                 }
             } else {
                 for word in &words {
-                    let mut w = self.layout(&word.text, font_size, available, false)?.1;
+                    let mut w = self
+                        .layout(&word.text, font_size, available, false, main_weight)?
+                        .1;
                     if aligned {
                         w = w.max(
                             self.layout(
@@ -741,6 +994,7 @@ impl Renderer {
                                 font_size * 0.46,
                                 available,
                                 false,
+                                DWRITE_FONT_WEIGHT(650),
                             )?
                             .1,
                         );
@@ -763,7 +1017,8 @@ impl Renderer {
                 &s.player_alignment
             };
             if words.is_empty() {
-                let (layout, w, h) = self.layout(&line.text, font_size, available, wrap)?;
+                let (layout, w, h) =
+                    self.layout(&line.text, font_size, available, wrap, main_weight)?;
                 if wrap {
                     layout.SetTextAlignment(match alignment {
                         "left" => DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -782,6 +1037,7 @@ impl Renderer {
                     base: if is_active { played } else { base },
                     played,
                     shadow,
+                    shadow_style,
                 });
                 if !wrap {
                     align_row(&mut self.texts[main_start..], available, w, alignment);
@@ -798,7 +1054,7 @@ impl Renderer {
                 let mut roman_baseline: f32 = 0.;
                 let mut roman_descent: f32 = 0.;
                 for word in words {
-                    let main = self.layout(&word.text, font_size, available, false)?;
+                    let main = self.layout(&word.text, font_size, available, false, main_weight)?;
                     let baseline = text_baseline(&main.0)?;
                     main_baseline = main_baseline.max(baseline);
                     main_descent = main_descent.max(main.2 - baseline);
@@ -808,6 +1064,7 @@ impl Renderer {
                             font_size * 0.46,
                             available,
                             false,
+                            DWRITE_FONT_WEIGHT(650),
                         )?;
                         let baseline = text_baseline(&layout)?;
                         roman_baseline = roman_baseline.max(baseline);
@@ -851,7 +1108,7 @@ impl Renderer {
                                 },
                                 D2D1_GRADIENT_STOP {
                                     position: 1.,
-                                    color: color(palette[1], opacity),
+                                    color: color(palette[1], 1.),
                                 },
                             ],
                             D2D1_GAMMA_2_2,
@@ -879,6 +1136,7 @@ impl Renderer {
                         base,
                         played,
                         shadow,
+                        shadow_style,
                     });
                     if let Some((layout, w, h2, baseline)) = roman {
                         self.texts.push(Text {
@@ -892,6 +1150,7 @@ impl Renderer {
                             base: roman_base,
                             played: roman_played,
                             shadow,
+                            shadow_style: ShadowStyle::ROMAJI,
                         });
                     }
                     x += cell_width;
@@ -916,6 +1175,7 @@ impl Renderer {
                 start: line.time,
                 end: line_end(state, index),
                 phase,
+                opacity: row_opacity,
             });
             for (text, roman) in [(&line.romaji, true), (&line.translation, false)] {
                 if text.is_empty()
@@ -925,13 +1185,19 @@ impl Renderer {
                     continue;
                 }
                 y += 2. * gap;
-                let natural_width = self.layout(text, sub_size, available, false)?.1;
+                let weight = if roman {
+                    DWRITE_FONT_WEIGHT(650)
+                } else {
+                    DWRITE_FONT_WEIGHT_NORMAL
+                };
+                let natural_width = self.layout(text, sub_size, available, false, weight)?.1;
                 let fitted = if wrap {
                     (available * 2. / natural_width.max(1.)).min(1.) * 0.999
                 } else {
                     flow::width_scale(&[natural_width], available, false)
                 };
-                let (layout, w, h) = self.layout(text, sub_size * fitted, available, wrap)?;
+                let (layout, w, h) =
+                    self.layout(text, sub_size * fitted, available, wrap, weight)?;
                 if wrap {
                     layout.SetTextAlignment(match alignment {
                         "left" => DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -954,18 +1220,20 @@ impl Renderer {
                     base: if roman {
                         roman_base
                     } else {
-                        color(
-                            if s.color_scheme == "custom" {
-                                &s.custom_translation_color
-                            } else {
-                                "#dddddd"
-                            },
-                            opacity * 0.88,
-                        )
+                        if s.color_scheme == "custom" {
+                            color(&s.custom_translation_color, 1.)
+                        } else {
+                            mix_color(color(palette[2], 1.), color("#ffffff", 0.76), 0.28)
+                        }
                     },
                     played: roman_played,
                     gradient: None,
                     shadow,
+                    shadow_style: if roman {
+                        ShadowStyle::ROMAJI
+                    } else {
+                        ShadowStyle::TRANSLATION
+                    },
                 });
                 if !wrap {
                     align_row(&mut self.texts[sub_start..], available, w, alignment);
@@ -989,6 +1257,7 @@ impl Renderer {
                     start: line.time,
                     end: line_end(state, index),
                     phase,
+                    opacity: row_opacity,
                 });
                 y += h;
             }
@@ -1009,7 +1278,8 @@ impl Renderer {
                 "error" => "Lyrics unavailable",
                 _ => &state.fallback_text,
             };
-            let (layout, w, h) = self.layout(text, 18. * scale, available, true)?;
+            let (layout, w, h) =
+                self.layout(text, 18. * scale, available, true, DWRITE_FONT_WEIGHT_BOLD)?;
             layout.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
             self.texts.push(Text {
                 layout,
@@ -1019,9 +1289,10 @@ impl Renderer {
                 height: h,
                 timing: None,
                 gradient: None,
-                base: color("#ffffff", alpha),
-                played: color("#ffffff", alpha),
+                base: color("#ffffff", 1.),
+                played: color("#ffffff", 1.),
                 shadow: s.first_line_text_shadow_strength,
+                shadow_style: ShadowStyle::MAIN,
             });
             y = h;
             self.lanes.push(Lane {
@@ -1033,6 +1304,7 @@ impl Renderer {
                 start: 0.,
                 end: 1.,
                 phase: -1,
+                opacity: alpha,
             });
         }
         let body_top = 52.;
@@ -1380,12 +1652,15 @@ impl Renderer {
                 / (self.scale * placement.scale);
             let viewport = rect(
                 24.,
-                (lane.top - 8.) * placement.scale + placement.y,
+                (lane.top - shadow_padding(texts[lane.range.start].shadow)) * placement.scale
+                    + placement.y,
                 available,
-                (lane.height + 16.) * placement.scale,
+                (lane.height + 2. * shadow_padding(texts[lane.range.start].shadow))
+                    * placement.scale,
             );
             let overflow = lane.width > lane_available + 0.5;
-            let layered = overflow || placement.opacity < 1.;
+            let opacity = placement.opacity * lane.opacity;
+            let layered = overflow || opacity < 1.;
             if layered {
                 let flags = usize::from(offset > 0.)
                     | (usize::from(offset + lane_available < lane.width - 0.5) << 1);
@@ -1394,7 +1669,7 @@ impl Renderer {
                     geometricMask: ManuallyDrop::new(None),
                     maskAntialiasMode: D2D1_ANTIALIAS_MODE_ALIASED,
                     maskTransform: identity,
-                    opacity: placement.opacity,
+                    opacity,
                     opacityBrush: ManuallyDrop::new(
                         overflow.then(|| self.fade_brushes[flags].clone()),
                     ),
