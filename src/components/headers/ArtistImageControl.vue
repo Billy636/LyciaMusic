@@ -68,7 +68,7 @@ onUnmounted(() => {
 <template>
   <button ref="trigger" type="button" title="本地歌手头像" aria-label="本地歌手头像"
     aria-haspopup="dialog" :aria-expanded="visible" :aria-controls="`${id}-panel`"
-    class="artist-image-trigger bg-white/1 hover:bg-white/10 border border-white/1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-7 h-7 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
+    class="artist-image-trigger bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white w-7 h-7 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
     :class="{ 'text-[#EC4141] dark:text-[#EC4141]': !!settingsStore.settings.artistImageFolder }"
     @click.stop="toggle" @keydown.esc.stop.prevent="closeAndFocus">
     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

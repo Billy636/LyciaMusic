@@ -526,7 +526,7 @@ onUnmounted(() => {
             :title="modeSwitchLabel"
             :aria-label="modeSwitchLabel"
             :aria-pressed="isAlbumArtistMode"
-            class="artist-mode-switch bg-white/1 hover:bg-white/10 border border-white/1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-7 h-7 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
+            class="artist-mode-switch bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white w-7 h-7 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
             @click="toggleArtistMode"
           >
             <ArtistModeIcon :album-artist="isAlbumArtistMode" class="h-4 w-4" />
@@ -539,12 +539,10 @@ onUnmounted(() => {
             :aria-label="`排序方式：${currentSortLabel}`"
             :aria-expanded="showSortMenu"
             aria-controls="artist-sort-options"
-            class="artist-sort-control bg-white/1 hover:bg-white/10 border border-white/1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-7 px-2.5 flex items-center justify-center gap-1.5 rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20 whitespace-nowrap text-xs"
+            class="artist-sort-control bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white w-7 h-7 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
             @click.stop="showSortMenu = !showSortMenu"
           >
             <SortModeIcon class="h-4 w-4 shrink-0" />
-            <span>{{ currentSortLabel }}</span>
-            <svg aria-hidden="true" class="h-3 w-3 transition-transform" :class="{ 'rotate-180': showSortMenu }" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 6 4 4 4-4" /></svg>
           </button>
 
           <div v-if="showSortMenu" id="artist-sort-options" role="group" aria-label="排序方式" class="absolute right-0 top-full mt-2 w-44 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md rounded-xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-top-right" @click.stop>
