@@ -74,7 +74,7 @@ export function usePlaylistManagement(options: PlaylistManagementOptions) {
     if (!targets.length) return;
     // 冻结确认目标，避免弹窗期间的选择或筛选变化改变实际删除对象。
     pendingDeleteIds.value = targets.map(playlist => playlist.id);
-    deleteMessage.value = `${targets.length === 1 ? `确定删除歌单「${targets[0].name}」吗？` : `确定删除选中的 ${targets.length} 个歌单吗？`}仅移除歌单，不会删除本地音乐文件。此操作无法撤销。`;
+    deleteMessage.value = '';
     showDeleteModal.value = true;
   };
   const confirmDelete = () => {

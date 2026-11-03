@@ -200,7 +200,7 @@ const createFromModal = (name: string) => {
 
     <PlaylistActionsMenu v-if="menuPlaylist" :key="menuPlaylist.id" :x="menuPosition.x" :y="menuPosition.y" :name="menuPlaylist.name" :pinned="library.isPinned(menuPlaylist.id)" :empty="!menuPlaylist.songPaths.length" @close="closeMenu" @action="handleMenuAction" />
     <ModernInputModal v-model:visible="showNameModal" :title="renameId ? '重命名歌单' : '新建歌单'" :initial-value="initialName" placeholder="为这张歌单取个名字" :confirm-text="renameId ? '保存' : '创建'" @confirm="createFromModal" />
-    <ModernModal v-model:visible="showDeleteModal" title="删除歌单" :content="deleteMessage" type="danger" confirm-text="删除歌单" @confirm="confirmDelete" />
+    <ModernModal v-model:visible="showDeleteModal" title="确定删除歌单？" :content="deleteMessage" type="danger" confirm-text="删除歌单" @confirm="confirmDelete" />
   </section>
 </template>
 

@@ -98,7 +98,7 @@ onUnmounted(() => {
         role="alertdialog"
         aria-modal="true"
         :aria-labelledby="titleId"
-        :aria-describedby="contentId"
+        :aria-describedby="content ? contentId : undefined"
         class="relative bg-white/80 dark:bg-gray-900/90 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all duration-300 cubic-bezier(0.34, 1.56, 0.64, 1)"
         :class="[
           isClosing ? 'scale-95 opacity-0 translate-y-4' : 'scale-100 opacity-100 translate-y-0',
@@ -106,7 +106,7 @@ onUnmounted(() => {
         ]"
       >
         <!-- Header -->
-        <div class="px-6 pt-6 pb-2 text-center">
+        <div class="px-6 pt-6 text-center" :class="content ? 'pb-2' : 'pb-6'">
           <div 
             v-if="type === 'danger'"
             class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4"
@@ -119,7 +119,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Body -->
-        <div class="px-6 pb-6 text-center">
+        <div v-if="content" class="px-6 pb-6 text-center">
           <p :id="contentId" class="text-sm text-gray-500 dark:text-gray-300 leading-relaxed break-words max-h-[40vh] overflow-y-auto">{{ content }}</p>
         </div>
 
