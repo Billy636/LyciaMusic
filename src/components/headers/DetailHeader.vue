@@ -8,11 +8,17 @@ import SortModeIcon from '../common/SortModeIcon.vue';
 import { usePlaylistSort } from '../../features/collections/usePlaylistSort';
 import { useCollectionsStore } from '../../features/collections/store';
 import { playlistSortLabel } from '../../features/collections/playlistSort';
+import PlaylistSourcePanel from '../playlists/PlaylistSourcePanel.vue';
+import { unresolvedCount } from '../../features/playlistImport/types';
+import { usePlaylistImportDialog } from '../../features/playlistImport/dialog';
 
 const { playlistSortMode, setPlaylistSortMode, currentViewMode, filterCondition } = usePlayerViewState();
 const { playlists } = useLibraryCollections();
 const { followsDefault } = usePlaylistSort();
 const collectionsStore = useCollectionsStore();
+const currentPlaylist = computed(() => playlists.value.find(p => p.id === filterCondition.value));
+const pendingCount = computed(() => unresolvedCount(currentPlaylist.value?.importData));
+const importDialog = usePlaylistImportDialog();
 const defaultSortLabel = computed(() => playlistSortLabel(collectionsStore.playlistSortMode));
 const sortTitle = computed(() => `排序：${playlistSortLabel(playlistSortMode.value)} · ${followsDefault.value ? '跟随默认' : '当前歌单'}`);
 const sortTrigger = ref<HTMLButtonElement | null>(null);
@@ -174,9 +180,9 @@ const handlePlayAll = () => {
     </div>
 
     <!-- 详情展示模式 -->
-    <div v-else class="flex gap-6 h-auto mt-1">
+    <div v-else class="flex gap-4 sm:gap-6 h-auto mt-1">
       <!-- 封面图 -->
-      <div class="w-40 h-40 rounded-2xl shadow-sm flex items-center justify-center shrink-0 overflow-hidden group relative select-none bg-gray-100 dark:bg-white/5">
+      <div class="w-24 h-24 sm:w-32 sm:h-32 rounded-2xl shadow-sm flex items-center justify-center shrink-0 overflow-hidden group relative select-none bg-gray-100 dark:bg-white/5">
         <img v-if="headerCover" :src="headerCover" class="w-full h-full object-cover animate-in fade-in duration-300" alt="Cover" />
         <div v-else class="flex flex-col items-center justify-center h-full w-full">
            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-16 h-16 text-indigo-500/50 mb-2 drop-shadow-md"><path fill-rule="evenodd" d="M19.952 1.651a.75.75 0 01.298.599V16.303a3 3 0 01-2.176 2.884l-1.32.377a2.553 2.553 0 11-1.403-4.909l2.311-.66a1.5 1.5 0 001.088-1.442V6.994l-9 2.572v9.737a3 3 0 01-2.176 2.884l-1.32.377a2.553 2.553 0 11-1.403-4.909l2.311-.66a1.5 1.5 0 001.088-1.442V9.017c0-.528.246-1.032.67-1.371l10.038-5.996z" clip-rule="evenodd" /></svg>
@@ -184,10 +190,10 @@ const handlePlayAll = () => {
       </div>
       
       <!-- 文本信息与操作 -->
-      <div class="h-40 flex flex-col justify-between py-1 flex-1 min-w-0">
+      <div class="min-h-24 sm:min-h-32 flex flex-col justify-between gap-3 py-1 flex-1 min-w-0">
         <div>
           <div class="flex items-center gap-2 mb-1">
-            <h1 class="text-3xl font-bold text-gray-800 dark:text-white truncate max-w-[500px]">{{ title }}</h1>
+            <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white truncate max-w-[500px]">{{ title }}</h1>
             <button 
               v-if="showRename" 
               @click="emit('rename')" 
@@ -200,12 +206,15 @@ const handlePlayAll = () => {
             </button>
           </div>
           
-          <div v-if="subtitle" class="text-xs text-gray-600 dark:text-gray-300 font-medium">
-             {{ subtitle }}
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+            <span>{{ currentPlaylist?.songPaths.length ?? songs.length }} 首歌曲</span>
+            <span v-if="subtitle">{{ subtitle }}</span>
+            <button v-if="pendingCount" type="button" class="text-amber-600 dark:text-amber-400 hover:underline" @click="importDialog.open(filterCondition)">{{ pendingCount }} 首待匹配</button>
+            <span v-if="currentPlaylist?.importData?.error" class="text-amber-600 dark:text-amber-400" :title="currentPlaylist.importData.error">源文件更新异常</span>
           </div>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
            <button @click="handlePlayAll" title="播放全部" class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-100 px-5 py-2 rounded-full text-sm font-medium transition flex items-center active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20">
              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                <path d="M9 5.5v13l10-6.5-10-6.5Z" />
@@ -232,6 +241,8 @@ const handlePlayAll = () => {
            >
              <SortModeIcon class="h-5 w-5" />
            </button>
+
+           <PlaylistSourcePanel v-if="currentViewMode === 'playlist'" :key="filterCondition" :playlist-id="filterCondition" />
 
            <!-- 排序菜单 -->
            <Teleport to="body">
