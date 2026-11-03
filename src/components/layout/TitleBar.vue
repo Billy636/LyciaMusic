@@ -10,13 +10,14 @@ import { useSettingsNavigationStore } from '../../features/settings/navigation';
 import { hideMainWindowToTray } from '../../composables/renderingPower';
 import { useLibrarySearchIndex } from '../../composables/useLibrarySearchIndex';
 import AppBrand from './AppBrand.vue';
+import { usePlaylistLibraryStore } from '../../features/collections/playlistLibrary';
 
 const props = defineProps({
   settingsLayout: { type: Boolean, default: undefined },
 });
 const router = useRouter();
 const route = useRoute();
-const { searchQuery, setSearch, isMiniMode, currentViewMode } = usePlayerViewState();
+const { searchQuery: musicSearchQuery, setSearch: setMusicSearch, isMiniMode, currentViewMode } = usePlayerViewState();
 const appWindow = getCurrentWindow();
 const TITLE_BAR_CONTROL_SELECTOR = 'button, a, input, select, textarea, [role="button"]';
 const { settings } = useSettings();
@@ -32,6 +33,12 @@ const settingsBackTitle = computed(() => settingsNavigation.canGoBack
   ? `返回${settingsNavigation.sectionTitle}`
   : '返回音乐页面');
 const isPlaylistLibraryRoute = computed(() => route.path === '/playlists');
+const playlistLibrary = usePlaylistLibraryStore();
+const searchQuery = computed(() => isPlaylistLibraryRoute.value ? playlistLibrary.searchQuery : musicSearchQuery.value);
+const setSearch = (value: string) => {
+  if (isPlaylistLibraryRoute.value) playlistLibrary.searchQuery = value;
+  else setMusicSearch(value);
+};
 const themeToggleTitle = computed(() => (isDarkTheme.value ? '切换浅色' : '切换深色'));
 const searchDraft = ref(searchQuery.value);
 const isSearchDraftDirty = computed(() => searchDraft.value !== searchQuery.value);
@@ -44,6 +51,7 @@ watch([isSettingsRoute, () => settingsNavigation.pageTitle], ([inSettings, title
 
 // 搜索框提示文字随页面切换：歌曲/艺术家/专辑三种搜索模式
 const searchPlaceholder = computed(() => {
+  if (isPlaylistLibraryRoute.value) return '搜索歌单，支持拼音';
   if (route.path === '/artists') {
     return '搜索艺术家...';
   }
@@ -239,7 +247,7 @@ const goBack = () => { router.back(); };
         </svg>
       </button>
 
-      <div v-if="!isSettingsRoute && !isPlaylistLibraryRoute" class="group relative bg-white/5 dark:bg-white/5 hover:bg-white/10 dark:hover:bg-white/10 focus-within:bg-white/20 dark:focus-within:bg-white/10 focus-within:ring-2 focus-within:ring-[#EC4141]/20 pl-2 pr-3 py-1.5 rounded-full text-sm flex items-center transition-all w-60 ml-2 border border-black/10 dark:border-white/20">
+      <div v-if="!isSettingsRoute" class="group relative bg-white/5 dark:bg-white/5 hover:bg-white/10 dark:hover:bg-white/10 focus-within:bg-white/20 dark:focus-within:bg-white/10 focus-within:ring-2 focus-within:ring-[#EC4141]/20 pl-2 pr-3 py-1.5 rounded-full text-sm flex items-center transition-all w-60 ml-2 border border-black/10 dark:border-white/20">
         <button
           type="button"
           class="p-1 mr-1 rounded-full text-gray-900 dark:text-gray-100 group-focus-within:text-[#EC4141] hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
@@ -266,7 +274,7 @@ const goBack = () => { router.back(); };
           </svg>
         </button>
         <span
-          v-if="searchIndexBuilding"
+          v-if="searchIndexBuilding && !isPlaylistLibraryRoute"
           class="absolute left-4 top-full mt-1 text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap pointer-events-none"
         >正在建立拼音索引 {{ searchIndexProgress }}%</span>
       </div>
