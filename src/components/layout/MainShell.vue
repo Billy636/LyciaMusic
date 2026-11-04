@@ -18,6 +18,9 @@ const PlayerDetail = defineAsyncComponent(() => import('../player/PlayerDetail.v
 const AddToPlaylistModal = defineAsyncComponent(() => import('../overlays/AddToPlaylistModal.vue'));
 const Toast = defineAsyncComponent(() => import('../common/Toast.vue'));
 const SongInfoModal = defineAsyncComponent(() => import('../overlays/SongInfoModal.vue'));
+const PlaylistImportDialog = defineAsyncComponent(() => import('../playlists/PlaylistImportDialog.vue'));
+import { usePlaylistImportDialog } from '../../features/playlistImport/dialog';
+const { visible: showPlaylistImport } = usePlaylistImportDialog();
 
 const route = useRoute();
 const {
@@ -278,6 +281,7 @@ useDesktopLyricsWindowBridge();
     />
 
     <Toast />
+    <PlaylistImportDialog v-if="showPlaylistImport" />
   </div>
 </template>
 

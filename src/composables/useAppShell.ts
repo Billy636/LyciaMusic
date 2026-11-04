@@ -24,6 +24,7 @@ import { useMainWindowRenderingPower } from './renderingPower';
 import { useLibrarySearchIndex } from './useLibrarySearchIndex';
 import { useSettingsStore } from '../features/settings/store';
 import { useCoverCache } from './useCoverCache';
+import { usePlaylistFileBridge } from '../features/playlistImport/files';
 
 export function useAppShell() {
   const {
@@ -86,6 +87,7 @@ export function useAppShell() {
 
   useMainWindowRenderingPower();
   useLibrarySearchIndex();
+  usePlaylistFileBridge();
 
   const prepareStartupTransparentComposition = async () => {
     await whenInitialThemeSynced();
