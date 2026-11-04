@@ -84,7 +84,7 @@ export function useHomeBatchActions({
     } else if (currentViewMode.value === 'playlist' && filterCondition?.value) {
       const selected = new Set(selectedPaths.value);
       const targetPlaylist = playlists.value.find(p => p.id === filterCondition.value);
-      if (targetPlaylist) {
+      if (targetPlaylist && !targetPlaylist.importData?.linked) {
         targetPlaylist.songPaths = targetPlaylist.songPaths.filter(path => !selected.has(path));
       }
     }
@@ -117,6 +117,7 @@ export function useHomeBatchActions({
       removeSongPathsFromPlaybackState({ playQueuePaths, tempQueuePaths, currentSong }, deletedPaths);
       await removeFromHistory(Array.from(deletedPaths));
       playlists.value.forEach((playlist) => {
+        if (playlist.importData?.linked) return;
         playlist.songPaths = playlist.songPaths.filter((path) => !deletedPaths.has(path));
       });
 
@@ -134,6 +135,10 @@ export function useHomeBatchActions({
 
   const requestBatchDelete = () => {
     if (selectedPaths.value.size === 0) return;
+    if (currentViewMode.value === 'playlist' && playlists.value.find(p => p.id === filterCondition?.value)?.importData?.linked) {
+      showToast('文件关联歌单由源文件管理，请先复制为普通歌单', 'info');
+      return;
+    }
 
     openConfirm({
       title: '移除歌曲',

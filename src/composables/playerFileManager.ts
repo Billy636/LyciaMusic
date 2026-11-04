@@ -149,7 +149,11 @@ export const createPlayerFileManager = ({
     libraryStore.setSourceSongOrder(nextSourcePaths);
     libraryStore.setCanonicalSongOrder(nextCanonicalPaths);
     favoritePaths.value = favoritePaths.value.map(remap);
-    playlists.value.forEach(playlist => { playlist.songPaths = playlist.songPaths.map(remap); });
+    playlists.value.forEach(playlist => {
+      if (playlist.importData?.linked) return;
+      playlist.songPaths = playlist.songPaths.map(remap);
+      if (playlist.importData) playlist.importData.choices = playlist.importData.choices.map(path => path ? remap(path) : null);
+    });
     recentSongs.value = recentSongs.value.map(item => ({ ...item, path: remap(item.path) }));
     // Use the song setters to migrate fallback records, then retain unresolved
     // path-only queue entries as well. None of this reloads or stops audio.
@@ -292,6 +296,7 @@ export const createPlayerFileManager = ({
       const removedPathSet = new Set(removedPaths.map(normalizePathForMatch));
       favoritePaths.value = favoritePaths.value.filter(path => !removedPathSet.has(normalizePathForMatch(path)));
       playlists.value.forEach((playlist) => {
+        if (playlist.importData?.linked) return;
         playlist.songPaths = playlist.songPaths.filter(path => !removedPathSet.has(normalizePathForMatch(path)));
       });
       recentSongs.value = recentSongs.value.filter(item => !removedPathSet.has(normalizePathForMatch(item.path)));
@@ -378,6 +383,7 @@ export const createPlayerFileManager = ({
       removeSongPathsFromPlaybackState({ playQueuePaths, tempQueuePaths, currentSong }, [song.path]);
       await removeFromHistory([song.path]);
       playlists.value.forEach(playlist => {
+        if (playlist.importData?.linked) return;
         playlist.songPaths = playlist.songPaths.filter(path => path !== song.path);
       });
     } catch (error) {
@@ -454,6 +460,7 @@ export const createPlayerFileManager = ({
         removeSongPathsFromPlaybackState({ playQueuePaths, tempQueuePaths, currentSong }, allRemovedPaths);
         await removeFromHistory(allRemovedPaths);
         playlists.value.forEach((playlist) => {
+          if (playlist.importData?.linked) return;
           const removedSet = new Set(allRemovedPaths);
           playlist.songPaths = playlist.songPaths.filter(path => !removedSet.has(path));
         });

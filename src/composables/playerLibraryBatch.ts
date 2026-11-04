@@ -99,6 +99,7 @@ export const createPlayerLibraryBatch = ({
       }, deletedPaths);
       collectionsStore.favoritePaths = collectionsStore.favoritePaths.filter(path => !deletedSet.has(path));
       collectionsStore.playlists.forEach((playlist) => {
+        if (playlist.importData?.linked) return;
         playlist.songPaths = playlist.songPaths.filter(path => !deletedSet.has(path));
       });
       collectionsStore.recentSongs = collectionsStore.recentSongs.filter(item => !deletedSet.has(item.path));

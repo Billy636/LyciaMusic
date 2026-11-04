@@ -101,6 +101,7 @@ export function useSongDrag(
         if (currentViewMode.value === 'playlist') {
             const playlist = playlists.value.find(item => item.id === filterCondition.value);
             if (!playlist) return;
+            if (playlist.importData?.linked) { showToast('文件关联歌单的顺序由源文件决定', 'info'); return; }
             const previousOrder = [...playlist.songPaths];
             const previousSort = collections.getPlaylistSortOverride(playlist.id);
             const nextOrder = mergeOrder(playlist.songPaths, reordered);
@@ -108,7 +109,7 @@ export function useSongDrag(
             setPlaylistSortMode('custom');
             showToast('已调整歌曲顺序', 'success', { label: '撤销', onClick: () => {
                 const current = playlists.value.find(item => item.id === playlist.id);
-                if (current && current.songPaths.join('\0') === nextOrder.join('\0')) {
+                    if (current && !current.importData?.linked && current.songPaths.join('\0') === nextOrder.join('\0')) {
                     current.songPaths = previousOrder;
                     collections.setPlaylistSortOverride(playlist.id, previousSort ?? null);
                 }
@@ -441,6 +442,7 @@ export function useSongDrag(
         } else if (playlist) {
             const target = playlists.value.find(item => item.id === playlist.id);
             if (!target) return;
+            if (target.importData?.linked) { showToast('请先复制为普通歌单，再添加歌曲', 'info'); return; }
             const existing = new Set(target.songPaths);
             const added = new Set(paths.filter(path => !existing.has(path)));
             const count = addSongsToPlaylist(playlist.id, paths);
@@ -455,7 +457,7 @@ export function useSongDrag(
                 : `歌曲已在「${playlist.name}」中`, count > 0 ? 'success' : 'info', count > 0 ? {
                 label: '撤销', onClick: () => {
                     const current = playlists.value.find(item => item.id === playlist.id);
-                    if (current) current.songPaths = current.songPaths.filter(path => !added.has(path));
+                    if (current && !current.importData?.linked) current.songPaths = current.songPaths.filter(path => !added.has(path));
                 },
             } : undefined);
         } else if (insertIndex > -1) {
