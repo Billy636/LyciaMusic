@@ -17,6 +17,7 @@ export const useCollectionsStore = defineStore('collections', () => {
   const RECENT_SONG_LIMIT = 200;
   const favoritePaths = ref<string[]>([]);
   const playlists = ref<Playlist[]>([]);
+  const initialized = ref(false);
   const recentSongs = ref<HistoryItem[]>([]);
   const playlistSortMode = ref<PlaylistSortMode>('custom');
   const storedOverrides = playerStorage.readObject<Record<string, unknown>>(playerStorageKeys.playlistSortOverrides);
@@ -43,6 +44,7 @@ export const useCollectionsStore = defineStore('collections', () => {
 
   const setPlaylists = (nextPlaylists: Playlist[]) => {
     playlists.value = nextPlaylists;
+    initialized.value = true;
   };
 
   const setRecentSongs = (historyItems: HistoryItem[]) => {
@@ -77,7 +79,7 @@ export const useCollectionsStore = defineStore('collections', () => {
 
   const addToPlaylist = (playlistId: string, path: string) => {
     const playlist = getPlaylistById(playlistId);
-    if (playlist && !playlist.songPaths.includes(path)) {
+    if (playlist && !playlist.importData?.linked && !playlist.songPaths.includes(path)) {
       playlist.songPaths.push(path);
       return true;
     }
@@ -87,7 +89,7 @@ export const useCollectionsStore = defineStore('collections', () => {
 
   const removeFromPlaylist = (playlistId: string, path: string) => {
     const playlist = getPlaylistById(playlistId);
-    if (!playlist) {
+    if (!playlist || playlist.importData?.linked) {
       return false;
     }
 
@@ -98,7 +100,7 @@ export const useCollectionsStore = defineStore('collections', () => {
 
   const addSongsToPlaylist = (playlistId: string, songPaths: string[]) => {
     const playlist = getPlaylistById(playlistId);
-    if (!playlist) {
+    if (!playlist || playlist.importData?.linked) {
       return 0;
     }
 
@@ -195,6 +197,7 @@ export const useCollectionsStore = defineStore('collections', () => {
   };
 
   return {
+    initialized,
     favoritePaths,
     playlists,
     recentSongs,

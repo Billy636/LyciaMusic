@@ -1,5 +1,6 @@
 import type { AppSettings, HistoryItem, Playlist, Song, EqualizerPreset } from '../../types';
 import { localStore } from './localStore';
+import { isPlaylistImportData } from '../../features/playlistImport/types';
 
 export type ArtistSortMode = 'count' | 'count_asc' | 'name' | 'name_desc';
 export type AlbumSortMode = 'count' | 'count_asc' | 'name' | 'name_desc' | 'artist' | 'artist_desc';
@@ -151,6 +152,13 @@ export const playerStorage = {
 
       const playlist = item as Playlist;
       return typeof playlist.id === 'string' && typeof playlist.name === 'string' && Array.isArray(playlist.songPaths);
+    }).map(playlist => {
+      if (playlist.importData && !isPlaylistImportData(playlist.importData)) {
+        const restored = { ...playlist };
+        delete restored.importData;
+        return restored;
+      }
+      return playlist;
     });
   },
 

@@ -1,4 +1,5 @@
 import type { TaskbarContentMode, TaskbarCoverShape, TaskbarLyricEffect } from '../features/taskbarPlayer/shared';
+import type { PlaylistImportData } from '../features/playlistImport/types';
 
 export interface SongCore {
   id?: number;       // 数据库主键 (用于播放记录关联)
@@ -193,6 +194,7 @@ export interface Playlist {
   name: string;
   songPaths: string[];
   createdAt?: string;
+  importData?: PlaylistImportData;
 }
 
 export interface LibraryFolder {
