@@ -795,7 +795,7 @@ const getRowStyle = (songIndex: number, songPath: string) => {
 
         <div
           v-for="song in virtualItems"
-          :key="song.path"
+          :key="`${song.path}:${song.virtualIndex}`"
           :data-index="song.virtualIndex"
           @pointerdown="handlePointerDown($event, song, song.virtualIndex)"
           @dblclick="handleSongDoubleClick(song)"
