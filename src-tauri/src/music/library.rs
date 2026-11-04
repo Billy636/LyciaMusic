@@ -160,10 +160,11 @@ fn remove_library_folder_from_conn(
         rows
     };
 
+    let retained = crate::playlist_import::retained_paths(&tx)?;
     let deleted_paths = candidate_paths
         .into_iter()
         .filter(|path| {
-            !remaining_roots
+            !retained.contains(&normalize_path(path)) && !remaining_roots
                 .iter()
                 .any(|root| is_descendant_path(path, root))
         })
@@ -195,6 +196,7 @@ fn remove_library_folder_from_conn(
 }
 
 fn cleanup_orphaned_local_songs(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+    let retained = crate::playlist_import::retained_paths(conn)?;
     let folder_roots: Vec<String> = {
         let mut stmt = conn
             .prepare("SELECT path FROM library_folders")
@@ -218,7 +220,7 @@ fn cleanup_orphaned_local_songs(conn: &rusqlite::Connection) -> Result<Vec<Strin
     let delete_paths = local_song_paths
         .into_iter()
         .filter(|path| {
-            !folder_roots
+            !retained.contains(&normalize_path(path)) && !folder_roots
                 .iter()
                 .any(|root| is_descendant_path(path, root))
         })

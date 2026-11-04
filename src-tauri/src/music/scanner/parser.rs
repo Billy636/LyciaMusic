@@ -292,7 +292,7 @@ fn parse_song_internal(
     })
 }
 
-pub(super) fn parse_audio_files_internal(paths: Vec<String>, options: ScanOptions) -> Vec<Song> {
+pub(crate) fn parse_audio_files_internal(paths: Vec<String>, options: ScanOptions) -> Vec<Song> {
     let mut songs = Vec::new();
     let mut seen_paths = HashSet::new();
 

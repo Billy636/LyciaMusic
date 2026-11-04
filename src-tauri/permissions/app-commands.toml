@@ -2,6 +2,11 @@
 identifier = "allow-app-commands"
 description = "Allows Lycia Player application commands used by the frontend."
 commands.allow = [
+  "read_playlist_source",
+  "match_playlist_tracks",
+  "prepare_playlist_paths",
+  "configure_playlist_files",
+  "export_playlist_m3u8",
   "native_desktop_lyrics_open",
   "native_desktop_lyrics_state",
   "native_desktop_lyrics_playback",

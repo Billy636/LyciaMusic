@@ -12,6 +12,7 @@ mod foreground_window;
 mod highlights;
 mod music;
 mod player;
+mod playlist_import;
 mod remote;
 mod statistics;
 mod system_fonts;
@@ -105,6 +106,7 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .manage(playlist_import::PlaylistFileWatcher::default())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             handle_single_instance(app, argv);
         }))
@@ -142,6 +144,11 @@ pub fn run() {
             setup_app(app)
         })
         .invoke_handler(tauri::generate_handler![
+            playlist_import::read_playlist_source,
+            playlist_import::match_playlist_tracks,
+            playlist_import::prepare_playlist_paths,
+            playlist_import::configure_playlist_files,
+            playlist_import::export_playlist_m3u8,
             desktop_lyrics::native_desktop_lyrics_open,
             desktop_lyrics::native_desktop_lyrics_state,
             desktop_lyrics::native_desktop_lyrics_playback,

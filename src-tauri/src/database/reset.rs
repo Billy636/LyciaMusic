@@ -1,6 +1,6 @@
 use crate::database::DbState;
 use std::fs;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 #[tauri::command]
 pub async fn clear_all_app_data(
@@ -9,6 +9,9 @@ pub async fn clear_all_app_data(
 ) -> Result<(), String> {
     let db_conn = db_state.conn.clone();
     let app_dir = crate::data_storage::data_dir(&app_handle);
+    if let Some(watcher) = app_handle.try_state::<crate::playlist_import::PlaylistFileWatcher>() {
+        watcher.stop()?;
+    }
 
     #[cfg(target_os = "windows")]
     crate::autostart::set_launch_on_startup(app_handle, false)
@@ -28,6 +31,7 @@ pub async fn clear_all_app_data(
                 DELETE FROM song_artists;
                 DELETE FROM artists;
                 DELETE FROM songs;
+                DELETE FROM playlist_import_paths;
                 DELETE FROM library_folders;
                 DELETE FROM library_scan_settings;
                 DELETE FROM sidebar_folders;

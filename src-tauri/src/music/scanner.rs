@@ -23,6 +23,7 @@ pub use orchestrator::{
     scan_music_folder, scan_music_folder_paths, scan_single_directory_internal,
 };
 pub(crate) use parser::parse_song_from_file;
+pub(crate) use parser::parse_audio_files_internal;
 pub(crate) use repository::apply_scan_changes;
 
 pub(super) const VARIOUS_ARTISTS: &str = "Various Artists";
