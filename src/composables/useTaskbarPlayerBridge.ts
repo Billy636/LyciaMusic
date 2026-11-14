@@ -1,18 +1,29 @@
-import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi';
+import { LogicalSize, PhysicalPosition } from '@tauri-apps/api/dpi';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getWebviewDataDirectory } from '../services/storage/dataStorage';
 import { availableMonitors, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { onMounted, onUnmounted, ref, toRaw, watch } from 'vue';
 
 import { useCoverCache } from './useCoverCache';
 import { usePlayer } from './player';
+import { useLyrics } from './lyrics';
 import { useThemeSettings } from './useThemeSettings';
 import { toggleMainWindowVisibility } from './mainWindowVisibility';
+import { APP_SHOW_MAIN_EVENT } from '../features/miniPlayer/shared';
 import { useSettings } from '../features/settings/useSettings';
+import { createTaskbarPlaybackClockTracker } from '../features/taskbarPlayer/lyrics';
+import {
+  clampTaskbarLeftOffset,
+  resolveTaskbarHorizontalPosition,
+  resolveTaskbarPositionScaleFactor,
+  type TaskbarHorizontalPosition,
+} from '../features/taskbarPlayer/position';
 import {
   TASKBAR_PLAYER_WINDOW_LABEL,
   TASKBAR_PLAYER_STATE_EVENT,
+  TASKBAR_PLAYER_PLAYBACK_EVENT,
   TASKBAR_PLAYER_STATE_APPLIED_EVENT,
   TASKBAR_PLAYER_ACTION_EVENT,
   TASKBAR_PLAYER_REQUEST_STATE_EVENT,
@@ -20,11 +31,18 @@ import {
   TASKBAR_PLAYER_VISIBILITY_EVENT,
   TASKBAR_PLAYER_DRAG_EVENT,
   TASKBAR_PLAYER_WINDOW_WIDTH,
+  TASKBAR_PLAYER_MIN_WIDTH,
+  TASKBAR_PLAYER_MAX_WIDTH,
+  normalizeTaskbarWidth,
+  normalizeTaskbarLeftOffset,
   TASKBAR_PLAYER_WINDOW_HEIGHT,
   readSavedTaskbarPositionX,
+  TASKBAR_PLAYER_POSITION_X_KEY,
   type TaskbarTrayGeometry,
   type TaskbarPlayerStatePayload,
+  type TaskbarPlayerPlaybackPayload,
   type TaskbarPlayerAction,
+  type TaskbarPlayerDragPayload,
 } from '../features/taskbarPlayer/shared';
 
 let taskbarPlayerWindowPromise: Promise<WebviewWindow> | null = null;
@@ -36,32 +54,43 @@ let unlistenScaleChange: (() => void) | null = null;
 
 const TASKBAR_FULLSCREEN_CHECK_INTERVAL_MS = 1_000;
 const TASKBAR_GEOMETRY_FALLBACK_INTERVAL_MS = 10_000;
+const TASKBAR_PLAYBACK_SYNC_INTERVAL_MS = 250;
 
 // 高可用定位并发控制锁
 let isPositioning = false;
 let pendingPositionUpdate = false;
 let isTaskbarPlayerDragging = false;
+let configuredWindowWidth = TASKBAR_PLAYER_WINDOW_WIDTH;
+let configuredLeftOffset: number | null = null;
+let currentPositionBounds: TaskbarHorizontalPosition | null = null;
+let persistTaskbarLeftOffset: ((offset: number) => void) | null = null;
+
+interface TaskbarWindowPosition extends TaskbarHorizontalPosition {
+  scaleFactor: number;
+}
 
 async function ensureTaskbarWindowSize(targetWindow: WebviewWindow) {
   await targetWindow.setSize(new LogicalSize(
-    TASKBAR_PLAYER_WINDOW_WIDTH,
+    configuredWindowWidth,
     TASKBAR_PLAYER_WINDOW_HEIGHT,
   )).catch((err) => {
     console.warn('Failed to normalize taskbar player size:', err);
   });
 }
 
-async function refreshTaskbarWindowTopmost(targetWindow: WebviewWindow) {
-  await targetWindow.setAlwaysOnTop(true);
-  await invoke('refresh_taskbar_window_topmost').catch((err) => {
+async function refreshTaskbarWindowTopmost() {
+  await invoke<boolean>('refresh_taskbar_window_topmost').then((refreshed) => {
+    if (!refreshed) console.warn('Taskbar player topmost refresh could not find its window.');
+  }).catch((err) => {
     console.warn('Failed to refresh taskbar player topmost state:', err);
   });
 }
 
 async function stabilizeTaskbarWindowGeometry(targetWindow: WebviewWindow) {
+  if (isTaskbarPlayerDragging) return;
   await ensureTaskbarWindowSize(targetWindow);
   await updatePosition();
-  await refreshTaskbarWindowTopmost(targetWindow);
+  await refreshTaskbarWindowTopmost();
 }
 
 function scheduleTaskbarWindowGeometryStabilization(targetWindow: WebviewWindow) {
@@ -72,6 +101,43 @@ function scheduleTaskbarWindowGeometryStabilization(targetWindow: WebviewWindow)
       void stabilizeTaskbarWindowGeometry(targetWindow);
     }, delay);
   }
+}
+
+async function getTaskbarPositionBounds(): Promise<TaskbarWindowPosition | null> {
+  let primary = await primaryMonitor().catch(() => null);
+  if (!primary) {
+    const monitors = await availableMonitors().catch(() => []);
+    primary = monitors.find(monitor => monitor.position.x === 0 && monitor.position.y === 0)
+      ?? monitors[0] ?? null;
+  }
+  const geometry = await invoke<TaskbarTrayGeometry>('get_taskbar_tray_geometry').catch((err) => {
+    console.warn('Failed to invoke get_taskbar_tray_geometry:', err);
+    return null;
+  });
+  if (!geometry) return null;
+
+  const scaleFactor = resolveTaskbarPositionScaleFactor(geometry, primary?.scaleFactor);
+  const horizontal = resolveTaskbarHorizontalPosition(geometry, configuredWindowWidth, scaleFactor);
+  if (horizontal) return { ...horizontal, scaleFactor };
+
+  // Keep the established work-area fallback for a vertical taskbar. Invalid
+  // native geometry is retried later instead of being used to migrate a position.
+  const rect = geometry.taskbar_rect_physical;
+  if (![rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite)
+    || rect.right <= rect.left || rect.bottom <= rect.top || !primary) return null;
+
+  const workArea = primary.workArea.position.toLogical(scaleFactor);
+  const workAreaSize = primary.workArea.size.toLogical(scaleFactor);
+  const minX = Math.ceil(workArea.x);
+  const maxX = Math.max(minX, Math.floor(workArea.x + workAreaSize.width - configuredWindowWidth));
+  const baseX = Math.max(minX, Math.min(maxX, Math.round(workArea.x + (workAreaSize.width - configuredWindowWidth) / 2)));
+  return {
+    minX,
+    maxX: baseX,
+    baseX,
+    y: Math.round(workArea.y + workAreaSize.height - TASKBAR_PLAYER_WINDOW_HEIGHT - 8),
+    scaleFactor,
+  };
 }
 
 // 核心自愈与几何定位控制器（带 pending 控制的并发锁机制）
@@ -91,107 +157,29 @@ async function updatePosition() {
     do {
       pendingPositionUpdate = false;
 
-      // 1. 安全的主显示器获取机制：优先 primaryMonitor()，失败时回退 availableMonitors()[0]
-      let primary = await primaryMonitor().catch(() => null);
-      if (!primary) {
-        const monitors = await availableMonitors().catch(() => []);
-        if (monitors.length > 0) {
-          primary = monitors[0];
-        }
-      }
-      const scaleFactor = primary?.scaleFactor ?? 1;
+      const position = await getTaskbarPositionBounds();
+      if (!position || isTaskbarPlayerDragging) break;
+      currentPositionBounds = position;
 
-      // 2. 调用 Rust 底层，返回 Win32 API 在当前进程 DPI awareness 下的原始物理屏幕坐标
-      const geometry = await invoke<TaskbarTrayGeometry>('get_taskbar_tray_geometry').catch((err) => {
-        console.warn('Failed to invoke get_taskbar_tray_geometry:', err);
-        return null;
-      });
-
-      if (!geometry) {
-        break;
+      // Migrate the legacy absolute X only after native geometry is available.
+      // Future monitor, width and tray changes use the same relative offset.
+      if (configuredLeftOffset === null) {
+        const savedX = readSavedTaskbarPositionX();
+        configuredLeftOffset = clampTaskbarLeftOffset(
+          savedX === null ? 0 : position.baseX - savedX,
+          position,
+        );
+        persistTaskbarLeftOffset?.(configuredLeftOffset);
+        if (typeof localStorage !== 'undefined') localStorage.removeItem(TASKBAR_PLAYER_POSITION_X_KEY);
       }
 
-      // 3. DPI 跨屏单次换算契约：物理坐标除以 scaleFactor，在前端转换为标准逻辑像素
-      const toLogicalVal = (val: number) => val / scaleFactor;
-
-      const taskbarRect = {
-        left: toLogicalVal(geometry.taskbar_rect_physical.left),
-        top: toLogicalVal(geometry.taskbar_rect_physical.top),
-        right: toLogicalVal(geometry.taskbar_rect_physical.right),
-        bottom: toLogicalVal(geometry.taskbar_rect_physical.bottom),
-      };
-      const taskbarWidth = taskbarRect.right - taskbarRect.left;
-      const taskbarHeight = taskbarRect.bottom - taskbarRect.top;
-
-      let trayRect = null;
-      if (geometry.tray_rect_physical) {
-        trayRect = {
-          left: toLogicalVal(geometry.tray_rect_physical.left),
-          top: toLogicalVal(geometry.tray_rect_physical.top),
-          right: toLogicalVal(geometry.tray_rect_physical.right),
-          bottom: toLogicalVal(geometry.tray_rect_physical.bottom),
-        };
-      }
-
-      // 获取主屏幕工作区大小与定位边界
-      const workArea = primary
-        ? primary.workArea.position.toLogical(scaleFactor)
-        : { x: 0, y: 0 };
-      const workAreaSize = primary
-        ? primary.workArea.size.toLogical(scaleFactor)
-        : { width: 1920, height: 1040 };
-
-      const winWidth = TASKBAR_PLAYER_WINDOW_WIDTH;
-      const winHeight = TASKBAR_PLAYER_WINDOW_HEIGHT;
-
-      // 四边任务栏朝向识别
-      const isBottom = taskbarRect.top > workArea.y && taskbarWidth > taskbarHeight;
-      const isTop = taskbarRect.top === 0 && taskbarWidth > taskbarHeight;
-
-      let x = 0;
-      let y = 0;
-
-      const savedX = readSavedTaskbarPositionX();
-
-      // 多边定位公式单独定义与精细避让
-      if (isBottom) {
-        // 底部任务栏：在任务栏矩形内精致居中
-        y = taskbarRect.top + (taskbarHeight - winHeight) / 2;
-        if (trayRect && geometry.source === 'tray') {
-          // 精密避让：托盘左边界 - 窗口宽度 - 12px 呼吸间隙
-          x = trayRect.left - winWidth - 12;
-        } else {
-          // Fallback：安全边界兜底
-          x = taskbarRect.right - 16 - winWidth;
-        }
-        if (savedX !== null) {
-          x = savedX;
-        }
-      } else if (isTop) {
-        // 顶部任务栏
-        y = taskbarRect.top + (taskbarHeight - winHeight) / 2;
-        if (trayRect && geometry.source === 'tray') {
-          x = trayRect.left - winWidth - 12;
-        } else {
-          x = taskbarRect.right - 16 - winWidth;
-        }
-        if (savedX !== null) {
-          x = savedX;
-        }
-      } else {
-        // 侧边（左/右）任务栏或异常布局下，采取在主屏底部工作区边缘悬浮的兜底策略，不飞屏
-        x = workArea.x + (workAreaSize.width - winWidth) / 2;
-        y = workArea.y + workAreaSize.height - winHeight - 8;
-        if (savedX !== null) {
-          x = savedX;
-        }
-      }
-
-      // 三级防护边界裁剪（防止溢出工作区）
-      x = Math.max(workArea.x, Math.min(workArea.x + workAreaSize.width - winWidth, x));
-
-      // 执行最终的 setPosition
-      await targetWindow.setPosition(new LogicalPosition(Math.round(x), Math.round(y))).catch((err) => {
+      const offset = clampTaskbarLeftOffset(configuredLeftOffset, position);
+      // The geometry was converted with the taskbar monitor's scale. Passing a
+      // physical position prevents Tao from applying the window's previous DPI.
+      await targetWindow.setPosition(new PhysicalPosition(
+        Math.round((position.baseX - offset) * position.scaleFactor),
+        Math.round(position.y * position.scaleFactor),
+      )).catch((err) => {
         console.warn('Failed to set window position:', err);
       });
 
@@ -220,13 +208,14 @@ async function ensureTaskbarPlayerWindow() {
     taskbarPlayerWindowPromise = (async () => {
       // 预创建时的默认虚拟定位，展示时会被 updatePosition 进行秒级精准对齐纠正
       const windowInstance = new WebviewWindow(TASKBAR_PLAYER_WINDOW_LABEL, {
+        dataDirectory: getWebviewDataDirectory(),
         url: '/',
         title: 'Lycia Taskbar Player',
-        width: TASKBAR_PLAYER_WINDOW_WIDTH,
+        width: configuredWindowWidth,
         height: TASKBAR_PLAYER_WINDOW_HEIGHT,
-        minWidth: TASKBAR_PLAYER_WINDOW_WIDTH,
+        minWidth: TASKBAR_PLAYER_MIN_WIDTH,
         minHeight: TASKBAR_PLAYER_WINDOW_HEIGHT,
-        maxWidth: TASKBAR_PLAYER_WINDOW_WIDTH,
+        maxWidth: TASKBAR_PLAYER_MAX_WIDTH,
         maxHeight: TASKBAR_PLAYER_WINDOW_HEIGHT,
         visible: false,
         decorations: false,
@@ -305,14 +294,30 @@ function waitForTaskbarPlayerStateApplied(timeoutMs = 500) {
 
 export function useTaskbarPlayerBridge() {
   const mainWindow = getCurrentWindow();
-  const { settings } = useSettings();
+  const { settings, audioDelay, patchSettings } = useSettings();
+  const persistLeftOffset = (offset: number) => patchSettings({ taskbarLeftOffset: offset });
+  persistTaskbarLeftOffset = persistLeftOffset;
+  watch(
+    [() => settings.value.taskbarWindowWidth, () => settings.value.taskbarLeftOffset],
+    ([width, offset]) => {
+      configuredWindowWidth = normalizeTaskbarWidth(width);
+      configuredLeftOffset = offset === null ? null : normalizeTaskbarLeftOffset(offset);
+      void getTaskbarPlayerWindow().then(targetWindow => {
+        if (targetWindow) return stabilizeTaskbarWindowGeometry(targetWindow);
+      }).catch(error => console.warn('Failed to update taskbar window geometry:', error));
+    },
+    { immediate: true, flush: 'sync' },
+  );
   const {
     currentSong,
+    currentTime,
     isPlaying,
+    isMiniMode,
     togglePlay,
     prevSong,
     nextSong,
   } = usePlayer();
+  const { parsedLyrics, lyricsStatus } = useLyrics();
   const { loadCover } = useCoverCache();
   const { isDarkTheme } = useThemeSettings();
 
@@ -322,28 +327,93 @@ export function useTaskbarPlayerBridge() {
   let lastGeometryFallbackAt = 0;
   let isMainWindowClosing = false;
   let updateSequence = 0;
+  let playbackSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  const playbackClockTracker = createTaskbarPlaybackClockTracker();
+  let lyricsSongPath = currentSong.value?.path ?? null;
+  let dragEventSequence = 0;
+
+  // Audio loading can change currentSong before loadLyrics clears the previous
+  // document. Do not label the previous song's lyrics as belonging to the new one.
+  watch(parsedLyrics, () => {
+    lyricsSongPath = currentSong.value?.path ?? null;
+  }, { flush: 'sync' });
+
+  const createPlaybackPayload = (): TaskbarPlayerPlaybackPayload => ({
+    songPath: currentSong.value?.path ?? null,
+    playbackTime: currentTime.value,
+    syncedAt: playbackClockTracker.resolveSyncedAt(currentTime.value),
+    isPlaying: isPlaying.value,
+    audioDelay: audioDelay.value,
+  });
+
+  // Send only the clock on progress ticks; covers and lyric documents change much less often.
+  const emitPlaybackToTaskbarPlayer = () => {
+    if (!isTaskbarPlayerVisible.value) return;
+    void emitTo<TaskbarPlayerPlaybackPayload>(
+      TASKBAR_PLAYER_WINDOW_LABEL,
+      TASKBAR_PLAYER_PLAYBACK_EVENT,
+      createPlaybackPayload(),
+    ).catch(error => console.warn('Failed to sync taskbar player playback:', error));
+  };
+
+  const cancelPlaybackSync = () => {
+    if (playbackSyncTimer !== null) {
+      clearTimeout(playbackSyncTimer);
+      playbackSyncTimer = null;
+    }
+  };
+
+  // Preserve the timestamp of the actual sample, including while the main window
+  // is in low-power mode. Resuming must not project across time spent paused.
+  watch([currentTime, isPlaying, () => currentSong.value?.path], () => {
+    playbackClockTracker.markPlaybackTimeSample(currentTime.value);
+  }, { immediate: true, flush: 'sync' });
+
+  watch(currentTime, () => {
+    if (!isTaskbarPlayerVisible.value || playbackSyncTimer !== null) return;
+    playbackSyncTimer = setTimeout(() => {
+      playbackSyncTimer = null;
+      emitPlaybackToTaskbarPlayer();
+    }, TASKBAR_PLAYBACK_SYNC_INTERVAL_MS);
+  });
+
+  watch([isPlaying, audioDelay], () => {
+    cancelPlaybackSync();
+    emitPlaybackToTaskbarPlayer();
+  });
 
   const createStatePayload = async (): Promise<TaskbarPlayerStatePayload> => {
     const song = currentSong.value;
     const coverUrl = song?.path ? await loadCover(song.path).catch(() => '') : '';
 
     return {
+      ...createPlaybackPayload(),
       currentSong: song,
       coverUrl: coverUrl || '',
-      isPlaying: isPlaying.value,
       isDarkTheme: isDarkTheme.value,
+      backgroundOpacity: settings.value.taskbarBackgroundOpacity,
+      textColor: settings.value.taskbarTextColor,
+      contentMode: settings.value.taskbarContentMode,
+      lyricEffect: settings.value.taskbarLyricEffect,
+      lyricHighlightColor: settings.value.taskbarLyricHighlightColor,
+      translationKaraoke: settings.value.taskbarTranslationKaraoke,
+      coverShape: settings.value.taskbarCoverShape,
+      coverRotate: settings.value.taskbarCoverRotate,
+      canDrag: !settings.value.taskbarPositionLocked,
+      parsedLyrics: lyricsStatus.value === 'ready' && lyricsSongPath === song?.path
+        ? toRaw(parsedLyrics.value)
+        : [],
+      lyricsStatus: lyricsStatus.value,
     };
   };
 
   const emitStateToTaskbarPlayer = async () => {
+    const currentSeq = ++updateSequence;
     const targetWindow = await getTaskbarPlayerWindow();
     if (!targetWindow) return;
 
-    updateSequence++;
-    const currentSeq = updateSequence;
-
     const payload = await createStatePayload();
-    if (currentSeq !== updateSequence) {
+    if (currentSeq !== updateSequence || payload.currentSong?.path !== currentSong.value?.path) {
       return;
     }
 
@@ -366,14 +436,19 @@ export function useTaskbarPlayerBridge() {
     await emitStateToTaskbarPlayer();
     await emitTo(TASKBAR_PLAYER_WINDOW_LABEL, TASKBAR_PLAYER_VISIBILITY_EVENT, { visible: true });
     await targetWindow.show();
+    // Install immediately after showing so Shell interactions are guarded while
+    // geometry and lyric state finish synchronizing.
+    await invoke<boolean>('install_taskbar_zorder_guard').then((installed) => {
+      if (!installed) console.warn('Taskbar player z-order guard could not find its window.');
+    }).catch((err) => {
+      console.warn('Failed to install taskbar z-order guard:', err);
+    });
     await stabilizeTaskbarWindowGeometry(targetWindow);
     lastGeometryFallbackAt = Date.now();
     isTaskbarPlayerVisible.value = true;
+    // Lyrics may have finished loading during the initial state/show handshake.
+    await emitStateToTaskbarPlayer();
 
-    // 安装 Z-order 守护，防止点击任务栏时播控窗口被遮盖
-    void invoke('install_taskbar_zorder_guard').catch((err) => {
-      console.warn('Failed to install taskbar zorder guard:', err);
-    });
     // Tauri 2 官方 API 缩放更改监听绑定
     if (unlistenScaleChange) {
       unlistenScaleChange();
@@ -391,6 +466,20 @@ export function useTaskbarPlayerBridge() {
   };
 
   const destroyTaskbarPlayerWindow = async () => {
+    cancelPlaybackSync();
+    updateSequence++;
+    dragEventSequence++;
+    isTaskbarPlayerDragging = false;
+    currentPositionBounds = null;
+    stopCheckLoop();
+    if (unlistenScaleChange) {
+      unlistenScaleChange();
+      unlistenScaleChange = null;
+    }
+    // Stop the guard even if the native window has already disappeared.
+    await invoke('uninstall_taskbar_zorder_guard').catch((error) => {
+      console.warn('Failed to uninstall taskbar z-order guard:', error);
+    });
     const targetWindow = await getTaskbarPlayerWindow();
     if (!targetWindow) {
       isTaskbarPlayerReady = false;
@@ -400,13 +489,6 @@ export function useTaskbarPlayerBridge() {
       return;
     }
 
-    stopCheckLoop();
-    if (unlistenScaleChange) {
-      unlistenScaleChange();
-      unlistenScaleChange = null;
-    }
-    // 在 destroy 前卸载守护，防止回调访问已失效的 HWND
-    void invoke('uninstall_taskbar_zorder_guard').catch(() => {});
     try {
       await targetWindow.destroy();
     } catch (error) {
@@ -432,17 +514,21 @@ export function useTaskbarPlayerBridge() {
         const state = await invoke<{ isFullscreen: boolean }>('get_foreground_fullscreen_state');
         if (state.isFullscreen) {
           if (isTaskbarPlayerVisible.value) {
+            await emitTo(TASKBAR_PLAYER_WINDOW_LABEL, TASKBAR_PLAYER_VISIBILITY_EVENT, { visible: false });
             await targetWindow.hide();
             isTaskbarPlayerVisible.value = false;
+            cancelPlaybackSync();
           }
         } else {
           if (!isTaskbarPlayerVisible.value) {
             // 对齐一次坐标并显示
             await stabilizeTaskbarWindowGeometry(targetWindow);
             await emitStateToTaskbarPlayer();
+            await emitTo(TASKBAR_PLAYER_WINDOW_LABEL, TASKBAR_PLAYER_VISIBILITY_EVENT, { visible: true });
             await targetWindow.show();
             await stabilizeTaskbarWindowGeometry(targetWindow);
             isTaskbarPlayerVisible.value = true;
+            await emitStateToTaskbarPlayer();
           } else if (
             !isTaskbarPlayerDragging
             && Date.now() - lastGeometryFallbackAt >= TASKBAR_GEOMETRY_FALLBACK_INTERVAL_MS
@@ -468,6 +554,10 @@ export function useTaskbarPlayerBridge() {
   const handleAction = async (action: TaskbarPlayerAction) => {
     switch (action.type) {
       case 'toggle-main-window':
+        if (isMiniMode.value) {
+          await emitTo('main', APP_SHOW_MAIN_EVENT);
+          break;
+        }
         await toggleMainWindowVisibility(mainWindow);
         break;
       case 'toggle-play':
@@ -482,6 +572,18 @@ export function useTaskbarPlayerBridge() {
       case 'close':
         settings.value.showTaskbarPlayer = false;
         break;
+      case 'set-left-offset':
+      case 'align-left': {
+        const position = await getTaskbarPositionBounds();
+        if (position) currentPositionBounds = position;
+        const offset = action.type === 'align-left'
+          ? position ? position.baseX - position.minX : null
+          : normalizeTaskbarLeftOffset(action.offset);
+        if (offset !== null) {
+          persistLeftOffset(position ? clampTaskbarLeftOffset(offset, position) : offset);
+        }
+        break;
+      }
       default:
         break;
     }
@@ -525,8 +627,25 @@ export function useTaskbarPlayerBridge() {
     );
 
     unlisteners.push(
-      await listen<{ dragging: boolean }>(TASKBAR_PLAYER_DRAG_EVENT, (event) => {
-        isTaskbarPlayerDragging = event.payload.dragging;
+      await listen<TaskbarPlayerDragPayload>(TASKBAR_PLAYER_DRAG_EVENT, async (event) => {
+        const sequence = ++dragEventSequence;
+        if (event.payload.dragging) {
+          isTaskbarPlayerDragging = true;
+          return;
+        }
+        if (event.payload.leftOffset !== undefined) {
+          const position = await getTaskbarPositionBounds() ?? currentPositionBounds;
+          if (sequence !== dragEventSequence) return;
+          if (position) currentPositionBounds = position;
+          const offset = normalizeTaskbarLeftOffset(event.payload.leftOffset);
+          // Persist the released position before automatic positioning resumes.
+          persistLeftOffset(position ? clampTaskbarLeftOffset(offset, position) : offset);
+        }
+        if (sequence !== dragEventSequence) return;
+        isTaskbarPlayerDragging = false;
+        void getTaskbarPlayerWindow().then(targetWindow => {
+          if (targetWindow) return stabilizeTaskbarWindowGeometry(targetWindow);
+        }).catch(error => console.warn('Failed to stabilize taskbar window after dragging:', error));
       })
     );
 
@@ -547,8 +666,18 @@ export function useTaskbarPlayerBridge() {
     watch(
       [
         currentSong,
-        isPlaying,
         isDarkTheme,
+        parsedLyrics,
+        () => settings.value.taskbarBackgroundOpacity,
+        () => settings.value.taskbarTextColor,
+        () => settings.value.taskbarContentMode,
+        () => settings.value.taskbarLyricEffect,
+        () => settings.value.taskbarLyricHighlightColor,
+        () => settings.value.taskbarTranslationKaraoke,
+        () => settings.value.taskbarCoverShape,
+        () => settings.value.taskbarCoverRotate,
+        () => settings.value.taskbarPositionLocked,
+        lyricsStatus,
       ],
       () => {
         if (!isTaskbarPlayerVisible.value) return;
@@ -559,11 +688,15 @@ export function useTaskbarPlayerBridge() {
   });
 
   onUnmounted(() => {
+    cancelPlaybackSync();
+    updateSequence++;
     stopCheckLoop();
     if (unlistenScaleChange) {
       unlistenScaleChange();
       unlistenScaleChange = null;
     }
     unlisteners.splice(0).forEach((unlisten) => unlisten());
+    dragEventSequence++;
+    if (persistTaskbarLeftOffset === persistLeftOffset) persistTaskbarLeftOffset = null;
   });
 }

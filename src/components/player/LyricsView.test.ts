@@ -1,89 +1,84 @@
+import { compileTemplate, parse } from '@vue/compiler-sfc';
 import { describe, expect, it } from 'vitest';
+// @ts-expect-error Vitest runs in Node, but this repo does not ship @types/node.
+import { readFileSync } from 'node:fs';
 
 import source from './LyricsView.vue?raw';
 
-describe('LyricsView custom font import', () => {
-  it('applies an imported font in the same settings patch that stores it', () => {
-    expect(source).toContain('lyrics: { playerFontPreset: importedFont.family }');
-    expect(source).toContain('desktopLyrics: { playerFontPreset: importedFont.family }');
+const officialStyles = readFileSync(
+  new URL('../../../node_modules/@applemusic-like-lyrics/core/dist/style.css', import.meta.url),
+  'utf8',
+);
+
+describe('LyricsView official AMLL integration', () => {
+  it('receives optional appearance previews from its parent without owning the settings panel', () => {
+    expect(source).not.toContain('LyricsAppearancePanel');
+    expect(source).not.toContain('@preview=');
+    expect(source).toMatch(/appearancePreview\?:\s*LyricsAppearanceDraft/);
+    expect(source).toMatch(/props\.appearancePreview\s*\?\?\s*readLyricsAppearanceDraft\(lyricsSettings\)/);
+    expect(source).not.toContain('const appearancePreview = ref(');
+    expect(source).not.toContain('importCustomLyricsFont');
+    expect(source).not.toContain('fontPresetMenu');
+    expect(source).not.toContain('commitDraftLyricsSettings');
+    expect(source).not.toContain('<Teleport');
   });
 
-  it('renders separate top-level triggers for system and custom font presets', () => {
-    expect(source).toContain('systemFontOptions');
-    expect(source).toContain('customFontOptions');
-    expect(source).toContain('systemFontPresetTriggerRef');
-    expect(source).toContain('customFontPresetTriggerRef');
-    expect(source).toContain('toggleFontPresetMenu(\'system\')');
-    expect(source).toContain('toggleFontPresetMenu(\'custom\')');
+  it('uses native lines for every format without a second legacy conversion', () => {
+    expect(source).toContain('useAmlDisplayLines(nativeAmlLyrics, () => lyricsSettings)');
+    expect(source).not.toContain('selectAmlLyricLines');
+    expect(source).not.toContain('convertLyricsToAmlLines');
+    expect(source).not.toContain('activeLyricsFormat');
   });
 
-  it('keeps system and custom font lists in their own menus', () => {
-    expect(source).toContain('fontPresetMenuMode === \'system\'');
-    expect(source).toContain('fontPresetMenuMode === \'custom\'');
-    expect(source).toContain('v-for="option in systemFontOptions"');
-    expect(source).toContain('v-for="option in customFontOptions"');
+  it('keeps AMLL and light render modes wired to the same appearance preview', () => {
+    expect(source).toContain("lyricsSettings.playerRenderMode === 'amll'");
+    expect(source).toContain("lyricsSettings.playerRenderMode === 'light'");
+    expect(source.match(/:line-gap="appearancePreview.playerLineGap"/g)).toHaveLength(2);
+    expect(source).toContain("'--lyrics-line-gap': appearancePreview.value.playerLineGap.toString()");
+    expect(source).toContain("'--lyrics-font-scale': appearancePreview.value.playerFontScale.toString()");
+    expect(source).toContain(':font-scale="appearancePreview.playerFontScale"');
+    expect(source).toContain(':style="lyricsPlayerStyle"');
   });
 
-  it('uses a shrinking label container so long font names do not cover trailing actions', () => {
-    expect(source).toContain('min-w-0 flex-1');
-    expect(source).toContain('truncate');
-    expect(source).toContain(':title="option.label"');
+  it('passes playing, low-power, and explicit clock/seek revisions to AMLL', () => {
+    expect(source).toContain(':playing="isPlaying"');
+    expect(source).toContain(':low-power="shouldReduceLyricsRendering"');
+    expect(source.match(/:time-sync-key="lyricsTimeSyncKey"/g)).toHaveLength(2);
+    expect(source.match(/:seek-key="seekRevision"/g)).toHaveLength(2);
+    expect(source).toContain('clockRevision.value');
   });
 
-  it('uses a delete icon for custom font removal without selecting the row', () => {
-    expect(source).toContain('Trash2');
-    expect(source).toContain('removeCustomLyricsFont(option.value)');
-    expect(source).toContain('@click.stop');
+  it('starts playback at original source timing even after AMLL adds a display lead-in', () => {
+    expect(source).toContain('getAmlLineSourceStartTime(event.line.getLine())');
+    expect(source).toContain('getPlaybackSeekSecondsForAmlLine(lineStartTimeMs, audioDelay.value)');
+    expect(source).toContain('await playAt(targetSeconds)');
+    expect(source).not.toContain('await seekTo(');
   });
 
-  it('rebuilds the lyrics layout after imported fonts finish registering', () => {
-    expect(source).toContain('importedLyricsFontsRevision');
-    expect(source).toContain('lyricsLayoutVersion');
+  it('refreshes font layout after imported fonts finish registering', () => {
+    expect(source).toContain('importedLyricsFontsRevision.value');
     expect(source).toContain(':layout-version="lyricsLayoutVersion"');
   });
 
-  it('passes playback state into AMLL so word highlighting pauses with audio', () => {
-    expect(source).toContain('isPlaying } = usePlayer();');
-    expect(source).toContain(':playing="isPlaying"');
+  it('targets actual AMLL 0.6 classes and preserves native duet alignment and subline order', () => {
+    expect(officialStyles).toMatch(/\.[\w-]+_lyricLineWrapper\s*\{/);
+    expect(officialStyles).toMatch(/\.[\w-]+_lyricDuetLine\s*\{/);
+    expect(source).toContain('[class*="_lyricLineWrapper"]');
+    expect(source).toContain(':not([class*="_lyricDuetLine"])');
+    expect(source).toContain('padding-top: calc(0.4em * var(--lyrics-line-gap, 1))');
+    expect(source).toContain('padding-bottom: calc(0.4em * var(--lyrics-line-gap, 1))');
+    expect(source).not.toContain('nth-child');
+    expect(source).not.toContain('calcLayout');
+    expect(source).not.toContain('[class*="_lyricLine_"]');
   });
 
-  it('passes low power rendering state to AMLL without removing the feature', () => {
-    expect(source).toContain('useRenderingPower');
-    expect(source).toContain('const shouldReduceLyricsRendering');
-    expect(source).toContain(':low-power="shouldReduceLyricsRendering"');
-  });
-
-  it('passes a sync key so AMLL can distinguish seeks from low-frequency clock ticks', () => {
-    expect(source).toContain('lyricsTimeSyncKey');
-    expect(source).toContain(':time-sync-key="lyricsTimeSyncKey"');
-  });
-
-  it('offers AMLL and light lyrics render modes at the top of the style panel', () => {
-    expect(source).toContain('PLAYER_RENDER_MODE_OPTIONS');
-    expect(source).toContain('AMLL');
-    expect(source).toContain('轻量');
-    expect(source).toContain('setPlayerRenderMode');
-  });
-
-  it('switches the player lyrics renderer based on the persisted render mode', () => {
-    expect(source).toContain('LightLyricPlayer');
-    expect(source).toContain("import AmlLyricPlayer from './AmlLyricPlayer.vue'");
-    expect(source).toContain("import LightLyricPlayer from './LightLyricPlayer.vue'");
-    expect(source).not.toContain('defineAsyncComponent');
-    expect(source).toContain('lyricsSettings.playerRenderMode === \'amll\'');
-    expect(source).toContain('lyricsSettings.playerRenderMode === \'light\'');
-  });
-  it('previews high-frequency slider changes locally before persisting lyrics settings', () => {
-    expect(source).toContain('previewPlayerFontScale');
-    expect(source).toContain('previewPlayerLineGap');
-    expect(source).toContain('scheduleLyricsSettingsCommit');
-    expect(source).toContain('@change="commitDraftLyricsSettings"');
-    expect(source).toContain(':line-gap="previewPlayerLineGap"');
-  });
-
-  it('starts playback from the clicked lyric line instead of only seeking while paused', () => {
-    expect(source).toContain('const { playAt, currentTime, isPlaying } = usePlayer();');
-    expect(source).toContain('await playAt(targetSeconds);');
-    expect(source).not.toContain('await seekTo(targetSeconds);');
+  it('compiles the extracted playback template', () => {
+    const { descriptor } = parse(source);
+    const result = compileTemplate({
+      source: descriptor.template!.content,
+      filename: 'LyricsView.vue',
+      id: 'lyrics-view',
+    });
+    expect(result.errors).toEqual([]);
   });
 });

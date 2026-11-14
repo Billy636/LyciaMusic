@@ -1,4 +1,5 @@
 use super::types::{RemoteFileEntry, RemoteSourceCredentials};
+use crate::music::scan_settings::LibraryScanSettings;
 use encoding_rs::GBK;
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -70,13 +71,13 @@ mod tests {
     }
 
     #[test]
-    fn build_url_does_not_duplicate_root_path() {
+    fn build_url_keeps_same_named_subdirectory_under_source_root() {
         assert_eq!(
             build_url(
                 &remote_source("https://dav.example.com", "/music"),
                 "/music/song.wav"
             ),
-            "https://dav.example.com/music/song.wav"
+            "https://dav.example.com/music/music/song.wav"
         );
     }
 
@@ -172,7 +173,7 @@ fn encode_path(path: &str) -> String {
 fn path_for_request(source: &RemoteSourceCredentials, path: &str) -> String {
     let normalized = normalize_remote_path(path);
     let root = normalize_remote_path(&source.root_path);
-    if root == "/" || normalized == root || normalized.starts_with(&format!("{}/", root)) {
+    if root == "/" {
         normalized
     } else if normalized == "/" {
         root
@@ -202,17 +203,6 @@ fn file_name(path: &str) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or(path)
         .to_string()
-}
-
-fn supported_audio_extension(path: &str) -> bool {
-    matches!(
-        path.rsplit('.').next().map(|value| value.to_ascii_lowercase()),
-        Some(ext)
-            if matches!(
-                ext.as_str(),
-                "mp3" | "flac" | "wav" | "m4a" | "aac" | "ogg" | "opus" | "aiff" | "aif"
-            )
-    )
 }
 
 fn auth_request(
@@ -263,20 +253,22 @@ fn href_to_remote_path(href: &str, source: &RemoteSourceCredentials) -> Option<S
     let root = normalize_remote_path(&source.root_path);
     let mut path = decoded.as_str();
 
-    if !base_path.is_empty() && path.starts_with(&base_path) {
+    if !base_path.is_empty() && (path == base_path || path.starts_with(&format!("{base_path}/"))) {
         path = &path[base_path.len()..];
     }
 
     let path_string = normalize_remote_path(path);
-    if root != "/" && path_string.starts_with(&root) {
+    if root != "/" && (path_string == root || path_string.starts_with(&format!("{root}/"))) {
         let relative = path_string[root.len()..].trim_start_matches('/');
         Some(if relative.is_empty() {
             "/".to_string()
         } else {
             format!("/{relative}")
         })
-    } else {
+    } else if root == "/" {
         Some(path_string)
+    } else {
+        None
     }
 }
 
@@ -388,6 +380,7 @@ pub(crate) async fn list_directory(
 
 pub(crate) async fn collect_audio_files(
     source: &RemoteSourceCredentials,
+    settings: &LibraryScanSettings,
 ) -> Result<Vec<RemoteFileEntry>, String> {
     let client = shared_client();
     let mut queue = VecDeque::from(["/".to_string()]);
@@ -395,9 +388,14 @@ pub(crate) async fn collect_audio_files(
 
     while let Some(path) = queue.pop_front() {
         for entry in list_directory(&client, source, &path).await? {
+            if settings.excludes_relative_directory(&entry.remote_path, true) {
+                continue;
+            }
             if entry.is_dir {
                 queue.push_back(entry.remote_path);
-            } else if supported_audio_extension(&entry.remote_path) {
+            } else if settings
+                .includes_extension(entry.remote_path.rsplit('.').next().unwrap_or_default())
+            {
                 files.push(entry);
             }
         }

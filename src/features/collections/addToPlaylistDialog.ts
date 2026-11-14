@@ -38,6 +38,10 @@ export function useAddToPlaylistDialog() {
   };
 
   const addSelectedSongsToPlaylist = (playlistId: string) => {
+    if (collectionsStore.getPlaylistById(playlistId)?.importData?.linked) {
+      showToast('文件关联歌单由源文件管理，请先复制为普通歌单', 'info');
+      return 0;
+    }
     const addedCount = collectionsStore.addSongsToPlaylist(
       playlistId,
       addToPlaylistTargetSongPaths.value,

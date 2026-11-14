@@ -29,7 +29,7 @@ unsafe extern "system" fn boundary_subclass_proc(
 ) -> LRESULT {
     if msg == WM_NCACTIVATE && RETAIN_MATERIAL_ON_UNFOCUS.load(Ordering::Relaxed) {
         if wparam == 0 {
-            // 维持激活信号的渲染，防止 DWM 失焦时取消 Acrylic/Mica 模糊效果
+            // 保持材质窗口的激活外观，沿用 Blur/Acrylic/Mica 的失焦处理。
             return DefSubclassProc(hwnd, msg, 1, lparam);
         }
     }

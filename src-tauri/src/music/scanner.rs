@@ -20,9 +20,10 @@ mod repository;
 pub(crate) use orchestrator::scan_single_directory_summary_internal;
 pub use orchestrator::{
     get_folder_first_song, parse_audio_files, scan_folder_as_playlists, scan_folder_recursive,
-    scan_music_folder, scan_single_directory_internal,
+    scan_music_folder, scan_music_folder_paths, scan_single_directory_internal,
 };
 pub(crate) use parser::parse_song_from_file;
+pub(crate) use parser::parse_audio_files_internal;
 pub(crate) use repository::apply_scan_changes;
 
 pub(super) const VARIOUS_ARTISTS: &str = "Various Artists";
@@ -38,12 +39,14 @@ pub(super) const UNKNOWN_ALBUM: &str = "未知专辑";
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ScanOptions {
     pub(crate) minimum_duration_seconds: u32,
+    pub(crate) force_metadata_refresh: bool,
 }
 
 impl ScanOptions {
     pub(crate) fn from_minimum_duration_seconds(value: Option<u32>) -> Self {
         Self {
             minimum_duration_seconds: value.unwrap_or(0),
+            ..Self::default()
         }
     }
 }
@@ -274,6 +277,7 @@ mod tests {
             cue_start_offset: None,
             cue_end_offset: None,
             comment: None,
+            genre: Some(String::new()),
             artist_avatar_path: None,
         }
     }
@@ -313,7 +317,8 @@ mod tests {
                 cue_source_path TEXT,
                 cue_start_offset INTEGER,
                 cue_end_offset INTEGER,
-                comment TEXT
+                comment TEXT,
+                genre TEXT
             );
             CREATE TABLE artists (
                 id INTEGER PRIMARY KEY,
@@ -469,6 +474,7 @@ mod tests {
             None,
             ScanOptions {
                 minimum_duration_seconds: 10,
+                ..ScanOptions::default()
             },
         )
         .expect("collect diff");

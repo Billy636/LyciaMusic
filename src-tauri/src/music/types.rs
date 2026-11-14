@@ -63,6 +63,8 @@ pub struct Song {
     pub cue_start_offset: Option<u32>,
     pub cue_end_offset: Option<u32>,
     pub comment: Option<String>,
+    // None 表示尚未随扫描回填（数据库中为 NULL）；Some("") 表示确认无流派标签。
+    pub genre: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]
@@ -217,6 +219,31 @@ pub struct AlbumCatalogItem {
     pub count: u32,
     pub artist: String,
     pub first_song_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder_path: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GenreCatalogItem {
+    pub name: String,
+    pub song_count: u32,
+    pub artist_count: u32,
+    pub album_count: u32,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GenreArtistItem {
+    pub name: String,
+    pub count: u32,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GenreGroups {
+    pub albums: Vec<AlbumCatalogItem>,
+    pub artists: Vec<GenreArtistItem>,
 }
 
 #[derive(Serialize)]
@@ -242,4 +269,5 @@ pub struct FolderNode {
 pub struct LibraryFolder {
     pub path: String,
     pub song_count: usize,
+    pub locked: bool,
 }

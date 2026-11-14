@@ -30,11 +30,10 @@ interface Props {
   localSongList: Song[];
   localSongPaths: string[];
   artistActiveTab: 'songs' | 'albums' | 'details';
+  genreActiveTab: 'songs' | 'albums' | 'artists';
   localFilterCondition: string;
   selectedAlbumSong: Song | null;
   artistAlbumList: ArtistAlbumItem[];
-  coverCache: Map<string, string>;
-  loadingSet: Set<string>;
   selectedPaths: Set<string>;
   setSongTableRef?: (instance: any | null) => void;
 }
@@ -45,6 +44,7 @@ const emit = defineEmits<{
   (event: 'update:isBatchMode', value: boolean): void;
   (event: 'update:isManagementMode', value: boolean): void;
   (event: 'update:artistActiveTab', value: 'songs' | 'albums' | 'details'): void;
+  (event: 'update:genreActiveTab', value: 'songs' | 'albums' | 'artists'): void;
   (event: 'update:selectedPaths', value: Set<string>): void;
   (event: 'playAll'): void;
   (event: 'batchPlay'): void;
@@ -87,6 +87,7 @@ const songTableMemoryScopeKey = computed(() =>
       case 'artist':
       case 'album':
       case 'playlist':
+      case 'genre':
         return [
           props.localViewMode,
           props.localFilterCondition || '',
@@ -102,7 +103,7 @@ const songTableMemoryScopeKey = computed(() =>
 
 <template>
   <transition name="home-view-fade" mode="out-in">
-    <div :key="viewTransitionKey" class="flex flex-1 flex-col min-h-0 min-w-0">
+    <div :key="localViewMode === 'genre' ? 'genre' : viewTransitionKey" class="flex flex-1 flex-col min-h-0 min-w-0">
       <HomeHeaderPanel
         :localViewMode="localViewMode"
         :isBatchMode="isBatchMode"
@@ -137,6 +138,7 @@ const songTableMemoryScopeKey = computed(() =>
         :isBatchMode="isBatchMode"
         :isManagementMode="isManagementMode"
         :artistActiveTab="artistActiveTab"
+        :genreActiveTab="genreActiveTab"
         :localFilterCondition="localFilterCondition"
         :songTableMemoryScopeKey="songTableMemoryScopeKey"
         :localSongList="localSongList"
@@ -144,12 +146,11 @@ const songTableMemoryScopeKey = computed(() =>
         :selectedCount="selectedCount"
         :selectedAlbumSong="selectedAlbumSong"
         :artistAlbumList="artistAlbumList"
-        :coverCache="coverCache"
-        :loadingSet="loadingSet"
         :selectedPaths="selectedPaths"
         :setSongTableRef="setSongTableRef"
         @update:isBatchMode="$emit('update:isBatchMode', $event)"
         @update:artistActiveTab="$emit('update:artistActiveTab', $event)"
+        @update:genreActiveTab="$emit('update:genreActiveTab', $event)"
         @update:selectedPaths="$emit('update:selectedPaths', $event)"
         @playAll="$emit('playAll')"
         @batchPlay="$emit('batchPlay')"

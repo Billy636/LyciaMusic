@@ -21,12 +21,26 @@ interface SeekCompletedPayload {
   time: number;
 }
 
+export interface PlaybackErrorPayload {
+  playbackId: number;
+  message: string;
+}
+
+export interface PlaybackFinishedPayload {
+  playbackId: number;
+}
+
+export interface PlaybackStartedPayload {
+  playbackId: number;
+}
+
 interface CreatePlayerPlaybackDeps {
   getDisplaySongPaths?: () => string[];
   getDisplaySongList?: () => Song[];
   addToHistory: (song: Song) => void | Promise<void>;
   loadLyrics: () => void | Promise<void>;
   handleAutoNext: () => void;
+  onPlaybackError?: (message: string) => void;
   onBeforePlay?: (song: Song, options: PlaySongOptions) => void;
   resolveSongForPlayback?: (song: Song) => Promise<Song>;
 }
@@ -51,6 +65,7 @@ export const createPlayerPlayback = ({
   addToHistory,
   loadLyrics,
   handleAutoNext,
+  onPlaybackError,
   onBeforePlay,
   resolveSongForPlayback,
 }: CreatePlayerPlaybackDeps) => {
@@ -87,6 +102,17 @@ export const createPlayerPlayback = ({
     tempQueuePaths,
   } = storeToRefs(playbackStore);
   const { showPlayerDetail } = storeToRefs(uiStore);
+  let runtimeGeneration = 0;
+  let playbackIntentId = 0;
+  let pendingPlayRequest: number | null = null;
+  let activePlaybackRequest: number | null = null;
+  let failedPlaybackId: number | null = null;
+  let finishedPlaybackId: number | null = null;
+  let startedPlaybackId: number | null = null;
+  let lastStartedSongPath: string | null | undefined;
+  const pendingPlaybackErrors = new Map<number, PlaybackErrorPayload>();
+  const pendingPlaybackFinished = new Set<number>();
+  const pendingPlaybackStarted = new Set<number>();
 
   const buildQueueWithInsertedPath = (songPath: string, previousPath: string | null, queue: string[]) => {
     if (previousPath === songPath) {
@@ -175,6 +201,7 @@ export const createPlayerPlayback = ({
   };
 
   const stopPlaybackRuntime = () => {
+    runtimeGeneration += 1;
     if (progressTimerId !== null) {
       clearTimeout(progressTimerId);
       progressTimerId = null;
@@ -189,10 +216,12 @@ export const createPlayerPlayback = ({
     playbackAnchorTime = performance.now();
     playbackStartOffset = time;
     currentTime.value = time;
+    playbackStore.clockRevision += 1;
   };
 
   const startPlaybackRuntime = () => {
     stopPlaybackRuntime();
+    const generation = runtimeGeneration;
     reanchorPlaybackClock(currentTime.value);
 
     const scheduleUpdate = (update: () => void) => {
@@ -203,26 +232,24 @@ export const createPlayerPlayback = ({
     };
 
     const update = () => {
-      if (!currentSong.value || !isPlaying.value) return;
+      if (generation !== runtimeGeneration || !currentSong.value || !isPlaying.value) return;
 
       const now = performance.now();
       const delta = (now - playbackAnchorTime) / 1000.0;
       currentTime.value = playbackStartOffset + delta;
 
-      if (currentSong.value.duration > 0 && currentTime.value >= currentSong.value.duration) {
-        handleAutoNext();
-        return;
-      }
-
+      // Only the backend's playback-finished event can end a track. Wall time
+      // keeps moving during an underrun, and imported duration can be too short.
       scheduleUpdate(update);
     };
 
     scheduleUpdate(update);
     syncIntervalId = setInterval(async () => {
-      if (!isPlaying.value || isSeeking) return;
+      if (generation !== runtimeGeneration || !isPlaying.value || isSeeking) return;
 
       try {
         const rawTime = await playbackApi.getPlaybackProgress();
+        if (generation !== runtimeGeneration || !isPlaying.value || isSeeking) return;
         const offsetSec = (currentSong.value?.cue_start_offset || 0) / 1000;
         const adjustedTime = Math.max(0, rawTime - offsetSec);
         if (Math.abs(adjustedTime - currentTime.value) > 0.05) {
@@ -259,7 +286,60 @@ export const createPlayerPlayback = ({
     sessionStartTime = null;
   };
 
+  const stopAfterPlaybackError = (message: string) => {
+    flushPlaySession();
+    isPlaying.value = false;
+    isSongLoaded.value = false;
+    isSeeking = false;
+    latestSeekRequestId += 1;
+    stopPlaybackRuntime();
+    onPlaybackError?.(`播放失败：${message}`);
+  };
+
+  const handlePlaybackError = (payload: PlaybackErrorPayload) => {
+    if (!currentSong.value || payload.playbackId <= 0) return;
+    if (payload.playbackId === currentPlaybackId.value) {
+      if (failedPlaybackId === payload.playbackId) return;
+      failedPlaybackId = payload.playbackId;
+      stopAfterPlaybackError(payload.message);
+    } else if (pendingPlayRequest === playRequestId) {
+      // The audio worker may fail before playAudio's IPC response delivers its
+      // ID. Retain the event until that response lets us reject stale attempts.
+      pendingPlaybackErrors.set(payload.playbackId, payload);
+    }
+  };
+
+  const handlePlaybackFinished = (payload: PlaybackFinishedPayload) => {
+    if (!currentSong.value || payload.playbackId <= 0) return;
+    if (payload.playbackId === currentPlaybackId.value) {
+      if (!isPlaying.value || finishedPlaybackId === payload.playbackId) return;
+      finishedPlaybackId = payload.playbackId;
+      handleAutoNext();
+    } else if (pendingPlayRequest === playRequestId) {
+      pendingPlaybackFinished.add(payload.playbackId);
+    }
+  };
+
+  const handlePlaybackStarted = (payload: PlaybackStartedPayload) => {
+    const song = currentSong.value;
+    if (!song || payload.playbackId <= 0) return;
+    if (payload.playbackId === currentPlaybackId.value) {
+      if (activePlaybackRequest !== playRequestId || !isSongLoaded.value
+        || failedPlaybackId === payload.playbackId || startedPlaybackId === payload.playbackId) return;
+      startedPlaybackId = payload.playbackId;
+      const songChanged = lastStartedSongPath !== song.path;
+      lastStartedSongPath = song.path;
+      if (isPlaying.value && songChanged) {
+        playbackStore.songChangeRevision += 1;
+      }
+    } else if (pendingPlayRequest === playRequestId) {
+      // The worker may finish opening the track before IPC returns its ID.
+      pendingPlaybackStarted.add(payload.playbackId);
+    }
+  };
+
   const playSong = async (song: Song, options: PlaySongOptions = {}) => {
+    playbackIntentId += 1;
     const requestId = ++playRequestId;
     const resolvedSong = resolveSongForPlayback
       ? await resolveSongForPlayback(song).catch(() => song)
@@ -269,8 +349,21 @@ export const createPlayerPlayback = ({
     }
     song = resolvedSong;
     const previousSong = currentSong.value;
+    if (lastStartedSongPath === undefined) {
+      // Restoring the selected song must not turn its first resume into a change.
+      lastStartedSongPath = previousSong?.path ?? null;
+    }
 
     currentPlaybackId.value = 0;
+    pendingPlayRequest = null;
+    pendingPlaybackErrors.clear();
+    pendingPlaybackFinished.clear();
+    pendingPlaybackStarted.clear();
+    failedPlaybackId = null;
+    finishedPlaybackId = null;
+    startedPlaybackId = null;
+    isSeeking = false;
+    latestSeekRequestId += 1;
     flushPlaySession();
     onBeforePlay?.(song, options);
 
@@ -327,7 +420,7 @@ export const createPlayerPlayback = ({
         if (normalizedCover) {
           currentCover.value = normalizedCover;
           currentCoverPath.value = song.path;
-        } else if (!immediateCover) {
+        } else if (!immediateCover && currentCoverPath.value !== song.path) {
           currentCoverPath.value = '';
         }
         if (!currentCoverFull.value) {
@@ -365,7 +458,10 @@ export const createPlayerPlayback = ({
     const startOffsetMs = cueStartOffset + Math.round(resumeTime * 1000);
 
     try {
+      pendingPlayRequest = requestId;
+      activePlaybackRequest = requestId;
       const pId = await playbackApi.playAudio({
+        fadeEnabled: settingsStore.settings.audio.playbackFadeEnabled !== false,
         path: audioFilePath,
         title: getSmtcTitle(song),
         artist: song.artist || 'Unknown Artist',
@@ -384,61 +480,76 @@ export const createPlayerPlayback = ({
       if (requestId !== playRequestId || currentSong.value?.path !== song.path) return;
 
       currentPlaybackId.value = pId;
+      pendingPlayRequest = null;
+      const pendingError = pendingPlaybackErrors.get(pId);
+      const pendingFinished = pendingPlaybackFinished.has(pId);
+      const pendingStarted = pendingPlaybackStarted.has(pId);
+      pendingPlaybackErrors.clear();
+      pendingPlaybackFinished.clear();
+      pendingPlaybackStarted.clear();
+      if (pendingError) {
+        handlePlaybackError(pendingError);
+        return;
+      }
       isSongLoaded.value = true;
+      if (pendingFinished) {
+        if (pendingStarted) lastStartedSongPath = song.path;
+        handlePlaybackFinished({ playbackId: pId });
+        return;
+      }
       sessionStartTime = Date.now();
       loadLyrics();
       startPlaybackRuntime();
+
+      if (pendingStarted) {
+        handlePlaybackStarted({ playbackId: pId });
+      }
 
       void loadFullCoverPath(coverLookupPath)
         .then(async (fullCoverPath) => {
           if (requestId !== playRequestId || currentSong.value?.path !== song.path) {
             return;
           }
-          if (fullCoverPath) {
-            await playbackApi.updatePlaybackMetadata({
-              title: getSmtcTitle(song),
-              artist: song.artist || 'Unknown Artist',
-              album: song.album || 'Unknown Album',
-              cover: fullCoverPath,
-              duration: Math.floor(song.duration),
-              isPlaying: isPlaying.value,
-            }).catch(() => {});
-          }
+          // Tags may have been refreshed while the audio or artwork was loading.
+          const latestSong = currentSong.value;
+          await playbackApi.updatePlaybackMetadata({
+            title: getSmtcTitle(latestSong),
+            artist: latestSong.artist || 'Unknown Artist',
+            album: latestSong.album || 'Unknown Album',
+            cover: fullCoverPath || peekCoverPath(coverLookupPath) || '',
+            duration: Math.floor(latestSong.duration),
+            isPlaying: isPlaying.value,
+          }).catch(() => {});
         })
         .catch(() => {});
-    } catch {
+    } catch (error) {
       if (requestId !== playRequestId || currentSong.value?.path !== song.path) return;
 
-      isPlaying.value = false;
-      isSongLoaded.value = false;
-      sessionStartTime = null;
-      stopPlaybackRuntime();
+      pendingPlayRequest = null;
+      pendingPlaybackErrors.clear();
+      pendingPlaybackFinished.clear();
+      pendingPlaybackStarted.clear();
+      stopAfterPlaybackError(String(error));
     }
   };
 
   const pauseSong = async () => {
+    playbackIntentId += 1;
     if (isPlaying.value && sessionStartTime) {
       accumulatedTime += (Date.now() - sessionStartTime) / 1000;
       sessionStartTime = null;
     }
 
     isPlaying.value = false;
-    await playbackApi.pauseAudio();
     stopPlaybackRuntime();
+    await playbackApi.pauseAudio(settingsStore.settings.audio.playbackFadeEnabled !== false);
   };
 
   const togglePlay = async () => {
     if (!currentSong.value) return;
 
     if (isPlaying.value) {
-      if (sessionStartTime) {
-        accumulatedTime += (Date.now() - sessionStartTime) / 1000;
-        sessionStartTime = null;
-      }
-
-      await playbackApi.pauseAudio();
-      isPlaying.value = false;
-      stopPlaybackRuntime();
+      await pauseSong();
       return;
     }
 
@@ -447,17 +558,38 @@ export const createPlayerPlayback = ({
         startTime: currentTime.value,
         preserveQueue: true,
       });
-    } else {
-      await playbackApi.resumeAudio();
-      sessionStartTime = Date.now();
+      return;
     }
 
+    const requestId = playRequestId;
+    const playbackId = currentPlaybackId.value;
+    const intentId = ++playbackIntentId;
+    const seekRequestId = latestSeekRequestId;
+    // Reflect intent immediately so another click can reverse an in-flight fade.
     isPlaying.value = true;
+    sessionStartTime = Date.now();
     startPlaybackRuntime();
+    try {
+      await playbackApi.resumeAudio(settingsStore.settings.audio.playbackFadeEnabled !== false);
+    } catch (error) {
+      if (intentId === playbackIntentId && requestId === playRequestId) {
+        stopAfterPlaybackError(String(error));
+      }
+      return;
+    }
+    // The backend continues advancing briefly during fade-out. Resume from its
+    // actual position, without letting stale responses overwrite a newer action.
+    const rawTime = await playbackApi.getPlaybackProgress().catch(() => null);
+    if (rawTime === null || intentId !== playbackIntentId || requestId !== playRequestId
+      || playbackId !== currentPlaybackId.value || !isSongLoaded.value
+      || seekRequestId !== latestSeekRequestId || isSeeking) return;
+    const offsetSec = (currentSong.value?.cue_start_offset || 0) / 1000;
+    reanchorPlaybackClock(Math.max(0, rawTime - offsetSec));
   };
 
   const seekTo = async (newTime: number) => {
     if (!currentSong.value) return;
+    finishedPlaybackId = null;
 
     if (isPlaying.value && sessionStartTime) {
       accumulatedTime += (Date.now() - sessionStartTime) / 1000;
@@ -469,7 +601,9 @@ export const createPlayerPlayback = ({
     const trackDuration = currentSong.value.duration;
     const targetTime = Math.max(0, Math.min(newTime, trackDuration));
     const requestId = ++latestSeekRequestId;
+    const playbackRequestId = playRequestId;
     reanchorPlaybackClock(targetTime);
+    playbackStore.seekRevision += 1;
 
     try {
       const offsetSec = (currentSong.value.cue_start_offset || 0) / 1000;
@@ -478,24 +612,31 @@ export const createPlayerPlayback = ({
         isPlaying: isPlaying.value,
         requestId,
       });
+      if (requestId !== latestSeekRequestId || playbackRequestId !== playRequestId) return;
       reanchorPlaybackClock(targetTime);
       if (isPlaying.value) {
         startPlaybackRuntime();
       }
     } catch (error) {
-      isSeeking = false;
-      if (isPlaying.value) {
-        startPlaybackRuntime();
+      if (requestId === latestSeekRequestId && playbackRequestId === playRequestId) {
+        isSeeking = false;
+        if (isPlaying.value) {
+          startPlaybackRuntime();
+        }
       }
       throw error;
     }
   };
 
   const playAt = async (time: number) => {
+    const playbackRequestId = playRequestId;
+    const seekRequestId = latestSeekRequestId + 1;
+    const isCurrentRequest = () =>
+      playbackRequestId === playRequestId && seekRequestId === latestSeekRequestId;
     await seekTo(time);
-    if (!isPlaying.value) {
+    if (isCurrentRequest() && !isPlaying.value) {
       setTimeout(async () => {
-        if (!isPlaying.value) {
+        if (isCurrentRequest() && !isPlaying.value) {
           await togglePlay();
         }
       }, 150);
@@ -527,6 +668,11 @@ export const createPlayerPlayback = ({
 
   const dispose = () => {
     stopPlaybackRuntime();
+    pendingPlayRequest = null;
+    activePlaybackRequest = null;
+    pendingPlaybackErrors.clear();
+    pendingPlaybackFinished.clear();
+    pendingPlaybackStarted.clear();
     stopPowerModeWatcher();
   };
 
@@ -537,6 +683,7 @@ export const createPlayerPlayback = ({
   });
 
   return {
+    getPlayRequestId: () => playRequestId,
     flushPlaySession,
     playSong,
     pauseSong,
@@ -546,6 +693,9 @@ export const createPlayerPlayback = ({
     handleSeek,
     stepSeek,
     handleSeekCompleted,
+    handlePlaybackError,
+    handlePlaybackFinished,
+    handlePlaybackStarted,
     stopPlaybackRuntime,
     dispose,
   };

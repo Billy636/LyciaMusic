@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, shallowRef, watch } from 'vue';
+import { useVisibleCoverUrls } from '../../composables/useVisibleCoverUrls';
 import HomeEmptyState from './HomeEmptyState.vue';
 
 interface ArtistAlbumItem {
@@ -11,11 +13,87 @@ interface ArtistAlbumItem {
 
 interface Props {
   albums: ArtistAlbumItem[];
-  coverCache: Map<string, string>;
-  loadingSet: Set<string>;
 }
 
-defineProps<Props>();
+const props = defineProps<Props>();
+const containerRef = shallowRef<HTMLElement | null>(null);
+const visibleCoverPaths = shallowRef<string[]>([]);
+const { getDisplayedCoverUrl, isCoverLoading } = useVisibleCoverUrls(visibleCoverPaths, 'card');
+let coverObserver: IntersectionObserver | null = null;
+let observerRevision = 0;
+let observedElements = new Map<HTMLElement, string>();
+const intersectingElements = new Set<HTMLElement>();
+
+const syncVisibleCoverPaths = () => {
+  const paths = new Set<string>();
+  for (const element of intersectingElements) {
+    const path = observedElements.get(element);
+    if (path) paths.add(path);
+  }
+  visibleCoverPaths.value = [...paths];
+};
+
+const refreshCoverObserver = () => {
+  const container = containerRef.value;
+  if (!container) return;
+
+  const revision = ++observerRevision;
+  coverObserver?.disconnect();
+  coverObserver = null;
+
+  if (typeof IntersectionObserver !== 'function') {
+    observedElements.clear();
+    intersectingElements.clear();
+    visibleCoverPaths.value = props.albums.map(album => album.firstSongPath);
+    return;
+  }
+
+  const nextElements = new Map<HTMLElement, string>();
+  container.querySelectorAll<HTMLElement>('[data-cover-path]').forEach(element => {
+    const path = element.dataset.coverPath;
+    if (path) nextElements.set(element, path);
+  });
+
+  // Keep unchanged cards painted while a changed album list is re-observed.
+  for (const element of intersectingElements) {
+    if (!nextElements.has(element) || nextElements.get(element) !== observedElements.get(element)) {
+      intersectingElements.delete(element);
+    }
+  }
+  observedElements = nextElements;
+  syncVisibleCoverPaths();
+
+  coverObserver = new IntersectionObserver(entries => {
+    if (revision !== observerRevision) return;
+    for (const entry of entries) {
+      const element = entry.target as HTMLElement;
+      if (!observedElements.has(element)) continue;
+      if (entry.isIntersecting) {
+        intersectingElements.add(element);
+      } else {
+        intersectingElements.delete(element);
+      }
+    }
+    // Multiple albums can share one song path; retain it until all leave.
+    syncVisibleCoverPaths();
+  }, { root: container, rootMargin: '200px 0px' });
+  observedElements.forEach((_path, element) => coverObserver?.observe(element));
+};
+
+onMounted(refreshCoverObserver);
+watch(
+  () => props.albums.map(album => [album.key, album.firstSongPath]),
+  refreshCoverObserver,
+  { flush: 'post' },
+);
+onBeforeUnmount(() => {
+  observerRevision += 1;
+  coverObserver?.disconnect();
+  coverObserver = null;
+  observedElements.clear();
+  intersectingElements.clear();
+  visibleCoverPaths.value = [];
+});
 
 defineEmits<{
   (event: 'openAlbum', albumKey: string): void;
@@ -23,7 +101,7 @@ defineEmits<{
 </script>
 
 <template>
-  <section class="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 custom-scrollbar relative z-0">
+  <section ref="containerRef" class="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 custom-scrollbar relative z-0">
     <div
       v-if="albums.length > 0"
       class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-x-6 gap-y-10"
@@ -31,6 +109,7 @@ defineEmits<{
       <div
         v-for="album in albums"
         :key="album.key"
+        :data-cover-path="album.firstSongPath"
         @click="$emit('openAlbum', album.key)"
         class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5"
       >
@@ -43,15 +122,15 @@ defineEmits<{
 
           <div class="absolute inset-0 z-10 bg-white dark:bg-gray-800 rounded-md shadow-md border border-gray-100 dark:border-white/10 p-1 flex items-center justify-center overflow-hidden group-hover:shadow-xl transition-shadow duration-300">
             <div
-              v-if="coverCache.get(album.firstSongPath)"
+              v-if="getDisplayedCoverUrl(album.firstSongPath)"
               class="w-full h-full bg-cover bg-center rounded-sm"
-              :style="{ backgroundImage: `url(${coverCache.get(album.firstSongPath)})` }"
+              :style="{ backgroundImage: `url(${getDisplayedCoverUrl(album.firstSongPath)})` }"
             ></div>
 
             <div
               v-else
               class="w-full h-full bg-gradient-to-br from-gray-100 to-gray-200 dark:from-white/5 dark:to-white/10 rounded-sm flex items-center justify-center text-4xl font-bold text-gray-300 dark:text-gray-600 shadow-inner"
-              :class="{ 'animate-pulse': loadingSet.has(album.firstSongPath) }"
+              :class="{ 'animate-pulse': isCoverLoading(album.firstSongPath) }"
             >
               {{ album.name ? album.name.substring(0, 1).toUpperCase() : 'A' }}
             </div>

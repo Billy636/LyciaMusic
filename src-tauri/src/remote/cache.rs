@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 pub(crate) const MAX_REMOTE_CACHE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 const REMOTE_DOWNLOAD_PROGRESS_EVENT: &str = "remote-download-progress";
@@ -31,11 +31,7 @@ pub(crate) enum RemotePlaybackSource {
 }
 
 fn cache_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let root = app
-        .path()
-        .app_cache_dir()
-        .map_err(|error| error.to_string())?
-        .join("remote-audio");
+    let root = crate::data_storage::cache_dir(app).join("remote-audio");
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     Ok(root)
 }

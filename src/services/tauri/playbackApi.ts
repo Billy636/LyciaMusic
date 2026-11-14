@@ -45,9 +45,9 @@ export const playbackApi = {
   playAudio: (options: PlayAudioOptions): Promise<number> => tauriInvoke('play_audio', options),
   updatePlaybackMetadata: (options: UpdatePlaybackMetadataOptions): Promise<void> =>
     tauriInvoke('update_playback_metadata', options),
-  pauseAudio: (): Promise<void> => tauriInvoke('pause_audio'),
+  pauseAudio: (fadeEnabled = false): Promise<void> => tauriInvoke('pause_audio', { fadeEnabled }),
   stopAudio: (): Promise<void> => tauriInvoke('stop_audio'),
-  resumeAudio: (): Promise<void> => tauriInvoke('resume_audio'),
+  resumeAudio: (fadeEnabled = false): Promise<void> => tauriInvoke('resume_audio', { fadeEnabled }),
   seekAudio: (options: SeekAudioOptions): Promise<void> => tauriInvoke('seek_audio', options),
   setAudioOutputMode: (outputMode: PlayAudioOptions['outputMode']): Promise<void> =>
     tauriInvoke('set_audio_output_mode', { outputMode }),

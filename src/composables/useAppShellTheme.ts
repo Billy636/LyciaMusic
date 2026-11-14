@@ -22,37 +22,38 @@ export function useAppShellTheme({
 
     const { dynamicBgType, mode, customBackground } = theme.value;
 
-    if (isMicaWindowMaterial.value) {
-      if (dynamicBgType === 'flow') {
-        return 'none';
-      }
-
-      if (dynamicBgType === 'blur') {
-        return 'blur(6px)';
-      }
-
-      if (mode === 'custom') {
-        return customBackground.blur <= 0 ? 'none' : `blur(${Math.min(customBackground.blur, 8)}px)`;
-      }
-    }
-
-    if (dynamicBgType === 'flow' || dynamicBgType === 'blur') {
-      return hasWindowMaterial.value ? 'blur(20px)' : 'blur(40px)';
-    }
-
     if (mode === 'custom') {
-      const blur = hasWindowMaterial.value ? Math.min(customBackground.blur, 16) : customBackground.blur;
+      const blur = isMicaWindowMaterial.value
+        ? Math.min(customBackground.blur, 8)
+        : hasWindowMaterial.value ? Math.min(customBackground.blur, 16) : customBackground.blur;
       return blur <= 0 ? 'none' : `blur(${blur}px)`;
+    }
+
+    // These color fields already have soft boundaries and need no extra blur pass.
+    if (dynamicBgType === 'flow' || dynamicBgType === 'mist') {
+      return 'none';
+    }
+
+    if (isMicaWindowMaterial.value && dynamicBgType === 'blur') {
+      return 'blur(6px)';
+    }
+
+    if (dynamicBgType === 'blur') {
+      return hasWindowMaterial.value ? 'blur(20px)' : 'blur(40px)';
     }
 
     return 'none';
   });
 
-  const mainContainerClass = computed(() => (
-    theme.value.mode === 'custom' || hasWindowMaterial.value
-      ? 'bg-transparent'
-      : 'bg-white/30 dark:bg-black/60'
-  ));
+  const mainContainerClass = computed(() => {
+    if (theme.value.mode === 'custom' || hasWindowMaterial.value) {
+      return 'bg-transparent';
+    }
+
+    return theme.value.dynamicBgType === 'flow' || theme.value.dynamicBgType === 'mist'
+      ? 'bg-white/10 dark:bg-black/10'
+      : 'bg-white/30 dark:bg-black/60';
+  });
 
   const footerBlurStyle = computed(() => mainBlurStyle.value);
   const footerContainerClass = computed(() => (

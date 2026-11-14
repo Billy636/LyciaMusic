@@ -1,6 +1,6 @@
 [package]
 name = "lycia_music"
-version = "1.3.12"
+version = "1.5.4"
 description = "A beautiful local music player powered by Tauri."
 authors = ["lyc"]
 license = "AGPL-3.0-only"
@@ -25,15 +25,21 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2"
+dirs = "6"
 lofty = "0.21"
 id3 = "1.14"
 encoding_rs = "0.8"
+csv = "1.3"
+notify = "8.2"
+pathdiff = "0.2"
+unicode-normalization = "0.1"
 base64 = "0.22.1"
 rodio = { version = "0.20", default-features = false, features = ["wav", "mp3", "symphonia-aac", "symphonia-aiff", "symphonia-alac", "symphonia-flac", "symphonia-isomp4", "symphonia-vorbis"] }
 symphonia = { version = "0.5.5", default-features = false, features = ["aac", "adpcm", "aiff", "alac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 image = { version = "0.25", features = ["jpeg", "png", "webp"] }
 urlencoding = "2"
-rusqlite = { version = "0.38.0", features = ["bundled"] }
+rusqlite = { version = "0.38.0", features = ["bundled", "collation", "functions"] }
+pinyin = { version = "0.11", default-features = false, features = ["plain"] }
 sha2 = "0.10.9"
 hex = "0.4.3"
 tokio = { version = "1.48.0", features = ["full"] }
@@ -44,7 +50,6 @@ thiserror = "2"
 cpal = "0.15"
 tauri-plugin-single-instance = "2"
 rayon = "1.10"
-amll-lyric = "0.3.0"
 time = { version = "0.3", features = ["formatting", "parsing"] }
 tauri-plugin-global-shortcut = "2.3.1"
 tauri-plugin-window-state = "2"
@@ -56,11 +61,15 @@ reqwest = { version = "0.12.26", default-features = false, features = ["native-t
 keyring = { version = "3", features = ["windows-native"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_UI_Shell", "Win32_UI_Accessibility", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+windows-core = "0.61.2"
+windows-numerics = "0.2"
+windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_Graphics_Direct2D", "Win32_Graphics_Direct2D_Common", "Win32_Graphics_DirectWrite", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_Shell", "Win32_UI_Accessibility", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 wasapi = "0.23"
 
 [patch.crates-io]
 rodio = { path = "vendor/rodio-0.20.1" }
+tauri-runtime-wry = { path = "vendor/tauri-runtime-wry-2.9.3" }
 
 [profile.dev.package."*"]
 opt-level = 3

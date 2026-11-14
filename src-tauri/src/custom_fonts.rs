@@ -6,7 +6,7 @@ use std::{
 
 use base64::{engine::general_purpose, Engine as _};
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -51,11 +51,7 @@ fn imported_at_millis() -> Result<u64, String> {
 }
 
 fn custom_fonts_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("custom-lyrics-fonts");
+    let dir = crate::data_storage::data_dir(app).join("custom-lyrics-fonts");
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     Ok(dir)
 }

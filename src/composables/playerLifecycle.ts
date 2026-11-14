@@ -24,6 +24,7 @@ import { useSettingsStore } from '../features/settings/store';
 import { defaultDominantColors, useUiStore } from '../shared/stores/ui';
 import { isRemoteSong } from '../utils/remoteSong';
 import { FIXED_FLOW_PRESET } from '../constants/themeBackground';
+import type { PlaybackErrorPayload, PlaybackFinishedPayload, PlaybackStartedPayload } from './playerPlayback';
 
 interface SeekCompletedPayload {
   request_id: number;
@@ -38,6 +39,7 @@ type RemoteLyricsCacheReadyPayload = string | {
 interface LibraryScanBatchPayload {
   songs: Song[];
   deleted_paths: string[];
+  excluded_paths?: string[];
   folder_path: string;
   folder_index: number;
   folder_total: number;
@@ -55,6 +57,9 @@ interface CreatePlayerLifecycleDeps {
   applyLibraryScanBatch: (payload: LibraryScanBatchPayload) => void;
   flushBufferedLibraryScanBatch: () => void;
   handleSeekCompleted: (payload: SeekCompletedPayload) => void;
+  handlePlaybackError: (payload: PlaybackErrorPayload) => void;
+  handlePlaybackFinished: (payload: PlaybackFinishedPayload) => void;
+  handlePlaybackStarted?: (payload: PlaybackStartedPayload) => void;
   schedulePersistedState: () => void;
   flushPersistedState: () => void;
   restorePathBackedState: () => Promise<void>;
@@ -65,6 +70,8 @@ interface CreatePlayerLifecycleDeps {
   disposeLibraryRuntime: () => void;
   disposePlayerPersistence: () => void;
   disposeLibraryBatch: () => void;
+  initExternalSongEdits?: () => void;
+  disposeExternalSongEdits?: () => void;
   lastSongPathKey: string;
   legacyLastSongKey: string;
 }
@@ -75,10 +82,9 @@ let dominantColorSignature = '';
 
 interface SortSettingsRefs {
   artistSortMode: Ref<ArtistSortMode>;
+  albumArtistSortMode?: Ref<ArtistSortMode>;
   albumSortMode: Ref<AlbumSortMode>;
   albumDetailSortMode: Ref<AlbumDetailSortMode>;
-  artistCustomOrder: Ref<string[]>;
-  albumCustomOrder: Ref<string[]>;
   folderSortMode: Ref<FolderSortMode>;
   folderCustomOrder: Ref<Record<string, string[]>>;
   localSortMode: Ref<LocalSortMode>;
@@ -104,10 +110,9 @@ const restoreOutputDevice = async () => {
 
 const restoreSortSettings = ({
   artistSortMode,
+  albumArtistSortMode,
   albumSortMode,
   albumDetailSortMode,
-  artistCustomOrder,
-  albumCustomOrder,
   folderSortMode,
   folderCustomOrder,
   localSortMode,
@@ -115,13 +120,26 @@ const restoreSortSettings = ({
   playlistSortMode,
 }: SortSettingsRefs) => {
   const storedArtistSort = playerStorage.getString(playerStorageKeys.artistSortMode);
-  if (storedArtistSort) {
-    artistSortMode.value = storedArtistSort as ArtistSortMode;
+  artistSortMode.value = storedArtistSort && ['name', 'name_desc', 'count', 'count_asc'].includes(storedArtistSort)
+    ? storedArtistSort as ArtistSortMode : 'name';
+  if (storedArtistSort && storedArtistSort !== artistSortMode.value) {
+    playerStorage.setString(playerStorageKeys.artistSortMode, artistSortMode.value);
+  }
+
+  const storedAlbumArtistSort = playerStorage.getString(playerStorageKeys.albumArtistSortMode);
+  if (albumArtistSortMode) {
+    albumArtistSortMode.value = storedAlbumArtistSort && ['name', 'name_desc', 'count', 'count_asc'].includes(storedAlbumArtistSort)
+      ? storedAlbumArtistSort as ArtistSortMode : 'name';
+    if (storedAlbumArtistSort && storedAlbumArtistSort !== albumArtistSortMode.value) {
+      playerStorage.setString(playerStorageKeys.albumArtistSortMode, albumArtistSortMode.value);
+    }
   }
 
   const storedAlbumSort = playerStorage.getString(playerStorageKeys.albumSortMode);
-  if (storedAlbumSort && ['count', 'name', 'artist', 'custom'].includes(storedAlbumSort)) {
-    albumSortMode.value = storedAlbumSort as AlbumSortMode;
+  albumSortMode.value = storedAlbumSort && ['name', 'name_desc', 'count', 'count_asc', 'artist', 'artist_desc'].includes(storedAlbumSort)
+    ? storedAlbumSort as AlbumSortMode : 'name';
+  if (storedAlbumSort && storedAlbumSort !== albumSortMode.value) {
+    playerStorage.setString(playerStorageKeys.albumSortMode, albumSortMode.value);
   }
 
   const storedAlbumDetailSort = playerStorage.getString(playerStorageKeys.albumDetailSortMode);
@@ -129,15 +147,10 @@ const restoreSortSettings = ({
     albumDetailSortMode.value = storedAlbumDetailSort as AlbumDetailSortMode;
   }
 
-  const storedArtistOrder = playerStorage.readStringArray(playerStorageKeys.artistCustomOrder);
-  if (storedArtistOrder) {
-    artistCustomOrder.value = storedArtistOrder;
-  }
+  playerStorage.remove(playerStorageKeys.artistCustomOrder);
+  playerStorage.remove(playerStorageKeys.albumArtistCustomOrder);
 
-  const storedAlbumOrder = playerStorage.readStringArray(playerStorageKeys.albumCustomOrder);
-  if (storedAlbumOrder) {
-    albumCustomOrder.value = storedAlbumOrder;
-  }
+  playerStorage.remove(playerStorageKeys.albumCustomOrder);
 
   const storedFolderSort = playerStorage.getString(playerStorageKeys.folderSortMode);
   if (storedFolderSort && ['title', 'name', 'artist', 'track_number', 'added_at', 'added_at_asc', 'custom'].includes(storedFolderSort)) {
@@ -154,7 +167,7 @@ const restoreSortSettings = ({
   }
 
   const storedPlaylistSort = playerStorage.getString(playerStorageKeys.playlistSortMode);
-  if (storedPlaylistSort && ['title', 'name', 'artist', 'added_at', 'custom'].includes(storedPlaylistSort)) {
+  if (storedPlaylistSort && ['title', 'name', 'artist', 'added_at', 'added_at_asc', 'custom'].includes(storedPlaylistSort)) {
     playlistSortMode.value = storedPlaylistSort as PlaylistSortMode;
   }
 
@@ -175,10 +188,12 @@ export const createPlayerLifecycle = ({
   nextSong,
   prevSong,
   seekTo,
-  handleAutoNext,
   applyLibraryScanBatch,
   flushBufferedLibraryScanBatch,
   handleSeekCompleted,
+  handlePlaybackError,
+  handlePlaybackFinished,
+  handlePlaybackStarted,
   schedulePersistedState,
   flushPersistedState,
   restorePathBackedState,
@@ -189,6 +204,8 @@ export const createPlayerLifecycle = ({
   disposeLibraryRuntime,
   disposePlayerPersistence,
   disposeLibraryBatch,
+  initExternalSongEdits,
+  disposeExternalSongEdits,
   lastSongPathKey,
   legacyLastSongKey,
 }: CreatePlayerLifecycleDeps) => {
@@ -202,10 +219,9 @@ export const createPlayerLifecycle = ({
     sourceSongPaths,
     watchedFolders,
     artistSortMode,
+    albumArtistSortMode,
     albumSortMode,
     albumDetailSortMode,
-    artistCustomOrder,
-    albumCustomOrder,
     folderSortMode,
     folderCustomOrder,
     localSortMode,
@@ -278,6 +294,7 @@ export const createPlayerLifecycle = ({
       return;
     }
     lifecycleInitDone = true;
+    initExternalSongEdits?.();
 
     const listenerRegistrations = [
       listen('player:play', () => {
@@ -309,9 +326,17 @@ export const createPlayerLifecycle = ({
         applyLibraryScanBatch(event.payload);
       }),
       listen<LibraryScanProgressPayload>('library-scan-progress', event => {
+        const previous = libraryStore.libraryScanProgress;
+        const startsNewScan = previous?.done && !event.payload.done
+          && event.payload.phase === 'collecting' && event.payload.folder_index <= 1;
+        const warnings = [...new Set([
+          ...(startsNewScan ? [] : previous?.warnings ?? []),
+          ...(event.payload.warnings ?? []),
+        ])];
         libraryStore.setLibraryScanProgress({
           ...event.payload,
           message: event.payload.message ?? null,
+          warnings,
         });
 
         if (event.payload.failed) {
@@ -325,17 +350,14 @@ export const createPlayerLifecycle = ({
       listen<SeekCompletedPayload>('seek_completed', event => {
         handleSeekCompleted(event.payload);
       }),
-      listen<{ playbackId: number }>('playback-finished', event => {
-        if (import.meta.env.DEV) {
-          console.log('[playerLifecycle] Received playback-finished event:', event.payload);
-        }
-        if (
-          currentSong.value &&
-          isPlaying.value &&
-          event.payload.playbackId === playbackStore.currentPlaybackId
-        ) {
-          handleAutoNext();
-        }
+      listen<PlaybackErrorPayload>('playback-error', event => {
+        handlePlaybackError(event.payload);
+      }),
+      listen<PlaybackFinishedPayload>('playback-finished', event => {
+        handlePlaybackFinished(event.payload);
+      }),
+      listen<PlaybackStartedPayload>('playback-started', event => {
+        handlePlaybackStarted?.(event.payload);
       }),
       listen<RemoteLyricsCacheReadyPayload>('remote-lyrics-cache-ready', event => {
         const payload = event.payload;
@@ -378,13 +400,14 @@ export const createPlayerLifecycle = ({
       },
       { deep: true }
     );
-    watch(artistCustomOrder, scheduleStatePersistence, { deep: true });
-    watch(albumCustomOrder, scheduleStatePersistence, { deep: true });
     watch(folderCustomOrder, scheduleStatePersistence, { deep: true });
     watch(localCustomOrder, scheduleStatePersistence, { deep: true });
 
     watch(artistSortMode, value => {
       playerStorage.setString(playerStorageKeys.artistSortMode, value);
+    });
+    watch(albumArtistSortMode, value => {
+      playerStorage.setString(playerStorageKeys.albumArtistSortMode, value);
     });
     watch(albumSortMode, value => {
       playerStorage.setString(playerStorageKeys.albumSortMode, value);
@@ -583,10 +606,9 @@ export const createPlayerLifecycle = ({
 
       restoreSortSettings({
         artistSortMode,
+        albumArtistSortMode,
         albumSortMode,
         albumDetailSortMode,
-        artistCustomOrder,
-        albumCustomOrder,
         folderSortMode,
         folderCustomOrder,
         localSortMode,
@@ -635,6 +657,7 @@ export const createPlayerLifecycle = ({
       disposeLibraryRuntime();
       disposePlayerPersistence();
       disposeLibraryBatch();
+      disposeExternalSongEdits?.();
     });
   };
 

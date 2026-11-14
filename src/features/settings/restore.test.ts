@@ -10,6 +10,18 @@ describe('settings restore', () => {
     setActivePinia(createPinia());
   });
 
+  it('enables startup update checks for older saved settings without the preference', () => {
+    const store = useSettingsStore();
+    restorePersistedAppSettings(store.settings, store.replaceSettings, () => ({ closeToTray: false }) as AppSettings);
+    expect(store.settings.autoCheckUpdatesOnStartup).toBe(true);
+  });
+
+  it('preserves a disabled startup update preference when restoring settings', () => {
+    const store = useSettingsStore();
+    restorePersistedAppSettings(store.settings, store.replaceSettings, () => ({ autoCheckUpdatesOnStartup: false }) as AppSettings);
+    expect(store.settings.autoCheckUpdatesOnStartup).toBe(false);
+  });
+
   it('restores persisted theme before the startup theme sync reads settings', () => {
     const settingsStore = useSettingsStore();
     const persisted: Partial<AppSettings> = {

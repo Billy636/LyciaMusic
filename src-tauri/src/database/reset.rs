@@ -8,10 +8,14 @@ pub async fn clear_all_app_data(
     db_state: State<'_, DbState>,
 ) -> Result<(), String> {
     let db_conn = db_state.conn.clone();
-    let app_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let app_dir = crate::data_storage::data_dir(&app_handle);
+    if let Some(watcher) = app_handle.try_state::<crate::playlist_import::PlaylistFileWatcher>() {
+        watcher.stop()?;
+    }
+
+    #[cfg(target_os = "windows")]
+    crate::autostart::set_launch_on_startup(app_handle, false)
+        .map_err(|e| format!("清除开机自动运行设置失败: {e}"))?;
 
     tauri::async_runtime::spawn_blocking(move || {
         {
@@ -27,7 +31,9 @@ pub async fn clear_all_app_data(
                 DELETE FROM song_artists;
                 DELETE FROM artists;
                 DELETE FROM songs;
+                DELETE FROM playlist_import_paths;
                 DELETE FROM library_folders;
+                DELETE FROM library_scan_settings;
                 DELETE FROM sidebar_folders;
                 ",
             )

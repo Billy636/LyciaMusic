@@ -27,16 +27,16 @@ export async function toggleMainWindowVisibility(
     return 'minimized';
   }
 
-  await mainWindow.show();
   if (minimized) {
     await mainWindow.unminimize();
   }
-  await mainWindow.setFocus();
+  await mainWindow.show();
   setMainWindowRenderingSnapshot({
     documentHidden: false,
     windowFocused: true,
     windowVisible: true,
     windowMinimized: false,
   });
+  await mainWindow.setFocus();
   return 'restored';
 }

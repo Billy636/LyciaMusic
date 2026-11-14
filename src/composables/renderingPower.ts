@@ -72,20 +72,26 @@ export function useMainWindowRenderingPower() {
   const appWindow = getCurrentWindow();
   const { isMiniMode } = storeToRefs(useUiStore());
   const unlisteners: Array<() => void> = [];
+  let windowStateGeneration = 0;
 
   const syncDocumentVisibility = () => {
     setMainWindowRenderingSnapshot({ documentHidden: document.hidden });
+    if (!document.hidden) void syncWindowState();
   };
 
   const syncWindowState = async () => {
+    const generation = ++windowStateGeneration;
     try {
       const [windowFocused, windowVisible, windowMinimized] = await Promise.all([
         appWindow.isFocused(),
         appWindow.isVisible(),
         appWindow.isMinimized(),
       ]);
+      // A delayed hide/blur sample must not overwrite a newer restore sample.
+      if (generation !== windowStateGeneration) return;
 
       setMainWindowRenderingSnapshot({
+        documentHidden: windowFocused && windowVisible && !windowMinimized ? false : document.hidden,
         windowFocused,
         windowVisible,
         windowMinimized,
@@ -93,12 +99,14 @@ export function useMainWindowRenderingPower() {
     } catch {}
   };
 
-  onMounted(async () => {
-    syncDocumentVisibility();
-    await syncWindowState();
+  const handleWindowFocus = () => {
+    setMainWindowFocusState(true);
+    void syncWindowState();
+  };
 
+  onMounted(async () => {
     document.addEventListener('visibilitychange', syncDocumentVisibility);
-    window.addEventListener('focus', syncWindowState);
+    window.addEventListener('focus', handleWindowFocus);
     window.addEventListener('blur', syncWindowState);
 
     unlisteners.push(await appWindow.onFocusChanged(({ payload }) => {
@@ -111,11 +119,14 @@ export function useMainWindowRenderingPower() {
     unlisteners.push(await appWindow.onResized(() => {
       void syncWindowState();
     }));
+    syncDocumentVisibility();
+    await syncWindowState();
   });
 
   onUnmounted(() => {
+    windowStateGeneration++;
     document.removeEventListener('visibilitychange', syncDocumentVisibility);
-    window.removeEventListener('focus', syncWindowState);
+    window.removeEventListener('focus', handleWindowFocus);
     window.removeEventListener('blur', syncWindowState);
     unlisteners.splice(0).forEach((unlisten) => unlisten());
   });

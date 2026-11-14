@@ -16,28 +16,32 @@ const FOLDER_VIEW_PATH_CACHE_NAMESPACE = 'folder';
 
 const inFlightRequests = new Map<string, Promise<string[]>>();
 const cacheVersion = ref(0);
+let cacheGeneration = 0;
 
 const makeCacheKey = (
   folderPath: string,
   query: string,
   sortMode: BackendFolderSortMode,
-) => `${sortMode}\u0001${folderPath}\u0001${query}`;
+  includeSubfolders: boolean,
+) => `${sortMode}\u0001${folderPath}\u0001${query}\u0001${includeSubfolders}`;
 
 export function useLibraryFolderSongPathCache() {
   const loadFolderViewSongPaths = async ({
     folderPath,
     query = '',
     sortMode,
+    includeSubfolders = false,
   }: {
     folderPath: string;
     query?: string;
     sortMode: BackendFolderSortMode;
+    includeSubfolders?: boolean;
   }) => {
     if (!folderPath) {
       return [];
     }
 
-    const cacheKey = makeCacheKey(folderPath, query, sortMode);
+    const cacheKey = makeCacheKey(folderPath, query, sortMode, includeSubfolders);
     activateLibrarySongPathCacheEntry(FOLDER_VIEW_PATH_CACHE_NAMESPACE, cacheKey);
     const cached = getLibrarySongPathCacheEntry(FOLDER_VIEW_PATH_CACHE_NAMESPACE, cacheKey);
     if (cached) {
@@ -49,12 +53,19 @@ export function useLibraryFolderSongPathCache() {
       return inFlight;
     }
 
+    const requestGeneration = cacheGeneration;
     const request = tauriInvoke('get_library_song_paths_for_folder_view', {
       folderPath,
       query,
       sortMode,
+      includeSubfolders,
     })
       .then((paths) => {
+        if (requestGeneration !== cacheGeneration) {
+          throw Object.assign(new Error('Stale library path request'), {
+            code: 'STALE_LIBRARY_PATH_REQUEST',
+          });
+        }
         setLibrarySongPathCacheEntry(
           FOLDER_VIEW_PATH_CACHE_NAMESPACE,
           cacheKey,
@@ -65,7 +76,7 @@ export function useLibraryFolderSongPathCache() {
         return paths;
       })
       .finally(() => {
-        inFlightRequests.delete(cacheKey);
+        if (inFlightRequests.get(cacheKey) === request) inFlightRequests.delete(cacheKey);
       });
 
     inFlightRequests.set(cacheKey, request);
@@ -75,6 +86,7 @@ export function useLibraryFolderSongPathCache() {
   return {
     loadFolderViewSongPaths,
     clearLibraryFolderSongPathCache: () => {
+      cacheGeneration += 1;
       clearLibrarySongPathCacheNamespace(FOLDER_VIEW_PATH_CACHE_NAMESPACE);
       inFlightRequests.clear();
       cacheVersion.value += 1;

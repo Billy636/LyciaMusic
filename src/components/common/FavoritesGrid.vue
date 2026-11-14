@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { useLibraryBrowse } from '../../features/library/useLibraryBrowse';
 import { usePlayerViewState } from '../../composables/usePlayerViewState';
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useCoverCache } from '../../composables/useCoverCache';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { useVisibleCoverUrls } from '../../composables/useVisibleCoverUrls';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import ArtistAlbumContextMenu from '../overlays/ArtistAlbumContextMenu.vue';
 
@@ -13,16 +13,13 @@ const emit = defineEmits<{
   (e: 'enterDetail', type: 'artist' | 'album', name: string): void
 }>();
 
-const { coverCache, loadCover } = useCoverCache();
 const rootRef = ref<HTMLElement | null>(null);
-const itemRefs = ref<HTMLElement[]>([]);
 const scrollParentRef = ref<HTMLElement | null>(null);
 const containerHeight = ref(720);
 const containerWidth = ref(1200);
 const viewportWidth = ref(window.innerWidth);
 const visibleTop = ref(0);
 const visibleBottom = ref(720);
-let observer: IntersectionObserver | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let scrollFrame = 0;
 
@@ -52,13 +49,6 @@ type FavoriteGridItem =
       albumArtist: string;
       album: FavoriteAlbumItem;
     };
-
-const ensureCoverLoaded = async (path: string) => {
-  if (!path || coverCache.get(path)) return;
-  try {
-    await loadCover(path);
-  } catch {}
-};
 
 const favoriteItems = computed<FavoriteGridItem[]>(() => {
   if (favTab.value === 'artists') {
@@ -134,20 +124,12 @@ const virtualGridState = computed(() => {
   };
 });
 
-const setItemRef = (target: Element | { $el?: Element | null } | null, index: number) => {
-  const el = target instanceof HTMLElement
-    ? target
-    : target && '$el' in target && target.$el instanceof HTMLElement
-      ? target.$el
-      : null;
-
-  if (!el) {
-    delete itemRefs.value[index];
-    return;
-  }
-
-  itemRefs.value[index] = el;
-};
+const { getDisplayedCoverUrl } = useVisibleCoverUrls(() =>
+  virtualGridState.value.items
+    .filter(item => item.type !== 'artist' || !item.artist.avatarPath)
+    .map(item => item.firstSongPath),
+  'card',
+);
 
 const findScrollParent = (element: HTMLElement | null) => {
   let current = element?.parentElement ?? null;
@@ -207,35 +189,6 @@ const requestViewportUpdate = () => {
   });
 };
 
-const initObserver = () => {
-  if (observer) observer.disconnect();
-
-  observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        const target = entry.target as HTMLElement;
-        const path = target.dataset.path;
-        if (path) {
-          void ensureCoverLoaded(path);
-          observer?.unobserve(target);
-        }
-      }
-    });
-  }, {
-    root: scrollParentRef.value,
-    rootMargin: '120px 0px',
-  });
-
-  itemRefs.value.forEach(el => {
-    if (el) observer?.observe(el);
-  });
-};
-
-watch([virtualGridState, favTab], async () => {
-  await nextTick();
-  initObserver();
-}, { immediate: true });
-
 const showContextMenu = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
@@ -276,7 +229,6 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  if (observer) observer.disconnect();
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
@@ -300,7 +252,7 @@ onUnmounted(() => {
   >
     <template v-if="favTab === 'artists'">
       <div
-        v-for="(item, index) in virtualGridState.items"
+        v-for="item in virtualGridState.items"
         v-show="item.type === 'artist'"
         :key="item.key"
         @click="item.type === 'artist' && emit('enterDetail', 'artist', item.name)"
@@ -308,14 +260,12 @@ onUnmounted(() => {
         class="group cursor-pointer"
       >
         <div
-          :ref="(el) => setItemRef(el, index)"
-          :data-path="item.firstSongPath"
           class="relative aspect-square rounded-full overflow-hidden shadow-md
                  group-hover:shadow-xl transition-all duration-300 ease-out group-hover:scale-[1.03]"
         >
           <img
-            v-if="item.type === 'artist' && (item.artist.avatarPath || coverCache.get(item.firstSongPath))"
-            :src="item.type === 'artist' && item.artist.avatarPath ? convertFileSrc(item.artist.avatarPath) : coverCache.get(item.firstSongPath)"
+            v-if="item.type === 'artist' && (item.artist.avatarPath || getDisplayedCoverUrl(item.firstSongPath))"
+            :src="item.type === 'artist' && item.artist.avatarPath ? convertFileSrc(item.artist.avatarPath) : getDisplayedCoverUrl(item.firstSongPath)"
             class="w-full h-full object-cover"
             alt="Artist"
             loading="lazy"
@@ -343,7 +293,7 @@ onUnmounted(() => {
 
     <template v-if="favTab === 'albums'">
       <div
-        v-for="(item, index) in virtualGridState.items"
+        v-for="item in virtualGridState.items"
         v-show="item.type === 'album'"
         :key="item.key"
         @click="item.type === 'album' && emit('enterDetail', 'album', item.name)"
@@ -351,14 +301,12 @@ onUnmounted(() => {
         class="group cursor-pointer"
       >
         <div
-          :ref="(el) => setItemRef(el, index)"
-          :data-path="item.firstSongPath"
           class="relative aspect-square rounded-lg overflow-hidden shadow-md
                  group-hover:shadow-xl transition-all duration-300 ease-out group-hover:scale-[1.03]"
         >
           <img
-            v-if="coverCache.get(item.firstSongPath)"
-            :src="coverCache.get(item.firstSongPath)"
+            v-if="getDisplayedCoverUrl(item.firstSongPath)"
+            :src="getDisplayedCoverUrl(item.firstSongPath)"
             class="w-full h-full object-cover"
             alt="Album"
             loading="lazy"

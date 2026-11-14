@@ -2,16 +2,31 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { SquarePen, Tag } from 'lucide-vue-next';
-import type { Song, SongDetail } from '../../types';
+import { RefreshCw, SquarePen, Tag } from 'lucide-vue-next';
+import type { LyricsReadingOrder, Song, SongDetail } from '../../types';
+import LyricsEditor from './LyricsEditor.vue';
 import { useCoverCache } from '../../composables/useCoverCache';
 import { usePlayer } from '../../composables/player';
+import { ensureMusicTagPath } from '../../composables/musicTag';
 import { useSongDetailCache } from '../../composables/useSongDetailCache';
+import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver';
+import { useLibraryAllSongPathCache } from '../../composables/useLibraryAllSongPathCache';
+import { useLibraryCollectionSongPathCache } from '../../composables/useLibraryCollectionSongPathCache';
+import { useLibraryDetailSongPathCache } from '../../composables/useLibraryDetailSongPathCache';
+import { useLibraryFolderSongPathCache } from '../../composables/useLibraryFolderSongPathCache';
 import { useThemeSettings } from '../../composables/useThemeSettings';
 import { useToast } from '../../composables/toast';
 import { useLibraryStore } from '../../features/library/store';
+import { useSettingsStore } from '../../features/settings/store';
+import { useNavigationStore } from '../../shared/stores/navigation';
+import {
+  createLyricsReadingOrderOverridePatch,
+  resolveLyricsReadingOrder,
+} from '../../composables/lyrics/readingOrder';
 import type { LyricsStorageSource } from '../../services/tauri/contracts';
 import { tauriInvoke } from '../../services/tauri/invoke';
+import { appApi } from '../../services/tauri/appApi';
+import { isRemoteSong } from '../../utils/remoteSong';
 
 const props = defineProps<{
   visible: boolean;
@@ -21,11 +36,18 @@ const props = defineProps<{
 const emit = defineEmits(['close']);
 
 const { loadCover, clearCoverCaches } = useCoverCache();
-const { loadSongDetail } = useSongDetailCache();
-const { openInFinder } = usePlayer();
+const { loadSongDetail, clearSongDetailCache } = useSongDetailCache();
+const { clearResolvedSongCache, rememberSongs } = useLibrarySongResolver();
+const { clearLibraryAllSongPathCache } = useLibraryAllSongPathCache();
+const { clearLibraryCollectionSongPathCache } = useLibraryCollectionSongPathCache();
+const { clearLibraryDetailSongPathCache } = useLibraryDetailSongPathCache();
+const { clearLibraryFolderSongPathCache } = useLibraryFolderSongPathCache();
+const { openInFinder, refreshSongMetadata, trackExternalSongEdit } = usePlayer();
 const { isDarkTheme } = useThemeSettings();
 const { showToast } = useToast();
 const libraryStore = useLibraryStore();
+const settingsStore = useSettingsStore();
+const navigationStore = useNavigationStore();
 
 interface SongInfoEditForm {
   title: string;
@@ -55,6 +77,7 @@ const isClosing = ref(false);
 const currentSongDetail = ref<SongDetail | null>(null);
 const isSongInfoEditing = ref(false);
 const isSongInfoSaving = ref(false);
+const isRefreshingSongInfo = ref(false);
 const songInfoEditError = ref('');
 const songInfoEditForm = ref<SongInfoEditForm>(createEmptySongInfoEditForm());
 const lyricsText = ref('');
@@ -69,6 +92,8 @@ const isLyricsEditorExpanded = ref(false);
 const pendingSongInfoExpanded = ref<boolean | null>(null);
 const pendingLyricsExpanded = ref<boolean | null>(null);
 let detailRequestId = 0;
+let contentRequestId = 0;
+let pendingMetadataReload = false;
 let songInfoExpandTimer: ReturnType<typeof window.setTimeout> | null = null;
 let lyricsExpandTimer: ReturnType<typeof window.setTimeout> | null = null;
 
@@ -95,10 +120,57 @@ const handleClose = () => {
   }, 200); // 时长匹配退出动画
 };
 
+const loadModalSongData = async (path: string, preserveDrafts = false) => {
+  const sessionId = detailRequestId;
+  const requestId = ++contentRequestId;
+  const lyricsBeforeLoad = lyricsText.value;
+  const hadLyricsDraft = lyricsText.value !== originalLyricsText.value;
+  isLyricsLoading.value = !preserveDrafts || !hadLyricsDraft;
+
+  const [url, detail, lyricsResult] = await Promise.all([
+    loadCover(path),
+    loadSongDetail(path).catch(() => null),
+    tauriInvoke('get_song_lyrics_for_edit', { path })
+      .then((lyrics) => ({ ...lyrics, error: '' }))
+      .catch((error) => ({
+        lyrics: '',
+        source: 'empty' as LyricsStorageSource,
+        sourcePath: null,
+        error: String(error),
+      })),
+  ]);
+
+  if (sessionId !== detailRequestId || requestId !== contentRequestId
+    || !props.visible || path !== props.song?.path) return;
+
+  if (isSongInfoSaving.value || isLyricsSaving.value) {
+    pendingMetadataReload = true;
+    isLyricsLoading.value = false;
+    return;
+  }
+
+  coverUrl.value = url || '';
+  if (!savedSongOverride.value) currentSongDetail.value = detail;
+  // Refresh the saved baseline while retaining any draft, including edits made during this request.
+  const keepLyricsDraft = preserveDrafts
+    && (hadLyricsDraft || lyricsText.value !== lyricsBeforeLoad);
+  if (!lyricsResult.error) {
+    if (!keepLyricsDraft) lyricsText.value = lyricsResult.lyrics;
+    originalLyricsText.value = lyricsResult.lyrics;
+    lyricsSource.value = lyricsResult.source;
+    lyricsSourcePath.value = lyricsResult.sourcePath;
+  }
+  lyricsError.value = lyricsResult.error;
+  isLyricsLoading.value = false;
+};
+
 watch(
   [() => props.visible, () => props.song?.path ?? ''],
   async ([visible, path]) => {
     const requestId = ++detailRequestId;
+    contentRequestId += 1;
+    pendingMetadataReload = false;
+    isRefreshingSongInfo.value = false;
 
     if (!visible || !path) {
       clearSongInfoExpandTimers();
@@ -136,6 +208,8 @@ watch(
     isSongInfoSaving.value = false;
     songInfoEditError.value = '';
     songInfoEditForm.value = createEmptySongInfoEditForm();
+    lyricsText.value = '';
+    originalLyricsText.value = '';
     isLyricsLoading.value = true;
     isLyricsSaving.value = false;
     lyricsSource.value = 'empty';
@@ -146,36 +220,41 @@ watch(
     pendingSongInfoExpanded.value = null;
     pendingLyricsExpanded.value = null;
 
-    const [url, detail, lyricsResult] = await Promise.all([
-      loadCover(path),
-      loadSongDetail(path).catch(() => null),
-      tauriInvoke('get_song_lyrics_for_edit', { path })
-        .then((lyrics) => ({ ...lyrics, error: '' }))
-        .catch((error) => ({
-          lyrics: '',
-          source: 'empty' as LyricsStorageSource,
-          sourcePath: null,
-          error: String(error),
-        })),
-    ]);
-
-    if (requestId !== detailRequestId || !props.visible || path !== (props.song?.path ?? '')) {
-      return;
-    }
-
-    coverUrl.value = url || '';
-    currentSongDetail.value = detail;
-    lyricsText.value = lyricsResult.lyrics;
-    originalLyricsText.value = lyricsResult.lyrics;
-    lyricsSource.value = lyricsResult.source;
-    lyricsSourcePath.value = lyricsResult.sourcePath;
-    lyricsError.value = lyricsResult.error;
-    isLyricsLoading.value = false;
+    await loadModalSongData(path);
   },
   { immediate: true },
 );
 
+watch(() => props.song, (song, previousSong) => {
+  if (!props.visible || !song || song.path !== previousSong?.path) return;
+  savedSongOverride.value = null;
+  if (isSongInfoSaving.value || isLyricsSaving.value) {
+    pendingMetadataReload = true;
+    return;
+  }
+  void loadModalSongData(song.path, true);
+});
+
+watch([isSongInfoSaving, isLyricsSaving], ([songInfoSaving, lyricsSaving]) => {
+  if (songInfoSaving || lyricsSaving || !pendingMetadataReload || !props.visible || !props.song) return;
+  pendingMetadataReload = false;
+  void loadModalSongData(props.song.path, true);
+});
+
 const hasLyricsChanged = computed(() => lyricsText.value !== originalLyricsText.value);
+const lyricsReadingOrder = computed(() => resolveLyricsReadingOrder(
+  settingsStore.settings.lyrics, props.song?.path,
+));
+const lyricsReadingOrderOverride = computed(() => (
+  settingsStore.settings.lyrics.readingOrderOverrides?.[props.song?.path ?? '']
+));
+const updateLyricsReadingOrder = (order: LyricsReadingOrder | null) => {
+  const path = props.song?.path;
+  if (!path || isLyricsLoading.value) return;
+  settingsStore.patchSettings({
+    lyrics: createLyricsReadingOrderOverridePatch(settingsStore.settings.lyrics, path, order),
+  });
+};
 const isSongInfoVisuallyExpanded = computed(
   () => pendingSongInfoExpanded.value ?? isSongInfoExpanded.value,
 );
@@ -184,6 +263,7 @@ const isLyricsEditorVisuallyExpanded = computed(
 );
 
 const handleKeydown = (e: KeyboardEvent) => {
+  if (e.defaultPrevented || e.isComposing) return;
   if (e.key === 'Escape' && props.visible) {
     handleClose();
   }
@@ -191,6 +271,8 @@ const handleKeydown = (e: KeyboardEvent) => {
 
 onMounted(() => window.addEventListener('keydown', handleKeydown));
 onUnmounted(() => {
+  detailRequestId += 1;
+  contentRequestId += 1;
   window.removeEventListener('keydown', handleKeydown);
   clearSongInfoExpandTimers();
   clearLyricsExpandTimers();
@@ -203,54 +285,14 @@ const handleOpenFolder = () => {
   }
 };
 
-const ensureMusicTagPath = async (): Promise<string | null> => {
-  const MUSICTAG_PATH_KEY = 'toolbox_musictag_path';
-  let path = localStorage.getItem(MUSICTAG_PATH_KEY);
-
-  if (path) {
-    const exists = await tauriInvoke('file_exists', { path });
-    if (!exists) {
-      localStorage.removeItem(MUSICTAG_PATH_KEY);
-      showToast('MusicTag 路径无效，请重新选择', 'error');
-      path = null;
-    }
-  }
-
-  if (!path) {
-    const selected = await open({
-      multiple: false,
-      directory: false,
-      title: '选择 MusicTag 可执行文件',
-      filters: [
-        {
-          name: '可执行文件',
-          extensions: ['exe'],
-        },
-      ],
-    });
-
-    if (!selected || typeof selected !== 'string') {
-      showToast('已取消选择 MusicTag', 'info');
-      return null;
-    }
-
-    const exists = await tauriInvoke('file_exists', { path: selected });
-    if (!exists) {
-      showToast('MusicTag 路径无效', 'error');
-      return null;
-    }
-
-    localStorage.setItem(MUSICTAG_PATH_KEY, selected);
-    path = selected;
-  }
-
-  return path;
-};
-
 const handleOpenInMusicTag = async () => {
   const songPath = props.song?.path;
   if (!songPath) {
     showToast('当前歌曲文件路径无效', 'error');
+    return;
+  }
+  if (isRemoteSong(props.song)) {
+    showToast('远程歌曲暂不支持使用 MusicTag 编辑标签', 'info');
     return;
   }
 
@@ -270,6 +312,7 @@ const handleOpenInMusicTag = async () => {
       path: musicTagPath,
       args: [songPath],
     });
+    trackExternalSongEdit(songPath);
     showToast('已在 MusicTag 中打开当前歌曲', 'success');
   } catch (error) {
     console.error('Failed to open MusicTag:', error);
@@ -277,26 +320,54 @@ const handleOpenInMusicTag = async () => {
   }
 };
 
+const handleRefreshSongInfo = async () => {
+  const song = props.song;
+  if (!song || isRefreshingSongInfo.value || isSongInfoSaving.value || isLyricsSaving.value) return;
+  if (isRemoteSong(song)) {
+    showToast('远程歌曲暂不支持刷新本地标签', 'info');
+    return;
+  }
+
+  const sessionId = detailRequestId;
+  isRefreshingSongInfo.value = true;
+  try {
+    await refreshSongMetadata(song.path);
+    showToast('歌曲信息已刷新', 'success');
+  } catch (error) {
+    showToast(`刷新歌曲信息失败: ${String(error)}`, 'error');
+  } finally {
+    if (sessionId === detailRequestId) isRefreshingSongInfo.value = false;
+  }
+};
+
 const handleSaveLyrics = async () => {
-  if (!props.song?.path || isLyricsSaving.value) return;
+  if (!props.song?.path || isLyricsLoading.value || isLyricsSaving.value || isRefreshingSongInfo.value) return;
+
+  const path = props.song.path;
+  const text = lyricsText.value;
+  const requestId = detailRequestId;
+  const isCurrentRequest = () => requestId === detailRequestId && props.visible && props.song?.path === path;
 
   isLyricsSaving.value = true;
+  contentRequestId += 1;
+  pendingMetadataReload = true;
   lyricsError.value = '';
 
   try {
     const savedLyrics = await tauriInvoke('save_song_lyrics', {
-      path: props.song.path,
-      lyrics: lyricsText.value,
+      path,
+      lyrics: text,
       source: lyricsSource.value,
       sourcePath: lyricsSourcePath.value,
     });
-    originalLyricsText.value = lyricsText.value;
+    if (!isCurrentRequest()) return;
+    originalLyricsText.value = text;
     lyricsSource.value = savedLyrics.source;
     lyricsSourcePath.value = savedLyrics.sourcePath;
   } catch (error) {
-    lyricsError.value = String(error);
+    if (isCurrentRequest()) lyricsError.value = String(error);
   } finally {
-    isLyricsSaving.value = false;
+    if (isCurrentRequest()) isLyricsSaving.value = false;
   }
 };
 
@@ -422,7 +493,9 @@ const handleChooseCover = async () => {
 
 const handleSaveSongInfo = async () => {
   const songPath = props.song?.path;
-  if (!songPath || isSongInfoSaving.value) return;
+  if (!songPath || isSongInfoSaving.value || isRefreshingSongInfo.value) return;
+  const sessionId = detailRequestId;
+  const isCurrentRequest = () => sessionId === detailRequestId && props.visible && props.song?.path === songPath;
 
   const title = songInfoEditForm.value.title.trim();
   if (!title) {
@@ -431,6 +504,9 @@ const handleSaveSongInfo = async () => {
   }
 
   isSongInfoSaving.value = true;
+  contentRequestId += 1;
+  pendingMetadataReload = true;
+  isLyricsLoading.value = false;
   songInfoEditError.value = '';
 
   try {
@@ -447,25 +523,40 @@ const handleSaveSongInfo = async () => {
       },
     });
 
+    // Invalidate saved metadata and ordering even if the dialog closed during saving.
+    for (const path of new Set([songPath, result.song.path])) {
+      clearSongDetailCache(path);
+      clearResolvedSongCache(path);
+    }
+    rememberSongs([result.song]);
+    libraryStore.setSongRecord(result.song);
+    clearLibraryAllSongPathCache();
+    clearLibraryCollectionSongPathCache();
+    clearLibraryDetailSongPathCache();
+    clearLibraryFolderSongPathCache();
+    navigationStore.refreshSearch();
+    if (!isCurrentRequest()) return;
     savedSongOverride.value = result.song;
     currentSongDetail.value = result.detail;
-    libraryStore.setSongRecord(result.song);
 
     if (songInfoEditForm.value.coverPath) {
-      await tauriInvoke('clear_cover_cache');
+      await appApi.clearCoverCache();
       clearCoverCaches();
-      coverUrl.value = (await loadCover(songPath)) || '';
+      const nextCoverUrl = (await loadCover(songPath)) || '';
+      if (!isCurrentRequest()) return;
+      coverUrl.value = nextCoverUrl;
     }
 
     isSongInfoEditing.value = false;
     populateSongInfoEditForm();
     showToast('歌曲信息已保存', 'success');
   } catch (error) {
+    if (!isCurrentRequest()) return;
     const message = String(error);
     songInfoEditError.value = message;
     showToast(`保存歌曲信息失败: ${message}`, 'error');
   } finally {
-    isSongInfoSaving.value = false;
+    if (isCurrentRequest()) isSongInfoSaving.value = false;
   }
 };
 
@@ -550,9 +641,20 @@ const formatTime = (timestampSeconds?: number) => {
                 :class="isSongInfoEditing ? 'song-info-edit-toggle--active' : ''"
                 :title="isSongInfoEditing ? '取消编辑歌曲信息' : '编辑歌曲信息'"
                 :aria-label="isSongInfoEditing ? '取消编辑歌曲信息' : '编辑歌曲信息'"
+                :disabled="isSongInfoSaving"
                 @click="isSongInfoEditing ? cancelSongInfoEdit() : beginSongInfoEdit()"
               >
                 <SquarePen class="h-4 w-4" :stroke-width="2.2" />
+              </button>
+              <button
+                type="button"
+                class="song-info-edit-toggle"
+                :title="isRefreshingSongInfo ? '正在刷新歌曲信息' : '刷新歌曲信息'"
+                aria-label="刷新歌曲信息"
+                :disabled="!props.song?.path || isRefreshingSongInfo || isSongInfoSaving || isLyricsSaving"
+                @click="handleRefreshSongInfo"
+              >
+                <RefreshCw class="h-4 w-4" :class="isRefreshingSongInfo ? 'animate-spin' : ''" :stroke-width="2.2" />
               </button>
             </div>
             <button
@@ -740,7 +842,7 @@ const formatTime = (timestampSeconds?: number) => {
               class="modal-action-button modal-action-button--wide"
             >
               <Tag class="w-4 h-4 mr-2 text-gray-500 dark:text-gray-400" />
-              用 MusicTag 修正标签
+              用 MusicTag 获取标签
             </button>
             <template v-else>
               <button
@@ -754,7 +856,7 @@ const formatTime = (timestampSeconds?: number) => {
               <button
                 type="button"
                 class="modal-action-button modal-action-button--primary"
-                :disabled="isSongInfoSaving"
+                :disabled="isSongInfoSaving || isRefreshingSongInfo"
                 @click="handleSaveSongInfo"
               >
                 {{ isSongInfoSaving ? '保存中' : '保存信息' }}
@@ -767,7 +869,7 @@ const formatTime = (timestampSeconds?: number) => {
           <div class="modal-external-header lyrics-editor-header">
             <div class="lyrics-editor-heading">
               <div class="lyrics-editor-title" :class="isLyricsEditorVisuallyExpanded ? 'lyrics-editor-title--expanded' : ''">
-                编辑歌词
+                歌词
               </div>
               <div
                 v-if="displaySong"
@@ -793,7 +895,8 @@ const formatTime = (timestampSeconds?: number) => {
             <button
               type="button"
               class="lyrics-editor-expand-button"
-              :title="isLyricsEditorVisuallyExpanded ? '还原歌词编辑器' : '放大歌词编辑器'"
+              :title="isLyricsEditorVisuallyExpanded ? '还原歌词面板' : '放大歌词面板'"
+              :aria-label="isLyricsEditorVisuallyExpanded ? '还原歌词面板' : '放大歌词面板'"
               @click="toggleLyricsEditorExpanded"
             >
               <svg v-if="!isLyricsEditorVisuallyExpanded" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -806,13 +909,16 @@ const formatTime = (timestampSeconds?: number) => {
           </div>
 
           <aside class="lyrics-editor-panel" :class="isLyricsEditorVisuallyExpanded ? 'lyrics-editor-panel--expanded' : ''">
-            <textarea
+            <LyricsEditor
+              :key="props.song?.path"
               v-model="lyricsText"
-              class="lyrics-editor-textarea custom-scrollbar"
-              :placeholder="isLyricsLoading ? '正在读取歌词...' : '[00:00.00] 在这里编辑 LRC 歌词'"
-              :disabled="isLyricsLoading"
-              spellcheck="false"
-            ></textarea>
+              :song-path="props.song?.path ?? ''"
+              :duration-ms="props.song?.duration ? props.song.duration * 1000 : undefined"
+              :loading="isLyricsLoading"
+              :reading-order="lyricsReadingOrder"
+              :reading-order-override="lyricsReadingOrderOverride"
+              @update:reading-order="updateLyricsReadingOrder"
+            />
 
             <div v-if="lyricsError" class="lyrics-editor-error">{{ lyricsError }}</div>
           </aside>
@@ -821,7 +927,7 @@ const formatTime = (timestampSeconds?: number) => {
             <button
               type="button"
               class="modal-action-button modal-action-button--primary"
-              :disabled="!hasLyricsChanged || isLyricsSaving"
+              :disabled="!hasLyricsChanged || isLyricsLoading || isLyricsSaving || isRefreshingSongInfo"
               @click="handleSaveLyrics"
             >
               {{ isLyricsSaving ? '保存中' : '保存' }}
@@ -854,6 +960,10 @@ const formatTime = (timestampSeconds?: number) => {
   --modal-external-header-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
   --lyrics-editor-title-color: rgb(17 24 39);
   --lyrics-editor-text-color: rgb(31 41 55);
+  --lyrics-reader-secondary: #526070;
+  --lyrics-reader-muted: #64748b;
+  --lyrics-reader-accent: #c93240;
+  --lyrics-reader-option-bg: #fff;
   --lyrics-editor-placeholder-color: rgb(156 163 175);
   --lyrics-editor-button-bg: rgba(255, 255, 255, 0.72);
   --lyrics-editor-button-border: rgba(148, 163, 184, 0.26);
@@ -887,6 +997,10 @@ const formatTime = (timestampSeconds?: number) => {
   --modal-external-header-shadow: 0 10px 28px rgba(0, 0, 0, 0.26);
   --lyrics-editor-title-color: rgb(248 250 252);
   --lyrics-editor-text-color: rgba(255, 255, 255, 0.86);
+  --lyrics-reader-secondary: #c1cad7;
+  --lyrics-reader-muted: #a5b3c6;
+  --lyrics-reader-accent: #ff8585;
+  --lyrics-reader-option-bg: #172033;
   --lyrics-editor-placeholder-color: rgba(148, 163, 184, 0.72);
   --lyrics-editor-button-bg: rgba(255, 255, 255, 0.06);
   --lyrics-editor-button-border: rgba(255, 255, 255, 0.1);
@@ -996,15 +1110,19 @@ const formatTime = (timestampSeconds?: number) => {
   pointer-events: auto;
 }
 
-.song-info-stage--lyrics-expanding .lyrics-editor-textarea,
-.song-info-stage--lyrics-collapsing .lyrics-editor-textarea,
+.song-info-stage--lyrics-expanding :deep(.lyrics-reading-scroll),
+.song-info-stage--lyrics-collapsing :deep(.lyrics-reading-scroll),
+.song-info-stage--lyrics-expanding :deep(.lyrics-source-editor .cm-scroller),
+.song-info-stage--lyrics-collapsing :deep(.lyrics-source-editor .cm-scroller),
 .song-info-stage--song-expanding .song-info-content,
 .song-info-stage--song-collapsing .song-info-content {
   scrollbar-width: none;
 }
 
-.song-info-stage--lyrics-expanding .lyrics-editor-textarea::-webkit-scrollbar,
-.song-info-stage--lyrics-collapsing .lyrics-editor-textarea::-webkit-scrollbar,
+.song-info-stage--lyrics-expanding :deep(.lyrics-reading-scroll::-webkit-scrollbar),
+.song-info-stage--lyrics-collapsing :deep(.lyrics-reading-scroll::-webkit-scrollbar),
+.song-info-stage--lyrics-expanding :deep(.lyrics-source-editor .cm-scroller::-webkit-scrollbar),
+.song-info-stage--lyrics-collapsing :deep(.lyrics-source-editor .cm-scroller::-webkit-scrollbar),
 .song-info-stage--song-expanding .song-info-content::-webkit-scrollbar,
 .song-info-stage--song-collapsing .song-info-content::-webkit-scrollbar {
   width: 0;
@@ -1128,6 +1246,11 @@ const formatTime = (timestampSeconds?: number) => {
 .song-info-edit-toggle--active {
   background: transparent;
   color: #ec4141;
+}
+
+.song-info-edit-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .song-info-cover {
@@ -1311,26 +1434,6 @@ const formatTime = (timestampSeconds?: number) => {
   object-fit: cover;
 }
 
-.lyrics-editor-textarea {
-  flex: 1;
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 420px;
-  resize: none;
-  border: 0;
-  background: transparent;
-  padding: 18px;
-  color: var(--lyrics-editor-text-color);
-  font-family: "Sarasa Gothic SC", "Sarasa Mono SC", "Sarasa Gothic", "Sarasa Mono", sans-serif;
-  font-size: 13px;
-  line-height: 1.7;
-  outline: none;
-}
-
-.lyrics-editor-panel--expanded .lyrics-editor-textarea {
-  min-height: 0;
-}
-
 .modal-action-button {
   display: inline-flex;
   align-items: center;
@@ -1402,11 +1505,10 @@ const formatTime = (timestampSeconds?: number) => {
   }
 }
 
-.lyrics-editor-textarea::placeholder {
-  color: var(--lyrics-editor-placeholder-color);
-}
-
 .lyrics-editor-error {
+  flex-shrink: 0;
+  max-height: 25%;
+  overflow: auto;
   margin: 0 18px 12px;
   border: 1px solid rgba(236, 65, 65, 0.22);
   border-radius: 12px;
@@ -1532,14 +1634,6 @@ const formatTime = (timestampSeconds?: number) => {
     height: calc(100dvh - var(--song-info-viewport-y));
   }
 
-  .lyrics-editor-textarea {
-    min-height: 280px;
-  }
-
-  .lyrics-editor-panel--expanded .lyrics-editor-textarea {
-    min-height: 0;
-  }
-
   .lyrics-editor-heading {
     gap: 12px;
   }
@@ -1639,11 +1733,6 @@ const formatTime = (timestampSeconds?: number) => {
   .modal-external-header {
     min-height: 48px;
     padding-block: 5px;
-  }
-
-  .lyrics-editor-textarea {
-    min-height: 220px;
-    padding-block: 14px;
   }
 
   .song-info-cover {

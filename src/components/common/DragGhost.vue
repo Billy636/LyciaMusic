@@ -1,17 +1,26 @@
 <script setup lang="ts">
 import { dragSession } from '../../composables/dragState';
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
+import { computed, ref, watch, onActivated, onDeactivated, onMounted, onUnmounted, type CSSProperties } from 'vue';
 import { useCoverCache } from '../../composables/useCoverCache';
 
-const ghostX = ref(0);
-const ghostY = ref(0);
+const POINTER_GAP = 12;
+// Leave room for the count badge, which extends 8px outside the card.
+const VIEWPORT_GUTTER = 16;
+const isViewActive = ref(true);
+const isGhostVisible = computed(() => isViewActive.value && dragSession.showGhost);
+const ghostElement = ref<HTMLElement | null>(null);
+const ghostSize = ref({ width: 0, height: 0 });
+const viewport = ref({ left: 0, top: 0, width: window.innerWidth, height: window.innerHeight });
+const visualViewport = window.visualViewport;
+let resizeObserver: ResizeObserver | null = null;
 const ghostCover = ref('');
 const { loadCover } = useCoverCache();
 let ghostRequestId = 0;
 
 // 🟢 监听拖拽状态和类型
-watch([() => dragSession.active, () => dragSession.type], async ([active, type]) => {
+watch([isGhostVisible, () => dragSession.type], async ([active, type]) => {
   const requestId = ++ghostRequestId;
+  ghostCover.value = '';
   if (active) {
     // 1. 歌曲类型
     if (type === 'song' && dragSession.songs.length > 0) {
@@ -24,64 +33,106 @@ watch([() => dragSession.active, () => dragSession.type], async ([active, type])
         ghostCover.value = '';
       }
     } 
-    // 2. 专辑类型 (如果有 data.name) - 这里假设 data 包含 name
-    else if (type === 'album' && dragSession.data?.name) {
-       // 专辑可以尝试获取第一首歌的封面，或者显示默认图标
-       // 暂时显示默认图标或尝试获取封面(如果有路径)
-       // 如果 data 里有 firstSongPath，可以尝试加载
-       ghostCover.value = ''; 
-    }
-    // 3. 其他类型 (Folder/Playlist/Artist) 暂不需要异步加载图片，使用默认图标
+    // 文件夹和歌单使用默认图标。
     else {
        ghostCover.value = '';
     }
   } else {
     ghostCover.value = '';
   }
-});
+}, { immediate: true });
 
-const onPointerMove = (e: PointerEvent) => {
-  if (dragSession.active) {
-    ghostX.value = e.clientX;
-    ghostY.value = e.clientY;
-  }
+const updateViewport = () => {
+  viewport.value = {
+    left: visualViewport?.offsetLeft ?? 0,
+    top: visualViewport?.offsetTop ?? 0,
+    width: visualViewport?.width ?? window.innerWidth,
+    height: visualViewport?.height ?? window.innerHeight,
+  };
 };
 
+const measureGhost = () => {
+  const element = ghostElement.value;
+  if (!element) return;
+  // offset dimensions ignore the fade transition's scale transform.
+  ghostSize.value = { width: element.offsetWidth, height: element.offsetHeight };
+};
+
+watch(ghostElement, element => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  ghostSize.value = { width: 0, height: 0 };
+  if (!element) return;
+  updateViewport();
+  measureGhost();
+  resizeObserver = new ResizeObserver(measureGhost);
+  resizeObserver.observe(element);
+}, { flush: 'post' });
+
 onMounted(() => {
-  window.addEventListener('pointermove', onPointerMove, { passive: true });
+  updateViewport();
+  window.addEventListener('resize', updateViewport, { passive: true });
+  visualViewport?.addEventListener('resize', updateViewport, { passive: true });
+  visualViewport?.addEventListener('scroll', updateViewport, { passive: true });
 });
+
+onActivated(() => {
+  isViewActive.value = true;
+  updateViewport();
+});
+onDeactivated(() => { isViewActive.value = false; });
 
 onUnmounted(() => {
-  window.removeEventListener('pointermove', onPointerMove);
+  ++ghostRequestId;
+  resizeObserver?.disconnect();
+  window.removeEventListener('resize', updateViewport);
+  visualViewport?.removeEventListener('resize', updateViewport);
+  visualViewport?.removeEventListener('scroll', updateViewport);
 });
 
-const ghostStyle = computed(() => ({
-  top: `${ghostY.value + 10}px`,
-  left: `${ghostX.value + 10}px`,
-}));
+const ghostStyle = computed<CSSProperties>(() => {
+  const { width, height } = ghostSize.value;
+  const minX = viewport.value.left + VIEWPORT_GUTTER;
+  const minY = viewport.value.top + VIEWPORT_GUTTER;
+  const maxX = viewport.value.left + viewport.value.width - VIEWPORT_GUTTER - width;
+  const maxY = viewport.value.top + viewport.value.height - VIEWPORT_GUTTER - height;
+  let left = dragSession.mouseX + POINTER_GAP;
+  let top = dragSession.mouseY + POINTER_GAP;
+
+  // Prefer the other side of the pointer before clamping to the window edges.
+  if (left > maxX) left = dragSession.mouseX - POINTER_GAP - width;
+  if (top > maxY) top = dragSession.mouseY - POINTER_GAP - height;
+
+  return {
+    left: `${Math.max(minX, Math.min(left, maxX))}px`,
+    top: `${Math.max(minY, Math.min(top, maxY))}px`,
+    maxWidth: `${Math.max(0, viewport.value.width - VIEWPORT_GUTTER * 2)}px`,
+    visibility: width > 0 && height > 0 ? 'visible' : 'hidden',
+  };
+});
+
+const songCount = computed(() => dragSession.songPaths?.length ?? dragSession.songs.length);
 
 // 🟢 计算显示内容
 const title = computed(() => {
   if (dragSession.type === 'song' && dragSession.songs.length > 0) return dragSession.songs[0].title || dragSession.songs[0].name;
   if (dragSession.type === 'playlist') return dragSession.data?.name || '未知歌单';
   if (dragSession.type === 'folder') return dragSession.data?.name || '未知文件夹';
-  if (dragSession.type === 'artist') return dragSession.data?.name || '未知歌手';
-  if (dragSession.type === 'album') return dragSession.data?.name || '未知专辑';
   return '移动中...';
 });
 
 const subtitle = computed(() => {
-  if (dragSession.type === 'song' && dragSession.songs.length > 0) return dragSession.songs[0].artist;
-  if (dragSession.type === 'song' && dragSession.songs.length > 1) return `等 ${dragSession.songs.length} 首歌曲`;
+  if (dragSession.type === 'song' && dragSession.targetFolder) return `移动到 ${dragSession.targetFolder.name}`;
+  if (dragSession.type === 'song' && dragSession.targetPlaylist) return `添加到「${dragSession.targetPlaylist.name}」`;
+  if (dragSession.type === 'song') return dragSession.insertIndex >= 0 ? '松开以调整顺序' : '拖到歌单以添加';
   if (dragSession.type === 'playlist') return '歌单';
-  if (dragSession.type === 'folder') return '文件夹';
-  if (dragSession.type === 'artist') return '歌手';
-  if (dragSession.type === 'album') return '专辑';
+  if (dragSession.type === 'folder') return dragSession.targetFolder
+    ? `移动到 ${dragSession.targetFolder.name}` : '拖到目标文件夹以移动';
   return '';
 });
 
 const badgeCount = computed(() => {
-  if (dragSession.type === 'song') return dragSession.songs.length;
+  if (dragSession.type === 'song') return songCount.value;
   return 0;
 });
 </script>
@@ -90,14 +141,15 @@ const badgeCount = computed(() => {
   <teleport to="body">
     <transition name="fade">
       <div 
-        v-if="dragSession.showGhost"
-        class="fixed z-[9999] pointer-events-none p-3 bg-white/90 dark:bg-[#1a1a1a]/90 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 dark:border-white/10 flex items-center gap-3 select-none transition-transform"
+        v-if="isGhostVisible"
+        ref="ghostElement"
+        class="fixed w-max z-[9999] pointer-events-none p-3 bg-white/90 dark:bg-[#1a1a1a]/90 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 dark:border-white/10 flex items-center gap-3 select-none transition-transform"
+        :class="{ 'song-drag-card': dragSession.type === 'song', 'song-drag-card-adding': dragSession.type === 'song' && dragSession.targetPlaylist }"
         :style="ghostStyle"
       >
         <!-- Icon / Cover Area -->
         <div 
-          class="w-12 h-12 bg-gray-200/50 dark:bg-white/10 flex items-center justify-center overflow-hidden shrink-0 shadow-sm relative"
-          :class="dragSession.type === 'artist' ? 'rounded-full' : 'rounded'"
+          class="w-12 h-12 bg-gray-200/50 dark:bg-white/10 flex items-center justify-center overflow-hidden shrink-0 shadow-sm relative rounded"
         >
           <!-- Song Cover -->
           <img v-if="dragSession.type === 'song' && ghostCover" :src="ghostCover" class="w-full h-full object-cover" />
@@ -116,19 +168,16 @@ const badgeCount = computed(() => {
              <svg v-else-if="dragSession.type === 'folder'" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-400 dark:text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
              </svg>
-             <!-- Artist Default -->
-             <div v-else-if="dragSession.type === 'artist'" class="text-2xl">👤</div>
-             <!-- Album Default -->
-             <div v-else-if="dragSession.type === 'album'" class="text-2xl">💿</div>
           </template>
 
           <div class="absolute inset-0 bg-black/5"></div>
         </div>
 
         <div class="flex flex-col min-w-0">
-          <span class="text-sm font-bold text-gray-900 dark:text-white truncate max-w-[200px] drop-shadow-sm">{{ title }}</span>
+          <span class="text-sm font-medium text-gray-900 dark:text-white truncate max-w-[200px] drop-shadow-sm">{{ title }}</span>
           <span class="text-xs text-gray-500 dark:text-white/60 truncate max-w-[200px]">{{ subtitle }}</span>
         </div>
+        <span v-if="dragSession.type === 'song' && dragSession.targetPlaylist" class="text-xl text-[#EC4141] shrink-0" aria-hidden="true">＋</span>
         
         <div v-if="badgeCount > 1" class="absolute -top-2 -right-2 w-6 h-6 bg-[#EC4141] text-white rounded-full flex items-center justify-center text-xs font-bold shadow-md border-2 border-white dark:border-[#222]">
            {{ badgeCount }}
@@ -139,6 +188,15 @@ const badgeCount = computed(() => {
 </template>
 
 <style scoped>
+.song-drag-card { width: 240px; gap: 10px; padding: 11px 12px; border-color: rgb(128 128 128 / 20%); }
+.song-drag-card > div:first-child { width: 36px; height: 36px; }
+.song-drag-card > div:nth-child(2) { flex: 1; }
+.song-drag-card-adding { border-color: #EC4141; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-enter-active, .fade-leave-active { transition: none !important; }
+}
+
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.15s ease, transform 0.15s ease;

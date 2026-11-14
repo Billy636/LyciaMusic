@@ -4,9 +4,32 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
+  /* Audio-output separators: the same translucent slate works on light and dark surfaces. */
+  --settings-divider: rgba(148, 163, 184, 0.14);
+  --app-text-secondary: #4b5563;
+  --app-text-muted: #64748b;
   font-family: "Inter", system-ui, sans-serif;
   overflow: hidden;
   /* 防止整个窗口出现滚动条，我们只让中间区域滚动 */
+}
+
+html.dark {
+  --app-text-secondary: #cbd5e1;
+  --app-text-muted: #b5bfce;
+}
+/* Honor the chosen foreground on artwork without fading secondary text into
+   it. Contrast support applies to semantic text, not backgrounds or borders. */
+html.custom-background-theme {
+  --app-text-secondary: #273449;
+  --app-text-muted: #334155;
+}
+html.custom-background-theme.dark {
+  --app-text-secondary: #f1f5f9;
+  --app-text-muted: #e2e8f0;
+}
+@layer utilities {
+  .app-text-secondary { color: var(--app-text-secondary); }
+  .app-text-muted { color: var(--app-text-muted); }
 }
 
 html,

@@ -1,5 +1,15 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
+import {
+  TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
+  normalizeTaskbarWidth,
+  normalizeTaskbarTextColor,
+  normalizeTaskbarContentMode,
+  normalizeTaskbarLyricEffect,
+  normalizeTaskbarLyricHighlightColor,
+  normalizeTaskbarCoverShape,
+  normalizeTaskbarLeftOffset,
+} from '../taskbarPlayer/shared';
 
 import type {
   AppSettings,
@@ -24,6 +34,9 @@ import {
   type ShortcutSettingsPatch,
 } from './shortcuts';
 import { playerStorage } from '../../services/storage/playerStorage';
+import { normalizeFooterSettings } from './footer';
+import { normalizePlayerBackgroundSettings } from './playerBackground';
+import { getSidebarHomepageId, normalizeSidebarNavigationOrder } from './sidebarNavigation';
 
 const createUserPresetId = (): string =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -77,6 +90,7 @@ export const normalizeThemeMode = (
 export const defaultThemeSettings: ThemeSettings = {
   mode: 'system',
   dynamicBgType: 'none',
+  ...normalizePlayerBackgroundSettings({}),
   windowMaterial: 'none',
   retainMaterialOnUnfocus: false,
   flowColorBoost: 25,
@@ -84,6 +98,7 @@ export const defaultThemeSettings: ThemeSettings = {
   flowSpeed: 52,
   flowTexture: 34,
   windowBlurTint: 50,
+  windowTransparentOpacity: 50,
   customBgPath: '',
   opacity: 0.8,
   blur: 20,
@@ -102,9 +117,13 @@ export const defaultThemeSettings: ThemeSettings = {
 };
 
 export const defaultSidebarSettings: SidebarSettings = {
+  navigationOrder: normalizeSidebarNavigationOrder(undefined),
+  homepageId: 'localMusic',
   showLocalMusic: true,
+  showPlaylistLibrary: true,
   showArtists: true,
   showAlbums: true,
+  showGenres: true,
   showFavorites: true,
   showRecent: true,
   showFolders: true,
@@ -114,6 +133,7 @@ export const defaultSidebarSettings: SidebarSettings = {
 
 export const defaultAudioSettings: AudioSettings = {
   outputMode: 'shared',
+  playbackFadeEnabled: true,
   volumeBalance: {
     enabled: false,
     gainOffsetDb: 0,
@@ -130,10 +150,15 @@ export const defaultAudioSettings: AudioSettings = {
 export const defaultAppSettings: AppSettings = {
   closeToTray: true,
   showDesktopLyrics: false,
+  showSongNotification: false,
   showQualityBadges: true,
   showSongComments: true,
+  doubleClickCurrentSongToPause: false,
   enableScrollToTopButton: true,
   libraryMinDurationSeconds: 0,
+  folderIncludeSubfolders: false,
+  preferFolderCover: false,
+  artistImageFolder: '',
   // Deprecated compat field. Main folder-source behavior no longer depends on it.
   linkFoldersToLibrary: false,
   lyricsSyncOffset: 0,
@@ -149,14 +174,28 @@ export const defaultAppSettings: AppSettings = {
   shortcuts: createDefaultShortcutSettings(),
   showTaskbarPlayer: false,
   showTaskbarPlayerIcon: true,
+  showMiniPlayerIcon: true,
+  taskbarBackgroundOpacity: TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
+  taskbarWindowWidth: 280,
+  taskbarTextColor: '#ffffff',
   taskbarPlayerCanDrag: false,
+  taskbarPositionLocked: false,
+  taskbarContentMode: 'adaptive',
+  taskbarLyricEffect: 'karaoke',
+  taskbarLyricHighlightColor: null,
+  taskbarTranslationKaraoke: true,
+  taskbarCoverShape: 'square',
+  taskbarCoverRotate: false,
+  taskbarLeftOffset: null,
   gpuAcceleration: true,
   writeArtistAvatarToTags: false,
   autoScanLibraryOnStartup: false,
+  autoCheckUpdatesOnStartup: true,
 };
 
 export const createDefaultThemeSettings = (): ThemeSettings => ({
   ...defaultThemeSettings,
+  ...normalizePlayerBackgroundSettings(defaultThemeSettings),
   customBackground: {
     ...defaultThemeSettings.customBackground,
   },
@@ -164,6 +203,7 @@ export const createDefaultThemeSettings = (): ThemeSettings => ({
 
 export const createDefaultSidebarSettings = (): SidebarSettings => ({
   ...defaultSidebarSettings,
+  navigationOrder: normalizeSidebarNavigationOrder(defaultSidebarSettings.navigationOrder),
 });
 
 export const createDefaultAudioSettings = (): AudioSettings => ({
@@ -209,11 +249,16 @@ export const mergeThemeSettings = (
   };
 
   const mediaType = mergedCustomBackground.mediaType === 'video' ? 'video' : 'image';
+  const transparentOpacity = patch.windowTransparentOpacity ?? base.windowTransparentOpacity;
 
   return {
     ...base,
     ...patch,
+    ...normalizePlayerBackgroundSettings({ ...base, ...patch, customBackground: mergedCustomBackground }),
     mode: normalizeThemeMode(patch.mode, base.mode),
+    windowTransparentOpacity: Number.isFinite(transparentOpacity)
+      ? Math.min(100, Math.max(0, Math.round(transparentOpacity)))
+      : defaultThemeSettings.windowTransparentOpacity,
     customBackground: {
       ...mergedCustomBackground,
       mediaType,
@@ -225,10 +270,14 @@ export const mergeThemeSettings = (
 export const mergeSidebarSettings = (
   base: SidebarSettings,
   patch: SidebarSettingsPatch,
-): SidebarSettings => ({
-  ...base,
-  ...patch,
-});
+): SidebarSettings => {
+  const merged = {
+    ...base,
+    ...patch,
+    navigationOrder: normalizeSidebarNavigationOrder(patch.navigationOrder ?? base.navigationOrder),
+  };
+  return { ...merged, homepageId: getSidebarHomepageId(merged) };
+};
 
 export const mergeAudioSettings = (
   base: AudioSettings,
@@ -271,6 +320,8 @@ export const mergeAudioSettings = (
   return {
     ...base,
     outputMode: nextOutputMode,
+    playbackFadeEnabled: typeof patch.playbackFadeEnabled === 'boolean'
+      ? patch.playbackFadeEnabled : base.playbackFadeEnabled ?? true,
     volumeBalance: {
       enabled,
       gainOffsetDb,
@@ -300,12 +351,48 @@ export const mergeAppSettings = (
     // Ignore removed legacy fields that may still exist in persisted settings.
     ...base,
     ...rest,
+    doubleClickCurrentSongToPause: typeof patch.doubleClickCurrentSongToPause === 'boolean'
+      ? patch.doubleClickCurrentSongToPause : base.doubleClickCurrentSongToPause,
+    showMiniPlayerIcon: typeof patch.showMiniPlayerIcon === 'boolean'
+      ? patch.showMiniPlayerIcon : base.showMiniPlayerIcon,
+    showSongNotification: typeof (patch.showSongNotification ?? base.showSongNotification) === 'boolean'
+      ? (patch.showSongNotification ?? base.showSongNotification) : false,
+    ...(patch.footer || base.footer ? { footer: normalizeFooterSettings(patch.footer ?? base.footer) } : {}),
     libraryMinDurationSeconds: normalizeLibraryMinDurationSeconds(
       libraryMinDurationSeconds ?? base.libraryMinDurationSeconds,
     ),
+    folderIncludeSubfolders: typeof patch.folderIncludeSubfolders === 'boolean'
+      ? patch.folderIncludeSubfolders : base.folderIncludeSubfolders,
+    preferFolderCover: typeof patch.preferFolderCover === 'boolean'
+      ? patch.preferFolderCover : base.preferFolderCover ?? false,
+    artistImageFolder: typeof (patch.artistImageFolder ?? base.artistImageFolder) === 'string'
+      ? (patch.artistImageFolder ?? base.artistImageFolder ?? '').trim() : '',
     lyrics: mergeLyricsSettings(base.lyrics, patch.lyrics ?? {}),
     desktopLyrics: mergeDesktopLyricsSettings(base.desktopLyrics, patch.desktopLyrics ?? {}),
     audio: mergeAudioSettings(base.audio ?? createDefaultAudioSettings(), patch.audio ?? {}),
+    taskbarBackgroundOpacity: typeof (patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity) === 'number'
+      && Number.isFinite(patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity)
+      ? Math.min(100, Math.max(0, Math.round(patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity))) : TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
+    taskbarWindowWidth: normalizeTaskbarWidth(patch.taskbarWindowWidth ?? base.taskbarWindowWidth),
+    taskbarTextColor: normalizeTaskbarTextColor(patch.taskbarTextColor ?? base.taskbarTextColor),
+    taskbarPlayerCanDrag: typeof (patch.taskbarPlayerCanDrag ?? base.taskbarPlayerCanDrag) === 'boolean'
+      ? (patch.taskbarPlayerCanDrag ?? base.taskbarPlayerCanDrag) : false,
+    // The legacy can-drag flag was not used by the drag handle. Only an explicit
+    // position lock should hide it; existing settings must remain draggable.
+    taskbarPositionLocked: typeof (patch.taskbarPositionLocked ?? base.taskbarPositionLocked) === 'boolean'
+      ? (patch.taskbarPositionLocked ?? base.taskbarPositionLocked) : false,
+    taskbarContentMode: normalizeTaskbarContentMode(patch.taskbarContentMode ?? base.taskbarContentMode),
+    taskbarLyricEffect: normalizeTaskbarLyricEffect(patch.taskbarLyricEffect ?? base.taskbarLyricEffect),
+    taskbarLyricHighlightColor: normalizeTaskbarLyricHighlightColor(
+      patch.taskbarLyricHighlightColor === undefined ? base.taskbarLyricHighlightColor : patch.taskbarLyricHighlightColor,
+    ),
+    taskbarTranslationKaraoke: typeof (patch.taskbarTranslationKaraoke ?? base.taskbarTranslationKaraoke) === 'boolean'
+      ? (patch.taskbarTranslationKaraoke ?? base.taskbarTranslationKaraoke) : true,
+    taskbarCoverShape: normalizeTaskbarCoverShape(patch.taskbarCoverShape ?? base.taskbarCoverShape),
+    taskbarCoverRotate: typeof (patch.taskbarCoverRotate ?? base.taskbarCoverRotate) === 'boolean'
+      ? (patch.taskbarCoverRotate ?? base.taskbarCoverRotate) : false,
+    taskbarLeftOffset: (patch.taskbarLeftOffset ?? base.taskbarLeftOffset) == null
+      ? null : normalizeTaskbarLeftOffset(patch.taskbarLeftOffset ?? base.taskbarLeftOffset),
     customLyricsFonts: normalizeImportedLyricsFonts(patch.customLyricsFonts ?? base.customLyricsFonts),
     theme: mergeThemeSettings(base.theme, patch.theme ?? {}),
     sidebar: mergeSidebarSettings(base.sidebar, patch.sidebar ?? {}),
@@ -347,8 +434,8 @@ export const useSettingsStore = defineStore('settings', () => {
     settings.value = createDefaultAppSettings();
   };
 
-  const replaceTheme = (nextTheme: ThemeSettings) => {
-    theme.value = nextTheme;
+  const replaceTheme = (nextTheme: ThemeSettingsPatch) => {
+    theme.value = mergeThemeSettings(createDefaultThemeSettings(), nextTheme);
   };
 
   const patchTheme = (partialTheme: ThemeSettingsPatch) => {

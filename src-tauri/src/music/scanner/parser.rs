@@ -1,7 +1,7 @@
 use super::super::cue::CueTrack;
 use super::super::tags::{extract_detail_metadata, read_tagged_file_from_path_for_scan};
 use super::super::types::Song;
-use super::super::utils::{is_supported_library_extension, normalize_path};
+use super::super::utils::{describe_scan_io_error, is_supported_library_extension, normalize_path};
 use super::{
     build_album_key, fill_text_fields_from_tags, normalize_album_key_part, primary_artist_name,
     split_artist_names, ScanOptions, UNKNOWN_ALBUM, UNKNOWN_ARTIST, VARIOUS_ARTISTS,
@@ -110,6 +110,28 @@ pub(super) fn song_identity_missing(song: &Song) -> bool {
 }
 
 pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) -> Option<Song> {
+    parse_song_for_scan(path, path_str, format).ok().flatten()
+}
+
+pub(super) fn parse_song_for_scan(
+    path: &Path,
+    path_str: &str,
+    format: &str,
+) -> Result<Option<Song>, String> {
+    let mut io_failure = None;
+    let song = parse_song_internal(path, path_str, format, &mut io_failure);
+    match io_failure {
+        Some(error) => Err(error),
+        None => Ok(song),
+    }
+}
+
+fn parse_song_internal(
+    path: &Path,
+    path_str: &str,
+    format: &str,
+    io_failure: &mut Option<String>,
+) -> Option<Song> {
     let mut artist = String::from("未知歌手");
     let mut album = String::from("未知专辑");
     let mut album_artist = String::new();
@@ -118,29 +140,45 @@ pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) ->
     let mut bitrate = 0u32;
     let mut sample_rate = 0u32;
     let mut bit_depth: Option<u8> = None;
-    let mut file_size = 0u64;
     let mut file_created_at: Option<u64> = None;
     let mut file_modified_at: Option<u64> = None;
     let mut track_number: Option<String> = None;
     let mut disc_number: Option<String> = None;
     let mut comment: Option<String> = None;
+    let mut genre: Option<String> = None;
     let mut container = Some(normalize_container_from_extension(format));
     let mut codec = None;
     let mut artist_avatar_bytes: Option<Vec<u8>> = None;
 
-    if let Ok(meta) = fs::metadata(path) {
-        file_size = meta.len();
-        if let Ok(created) = meta.created() {
-            file_created_at = system_time_to_unix_seconds(created);
+    let meta = match fs::metadata(path) {
+        Ok(meta) => meta,
+        Err(error) => {
+            *io_failure = Some(describe_scan_io_error(path, "读取文件信息", &error));
+            return None;
         }
-        if let Ok(modified) = meta.modified() {
-            file_modified_at = system_time_to_unix_seconds(modified);
-        }
+    };
+    let file_size = meta.len();
+    if let Ok(created) = meta.created() {
+        file_created_at = system_time_to_unix_seconds(created);
+    }
+    if let Ok(modified) = meta.modified() {
+        file_modified_at = system_time_to_unix_seconds(modified);
     }
 
-    if let Ok(tagged_file) =
-        read_tagged_file_from_path_for_scan(path).map_err(|error| error.to_string())
-    {
+    let tagged_file = match read_tagged_file_from_path_for_scan(path) {
+        Ok(tagged_file) => Some(tagged_file),
+        Err(error) => {
+            if let lofty::error::ErrorKind::Io(error) = error.kind() {
+                // Truncated/malformed tags still use the existing decoder fallback.
+                if error.kind() != std::io::ErrorKind::UnexpectedEof {
+                    *io_failure = Some(describe_scan_io_error(path, "读取歌曲", error));
+                    return None;
+                }
+            }
+            None
+        }
+    };
+    if let Some(tagged_file) = tagged_file {
         let props = tagged_file.properties();
         duration = props.duration().as_secs() as u32;
         bitrate = props.audio_bitrate().unwrap_or(0);
@@ -159,6 +197,7 @@ pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) ->
         track_number = detail_metadata.track_number;
         disc_number = detail_metadata.disc_number;
         comment = detail_metadata.comment;
+        genre = detail_metadata.genre;
 
         if let Some(pic) = super::super::tags::find_embedded_artist_picture(&tagged_file) {
             artist_avatar_bytes = Some(pic.data().to_vec());
@@ -166,7 +205,10 @@ pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) ->
     }
 
     if duration == 0 || sample_rate == 0 || bit_depth.is_none() {
-        let identity = detect_audio_identity(path, format);
+        let identity = detect_audio_identity(path, format, io_failure);
+        if io_failure.is_some() {
+            return None;
+        }
 
         if duration == 0 {
             duration = identity.duration_seconds.unwrap_or(0);
@@ -244,11 +286,13 @@ pub(crate) fn parse_song_from_file(path: &Path, path_str: &str, format: &str) ->
         cue_start_offset: None,
         cue_end_offset: None,
         comment,
+        // Some("") 表示解析过但无流派标签，避免数据库 NULL 触发重复回填解析。
+        genre: Some(genre.unwrap_or_default()),
         artist_avatar_path: None,
     })
 }
 
-pub(super) fn parse_audio_files_internal(paths: Vec<String>, options: ScanOptions) -> Vec<Song> {
+pub(crate) fn parse_audio_files_internal(paths: Vec<String>, options: ScanOptions) -> Vec<Song> {
     let mut songs = Vec::new();
     let mut seen_paths = HashSet::new();
 
@@ -330,10 +374,11 @@ fn normalize_codec(short_name: &str) -> String {
     }
 }
 
-fn detect_audio_identity(path: &Path, ext: &str) -> AudioIdentity {
+fn detect_audio_identity(path: &Path, ext: &str, io_failure: &mut Option<String>) -> AudioIdentity {
     let file = match File::open(path) {
         Ok(file) => file,
-        Err(_) => {
+        Err(error) => {
+            *io_failure = Some(describe_scan_io_error(path, "读取音频", &error));
             return AudioIdentity {
                 container: Some(normalize_container_from_extension(ext)),
                 ..Default::default()
@@ -355,7 +400,12 @@ fn detect_audio_identity(path: &Path, ext: &str) -> AudioIdentity {
         },
     ) {
         Ok(probed) => probed,
-        Err(_) => {
+        Err(error) => {
+            if let symphonia::core::errors::Error::IoError(error) = error {
+                if error.kind() != std::io::ErrorKind::UnexpectedEof {
+                    *io_failure = Some(describe_scan_io_error(path, "解析音频", &error));
+                }
+            }
             return AudioIdentity {
                 container: Some(normalize_container_from_extension(ext)),
                 ..Default::default()
@@ -512,7 +562,12 @@ pub(crate) fn build_cue_track_song(
     };
 
     let flac_path_buf = std::path::PathBuf::from(flac_path);
-    let (cover_thumb_path, bitrate, sample_rate, bit_depth, codec_name) =
+    let source_format = flac_path_buf
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("flac")
+        .to_ascii_lowercase();
+    let (cover_thumb_path, bitrate, sample_rate, bit_depth, codec_name, flac_genre) =
         probe_flac_for_cue_metadata(&flac_path_buf);
 
     let name = format!("{:02}. {}", track.track_number, title);
@@ -539,8 +594,8 @@ pub(crate) fn build_cue_track_song(
         bitrate,
         sample_rate,
         bit_depth,
-        format: "flac".to_string(),
-        container: Some("flac".to_string()),
+        container: Some(normalize_container_from_extension(&source_format)),
+        format: source_format,
         codec: codec_name,
         file_size: std::fs::metadata(&flac_path_buf)
             .map(|m| m.len())
@@ -553,13 +608,14 @@ pub(crate) fn build_cue_track_song(
         cue_start_offset: Some(track.index01_start_ms as u32),
         cue_end_offset: Some(end_ms as u32),
         comment: None,
+        genre: Some(flac_genre.unwrap_or_default()),
         artist_avatar_path: None,
     })
 }
 
 fn probe_flac_for_cue_metadata(
     flac_path: &std::path::Path,
-) -> (Option<String>, u32, u32, Option<u8>, Option<String>) {
+) -> (Option<String>, u32, u32, Option<u8>, Option<String>, Option<String>) {
     let tagged_file = read_tagged_file_from_path_for_scan(flac_path).ok();
     let cover_thumb_path = None; // Will be generated by cover cache later
     let bitrate = tagged_file
@@ -575,6 +631,9 @@ fn probe_flac_for_cue_metadata(
         .and_then(|f| f.properties().bit_depth())
         .map(|b| b as u8);
     let codec_name = None;
+    let genre = tagged_file
+        .as_ref()
+        .and_then(|f| extract_detail_metadata(f).genre);
 
     (
         cover_thumb_path,
@@ -582,6 +641,7 @@ fn probe_flac_for_cue_metadata(
         sample_rate,
         bit_depth,
         codec_name,
+        genre,
     )
 }
 

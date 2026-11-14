@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { albumHeaderCache } from '../../caches/imageCaches';
 import { useCoverCache } from '../../composables/useCoverCache';
+import { useHomeNavigation } from '../../composables/useHomeNavigation';
 import { usePlayerViewState } from '../../composables/usePlayerViewState';
 import SortModeIcon from '../common/SortModeIcon.vue';
 
@@ -44,9 +46,14 @@ const sortMenuIsRightAligned = ref(false);
 const coverUrl = ref('');
 const isLoading = ref(false);
 const artistName = computed(() => props.albumArtist || '未知歌手');
+const { openHomeArtist } = useHomeNavigation(useRouter());
 const albumCacheKey = computed(() => `${props.albumName}::${props.albumArtist || '未知歌手'}`);
-const { loadCover, peekCoverUrl } = useCoverCache();
+const { loadCover, peekCoverUrl, coverCacheResetVersion, coverCacheResumeVersion } = useCoverCache();
 let coverRequestId = 0;
+
+const handleArtistClick = () => {
+  void openHomeArtist(artistName.value);
+};
 
 const handleSortClick = (e: MouseEvent) => {
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -74,7 +81,7 @@ const handleGlobalClick = (e: MouseEvent) => {
 onMounted(() => window.addEventListener('click', handleGlobalClick));
 onUnmounted(() => window.removeEventListener('click', handleGlobalClick));
 
-watch([albumCacheKey, () => props.songPaths, () => props.songs], async ([cacheKey, songPaths, newSongs]) => {
+watch([albumCacheKey, () => props.songPaths, () => props.songs, coverCacheResetVersion, coverCacheResumeVersion], async ([albumIdentity, songPaths, newSongs, cacheVersion]) => {
   const requestId = ++coverRequestId;
 
   const firstSongPath = songPaths?.[0] ?? newSongs?.[0]?.path;
@@ -84,6 +91,7 @@ watch([albumCacheKey, () => props.songPaths, () => props.songs], async ([cacheKe
     return;
   }
 
+  const cacheKey = `${albumIdentity}::${firstSongPath}::card:${cacheVersion}`;
   const cachedCover = albumHeaderCache.get(cacheKey);
   if (cachedCover) {
     coverUrl.value = cachedCover;
@@ -91,28 +99,26 @@ watch([albumCacheKey, () => props.songPaths, () => props.songs], async ([cacheKe
     return;
   }
 
-  const cachedThumbnail = peekCoverUrl(firstSongPath);
-  if (cachedThumbnail) {
-    coverUrl.value = cachedThumbnail;
-    albumHeaderCache.set(cacheKey, cachedThumbnail);
+  const cachedCardCover = peekCoverUrl(firstSongPath, 'card');
+  if (cachedCardCover) {
+    coverUrl.value = cachedCardCover;
+    albumHeaderCache.set(cacheKey, cachedCardCover);
     isLoading.value = false;
     return;
   }
 
-  isLoading.value = true;
+  coverUrl.value = peekCoverUrl(firstSongPath) || '';
+  isLoading.value = !coverUrl.value;
   try {
-    const resolvedCover = await loadCover(firstSongPath);
+    const resolvedCover = await loadCover(firstSongPath, 'card');
     if (requestId !== coverRequestId) return;
 
     if (resolvedCover) {
       coverUrl.value = resolvedCover;
       albumHeaderCache.set(cacheKey, resolvedCover);
-    } else {
-      coverUrl.value = '';
     }
   } catch {
     if (requestId !== coverRequestId) return;
-    coverUrl.value = '';
   } finally {
     if (requestId === coverRequestId) {
       isLoading.value = false;
@@ -175,9 +181,14 @@ const getGradientForAlbum = (name: string) => {
             <span class="bg-[#EC4141] text-white text-[12px] px-1.5 py-0.5 rounded border border-[#EC4141] font-normal leading-none -mt-1 relative top-[1px]">专辑</span>
             {{ albumName }}
           </h1>
-          <p class="text-[14px] text-gray-500 dark:text-gray-400 mt-2 truncate w-full flex items-center gap-2">
-            <span>专辑艺人:</span>
-            <span class="text-[#507DAF] dark:text-[#6a9adb]">{{ artistName }}</span>
+          <p class="text-[14px] app-text-secondary mt-2 truncate w-full flex items-center gap-2">
+            <span class="shrink-0">专辑艺人:</span>
+            <button
+              type="button"
+              class="min-w-0 truncate rounded-sm text-left text-[#507DAF] dark:text-[#6a9adb] hover:text-[#3d6593] dark:hover:text-[#89b1e4] hover:underline underline-offset-4 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#507DAF]"
+              :title="`查看 ${artistName} 的歌曲`"
+              @click.stop="handleArtistClick"
+            >{{ artistName }}</button>
           </p>
         </div>
 

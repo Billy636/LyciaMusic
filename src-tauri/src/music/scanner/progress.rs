@@ -1,6 +1,7 @@
 use super::{LIBRARY_SCAN_BATCH_EVENT, LIBRARY_SCAN_PROGRESS_EVENT, PROGRESS_EMIT_INTERVAL_MS};
 use crate::music::types::Song;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
@@ -17,6 +18,7 @@ struct ScanProgressPayload {
     message: Option<String>,
     done: bool,
     failed: bool,
+    warnings: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -24,6 +26,7 @@ struct ScanProgressPayload {
 struct ScanBatchPayload {
     songs: Vec<Song>,
     deleted_paths: Vec<String>,
+    excluded_paths: Vec<String>,
     folder_path: String,
     folder_index: usize,
     folder_total: usize,
@@ -48,6 +51,7 @@ pub(crate) struct ScanProgressReporter {
     buffered_songs: Arc<std::sync::Mutex<Vec<Song>>>,
     buffered_deleted: Arc<std::sync::Mutex<Vec<String>>>,
     last_batch_emit_ms: Arc<AtomicU64>,
+    excluded_paths: Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
 impl ScanProgressReporter {
@@ -67,6 +71,7 @@ impl ScanProgressReporter {
             buffered_songs: Arc::new(std::sync::Mutex::new(Vec::new())),
             buffered_deleted: Arc::new(std::sync::Mutex::new(Vec::new())),
             last_batch_emit_ms: Arc::new(AtomicU64::new(0)),
+            excluded_paths: Arc::new(std::sync::Mutex::new(HashSet::new())),
         }
     }
 
@@ -91,6 +96,7 @@ impl ScanProgressReporter {
                 message,
                 done,
                 failed,
+                warnings: Vec::new(),
             },
         );
     }
@@ -167,11 +173,23 @@ impl ScanProgressReporter {
 
         self.last_batch_emit_ms.store(now, Ordering::Relaxed);
 
+        let excluded_paths = self
+            .excluded_paths
+            .lock()
+            .map(|excluded| {
+                deleted_paths
+                    .iter()
+                    .filter(|path| excluded.contains(*path))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
         let _ = self.app.emit(
             LIBRARY_SCAN_BATCH_EVENT,
             ScanBatchPayload {
                 songs,
                 deleted_paths,
+                excluded_paths,
                 folder_path: self.folder_path.clone(),
                 folder_index: self.folder_index,
                 folder_total: self.folder_total,
@@ -179,15 +197,36 @@ impl ScanProgressReporter {
         );
     }
 
-    pub(super) fn emit_complete(&self, total_songs: usize) {
+    pub(super) fn set_excluded_paths(&self, paths: &[String]) {
+        if let Ok(mut excluded) = self.excluded_paths.lock() {
+            excluded.extend(paths.iter().cloned());
+        }
+    }
+
+    pub(super) fn emit_complete(&self, total_songs: usize, warnings: &[String]) {
         self.flush_batch_internal(now_millis());
-        self.emit(
-            "complete",
-            total_songs,
-            total_songs,
-            Some(format!("已完成扫描，共 {} 首歌曲", total_songs)),
-            true,
-            false,
+        let summary = if warnings.is_empty() {
+            format!("已完成扫描，共 {total_songs} 首歌曲")
+        } else {
+            format!(
+                "已完成扫描，共 {total_songs} 首歌曲；已跳过 {} 个无效或不可读取的 CUE",
+                warnings.len()
+            )
+        };
+        let _ = self.app.emit(
+            LIBRARY_SCAN_PROGRESS_EVENT,
+            ScanProgressPayload {
+                phase: "complete",
+                current: total_songs,
+                total: total_songs,
+                folder_path: self.folder_path.clone(),
+                folder_index: self.folder_index,
+                folder_total: self.folder_total,
+                message: Some(summary),
+                done: true,
+                failed: false,
+                warnings: warnings.to_vec(),
+            },
         );
     }
 

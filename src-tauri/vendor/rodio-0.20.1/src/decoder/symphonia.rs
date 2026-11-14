@@ -30,6 +30,7 @@ pub(crate) struct SymphoniaDecoder {
     total_duration: Option<Time>,
     buffer: SampleBuffer<i16>,
     spec: SignalSpec,
+    track_id: u32,
 }
 
 impl SymphoniaDecoder {
@@ -72,7 +73,7 @@ impl SymphoniaDecoder {
         let metadata_opts: MetadataOptions = Default::default();
         let mut probed = get_probe().format(&hint, mss, &format_opts, &metadata_opts)?;
 
-        let stream = match probed.format.default_track() {
+        let _stream = match probed.format.default_track() {
             Some(stream) => stream,
             None => return Ok(None),
         };
@@ -97,10 +98,11 @@ impl SymphoniaDecoder {
 
         let mut decoder = symphonia::default::get_codecs()
             .make(&track.codec_params, &DecoderOptions::default())?;
-        let total_duration = stream
+        let total_duration = track
             .codec_params
             .time_base
-            .zip(stream.codec_params.n_frames)
+            .zip(track.codec_params.n_frames)
+            .filter(|(_, frames)| *frames > 0)
             .map(|(base, frames)| base.calc_time(frames));
 
         let mut decode_errors: usize = 0;
@@ -140,6 +142,7 @@ impl SymphoniaDecoder {
             total_duration,
             buffer,
             spec,
+            track_id,
         }))
     }
 
@@ -170,8 +173,14 @@ impl Source for SymphoniaDecoder {
 
     #[inline]
     fn total_duration(&self) -> Option<Duration> {
-        self.total_duration
-            .map(|Time { seconds, frac }| Duration::new(seconds, (1f64 / frac) as u32))
+        self.total_duration.and_then(|Time { seconds, frac }| {
+            if seconds == 0 && frac <= 0.0 {
+                None
+            } else {
+                let nanos = (frac * 1_000_000_000.0).round().clamp(0.0, 999_999_999.0) as u32;
+                Some(Duration::new(seconds, nanos))
+            }
+        })
     }
 
     fn try_seek(&mut self, pos: Duration) -> Result<(), source::SeekError> {
@@ -197,7 +206,7 @@ impl Source for SymphoniaDecoder {
                 SeekMode::Accurate,
                 SeekTo::Time {
                     time,
-                    track_id: None,
+                    track_id: Some(self.track_id),
                 },
             )
             .map_err(SeekError::BaseSeek)?;
@@ -265,9 +274,12 @@ impl std::error::Error for SeekError {
 impl SymphoniaDecoder {
     /// Note frame offset must be set after
     fn refine_position(&mut self, seek_res: SeekedTo) -> Result<(), source::SeekError> {
-        let mut samples_to_pass = seek_res.required_ts - seek_res.actual_ts;
+        let mut samples_to_pass = seek_res.required_ts.saturating_sub(seek_res.actual_ts);
         let packet = loop {
             let candidate = self.format.next_packet().map_err(SeekError::Refining)?;
+            if candidate.track_id() != self.track_id {
+                continue;
+            }
             if candidate.dur() > samples_to_pass {
                 break candidate;
             } else {
@@ -278,7 +290,12 @@ impl SymphoniaDecoder {
         let mut decoded = self.decoder.decode(&packet);
         for _ in 0..MAX_DECODE_RETRIES {
             if decoded.is_err() {
-                let packet = self.format.next_packet().map_err(SeekError::Retrying)?;
+                let packet = loop {
+                    let candidate = self.format.next_packet().map_err(SeekError::Retrying)?;
+                    if candidate.track_id() == self.track_id {
+                        break candidate;
+                    }
+                };
                 decoded = self.decoder.decode(&packet);
             }
         }
@@ -300,7 +317,7 @@ fn skip_back_a_tiny_bit(
     frac -= 0.0001;
     if frac < 0.0 {
         seconds = seconds.saturating_sub(1);
-        frac = 1.0 - frac;
+        frac = (1.0 + frac).clamp(0.0, 0.999999);
     }
     Time { seconds, frac }
 }
@@ -311,11 +328,21 @@ impl Iterator for SymphoniaDecoder {
     #[inline]
     fn next(&mut self) -> Option<i16> {
         if self.current_frame_offset >= self.buffer.len() {
-            let packet = self.format.next_packet().ok()?;
+            let packet = loop {
+                let packet = self.format.next_packet().ok()?;
+                if packet.track_id() == self.track_id {
+                    break packet;
+                }
+            };
             let mut decoded = self.decoder.decode(&packet);
             for _ in 0..MAX_DECODE_RETRIES {
                 if decoded.is_err() {
-                    let packet = self.format.next_packet().ok()?;
+                    let packet = loop {
+                        let packet = self.format.next_packet().ok()?;
+                        if packet.track_id() == self.track_id {
+                            break packet;
+                        }
+                    };
                     decoded = self.decoder.decode(&packet);
                 }
             }

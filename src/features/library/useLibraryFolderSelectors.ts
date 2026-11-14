@@ -8,6 +8,7 @@ import {
   getSongFileNameLabel,
   getSongTitleLabel,
   isDirectParent,
+  sortSongPathsByArtist,
 } from './playerLibraryViewShared';
 
 interface FolderListItem {
@@ -24,6 +25,7 @@ interface UseLibraryFolderSelectorsOptions {
   currentFolderFilter: Ref<string>;
   folderSortMode: Ref<FolderSortMode>;
   folderCustomOrder: Ref<Record<string, string[]>>;
+  includeSubfolders?: Ref<boolean>;
 }
 
 export function useLibraryFolderSelectors({
@@ -33,6 +35,7 @@ export function useLibraryFolderSelectors({
   currentFolderFilter,
   folderSortMode,
   folderCustomOrder,
+  includeSubfolders,
 }: UseLibraryFolderSelectorsOptions) {
   const lookupSong = (path: string): Song | null => {
     const direct = songLookup.value.get(path);
@@ -57,7 +60,10 @@ export function useLibraryFolderSelectors({
       return [];
     }
 
-    const paths = sourceSongPaths.value.filter(path => isDirectParent(currentFolderFilter.value, path));
+    const folderPrefix = `${currentFolderFilter.value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()}/`;
+    const paths = sourceSongPaths.value.filter(path => includeSubfolders?.value
+      ? path.replace(/\\/g, '/').toLowerCase().startsWith(folderPrefix)
+      : isDirectParent(currentFolderFilter.value, path));
     if (folderSortMode.value !== 'custom' && songLookup.value.size === 0) {
       return paths;
     }
@@ -71,9 +77,7 @@ export function useLibraryFolderSelectors({
     }
 
     if (folderSortMode.value === 'artist') {
-      return [...paths].sort((left, right) =>
-        (lookupSong(left)?.artist || '').localeCompare(lookupSong(right)?.artist || '', 'zh-CN'),
-      );
+      return sortSongPathsByArtist(paths, lookupSong);
     }
 
     if (folderSortMode.value === 'added_at') {

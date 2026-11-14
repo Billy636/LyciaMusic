@@ -1,3 +1,6 @@
+import type { TaskbarContentMode, TaskbarCoverShape, TaskbarLyricEffect } from '../features/taskbarPlayer/shared';
+import type { PlaylistImportData } from '../features/playlistImport/types';
+
 export interface SongCore {
   id?: number;       // 数据库主键 (用于播放记录关联)
   name: string;
@@ -144,6 +147,8 @@ export interface AlbumCatalogItem {
   count: number;
   artist: string;
   firstSongPath: string;
+  /** Present only for a folder collection in the album browser. */
+  folderPath?: string;
 }
 
 export interface RecentAlbumCatalogItem {
@@ -152,6 +157,23 @@ export interface RecentAlbumCatalogItem {
   artist: string;
   playedAt: number;
   firstSongPath: string;
+}
+
+export interface GenreCatalogItem {
+  name: string;
+  songCount: number;
+  artistCount: number;
+  albumCount: number;
+}
+
+export interface GenreArtistItem {
+  name: string;
+  count: number;
+}
+
+export interface GenreGroups {
+  albums: AlbumCatalogItem[];
+  artists: GenreArtistItem[];
 }
 
 export interface RecentPlaylistCatalogItem {
@@ -172,11 +194,23 @@ export interface Playlist {
   name: string;
   songPaths: string[];
   createdAt?: string;
+  importData?: PlaylistImportData;
 }
 
 export interface LibraryFolder {
   path: string;
   song_count: number;
+  locked: boolean;
+}
+
+export type LibraryScanSource =
+  | { kind: 'local'; path: string }
+  | { kind: 'remote'; sourceId: string };
+
+export interface LibraryScanSettings {
+  includedExtensions: string[];
+  readCue: boolean;
+  excludedDirectories: string[];
 }
 
 export type RemoteSourceProvider = 'webdav';
@@ -278,6 +312,7 @@ export interface LibraryScanProgress {
   folder_index: number;
   folder_total: number;
   message: string | null;
+  warnings?: string[];
   done: boolean;
   failed: boolean;
 }
@@ -291,16 +326,23 @@ export interface LibraryScanSession {
   sourcePath?: string;
 }
 
+export type PlayerBackgroundMode = 'original' | 'soft' | 'gradient';
+export type PlayerBackgroundPalette = 'indigo' | 'rose' | 'teal' | 'cover';
+
 export interface ThemeSettings {
   mode: 'system' | 'light' | 'dark' | 'custom';
-  dynamicBgType: 'none' | 'flow' | 'blur';
-  windowMaterial: 'none' | 'mica' | 'acrylic' | 'blur';
+  dynamicBgType: 'none' | 'flow' | 'blur' | 'mist';
+  playerBackgroundMode?: PlayerBackgroundMode;
+  playerBackgroundPalette?: PlayerBackgroundPalette;
+  playerBackgroundMotion?: boolean;
+  windowMaterial: 'none' | 'mica' | 'acrylic' | 'blur' | 'transparent';
   retainMaterialOnUnfocus: boolean;
   flowColorBoost: number;
   flowDepth: number;
   flowSpeed: number;
   flowTexture: number;
   windowBlurTint: number;
+  windowTransparentOpacity: number;
   customBgPath: string; // Legacy field, keeping for compatibility if needed, but we'll use customBackground
   opacity: number;      // Legacy field
   blur: number;         // Legacy field
@@ -320,10 +362,25 @@ export interface ThemeSettings {
   }
 }
 
+export type SidebarNavigationId =
+  | 'localMusic'
+  | 'artists'
+  | 'albums'
+  | 'genres'
+  | 'playlists'
+  | 'favorites'
+  | 'recent'
+  | 'folders'
+  | 'statistics';
+
 export interface SidebarSettings {
+  navigationOrder?: SidebarNavigationId[];
+  homepageId?: SidebarNavigationId;
   showLocalMusic: boolean;
+  showPlaylistLibrary: boolean;
   showArtists: boolean;
   showAlbums: boolean;
+  showGenres: boolean;
   showFavorites: boolean;
   showRecent: boolean;
   showFolders: boolean;
@@ -336,6 +393,15 @@ export type DesktopLyricsPlayerAlignment = LyricsPlayerAlignment | 'split-corner
 export type LyricsColorScheme = 'auto' | 'default' | 'pink' | 'blue' | 'green' | 'white' | 'custom';
 export type LyricsFontPreset = string;
 export type LyricsPlayerRenderMode = 'amll' | 'light';
+export type LyricsPlayerWritingMode = 'horizontal' | 'vertical';
+export type LyricsVerticalScrollDirection = 'left' | 'right';
+export type LyricsReadingOrder =
+  | 'main-translation-roman'
+  | 'main-roman-translation'
+  | 'roman-main-translation'
+  | 'roman-translation-main'
+  | 'translation-main-roman'
+  | 'translation-roman-main';
 
 export interface ImportedLyricsFont {
   id: string;
@@ -349,8 +415,15 @@ export interface ImportedLyricsFont {
 export interface LyricsSettings {
   showTranslation: boolean;
   showRomaji: boolean;
+  enableBlur: boolean;
+  blurStrength: number;
+  readingOrder: LyricsReadingOrder;
+  readingOrderOverrides: Record<string, LyricsReadingOrder>;
   playerRenderMode: LyricsPlayerRenderMode;
+  playerWritingMode: LyricsPlayerWritingMode;
+  playerVerticalScrollDirection: LyricsVerticalScrollDirection;
   playerFontScale: number;
+  playerTranslationFontScale: number;
   playerLineGap: number;
   playerOffsetX: number;
   playerOffsetY: number;
@@ -364,6 +437,8 @@ export interface DesktopLyricsSettings {
   autoHideWhenFullscreen: boolean;
   autoHideWhenPaused: boolean;
   showDoubleLine: boolean;
+  /** Windows native renderer: follow long lines, or fit up to two wrapped rows. */
+  overflowMode?: 'scroll' | 'wrap';
   enableWordEffect: boolean;
   isLocked: boolean;
   persistLock: boolean;
@@ -410,13 +485,14 @@ export interface EqualizerSettings {
 
 export interface AudioSettings {
   outputMode: AudioOutputMode;
+  playbackFadeEnabled?: boolean;
   volumeBalance: {
     enabled: boolean;
     gainOffsetDb: number;
     preventClipping: boolean;
   };
   equalizer: EqualizerSettings;
-  showEqualizerInFooter: boolean; // 运行态必选属性
+  showEqualizerInFooter: boolean; // 旧版兼容字段：仅用于迁移底栏按钮显示偏好。
 }
 
 export type ShortcutActionId =
@@ -452,12 +528,19 @@ export interface ShortcutSettings {
 }
 
 export interface AppSettings {
+  // Optional only for legacy settings; initialized by the footer settings domain.
+  footer?: import('./footer').FooterSettings;
   closeToTray: boolean;
   showDesktopLyrics: boolean;
+  showSongNotification: boolean;
   showQualityBadges: boolean;
   showSongComments: boolean;
+  doubleClickCurrentSongToPause: boolean;
   enableScrollToTopButton: boolean;
   libraryMinDurationSeconds: number;
+  folderIncludeSubfolders: boolean;
+  preferFolderCover?: boolean;
+  artistImageFolder?: string;
   // Deprecated compat field. Retained only for legacy config deserialization.
   linkFoldersToLibrary: boolean;
   lyricsSyncOffset: number;
@@ -473,10 +556,25 @@ export interface AppSettings {
   shortcuts: ShortcutSettings;
   showTaskbarPlayer: boolean;
   showTaskbarPlayerIcon: boolean;
+  showMiniPlayerIcon: boolean;
+  taskbarBackgroundOpacity: number;
+  taskbarWindowWidth: number;
+  taskbarTextColor: string;
+  /** Deprecated compatibility field; position locking uses taskbarPositionLocked. */
   taskbarPlayerCanDrag: boolean;
+  taskbarPositionLocked: boolean;
+  taskbarContentMode: TaskbarContentMode;
+  taskbarLyricEffect: TaskbarLyricEffect;
+  taskbarLyricHighlightColor: string | null;
+  taskbarTranslationKaraoke: boolean;
+  taskbarCoverShape: TaskbarCoverShape;
+  taskbarCoverRotate: boolean;
+  /** Null until a legacy absolute taskbar position has been migrated. */
+  taskbarLeftOffset: number | null;
   gpuAcceleration: boolean;
   writeArtistAvatarToTags: boolean;
   autoScanLibraryOnStartup: boolean;
+  autoCheckUpdatesOnStartup: boolean;
 }
 
 export interface SaveArtistAvatarResponse {

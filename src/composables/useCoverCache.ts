@@ -1,35 +1,50 @@
-import { reactive } from 'vue';
+import { reactive, readonly, shallowRef } from 'vue';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { getActivePinia } from 'pinia';
+import { useSettingsStore } from '../features/settings/store';
 import { MemoryCache } from '../utils/MemoryCache';
 
-type CoverKind = 'thumbnail' | 'full';
+export type CoverKind = 'thumbnail' | 'card' | 'full';
 type PreloadPriority = 'priority' | 'background';
+type PreviewKind = Exclude<CoverKind, 'full'>;
+type PreloadRequest = { path: string; kind: PreviewKind };
 
 const THUMBNAIL_CACHE_LIMIT = 64;
+const CARD_COVER_CACHE_LIMIT = 32;
 const FULL_COVER_CACHE_LIMIT = 4;
 const THUMBNAIL_CACHE_TTL_MS = 5 * 60 * 1000;
+const CARD_COVER_CACHE_TTL_MS = 2 * 60 * 1000;
 const FULL_COVER_CACHE_TTL_MS = 2 * 60 * 1000;
 const HIDDEN_THUMBNAIL_CACHE_LIMIT = 12;
 const PRELOAD_CONCURRENCY = 4;
 const BACKGROUND_PRELOAD_CONCURRENCY = 1;
 const BACKGROUND_FULL_PRELOAD_CONCURRENCY = 1;
 const FAILURE_RETRY_MS = 10_000;
+const prefersFolderCover = () => !!getActivePinia() && !!useSettingsStore().settings.preferFolderCover;
 
 // Small in-memory LRU for thumbnail URLs. The actual image files live on disk.
 const thumbnailCache = reactive(new Map<string, string>());
+const cardCoverCache = reactive(new Map<string, string>());
 const fullCoverCache = reactive(new Map<string, string>());
 const thumbnailPathCache = new Map<string, string>();
+const cardCoverPathCache = new Map<string, string>();
 const fullCoverPathCache = new Map<string, string>();
 const thumbnailCacheExpiry = new Map<string, number>();
+const cardCoverCacheExpiry = new Map<string, number>();
 const fullCoverCacheExpiry = new Map<string, number>();
 const loadingSet = reactive(new Set<string>());
-const inFlightRequests = new Map<string, Promise<string>>();
+const inFlightRequests = new Map<string, { epoch: number; promise: Promise<string> }>();
+const requestTokens = new Map<string, symbol>();
+const coverCacheResetVersion = shallowRef(0);
+const readonlyCoverCacheResetVersion = readonly(coverCacheResetVersion);
+const coverCacheResumeVersion = shallowRef(0);
+const readonlyCoverCacheResumeVersion = readonly(coverCacheResumeVersion);
 const recentFailureCache = new MemoryCache<string, true>({
   maxEntries: 256,
   ttlMs: FAILURE_RETRY_MS,
 });
-const priorityPreloadQueue: string[] = [];
-const backgroundPreloadQueue: string[] = [];
+const priorityPreloadQueue: PreloadRequest[] = [];
+const backgroundPreloadQueue: PreloadRequest[] = [];
 const queuedPathPriority = new Map<string, PreloadPriority>();
 const backgroundFullPreloadQueue: string[] = [];
 const queuedBackgroundFullPaths = new Set<string>();
@@ -40,23 +55,40 @@ let cachePruneTimer: ReturnType<typeof setTimeout> | null = null;
 let hasRegisteredVisibilityCleanup = false;
 const cacheEpochs: Record<CoverKind, number> = {
   thumbnail: 0,
+  card: 0,
   full: 0,
 };
-const invalidatedRequestKeys = new Set<string>();
 
-const getCacheForKind = (kind: CoverKind) =>
-  kind === 'full' ? fullCoverCache : thumbnailCache;
-const getPathCacheForKind = (kind: CoverKind) =>
-  kind === 'full' ? fullCoverPathCache : thumbnailPathCache;
-const getCacheExpiryForKind = (kind: CoverKind) =>
-  kind === 'full' ? fullCoverCacheExpiry : thumbnailCacheExpiry;
-const getCacheLimitForKind = (kind: CoverKind) =>
-  kind === 'full' ? FULL_COVER_CACHE_LIMIT : THUMBNAIL_CACHE_LIMIT;
-const getCacheTtlForKind = (kind: CoverKind) =>
-  kind === 'full' ? FULL_COVER_CACHE_TTL_MS : THUMBNAIL_CACHE_TTL_MS;
+const cacheConfigs = {
+  thumbnail: {
+    cache: thumbnailCache, paths: thumbnailPathCache, expiry: thumbnailCacheExpiry,
+    limit: THUMBNAIL_CACHE_LIMIT, ttl: THUMBNAIL_CACHE_TTL_MS,
+  },
+  card: {
+    cache: cardCoverCache, paths: cardCoverPathCache, expiry: cardCoverCacheExpiry,
+    limit: CARD_COVER_CACHE_LIMIT, ttl: CARD_COVER_CACHE_TTL_MS,
+  },
+  full: {
+    cache: fullCoverCache, paths: fullCoverPathCache, expiry: fullCoverCacheExpiry,
+    limit: FULL_COVER_CACHE_LIMIT, ttl: FULL_COVER_CACHE_TTL_MS,
+  },
+};
+const getCacheForKind = (kind: CoverKind) => cacheConfigs[kind].cache;
+const getPathCacheForKind = (kind: CoverKind) => cacheConfigs[kind].paths;
+const getCacheExpiryForKind = (kind: CoverKind) => cacheConfigs[kind].expiry;
+const getCacheLimitForKind = (kind: CoverKind) => cacheConfigs[kind].limit;
+const getCacheTtlForKind = (kind: CoverKind) => cacheConfigs[kind].ttl;
+
+// Most cards are under 256 CSS pixels. Match the display scale without
+// loading 800px player artwork for every card on a high-DPI screen.
+const resolveCardEdge = () => {
+  const scale = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
+  return scale <= 1 ? 256 : scale <= 1.5 ? 384 : 512;
+};
+let cardEdge = resolveCardEdge();
 
 const buildCacheKey = (path: string, kind: CoverKind) => `${kind}:${path}`;
-const isThumbnailRequestKey = (requestKey: string) => requestKey.startsWith('thumbnail:');
+const isPreviewRequestKey = (requestKey: string) => !requestKey.startsWith('full:');
 
 const deleteCacheEntry = (
   cache: Map<string, string>,
@@ -157,11 +189,10 @@ const scheduleCachePrune = () => {
   }
 
   let nextExpiry: number | null = null;
-  for (const expiresAt of thumbnailCacheExpiry.values()) {
-    nextExpiry = nextExpiry === null ? expiresAt : Math.min(nextExpiry, expiresAt);
-  }
-  for (const expiresAt of fullCoverCacheExpiry.values()) {
-    nextExpiry = nextExpiry === null ? expiresAt : Math.min(nextExpiry, expiresAt);
+  for (const config of Object.values(cacheConfigs)) {
+    for (const expiresAt of config.expiry.values()) {
+      nextExpiry = nextExpiry === null ? expiresAt : Math.min(nextExpiry, expiresAt);
+    }
   }
 
   if (nextExpiry === null) {
@@ -171,8 +202,9 @@ const scheduleCachePrune = () => {
   const delay = Math.max(0, nextExpiry - Date.now());
   cachePruneTimer = window.setTimeout(() => {
     cachePruneTimer = null;
-    pruneCache(thumbnailCache, thumbnailCacheExpiry, thumbnailPathCache, THUMBNAIL_CACHE_LIMIT);
-    pruneCache(fullCoverCache, fullCoverCacheExpiry, fullCoverPathCache, FULL_COVER_CACHE_LIMIT);
+    for (const config of Object.values(cacheConfigs)) {
+      pruneCache(config.cache, config.expiry, config.paths, config.limit);
+    }
   }, delay);
 };
 
@@ -234,6 +266,7 @@ const bumpCacheEpoch = (kind?: CoverKind) => {
   }
 
   cacheEpochs.thumbnail += 1;
+  cacheEpochs.card += 1;
   cacheEpochs.full += 1;
 };
 
@@ -242,14 +275,14 @@ const getCacheEpoch = (kind: CoverKind) => {
 };
 
 const trimTransientCoverState = () => {
-  bumpCacheEpoch('thumbnail');
-  bumpCacheEpoch('full');
+  bumpCacheEpoch();
   pruneCache(
     thumbnailCache,
     thumbnailCacheExpiry,
     thumbnailPathCache,
     HIDDEN_THUMBNAIL_CACHE_LIMIT,
   );
+  clearCacheEntries(cardCoverCache, cardCoverCacheExpiry, cardCoverPathCache);
   clearCacheEntries(fullCoverCache, fullCoverCacheExpiry, fullCoverPathCache);
   priorityPreloadQueue.length = 0;
   backgroundPreloadQueue.length = 0;
@@ -260,6 +293,26 @@ const trimTransientCoverState = () => {
   recentFailureCache.prune();
 };
 
+const syncCardResolution = () => {
+  const nextEdge = resolveCardEdge();
+  if (cardEdge === nextEdge) return;
+
+  cardEdge = nextEdge;
+  bumpCacheEpoch('card');
+  clearCacheEntries(cardCoverCache, cardCoverCacheExpiry, cardCoverPathCache);
+  for (const requestKey of requestTokens.keys()) {
+    if (!requestKey.startsWith('card:')) continue;
+    requestTokens.delete(requestKey);
+    inFlightRequests.delete(requestKey);
+    loadingSet.delete(requestKey);
+  }
+  // Old-size preload results must not replace a freshly loaded card.
+  for (const requestKey of queuedPathPriority.keys()) {
+    if (requestKey.startsWith('card:')) queuedPathPriority.delete(requestKey);
+  }
+  coverCacheResetVersion.value += 1;
+};
+
 const registerVisibilityCleanup = () => {
   if (hasRegisteredVisibilityCleanup || typeof document === 'undefined') {
     return;
@@ -268,8 +321,14 @@ const registerVisibilityCleanup = () => {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       trimTransientCoverState();
+    } else {
+      syncCardResolution();
+      coverCacheResumeVersion.value += 1;
     }
   });
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('resize', syncCardResolution);
+  }
   hasRegisteredVisibilityCleanup = true;
 };
 
@@ -279,18 +338,27 @@ const loadCoverInternal = (path: string, kind: CoverKind): Promise<string> => {
     return Promise.resolve('');
   }
 
-  const existingRequest = inFlightRequests.get(requestKey);
-  if (existingRequest) {
-    return existingRequest;
-  }
   const requestEpoch = getCacheEpoch(kind);
+  const existingRequest = inFlightRequests.get(requestKey);
+  if (existingRequest?.epoch === requestEpoch) {
+    return existingRequest.promise;
+  }
+  const requestToken = Symbol(requestKey);
+  requestTokens.set(requestKey, requestToken);
+  const isCurrentRequest = () => requestEpoch === getCacheEpoch(kind)
+    && requestTokens.get(requestKey) === requestToken;
 
   const request = (async () => {
     loadingSet.add(requestKey);
     try {
       const command = kind === 'full' ? 'get_song_cover' : 'get_song_cover_thumbnail';
-      const coverPath = await invoke<string>(command, { path });
-      if (requestEpoch !== getCacheEpoch(kind) || invalidatedRequestKeys.has(requestKey)) {
+      const options = {
+        path,
+        ...(kind === 'card' ? { edge: cardEdge } : {}),
+        ...(prefersFolderCover() ? { preferFolderCover: true } : {}),
+      };
+      const coverPath = await invoke<string>(command, options);
+      if (!isCurrentRequest()) {
         return '';
       }
       const finalUrl = coverPath ? convertFileSrc(coverPath) : '';
@@ -300,26 +368,33 @@ const loadCoverInternal = (path: string, kind: CoverKind): Promise<string> => {
       }
       return finalUrl;
     } catch {
-      if (requestEpoch !== getCacheEpoch(kind) || invalidatedRequestKeys.has(requestKey)) {
+      if (!isCurrentRequest()) {
         return '';
       }
       recentFailureCache.set(requestKey, true);
       return '';
     } finally {
-      loadingSet.delete(requestKey);
-      inFlightRequests.delete(requestKey);
-      invalidatedRequestKeys.delete(requestKey);
+      // A reset or retention change may already have started a newer request
+      // for this path. Only the owner can release that request's shared state.
+      if (requestTokens.get(requestKey) === requestToken) {
+        requestTokens.delete(requestKey);
+        loadingSet.delete(requestKey);
+        inFlightRequests.delete(requestKey);
+      }
     }
   })();
 
-  inFlightRequests.set(requestKey, request);
+  // invoke can throw synchronously; do not register an already-finished request.
+  if (requestTokens.get(requestKey) === requestToken) {
+    inFlightRequests.set(requestKey, { epoch: requestEpoch, promise: request });
+  }
   return request;
 };
 
-const getActiveThumbnailLoadCount = () => {
+const getActivePreviewLoadCount = () => {
   let activeCount = 0;
   for (const requestKey of loadingSet) {
-    if (isThumbnailRequestKey(requestKey)) {
+    if (isPreviewRequestKey(requestKey)) {
       activeCount += 1;
     }
   }
@@ -342,28 +417,29 @@ const dequeueNextPath = (priority: PreloadPriority) => {
   const queue = priority === 'priority' ? priorityPreloadQueue : backgroundPreloadQueue;
 
   while (queue.length > 0) {
-    const path = queue.shift();
-    if (!path) {
+    const request = queue.shift();
+    if (!request) {
       continue;
     }
 
-    if (queuedPathPriority.get(path) !== priority) {
+    const requestKey = buildCacheKey(request.path, request.kind);
+    if (queuedPathPriority.get(requestKey) !== priority) {
       continue;
     }
 
-    queuedPathPriority.delete(path);
-    return path;
+    queuedPathPriority.delete(requestKey);
+    return request;
   }
 
   return undefined;
 };
 
-const startPreload = (path: string) => {
-  if (thumbnailCache.has(path) || loadingSet.has(buildCacheKey(path, 'thumbnail'))) {
+const startPreload = ({ path, kind }: PreloadRequest) => {
+  if (getCacheForKind(kind).has(path) || loadingSet.has(buildCacheKey(path, kind))) {
     return;
   }
 
-  void loadCoverInternal(path, 'thumbnail').finally(() => {
+  void loadCoverInternal(path, kind).finally(() => {
     schedulePriorityPreload();
     scheduleBackgroundPreload();
   });
@@ -372,7 +448,7 @@ const startPreload = (path: string) => {
 const schedulePriorityPreload = () => {
   cancelBackgroundPreload();
 
-  while (getActiveThumbnailLoadCount() < PRELOAD_CONCURRENCY) {
+  while (getActivePreviewLoadCount() < PRELOAD_CONCURRENCY) {
     const nextPath = dequeueNextPath('priority');
     if (!nextPath) {
       break;
@@ -391,7 +467,7 @@ const flushBackgroundPreload = () => {
     return;
   }
 
-  while (getActiveThumbnailLoadCount() < BACKGROUND_PRELOAD_CONCURRENCY) {
+  while (getActivePreviewLoadCount() < BACKGROUND_PRELOAD_CONCURRENCY) {
     const nextPath = dequeueNextPath('background');
     if (!nextPath) {
       break;
@@ -411,7 +487,7 @@ function scheduleBackgroundPreload() {
     backgroundPreloadIdleId !== null ||
     priorityPreloadQueue.length > 0 ||
     backgroundPreloadQueue.length === 0 ||
-    getActiveThumbnailLoadCount() >= BACKGROUND_PRELOAD_CONCURRENCY
+    getActivePreviewLoadCount() >= BACKGROUND_PRELOAD_CONCURRENCY
   ) {
     return;
   }
@@ -428,25 +504,26 @@ function scheduleBackgroundPreload() {
   backgroundPreloadTimer = setTimeout(runBackgroundPreload, 160);
 }
 
-const enqueuePreload = (path: string, priority: PreloadPriority) => {
-  if (!path || thumbnailCache.has(path) || loadingSet.has(buildCacheKey(path, 'thumbnail'))) {
+const enqueuePreload = (path: string, priority: PreloadPriority, kind: PreviewKind) => {
+  const requestKey = buildCacheKey(path, kind);
+  if (!path || getCacheForKind(kind).has(path) || loadingSet.has(requestKey)) {
     return;
   }
 
-  const existingPriority = queuedPathPriority.get(path);
+  const existingPriority = queuedPathPriority.get(requestKey);
   if (existingPriority === 'priority') {
     return;
   }
 
   if (priority === 'priority') {
-    queuedPathPriority.set(path, 'priority');
-    priorityPreloadQueue.push(path);
+    queuedPathPriority.set(requestKey, 'priority');
+    priorityPreloadQueue.push({ path, kind });
     return;
   }
 
   if (!existingPriority) {
-    queuedPathPriority.set(path, 'background');
-    backgroundPreloadQueue.push(path);
+    queuedPathPriority.set(requestKey, 'background');
+    backgroundPreloadQueue.push({ path, kind });
   }
 };
 
@@ -495,6 +572,7 @@ const enqueueBackgroundFullPreload = (path: string) => {
 
 export function useCoverCache() {
   registerVisibilityCleanup();
+  syncCardResolution();
 
   const peekCoverUrl = (path: string | undefined, kind: CoverKind = 'thumbnail') => {
     if (!path) {
@@ -560,17 +638,17 @@ export function useCoverCache() {
     return loadingSet.has(buildCacheKey(path, kind));
   };
 
-  const loadCover = async (path: string | undefined): Promise<string | undefined> => {
+  const loadCover = async (path: string | undefined, kind: CoverKind = 'thumbnail'): Promise<string | undefined> => {
     if (!path) {
       return undefined;
     }
 
-    const cachedValue = getCachedCover(path, 'thumbnail');
+    const cachedValue = getCachedCover(path, kind);
     if (cachedValue !== undefined) {
       return cachedValue;
     }
 
-    return loadCoverInternal(path, 'thumbnail');
+    return loadCoverInternal(path, kind);
   };
 
   const loadFullCover = async (path: string | undefined): Promise<string | undefined> => {
@@ -615,7 +693,8 @@ export function useCoverCache() {
   };
 
   const primeCoverPath = (path: string | undefined, rawPath: string | undefined | null) => {
-    if (!path || !rawPath) {
+    // Persisted thumbnails use the default policy, so they cannot override a folder-first request.
+    if (!path || !rawPath || prefersFolderCover()) {
       return '';
     }
 
@@ -629,9 +708,9 @@ export function useCoverCache() {
     return finalUrl;
   };
 
-  const preloadCovers = (paths: string[], priority: PreloadPriority = 'background') => {
+  const preloadCovers = (paths: string[], priority: PreloadPriority = 'background', kind: PreviewKind = 'thumbnail') => {
     for (const path of paths) {
-      enqueuePreload(path, priority);
+      enqueuePreload(path, priority, kind);
     }
 
     if (priority === 'priority') {
@@ -660,7 +739,7 @@ export function useCoverCache() {
     );
 
     for (const requestKey of Array.from(inFlightRequests.keys())) {
-      if (isThumbnailRequestKey(requestKey)) {
+      if (isPreviewRequestKey(requestKey)) {
         continue;
       }
 
@@ -669,7 +748,7 @@ export function useCoverCache() {
         continue;
       }
 
-      invalidatedRequestKeys.add(requestKey);
+      requestTokens.delete(requestKey);
       inFlightRequests.delete(requestKey);
       loadingSet.delete(requestKey);
     }
@@ -707,14 +786,52 @@ export function useCoverCache() {
     );
   };
 
+  const invalidateSongCover = (path: string) => {
+    if (!path) {
+      return;
+    }
+
+    for (const kind of Object.keys(cacheConfigs) as CoverKind[]) {
+      const config = cacheConfigs[kind];
+      const requestKey = buildCacheKey(path, kind);
+      deleteCacheEntry(config.cache, config.expiry, config.paths, path);
+      // Removing the token makes any older response stale without invalidating
+      // requests or cached artwork belonging to other songs.
+      requestTokens.delete(requestKey);
+      inFlightRequests.delete(requestKey);
+      loadingSet.delete(requestKey);
+      recentFailureCache.delete(requestKey);
+      queuedPathPriority.delete(requestKey);
+    }
+
+    for (const queue of [priorityPreloadQueue, backgroundPreloadQueue]) {
+      for (let index = queue.length - 1; index >= 0; index -= 1) {
+        if (queue[index]?.path === path) {
+          queue.splice(index, 1);
+        }
+      }
+    }
+    for (let index = backgroundFullPreloadQueue.length - 1; index >= 0; index -= 1) {
+      if (backgroundFullPreloadQueue[index] === path) {
+        backgroundFullPreloadQueue.splice(index, 1);
+      }
+    }
+    queuedBackgroundFullPaths.delete(path);
+    scheduleCachePrune();
+    // Visible owners retain URLs beyond the shared LRU, so also tell them to
+    // discard the old image and request it again after all stale work is removed.
+    coverCacheResetVersion.value += 1;
+  };
+
   const clearCoverCaches = () => {
     bumpCacheEpoch();
     clearCacheEntries(thumbnailCache, thumbnailCacheExpiry, thumbnailPathCache);
+    clearCacheEntries(cardCoverCache, cardCoverCacheExpiry, cardCoverPathCache);
     clearCacheEntries(fullCoverCache, fullCoverCacheExpiry, fullCoverPathCache);
     loadingSet.clear();
     inFlightRequests.clear();
     recentFailureCache.clear();
-    invalidatedRequestKeys.clear();
+    requestTokens.clear();
     priorityPreloadQueue.length = 0;
     backgroundPreloadQueue.length = 0;
     backgroundFullPreloadQueue.length = 0;
@@ -726,11 +843,17 @@ export function useCoverCache() {
       clearTimeout(cachePruneTimer);
       cachePruneTimer = null;
     }
+    // Notify visible consumers only after every old request/queue is cleared,
+    // so a synchronous reset watcher can safely start fresh requests.
+    coverCacheResetVersion.value += 1;
   };
 
   return {
     coverCache: thumbnailCache,
+    cardCoverCache,
     fullCoverCache,
+    coverCacheResetVersion: readonlyCoverCacheResetVersion,
+    coverCacheResumeVersion: readonlyCoverCacheResumeVersion,
     loadingSet,
     peekCoverUrl,
     peekCoverPath,
@@ -743,9 +866,10 @@ export function useCoverCache() {
     primeCoverPath,
     loadFullCover,
     preloadCovers,
-    preloadPriorityCovers: (paths: string[]) => preloadCovers(paths, 'priority'),
+    preloadPriorityCovers: (paths: string[], kind: PreviewKind = 'thumbnail') => preloadCovers(paths, 'priority', kind),
     preloadFullCovers,
     retainFullCoverPaths,
+    invalidateSongCover,
     clearCoverCaches,
   };
 }

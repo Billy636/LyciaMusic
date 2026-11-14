@@ -22,6 +22,7 @@ const ALL_VIEW_PATH_CACHE_NAMESPACE = 'all';
 
 const inFlightRequests = new Map<string, Promise<string[]>>();
 const cacheVersion = ref(0);
+let cacheGeneration = 0;
 const STALE_LIBRARY_PATH_REQUEST = 'STALE_LIBRARY_PATH_REQUEST';
 
 const makeCacheKey = (
@@ -29,7 +30,8 @@ const makeCacheKey = (
   artistFilter: string,
   albumFilter: string,
   sortMode: BackendLocalSortMode,
-) => `${sortMode}\u0001${query}\u0001${artistFilter}\u0001${albumFilter}`;
+  albumArtist: boolean,
+) => `${sortMode}\u0001${query}\u0001${artistFilter}\u0001${albumFilter}\u0001${albumArtist}`;
 
 export function useLibraryAllSongPathCache() {
   const libraryStore = useLibraryStore();
@@ -38,14 +40,16 @@ export function useLibraryAllSongPathCache() {
     query = '',
     artistFilter = '',
     albumFilter = '',
+    albumArtist = false,
     sortMode,
   }: {
     query?: string;
     artistFilter?: string;
     albumFilter?: string;
+    albumArtist?: boolean;
     sortMode: BackendLocalSortMode;
   }) => {
-    const cacheKey = makeCacheKey(query, artistFilter, albumFilter, sortMode);
+    const cacheKey = makeCacheKey(query, artistFilter, albumFilter, sortMode, albumArtist);
     activateLibrarySongPathCacheEntry(ALL_VIEW_PATH_CACHE_NAMESPACE, cacheKey);
     const cached = getLibrarySongPathCacheEntry(ALL_VIEW_PATH_CACHE_NAMESPACE, cacheKey);
     if (cached) {
@@ -69,6 +73,7 @@ export function useLibraryAllSongPathCache() {
 
     // 记录发起异步请求时的全局数据版本
     const requestVersion = libraryStore.libraryDataVersion;
+    const requestGeneration = cacheGeneration;
     const profileStart = isProfilingEnabled() ? performance.now() : 0;
 
     if (isProfilingEnabled()) {
@@ -82,6 +87,7 @@ export function useLibraryAllSongPathCache() {
           query,
           artistFilter,
           albumFilter,
+          ...(albumArtist ? { albumArtist: true } : {}),
         }).then((labels) => {
           // Keep older mocks and mixed-version backends compatible while the
           // compact label endpoint rolls out.
@@ -116,12 +122,13 @@ export function useLibraryAllSongPathCache() {
           artistFilter,
           albumFilter,
           sortMode,
+          ...(albumArtist ? { albumArtist: true } : {}),
         }).then(paths => ({ paths }));
 
     const request = pathRequest
       .then((entry) => {
         // 强一致性校验：若在请求未决期间数据版本发生变更（如新增、删除或重排），则丢弃缓存回填
-        if (libraryStore.libraryDataVersion === requestVersion) {
+        if (libraryStore.libraryDataVersion === requestVersion && cacheGeneration === requestGeneration) {
           setLibrarySongPathCacheEntry(
             ALL_VIEW_PATH_CACHE_NAMESPACE,
             cacheKey,
@@ -143,7 +150,7 @@ export function useLibraryAllSongPathCache() {
         });
       })
       .finally(() => {
-        inFlightRequests.delete(cacheKey);
+        if (inFlightRequests.get(cacheKey) === request) inFlightRequests.delete(cacheKey);
       });
 
     inFlightRequests.set(cacheKey, request);
@@ -153,6 +160,7 @@ export function useLibraryAllSongPathCache() {
   return {
     loadAllViewSongPaths,
     clearLibraryAllSongPathCache: () => {
+      cacheGeneration += 1;
       clearLibrarySongPathCacheNamespace(ALL_VIEW_PATH_CACHE_NAMESPACE);
       inFlightRequests.clear();
       cacheVersion.value += 1;

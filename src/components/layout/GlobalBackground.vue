@@ -11,7 +11,10 @@ import { getPreblurredBackgroundUrl } from '../../composables/preblurredBackgrou
 import { useRenderingPower } from '../../composables/renderingPower';
 import { calculateCoverGeometry } from '../../composables/useThemeBackgroundGeometry';
 import {
+  cancelCustomBackgroundImage,
+  customBackgroundCacheResetVersion,
   getCustomBackgroundRenderTarget,
+  isCustomBackgroundRequestSuperseded,
   loadCustomBackgroundMediaMetadata,
   prepareCustomBackgroundImage,
   resolveCustomBackgroundMediaType,
@@ -19,9 +22,10 @@ import {
   type CustomBackgroundMediaType,
 } from '../../composables/customBackgroundMedia';
 import { useCustomBackgroundPreviewState } from '../../composables/customBackgroundPreviewState';
-import { FIXED_FLOW_PRESET } from '../../constants/themeBackground';
+import FlowBackground from './FlowBackground.vue';
+import MistBackground from './MistBackground.vue';
 
-const { currentCover, currentCoverFull, dominantColors, showPlayerDetail, isMiniMode } = usePlayer();
+const { currentSong, currentCover, currentCoverPath, currentCoverFull, showPlayerDetail, isMiniMode } = usePlayer();
 const { theme, isDarkTheme, patchTheme } = useThemeSettings();
 const { activeWindowMaterial } = useWindowMaterial();
 const { loadFullCover } = useCoverCache();
@@ -29,23 +33,53 @@ const { isMainWindowLowPower } = useRenderingPower();
 const { isCustomBackgroundPreviewOpen } = useCustomBackgroundPreviewState();
 const playbackStore = usePlaybackStore();
 const { currentSongPath } = storeToRefs(playbackStore);
+const isBackgroundPreparationSuspended = computed(() => isMainWindowLowPower.value || isMiniMode.value);
 
 // --- 大背景物理尺寸动态测量 ---
+const backgroundRoot = ref<HTMLElement | null>(null);
 const containerWidth = ref(window.innerWidth);
 const containerHeight = ref(window.innerHeight);
+let containerResizeObserver: ResizeObserver | null = null;
+let containerSizeFrame = 0;
+let containerSizeTimer: ReturnType<typeof setTimeout> | null = null;
 
 const updateContainerSize = () => {
-  const bgEl = document.querySelector('[data-global-background]');
-  if (bgEl) {
-    const rect = bgEl.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      containerWidth.value = rect.width;
-      containerHeight.value = rect.height;
-      return;
-    }
+  if (isBackgroundPreparationSuspended.value) return;
+  const bgEl = backgroundRoot.value;
+  if (!bgEl) return;
+  // Layout dimensions exclude the scale used by the window-restore transition.
+  // Keep the last valid size while a hidden/minimized WebView has no layout.
+  const width = bgEl.clientWidth;
+  const height = bgEl.clientHeight;
+  if (width > 0 && height > 0) {
+    containerWidth.value = width;
+    containerHeight.value = height;
   }
-  containerWidth.value = window.innerWidth;
-  containerHeight.value = window.innerHeight;
+};
+
+const cancelContainerSizeRefresh = () => {
+  if (containerSizeFrame) window.cancelAnimationFrame(containerSizeFrame);
+  containerSizeFrame = 0;
+  if (containerSizeTimer !== null) clearTimeout(containerSizeTimer);
+  containerSizeTimer = null;
+};
+
+const refreshContainerSizeAfterRestore = () => {
+  cancelContainerSizeRefresh();
+  if (isBackgroundPreparationSuspended.value) return;
+  updateContainerSize();
+  containerSizeFrame = window.requestAnimationFrame(() => {
+    updateContainerSize();
+    containerSizeFrame = window.requestAnimationFrame(() => {
+      containerSizeFrame = 0;
+      updateContainerSize();
+    });
+  });
+  // Native show/focus can arrive before WebView2 finishes restoring its bounds.
+  containerSizeTimer = setTimeout(() => {
+    containerSizeTimer = null;
+    updateContainerSize();
+  }, 120);
 };
 
 // --- 图片物理原始宽高元数据管理 ---
@@ -59,6 +93,7 @@ interface RenderedCustomMedia {
   path: string;
   displayPath: string;
   mediaType: CustomBackgroundMediaType;
+  cacheResetVersion: number;
 }
 
 const renderedCustomMedia = ref<RenderedCustomMedia | null>(null);
@@ -81,31 +116,48 @@ watch(
     () => theme.value.customBackground?.blur,
     () => customRenderTarget.value.width,
     () => customRenderTarget.value.height,
+    isBackgroundPreparationSuspended,
+    customBackgroundCacheResetVersion,
   ],
   async ([mode, path, configuredMediaType, blur]) => {
     const requestId = ++customMediaRequestId;
+    const cacheResetVersion = customBackgroundCacheResetVersion.value;
     if (mode !== 'custom' || !path) {
+      void cancelCustomBackgroundImage('global-background').catch(() => {});
       renderedCustomMedia.value = null;
       customMediaReady.value = false;
       return;
     }
+    if (isBackgroundPreparationSuspended.value) {
+      void cancelCustomBackgroundImage('global-background').catch(() => {});
+      return;
+    }
 
     const mediaType = resolveCustomBackgroundMediaType(path, configuredMediaType);
+    if (mediaType === 'video') {
+      void cancelCustomBackgroundImage('global-background').catch(() => {});
+    }
     try {
       const prepared = mediaType === 'image'
         ? await prepareCustomBackgroundImage(path, {
             target: customRenderTarget.value,
             blurCssPixels: Number(blur) || 0,
+            consumerId: 'global-background',
           })
         : await loadCustomBackgroundMediaMetadata(convertFileSrc(path), mediaType);
-      if (requestId !== customMediaRequestId) return;
+      if (
+        requestId !== customMediaRequestId
+        || isBackgroundPreparationSuspended.value
+        || cacheResetVersion !== customBackgroundCacheResetVersion.value
+      ) return;
 
       const sourceWidth = 'sourceWidth' in prepared ? prepared.sourceWidth : prepared.width;
       const sourceHeight = 'sourceHeight' in prepared ? prepared.sourceHeight : prepared.height;
       const displayPath = 'displayPath' in prepared ? prepared.displayPath : path;
       const isPathChanged =
         renderedCustomMedia.value?.displayPath !== displayPath ||
-        renderedCustomMedia.value?.mediaType !== mediaType;
+        renderedCustomMedia.value?.mediaType !== mediaType ||
+        (mediaType === 'image' && renderedCustomMedia.value?.cacheResetVersion !== cacheResetVersion);
 
       imageNaturalWidth.value = sourceWidth;
       imageNaturalHeight.value = sourceHeight;
@@ -116,6 +168,7 @@ watch(
         path,
         displayPath,
         mediaType,
+        cacheResetVersion,
       };
 
       if (
@@ -133,7 +186,7 @@ watch(
         });
       }
     } catch (err) {
-      if (requestId === customMediaRequestId) {
+      if (requestId === customMediaRequestId && !isCustomBackgroundRequestSuperseded(err)) {
         console.error('Failed to load custom theme background media', err);
       }
     }
@@ -144,30 +197,19 @@ watch(
 const hasWindowMaterial = computed(() => activeWindowMaterial.value !== 'none');
 const isMicaWindowMaterial = computed(() => activeWindowMaterial.value === 'mica');
 const reduceDynamicEffects = computed(() => showPlayerDetail.value || isMainWindowLowPower.value);
-const flowFallbackPalette = ['hsl(220, 28%, 34%)', 'hsl(196, 58%, 56%)', 'hsl(340, 52%, 58%)', 'hsl(42, 72%, 60%)'];
-const FLOW_SCENE_TRANSITION_MS = 1180;
-
-interface FlowLayerSnapshot {
-  id: number;
-  signature: string;
-  state: 'entering' | 'current' | 'previous';
-  shellClass: string;
-  baseStyle: {
-    opacity: number;
-    background: string;
-  };
-  blobStyle: {
-    backgroundImage: string;
-    backgroundSize: string;
-  };
-  blobOpacity: number;
-  noiseOpacity: number;
-  overlayClass: string;
-  overlayStyle: {
-    opacity: number;
-  };
-  reduceDynamicEffects: boolean;
-}
+// The artwork view can retain the previous thumbnail while the new song loads.
+// Only let a cover belonging to the current song supply its background color.
+const matchingCoverSrc = computed(() => {
+  const song = currentSong.value;
+  return song && currentCoverPath.value
+    && (currentCoverPath.value === song.path || currentCoverPath.value === song.cue_source_path)
+    ? currentCover.value : '';
+});
+const coverPending = computed(() => Boolean(
+  currentSong.value && currentCoverPath.value
+  && currentCoverPath.value !== currentSong.value.path
+  && currentCoverPath.value !== currentSong.value.cue_source_path
+));
 
 const activeBackgroundInfo = computed(() => {
   const currentTheme = theme.value;
@@ -193,7 +235,7 @@ const activeBackgroundInfo = computed(() => {
 
   if (currentTheme.dynamicBgType === 'flow') {
     return {
-      src: currentCover.value,
+      src: matchingCoverSrc.value,
       blur: 60,
       opacity: 0.9,
       isDynamic: true,
@@ -209,6 +251,13 @@ const activeBackgroundInfo = computed(() => {
       scale: 1.25,
       isDynamic: false,
       type: 'blur' as const,
+    };
+  }
+
+  if (currentTheme.dynamicBgType === 'mist') {
+    return {
+      src: matchingCoverSrc.value,
+      type: 'mist' as const,
     };
   }
 
@@ -271,252 +320,47 @@ watch(
   { immediate: true },
 );
 
-const dynamicShellClass = computed(() => {
-  if (isMicaWindowMaterial.value) return 'bg-white/40 dark:bg-black/8';
-  if (hasWindowMaterial.value) return 'bg-white/60 dark:bg-black/25';
-  return 'bg-white dark:bg-[#1a1a1a]';
-});
-
-const flowColorBoostFactor = FIXED_FLOW_PRESET.colorBoost / 100;
-const flowDepthFactor = FIXED_FLOW_PRESET.depth / 100;
-const flowTextureFactor = FIXED_FLOW_PRESET.texture / 100;
-
-const resolvedFlowColors = computed(() => {
-  const colors = dominantColors.value.filter(color => color && color !== 'transparent');
-  return colors.length >= 3 ? colors : flowFallbackPalette;
-});
-
-const dynamicBaseOpacity = computed(() => {
-  const baseOpacity = 0.36 + flowColorBoostFactor * 0.15 - flowDepthFactor * 0.05;
-  return isMicaWindowMaterial.value ? Math.max(0.14, baseOpacity * 0.36) : Math.max(0.34, baseOpacity);
-});
-
-const dynamicBlobOpacity = computed(() => {
-  const blobOpacity = 0.45 + flowColorBoostFactor * 0.18;
-  return isMicaWindowMaterial.value ? Math.max(0.18, blobOpacity * 0.34) : Math.min(0.86, blobOpacity);
-});
-
-const dynamicNoiseOpacity = computed(() => {
-  const noiseOpacity = 0.004 + flowTextureFactor * 0.022;
-  return isMicaWindowMaterial.value ? noiseOpacity * 0.55 : noiseOpacity;
-});
-
-const dynamicBaseStyle = computed(() => {
-  const [base, accent, edge, glow] = resolvedFlowColors.value;
-  const depthFactor = flowDepthFactor;
-
-  return {
-    opacity: dynamicBaseOpacity.value,
-    background: [
-      `radial-gradient(circle at 18% 18%, ${accent} 0%, transparent ${38 + depthFactor * 8}%)`,
-      `radial-gradient(circle at 82% 78%, ${glow || edge || base} 0%, transparent ${42 + depthFactor * 10}%)`,
-      `linear-gradient(135deg, ${base} 0%, ${edge || accent || base} 100%)`,
-    ].join(', '),
-  };
-});
-
-function createFlowTexture(colors: string[]) {
-  const [base, accent, edge, glow] = colors;
-  const canvas = document.createElement('canvas');
-  canvas.width = 384;
-  canvas.height = 384;
-  const context = canvas.getContext('2d');
-  if (!context) return '';
-
-  const drawGlow = (color: string, x: number, y: number, radius: number) => {
-    const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
-    gradient.addColorStop(0, color);
-    gradient.addColorStop(1, 'transparent');
-    context.fillStyle = gradient;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-  };
-
-  drawGlow(accent, 135, 125, 265);
-  drawGlow(edge || base, 265, 270, 275);
-  drawGlow(glow || accent || base, 275, 105, 235);
-  return canvas.toDataURL('image/webp', 0.82);
-}
-
-const dynamicBlobStyle = computed(() => {
-  const textureUrl = createFlowTexture(resolvedFlowColors.value);
-  return {
-    backgroundImage: textureUrl ? `url("${textureUrl}")` : 'none',
-    backgroundSize: '100% 100%',
-  };
-});
-
-const dynamicOverlayClass = computed(() => {
-  if (isMicaWindowMaterial.value) return 'bg-white/[0.02] dark:bg-black/[0.08]';
-  if (hasWindowMaterial.value) return 'bg-white/[0.02] dark:bg-black/[0.16]';
-  return 'bg-white/[0.03] dark:bg-black/[0.22]';
-});
-
-const dynamicOverlayStyle = computed(() => {
-  const overlayOpacity = 0.91 + flowDepthFactor * 0.26 - flowColorBoostFactor * 0.08;
-  return { opacity: Math.min(1.1, Math.max(0.80, overlayOpacity)) };
-});
-
-// 固定预设不再逐项 patch 图层；颜色或材质变化时通过整层交叉淡入切换缓存纹理。
-const flowSceneSignature = computed(() => {
-  if (activeBackgroundInfo.value?.type !== 'flow') return null;
-  return JSON.stringify({
-    shellClass: dynamicShellClass.value,
-    baseStyle: dynamicBaseStyle.value,
-    blobStyle: dynamicBlobStyle.value,
-    blobOpacity: dynamicBlobOpacity.value,
-    noiseOpacity: dynamicNoiseOpacity.value,
-    overlayClass: dynamicOverlayClass.value,
-    overlayStyle: dynamicOverlayStyle.value,
-    reduceDynamicEffects: reduceDynamicEffects.value,
-  });
-});
-
-const flowScene = computed(() => {
-  if (activeBackgroundInfo.value?.type !== 'flow') {
-    return null;
-  }
-
-  const baseStyle = { ...dynamicBaseStyle.value };
-  const blobStyle = { ...dynamicBlobStyle.value };
-  const overlayStyle = { ...dynamicOverlayStyle.value };
-
-  return {
-    signature: flowSceneSignature.value!,
-    shellClass: dynamicShellClass.value,
-    baseStyle,
-    blobStyle,
-    blobOpacity: dynamicBlobOpacity.value,
-    noiseOpacity: dynamicNoiseOpacity.value,
-    overlayClass: dynamicOverlayClass.value,
-    overlayStyle,
-    reduceDynamicEffects: reduceDynamicEffects.value,
-  };
-});
-
-const flowLayers = ref<FlowLayerSnapshot[]>([]);
 const preblurredStaticBgSrc = ref('');
 const isStaticBgPreblurred = ref(false);
-
-let flowLayerId = 0;
-let flowTransitionTimer: ReturnType<typeof setTimeout> | null = null;
-let flowEnterAnimationFrame: number | null = null;
+// Keep the last displayed bitmap while hidden and until its replacement is
+// ready. Background song changes must not recreate an invisible image layer.
+const staticBackgroundSource = ref('');
+const staticBackgroundDisplaySrc = computed(() => preblurredStaticBgSrc.value || staticBackgroundSource.value);
 let fullCoverRequestId = 0;
 let preblurRequestId = 0;
 
-function clearFlowTransitionTimer() {
-  if (flowTransitionTimer) {
-    clearTimeout(flowTransitionTimer);
-    flowTransitionTimer = null;
-  }
-}
-
-function clearFlowEnterAnimationFrame() {
-  if (flowEnterAnimationFrame !== null) {
-    cancelAnimationFrame(flowEnterAnimationFrame);
-    flowEnterAnimationFrame = null;
-  }
-}
-
-function buildFlowLayerSnapshot(scene: NonNullable<typeof flowScene.value>): FlowLayerSnapshot {
-  return {
-    id: ++flowLayerId,
-    signature: scene.signature,
-    state: 'entering',
-    shellClass: scene.shellClass,
-    baseStyle: scene.baseStyle,
-    blobStyle: scene.blobStyle,
-    blobOpacity: scene.blobOpacity,
-    noiseOpacity: scene.noiseOpacity,
-    overlayClass: scene.overlayClass,
-    overlayStyle: scene.overlayStyle,
-    reduceDynamicEffects: scene.reduceDynamicEffects,
-  };
-}
-
-// 只有 signature 变了（颜色/shell 切换）才触发溶解过场
-watch(flowSceneSignature, (newSig) => {
-  if (!newSig) {
-    clearFlowTransitionTimer();
-    clearFlowEnterAnimationFrame();
-    flowLayers.value = [];
-    return;
-  }
-
-  const nextScene = flowScene.value!;
-  const currentLayer = flowLayers.value.find(layer => layer.state === 'current');
-  if (!currentLayer) {
-    const initialLayer = buildFlowLayerSnapshot(nextScene);
-    flowLayers.value = [initialLayer];
-    void nextTick(() => {
-      clearFlowEnterAnimationFrame();
-      flowEnterAnimationFrame = requestAnimationFrame(() => {
-        flowLayers.value = flowLayers.value.map(layer => (
-          layer.id === initialLayer.id
-            ? { ...layer, state: 'current' }
-            : layer
-        ));
-        flowEnterAnimationFrame = null;
-      });
-    });
-    return;
-  }
-
-  const nextLayer = buildFlowLayerSnapshot(nextScene);
-  flowLayers.value = [
-    { ...currentLayer, state: 'previous' },
-    nextLayer,
-  ];
-
-  void nextTick(() => {
-    clearFlowEnterAnimationFrame();
-    flowEnterAnimationFrame = requestAnimationFrame(() => {
-      flowLayers.value = flowLayers.value.map(layer => (
-        layer.id === nextLayer.id
-          ? { ...layer, state: 'current' }
-          : layer
-      ));
-      flowEnterAnimationFrame = null;
-    });
-  });
-
-  clearFlowTransitionTimer();
-  flowTransitionTimer = setTimeout(() => {
-    flowLayers.value = flowLayers.value.filter(layer => layer.state === 'current');
-    flowTransitionTimer = null;
-  }, FLOW_SCENE_TRANSITION_MS);
-}, { immediate: true });
-
 watch(
-  [() => activeBackgroundInfo.value?.type, currentSongPath],
-  async ([backgroundType, path]) => {
-    if (backgroundType !== 'blur' || !path) {
-      fullCoverRequestId += 1;
+  [() => activeBackgroundInfo.value?.type, currentSongPath, isBackgroundPreparationSuspended],
+  async ([backgroundType, path, suspended]) => {
+    const requestId = ++fullCoverRequestId;
+    if (suspended || backgroundType !== 'blur' || !path) {
       return;
     }
-
-    const requestId = ++fullCoverRequestId;
 
     try {
       const fullCoverUrl = await loadFullCover(path);
       if (
         requestId !== fullCoverRequestId
+        || isBackgroundPreparationSuspended.value
         || currentSongPath.value !== path
         || activeBackgroundInfo.value?.type !== 'blur'
       ) {
         return;
       }
 
-      playbackStore.currentCoverFull = fullCoverUrl || playbackStore.currentCover;
+      if (fullCoverUrl) playbackStore.currentCoverFull = fullCoverUrl;
     } catch {
       if (
         requestId !== fullCoverRequestId
+        || isBackgroundPreparationSuspended.value
         || currentSongPath.value !== path
         || activeBackgroundInfo.value?.type !== 'blur'
       ) {
         return;
       }
 
-      playbackStore.currentCoverFull = playbackStore.currentCover;
+      // The playback/detail chain owns the thumbnail fallback. A background
+      // failure must not overwrite a full cover another consumer has loaded.
     }
   },
   { immediate: true },
@@ -537,14 +381,20 @@ const staticBrightness = computed(() => {
 });
 
 watch(
-  [() => activeBackgroundInfo.value?.type, bgImageSrc, staticBlurAmount, staticBrightness],
-  async ([backgroundType, src, blur, brightness]) => {
+  [() => activeBackgroundInfo.value?.type, bgImageSrc, staticBlurAmount, staticBrightness, isBackgroundPreparationSuspended],
+  async ([backgroundType, src, blur, brightness, suspended]) => {
     const requestId = ++preblurRequestId;
-    preblurredStaticBgSrc.value = '';
-    isStaticBgPreblurred.value = false;
+    if (suspended) return;
 
     if (backgroundType !== 'blur' || !src) {
+      staticBackgroundSource.value = '';
+      preblurredStaticBgSrc.value = '';
+      isStaticBgPreblurred.value = false;
       return;
+    }
+
+    if (!staticBackgroundSource.value) {
+      staticBackgroundSource.value = src;
     }
 
     const preblurredUrl = await getPreblurredBackgroundUrl(src, {
@@ -554,37 +404,39 @@ watch(
 
     if (
       requestId !== preblurRequestId
+      || isBackgroundPreparationSuspended.value
       || activeBackgroundInfo.value?.type !== 'blur'
       || bgImageSrc.value !== src
     ) {
       return;
     }
 
-    preblurredStaticBgSrc.value = preblurredUrl;
+    staticBackgroundSource.value = src;
+    preblurredStaticBgSrc.value = preblurredUrl !== src ? preblurredUrl : '';
     isStaticBgPreblurred.value = preblurredUrl !== src;
   },
   { immediate: true },
 );
 
-watch(isMiniMode, async (mini, prevMini) => {
-  if (prevMini && !mini) {
-    await nextTick();
-    updateContainerSize();
-    setTimeout(updateContainerSize, 100);
-  }
-});
+watch(isBackgroundPreparationSuspended, refreshContainerSizeAfterRestore, { flush: 'post' });
 
 onMounted(() => {
   updateContainerSize();
+  containerResizeObserver = new ResizeObserver(updateContainerSize);
+  if (backgroundRoot.value) containerResizeObserver.observe(backgroundRoot.value);
   window.addEventListener('resize', updateContainerSize);
+  window.addEventListener('focus', refreshContainerSizeAfterRestore);
 });
 
 onBeforeUnmount(() => {
+  cancelContainerSizeRefresh();
+  containerResizeObserver?.disconnect();
   window.removeEventListener('resize', updateContainerSize);
-  clearFlowTransitionTimer();
-  clearFlowEnterAnimationFrame();
+  window.removeEventListener('focus', refreshContainerSizeAfterRestore);
   fullCoverRequestId += 1;
   preblurRequestId += 1;
+  customMediaRequestId += 1;
+  void cancelCustomBackgroundImage('global-background').catch(() => {});
   const video = customVideoRef.value;
   if (video) {
     video.pause();
@@ -601,18 +453,43 @@ const staticMaskClass = computed(() => {
 const staticImageOpacity = computed(() => (isMicaWindowMaterial.value ? 0.35 : 1));
 
 const materialScrimStyle = computed(() => {
-  if (!hasWindowMaterial.value) {
+  // Mica already supplies an opaque, theme-aware wallpaper tint. Another
+  // full-window scrim washes it out; only translucent materials need one.
+  if (!hasWindowMaterial.value || isMicaWindowMaterial.value) {
     return null;
+  }
+
+  if (activeWindowMaterial.value === 'transparent') {
+    // A barely painted surface keeps WebView2 hit testing working at 0%.
+    const opacity = Math.max(1 / 255, theme.value.windowTransparentOpacity / 100);
+    return {
+      backgroundColor: isDarkTheme.value
+        ? `rgba(18, 18, 18, ${opacity})`
+        : `rgba(250, 250, 250, ${opacity})`,
+    };
+  }
+
+  if (activeWindowMaterial.value === 'blur') {
+    const tint = Math.min(100, Math.max(0, Math.round(theme.value.windowBlurTint)));
+    // Fade out the legacy scrim at the low end; 50 and above keep its
+    // original opacity. A barely painted surface preserves hit testing.
+    const strength = Math.min(1, tint / 50);
+    const opacity = Math.max(1 / 255, (isDarkTheme.value ? 0.34 : 0.5) * strength);
+    return {
+      backgroundColor: isDarkTheme.value
+        ? `rgba(12, 14, 16, ${opacity})`
+        : `rgba(250, 250, 252, ${opacity})`,
+    };
   }
 
   if (isDarkTheme.value) {
     return {
-      backgroundColor: isMicaWindowMaterial.value ? 'rgba(14, 16, 18, 0.42)' : 'rgba(12, 14, 16, 0.34)',
+      backgroundColor: 'rgba(12, 14, 16, 0.34)',
     };
   }
 
   return {
-    backgroundColor: isMicaWindowMaterial.value ? 'rgba(248, 249, 251, 0.62)' : 'rgba(250, 250, 252, 0.5)',
+    backgroundColor: 'rgba(250, 250, 252, 0.5)',
   };
 });
 
@@ -663,6 +540,7 @@ const customBgTransform = computed(() => {
 
 <template>
   <div
+    ref="backgroundRoot"
     data-global-background
     class="fixed inset-0 z-0 overflow-hidden pointer-events-none transition-colors duration-500"
     :class="[
@@ -675,64 +553,39 @@ const customBgTransform = computed(() => {
     ]"
   >
     <div
-      v-if="hasWindowMaterial"
+      v-if="materialScrimStyle"
       class="absolute inset-0 z-[1] transition-colors duration-500"
       :style="materialScrimStyle"
     ></div>
 
     <transition name="fade">
-      <div
-        v-if="activeBackgroundInfo?.isDynamic && flowLayers.length > 0"
-        class="absolute inset-0 overflow-hidden"
-      >
-        <div
-          v-for="layer in flowLayers"
-          :key="layer.id"
-          class="flow-layer absolute inset-0 overflow-hidden"
-          :class="[
-            layer.shellClass,
-            layer.state === 'previous'
-              ? 'flow-layer-previous'
-              : layer.state === 'entering'
-                ? 'flow-layer-entering'
-                : 'flow-layer-current',
-          ]"
-        >
-          <div
-            class="absolute inset-0 transition-colors duration-[1500ms]"
-            :style="layer.baseStyle"
-          ></div>
+      <FlowBackground
+        v-if="activeBackgroundInfo?.type === 'flow'"
+        :cover-src="bgImageSrc"
+        :cover-pending="coverPending"
+        :paused="reduceDynamicEffects || isMiniMode"
+        :dark="isDarkTheme"
+      />
+    </transition>
 
-          <div
-            v-if="!layer.reduceDynamicEffects"
-            class="flow-accent-texture absolute"
-            :style="{ ...layer.blobStyle, opacity: layer.blobOpacity }"
-          ></div>
-
-          <div
-            v-if="!layer.reduceDynamicEffects"
-            class="absolute inset-0 z-10 bg-noise pointer-events-none"
-            :style="{ opacity: layer.noiseOpacity }"
-          ></div>
-
-          <div
-            class="absolute inset-0 z-20"
-            :class="layer.overlayClass"
-            :style="layer.overlayStyle"
-          ></div>
-        </div>
-      </div>
+    <transition name="fade">
+      <MistBackground
+        v-if="activeBackgroundInfo?.type === 'mist'"
+        :cover-src="activeBackgroundInfo.src"
+        :suspended="reduceDynamicEffects || isMiniMode"
+        :dark="isDarkTheme"
+      />
     </transition>
 
     <transition name="fade-fast">
       <div
-        v-if="activeBackgroundInfo?.type === 'blur' && bgImageSrc"
-        :key="bgImageSrc"
+        v-if="activeBackgroundInfo?.type === 'blur' && staticBackgroundDisplaySrc"
+        :key="staticBackgroundSource"
         class="absolute inset-0"
       >
         <div class="absolute inset-0 z-10 transition-colors duration-500" :class="staticMaskClass"></div>
         <img
-          :src="preblurredStaticBgSrc || bgImageSrc"
+          :src="staticBackgroundDisplaySrc"
           class="w-full h-full object-cover transition-opacity duration-1000 z-0"
           :style="{
             filter: isStaticBgPreblurred ? 'none' : `blur(${staticBlurAmount}px) brightness(${staticBrightness})`,
@@ -783,6 +636,7 @@ const customBgTransform = computed(() => {
         />
         <img
           v-else-if="customBgGeometry"
+          :key="renderedCustomMedia?.cacheResetVersion"
           :src="customMediaSrc"
           class="absolute block max-w-none max-h-none select-none pointer-events-none transition-opacity duration-700"
           :style="{
@@ -827,42 +681,6 @@ const customBgTransform = computed(() => {
 .fade-fast-enter-from,
 .fade-fast-leave-to {
   opacity: 0;
-}
-
-.flow-layer {
-  will-change: opacity, transform;
-  transition:
-    opacity 920ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 920ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.flow-layer-current {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.flow-layer-entering {
-  opacity: 0;
-  transform: scale(1.028);
-}
-
-.flow-layer-previous {
-  opacity: 0;
-  transform: scale(1.048);
-}
-
-.flow-accent-texture {
-  top: 16%;
-  left: 16%;
-  width: 68%;
-  height: 68%;
-  transform-origin: center;
-  transform: scale(1.05);
-  contain: paint;
-}
-
-.bg-noise {
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3%3Ffilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/feTurbulence%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
 }
 
 .global-background--low-power,

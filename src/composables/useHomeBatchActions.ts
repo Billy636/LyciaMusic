@@ -1,15 +1,17 @@
-import { ref, type Ref } from 'vue';
+import { onDeactivated, ref, watch, type Ref } from 'vue';
 import { storeToRefs } from 'pinia';
 import { fileApi } from '../services/tauri/fileApi';
 import { usePlaybackStore } from '../features/playback/store';
 import type { Playlist } from '../types';
 import { removeSongPathsFromPlaybackState } from './playbackCleanup';
+import { folderPathKey } from '../utils/folderMove';
 
 interface ConfirmOptions {
   title: string;
   confirmText: string;
   message: string;
   action: () => void | Promise<void>;
+  type?: 'danger' | 'info';
 }
 
 interface UseHomeBatchActionsOptions {
@@ -18,6 +20,7 @@ interface UseHomeBatchActionsOptions {
   selectedPaths: Ref<Set<string>>;
   isBatchMode: Ref<boolean>;
   isManagementMode: Ref<boolean>;
+  selectionScope?: Ref<string>;
   canonicalSongPaths: Ref<string[]>;
   sourceSongPaths: Ref<string[]>;
   favoritePaths: Ref<string[]>;
@@ -34,6 +37,7 @@ export function useHomeBatchActions({
   selectedPaths,
   isBatchMode,
   isManagementMode,
+  selectionScope,
   canonicalSongPaths,
   sourceSongPaths,
   favoritePaths,
@@ -44,7 +48,10 @@ export function useHomeBatchActions({
   getRoutePath,
 }: UseHomeBatchActionsOptions) {
   const showMoveToFolderModal = ref(false);
+  const pendingMovePaths = ref<string[]>([]);
+  const isMovingSongs = ref(false);
   const showConfirm = ref(false);
+  const confirmType = ref<'danger' | 'info'>('danger');
   const confirmTitle = ref('移除歌曲');
   const confirmButtonText = ref('移除');
   const confirmMessage = ref('');
@@ -57,7 +64,8 @@ export function useHomeBatchActions({
     isBatchMode.value = false;
   };
 
-  const openConfirm = ({ title, confirmText, message, action }: ConfirmOptions) => {
+  const openConfirm = ({ title, confirmText, message, action, type = 'danger' }: ConfirmOptions) => {
+    confirmType.value = type;
     confirmTitle.value = title;
     confirmButtonText.value = confirmText;
     confirmMessage.value = message;
@@ -76,7 +84,7 @@ export function useHomeBatchActions({
     } else if (currentViewMode.value === 'playlist' && filterCondition?.value) {
       const selected = new Set(selectedPaths.value);
       const targetPlaylist = playlists.value.find(p => p.id === filterCondition.value);
-      if (targetPlaylist) {
+      if (targetPlaylist && !targetPlaylist.importData?.linked) {
         targetPlaylist.songPaths = targetPlaylist.songPaths.filter(path => !selected.has(path));
       }
     }
@@ -109,6 +117,7 @@ export function useHomeBatchActions({
       removeSongPathsFromPlaybackState({ playQueuePaths, tempQueuePaths, currentSong }, deletedPaths);
       await removeFromHistory(Array.from(deletedPaths));
       playlists.value.forEach((playlist) => {
+        if (playlist.importData?.linked) return;
         playlist.songPaths = playlist.songPaths.filter((path) => !deletedPaths.has(path));
       });
 
@@ -126,6 +135,10 @@ export function useHomeBatchActions({
 
   const requestBatchDelete = () => {
     if (selectedPaths.value.size === 0) return;
+    if (currentViewMode.value === 'playlist' && playlists.value.find(p => p.id === filterCondition?.value)?.importData?.linked) {
+      showToast('文件关联歌单由源文件管理，请先复制为普通歌单', 'info');
+      return;
+    }
 
     openConfirm({
       title: '移除歌曲',
@@ -156,31 +169,87 @@ export function useHomeBatchActions({
   };
 
   const executeConfirmAction = async () => {
-    await confirmAction.value();
+    const action = confirmAction.value;
     showConfirm.value = false;
+    await action();
   };
+
+  const canMoveSongs = () => !isMovingSongs.value
+    && (currentViewMode.value !== 'folder' || isManagementMode.value);
 
   const handleBatchMove = () => {
-    if (selectedPaths.value.size > 0) {
-      showMoveToFolderModal.value = true;
+    if (!canMoveSongs() || selectedPaths.value.size === 0) return;
+    pendingMovePaths.value = Array.from(selectedPaths.value);
+    showMoveToFolderModal.value = true;
+  };
+
+  const executeSongMove = async (paths: string[], targetFolder: string, folderName: string) => {
+    if (!canMoveSongs() || paths.length === 0) return;
+    const sourceScope = selectionScope?.value;
+    isMovingSongs.value = true;
+    try {
+      const count = await moveFilesToFolder(paths, targetFolder);
+      if (count === 0) {
+        showToast('歌曲已在这个文件夹中', 'info');
+        return;
+      }
+      showToast(`已移动 ${count} 首歌曲到“${folderName}”`, 'success');
+      showMoveToFolderModal.value = false;
+      pendingMovePaths.value = [];
+      if (sourceScope === selectionScope?.value) {
+        paths.forEach(path => selectedPaths.value.delete(path));
+        if (selectedPaths.value.size === 0) isBatchMode.value = false;
+      }
+    } catch (error: any) {
+      showToast(`移动失败: ${error?.message || error}`, 'error');
+    } finally {
+      isMovingSongs.value = false;
     }
   };
 
-  const confirmBatchMove = async (targetFolder: string, folderName: string) => {
-    try {
-      const paths = Array.from(selectedPaths.value);
-      const count = await moveFilesToFolder(paths, targetFolder);
-      showToast(`已成功移动 ${count} 首歌曲到 "${folderName}"`, 'success');
-      showMoveToFolderModal.value = false;
-      resetSelection();
-    } catch (error: any) {
-      showToast(`移动失败: ${error?.message || error}`, 'error');
-    }
+  const confirmBatchMove = (targetFolder: string, folderName: string) =>
+    executeSongMove([...pendingMovePaths.value], targetFolder, folderName);
+
+  const requestSongDrop = (paths: string[], target: { path: string; name: string }) => {
+    if (!canMoveSongs() || showConfirm.value || showMoveToFolderModal.value) return;
+    const movingPaths = [...new Set(paths)].filter(path =>
+      folderPathKey(path.replace(/[/\\][^/\\]+$/, '')) !== folderPathKey(target.path),
+    );
+    if (!movingPaths.length) { showToast('歌曲已在这个文件夹中', 'info'); return; }
+    const destination = { ...target };
+    openConfirm({
+      title: '移动歌曲',
+      confirmText: '移动',
+      message: `将 ${movingPaths.length} 首歌曲移动到“${destination.name}”？`,
+      type: 'info',
+      action: () => executeSongMove(movingPaths, destination.path, destination.name),
+    });
   };
+
+  watch([currentViewMode, isManagementMode], ([view, management], [previousView]) => {
+    if (view !== previousView || (view === 'folder' && !management)) {
+      showMoveToFolderModal.value = false;
+      pendingMovePaths.value = [];
+      if (confirmType.value === 'info') showConfirm.value = false;
+    }
+  });
+
+  const cancelPendingActions = () => {
+    showMoveToFolderModal.value = false;
+    pendingMovePaths.value = [];
+    showConfirm.value = false;
+    confirmAction.value = () => {};
+  };
+  if (selectionScope) watch(selectionScope, cancelPendingActions, { flush: 'sync' });
+  onDeactivated(cancelPendingActions);
 
   return {
     showMoveToFolderModal,
+    pendingMovePaths,
+    isMovingSongs,
+    requestSongDrop,
     showConfirm,
+    confirmType,
     confirmTitle,
     confirmButtonText,
     confirmMessage,

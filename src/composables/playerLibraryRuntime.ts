@@ -8,6 +8,7 @@ import type { ScanLibraryOptions } from './playerLibraryScan';
 import type {
   AlbumCatalogItem,
   ArtistCatalogItem,
+  GenreCatalogItem,
   LibraryScanVisibility,
   Song,
 } from '../types';
@@ -90,7 +91,11 @@ export const createPlayerLibraryRuntime = ({
         LIBRARY_SCAN_VISIBILITY_PRIORITY[next.visibility] >= LIBRARY_SCAN_VISIBILITY_PRIORITY[current.visibility]
           ? next.visibility
           : current.visibility,
-      sourcePath: next.sourcePath || current.sourcePath,
+      // Requests for different roots need a full scan when coalesced; retaining
+      // only the last root would leave another newly registered root unscanned.
+      sourcePath: current.sourcePath && current.sourcePath === next.sourcePath
+        ? current.sourcePath
+        : '',
     };
   };
 
@@ -149,16 +154,19 @@ export const createPlayerLibraryRuntime = ({
   const loadLibraryCatalogsFromCache = async () => {
     const profileStart = isProfilingEnabled() ? performance.now() : 0;
     try {
-      const [artists, albums] = await Promise.all([
+      const [artists, albums, genres] = await Promise.all([
         invoke<ArtistCatalogItem[]>('get_library_artist_catalog'),
         invoke<AlbumCatalogItem[]>('get_library_album_catalog'),
+        invoke<GenreCatalogItem[]>('get_library_genre_catalog'),
       ]);
 
       libraryStore.setArtistCatalog(artists);
       libraryStore.setAlbumCatalog(albums);
+      clearLibraryDetailSongPathCache();
+      libraryStore.setGenreCatalog(genres);
       if (isProfilingEnabled()) {
         console.log(
-          `[Profiling] loadLibraryCatalogsFromCache took ${(performance.now() - profileStart).toFixed(2)}ms (artists: ${artists.length}, albums: ${albums.length})`,
+          `[Profiling] loadLibraryCatalogsFromCache took ${(performance.now() - profileStart).toFixed(2)}ms (artists: ${artists.length}, albums: ${albums.length}, genres: ${genres.length})`,
         );
       }
     } catch (error) {
@@ -207,6 +215,7 @@ export const createPlayerLibraryRuntime = ({
       libraryStore.setLibraryHierarchy([]);
       libraryStore.setArtistCatalog([]);
       libraryStore.setAlbumCatalog([]);
+      libraryStore.setGenreCatalog([]);
       clearLibraryPathCaches();
       refreshStateSongReferences([]);
       libraryStore.setLibraryScanSession(null);
@@ -227,9 +236,18 @@ export const createPlayerLibraryRuntime = ({
 
     libraryRefreshPromise = (async () => {
       try {
-        const scanEntries = await invoke<Array<string | { path: string }>>('scan_library', {
-          minimumDurationSeconds: settingsStore.settings.libraryMinDurationSeconds,
-        });
+        let scanEntries: Array<string | { path: string }>;
+        if (resolvedOptions.sourcePath) {
+          await invoke<string[]>('scan_music_folder_paths', {
+            folderPath: resolvedOptions.sourcePath,
+            minimumDurationSeconds: settingsStore.settings.libraryMinDurationSeconds,
+          });
+          scanEntries = await invoke<Array<string | { path: string }>>('get_library_song_paths_cached');
+        } else {
+          scanEntries = await invoke<Array<string | { path: string }>>('scan_library', {
+            minimumDurationSeconds: settingsStore.settings.libraryMinDurationSeconds,
+          });
+        }
         const paths = scanEntries
           .map(entry => typeof entry === 'string' ? entry : entry.path)
           .filter(Boolean);

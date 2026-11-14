@@ -17,12 +17,13 @@ interface ProcessExternalPathsResult {
   skippedFolderCount: number;
   playableSongs: Song[];
   ignoredFileCount: number;
+  playlistFileCount?: number;
 }
 
 interface UseLibrarySyncOptions {
   fetchLibraryFolders: () => Promise<unknown>;
   scanLibrary: (options?: ScanLibraryOptions) => Promise<unknown>;
-  refreshFolder: (folderPath: string) => Promise<unknown>;
+  refreshFolder: (folderPath: string, forceMetadataRefresh?: boolean) => Promise<unknown>;
   refreshAllFolders: () => Promise<unknown>;
   addLibraryFolder?: () => Promise<unknown>;
   addLibraryFolderLinked?: (
@@ -93,6 +94,7 @@ export function useLibrarySync(options: UseLibrarySyncOptions) {
       skippedFolderCount,
       playableSongs,
       ignoredFileCount,
+      playlistFileCount,
     } = await options.processExternalPaths(paths, config);
 
     if (importedFolderCount > 0 && playableSongs.length > 0) {
@@ -141,6 +143,11 @@ export function useLibrarySync(options: UseLibrarySyncOptions) {
 
     if (skippedFolderCount > 0) {
       showToast(`${skippedFolderCount} 个文件夹已在音乐库中，未重复导入`, 'info');
+      return;
+    }
+
+    if (playlistFileCount) {
+      if (playlistFileCount > 1) showToast('已打开第一个歌单文件，请逐个导入其他歌单', 'info');
       return;
     }
 

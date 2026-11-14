@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useFolderDrag } from '../../composables/useFolderDrag';
+import { folderMoveTargetError, isWithinFolder } from '../../utils/folderMove';
 
 import { usePlayer } from '../../composables/player';
 import { useToast } from '../../composables/toast';
-import { dragSession } from '../../composables/dragState';
 import { useLibraryFolderSongPathCache } from '../../composables/useLibraryFolderSongPathCache';
+import { useFolderSongScope } from '../../features/library/useFolderSongScope';
+import { useNavigationStore } from '../../shared/stores/navigation';
 import { useListScrollMemory } from '../../composables/useListScrollMemory';
 import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver';
 import type { FolderNode } from '../../types';
@@ -12,6 +15,7 @@ import FolderTreeItem from '../common/FolderTreeItem.vue';
 import ModernInputModal from '../common/ModernInputModal.vue';
 import ModernModal from '../common/ModernModal.vue';
 import FolderContextMenu from '../overlays/FolderContextMenu.vue';
+import MoveToFolderModal from '../overlays/MoveToFolderModal.vue';
 import { useAddToPlaylistDialog } from '../../features/collections/addToPlaylistDialog';
 
 const props = withDefaults(defineProps<{
@@ -31,24 +35,70 @@ const {
   fetchFolderTree,
   toggleFolderNode,
   expandFolderPath,
+  ensureFolderChildrenLoaded,
   refreshFolder,
   removeLibraryFolder,
   deleteFolder,
-  moveFilesToFolder,
+  moveFolderToFolder,
   playSong,
   addSongPathsToQueue,
   openInFinder,
   createPlaylist,
   createFolder,
+  libraryScanProgress,
 } = usePlayer();
 
 const toast = useToast();
 const { loadFolderViewSongPaths } = useLibraryFolderSongPathCache();
+const { includesDescendantsFor } = useFolderSongScope();
+const navigationStore = useNavigationStore();
 const { loadSong } = useLibrarySongResolver();
 
 const sidebarWidth = ref(240);
 const isResizing = ref(false);
 const treeContainerRef = ref<HTMLElement | null>(null);
+const isMovingFolder = ref(false);
+const showFolderMoveModal = ref(false);
+const folderMoveSource = ref<{ path: string; name: string } | null>(null);
+const canMoveFolder = (folder: { path: string }) =>
+  !folderTree.value.some(root => isWithinFolder(root.path, folder.path));
+
+const executeFolderMove = async (source: { path: string; name: string }, target: { path: string; name: string }) => {
+  if (!props.isManagementMode || isMovingFolder.value || !canMoveFolder(source)) return;
+  if (libraryScanProgress.value && !libraryScanProgress.value.done && !libraryScanProgress.value.failed) {
+    toast.showToast('音乐库正在扫描，请扫描完成后再移动文件夹', 'info');
+    return;
+  }
+  const error = folderMoveTargetError(source.path, target.path);
+  if (error) { toast.showToast(error, 'info'); return; }
+  isMovingFolder.value = true;
+  try {
+    const newPath = await moveFolderToFolder(source.path, target.path);
+    const root = folderTree.value.filter(root => isWithinFolder(newPath, root.path))
+      .sort((a, b) => b.path.length - a.path.length)[0];
+    if (root) activeRootPath.value = root.path;
+    currentFolderFilter.value = newPath;
+    await expandFolderPath(newPath);
+    showFolderMoveModal.value = false;
+    folderMoveSource.value = null;
+    toast.showToast(`已将“${source.name}”移动到“${target.name}”`, 'success');
+  } catch (error) {
+    toast.showToast(`移动文件夹失败：${error}`, 'error');
+  } finally {
+    isMovingFolder.value = false;
+  }
+};
+
+const { startFolderDrag } = useFolderDrag({
+  enabled: computed(() => currentViewMode.value === 'folder' && props.isManagementMode && !isMovingFolder.value),
+  container: treeContainerRef,
+  canMove: canMoveFolder,
+  expand: async path => {
+    await ensureFolderChildrenLoaded(path);
+    await expandFolderPath(path);
+  },
+  move: executeFolderMove,
+});
 let resizeStartX = 0;
 let resizeStartWidth = 0;
 
@@ -63,9 +113,6 @@ const createFolderParentPath = ref('');
 const showPhysicalDeleteConfirm = ref(false);
 const folderToPhysicalDelete = ref<string | null>(null);
 
-const showMoveConfirm = ref(false);
-const dragPendingFiles = ref<string[]>([]);
-const moveTarget = ref<{ name: string; path: string } | null>(null);
 let skipNextSelectionExpand = false;
 
 const activeTreeNodes = computed(() => {
@@ -97,24 +144,27 @@ const {
 
 watch(
   folderTree,
-  async newTree => {
+  newTree => {
     if (newTree.length === 0) {
       activeRootPath.value = null;
       return;
     }
 
-    if (!activeRootPath.value || !newTree.find(node => node.path === activeRootPath.value)) {
+    const collectionTarget = navigationStore.folderCollectionPath
+      && navigationStore.folderCollectionPath === currentFolderFilter.value
+      ? currentFolderFilter.value : '';
+    if (collectionTarget) {
+      const owningRoot = newTree.filter(node => isWithinFolder(collectionTarget, node.path))
+        .sort((left, right) => right.path.length - left.path.length)[0];
+      if (owningRoot) activeRootPath.value = owningRoot.path;
+    } else if (!activeRootPath.value || !newTree.find(node => node.path === activeRootPath.value)) {
       activeRootPath.value = newTree[0].path;
     }
 
     const selectedRoot = newTree.find(node => node.path === activeRootPath.value);
-    if (selectedRoot && selectedRoot.children.length === 0 && selectedRoot.song_count > 0) {
+    // Keep an explicit collection target while its folder tree is unavailable.
+    if (!collectionTarget && selectedRoot && selectedRoot.children.length === 0 && selectedRoot.song_count > 0) {
       currentFolderFilter.value = selectedRoot.path;
-      try {
-        await refreshFolder(selectedRoot.path);
-      } catch (error) {
-        console.error('Failed to auto-load root folder songs:', error);
-      }
     }
   },
   { immediate: true },
@@ -209,7 +259,7 @@ const handleRefreshFolder = async () => {
       } else if (removedCount > 0) {
         toast.showToast(`刷新成功，检测到少了 ${removedCount} 首歌曲`, 'success');
       } else {
-        toast.showToast('刷新成功，文件夹歌曲已是最新', 'success');
+        toast.showToast('刷新成功，已重新读取歌曲标签和封面', 'success');
       }
     } else {
       toast.showToast('刷新成功', 'success');
@@ -228,6 +278,7 @@ const resolveFolderMenuPaths = async (folderPath: string) => {
 
   const paths = await loadFolderViewSongPaths({
     folderPath,
+    includeSubfolders: includesDescendantsFor(folderPath),
     query: currentViewMode.value === 'folder' ? searchQuery.value : '',
     sortMode: folderSortMode.value === 'custom' ? 'title' : folderSortMode.value,
   });
@@ -370,6 +421,17 @@ const handlePhysicalDelete = () => {
   showMenu.value = false;
 };
 
+const handleMoveFolder = () => {
+  if (!props.isManagementMode || isMovingFolder.value || !targetFolder.value || !canMoveFolder(targetFolder.value)) return;
+  folderMoveSource.value = { ...targetFolder.value };
+  showMenu.value = false;
+  showFolderMoveModal.value = true;
+};
+
+const confirmFolderMove = async (path: string, name: string) => {
+  if (folderMoveSource.value) await executeFolderMove({ ...folderMoveSource.value }, { path, name });
+};
+
 const executePhysicalDelete = async () => {
   if (!folderToPhysicalDelete.value) {
     return;
@@ -409,58 +471,6 @@ const executePhysicalDelete = async () => {
   }
 };
 
-const handleDropEvent = () => {
-  if (!props.isManagementMode) {
-    return;
-  }
-
-  if (!dragSession.targetFolder || dragSession.targetFolder.path === currentFolderFilter.value) {
-    return;
-  }
-
-  const songsToMove = dragSession.songs && dragSession.songs.length > 0
-    ? dragSession.songs
-    : (dragSession.data ? [dragSession.data] : []);
-
-  if (songsToMove.length === 0) {
-    return;
-  }
-
-  dragPendingFiles.value = songsToMove.map(song => song.path);
-  moveTarget.value = { ...dragSession.targetFolder };
-  showMoveConfirm.value = true;
-};
-
-const resetMoveState = () => {
-  dragPendingFiles.value = [];
-  showMoveConfirm.value = false;
-  moveTarget.value = null;
-  dragSession.showGhost = false;
-  dragSession.active = false;
-  dragSession.targetFolder = null;
-  dragSession.songs = [];
-};
-
-const executeMove = async () => {
-  if (!moveTarget.value || dragPendingFiles.value.length === 0) {
-    resetMoveState();
-    return;
-  }
-
-  try {
-    await moveFilesToFolder(dragPendingFiles.value, moveTarget.value.path);
-    toast.showToast('Files moved successfully', 'success');
-  } catch (error) {
-    toast.showToast(`Move failed: ${error}`, 'error');
-  } finally {
-    resetMoveState();
-  }
-};
-
-const cancelMove = () => {
-  resetMoveState();
-};
-
 const startResize = (event: MouseEvent) => {
   isResizing.value = true;
   resizeStartX = event.clientX;
@@ -489,7 +499,6 @@ const stopResize = () => {
 };
 
 onMounted(async () => {
-  window.addEventListener('custom-drop-trigger', handleDropEvent);
   await restoreFolderViewState();
 });
 
@@ -498,9 +507,13 @@ onActivated(async () => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener('custom-drop-trigger', handleDropEvent);
   stopResize();
 });
+
+watch(() => props.isManagementMode, enabled => {
+  if (!enabled) showFolderMoveModal.value = false;
+});
+onDeactivated(() => { showFolderMoveModal.value = false; showMenu.value = false; });
 </script>
 
 <template>
@@ -516,7 +529,7 @@ onUnmounted(() => {
 
     <div class="h-full overflow-y-auto custom-scrollbar">
       <div class="flex flex-col h-full bg-transparent">
-        <div ref="treeContainerRef" class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4 space-y-0.5 mt-1">
+        <div ref="treeContainerRef" data-folder-tree-scroll class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4 space-y-0.5 mt-1">
           <div v-if="activeTreeNodes.length > 0">
             <FolderTreeItem
               v-for="node in activeTreeNodes"
@@ -527,6 +540,7 @@ onUnmounted(() => {
               @select="handleTreeSelect"
               @toggle="handleTreeToggle"
               @contextmenu="handleTreeContextMenu"
+              @drag-start="startFolderDrag"
             />
           </div>
 
@@ -568,14 +582,15 @@ onUnmounted(() => {
       @remove="removeFolderItem"
       @new-folder="handleCreateFolder"
       @delete-disk="handlePhysicalDelete"
+      @move-folder="handleMoveFolder"
     />
 
-    <ModernModal
-      v-model:visible="showMoveConfirm"
-      title="Move Files"
-      :content="`Move ${dragPendingFiles.length} file(s) to folder '${moveTarget?.name}'?`"
-      @confirm="executeMove"
-      @cancel="cancelMove"
+    <MoveToFolderModal
+      :visible="showFolderMoveModal"
+      :source-folder="folderMoveSource"
+      :busy="isMovingFolder"
+      @close="showFolderMoveModal = false"
+      @confirm="confirmFolderMove"
     />
 
     <ModernModal

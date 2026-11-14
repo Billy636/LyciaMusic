@@ -4,6 +4,7 @@ import {
   DESKTOP_LYRICS_WINDOW_LABEL,
   MAIN_WINDOW_LABEL,
   MINI_PLAYER_WINDOW_LABEL,
+  SONG_NOTIFICATION_WINDOW_LABEL,
   TASKBAR_PLAYER_WINDOW_LABEL,
   TRAY_MENU_WINDOW_LABEL,
 } from './windowLabels';
@@ -13,6 +14,7 @@ export type WindowKind =
   | 'desktop-lyrics'
   | 'mini-player'
   | 'tray-menu'
+  | 'song-notification'
   | 'taskbar-player';
 
 type WindowRootModule = { default: Component };
@@ -24,6 +26,7 @@ const windowRootLoaders: Record<WindowKind, WindowRootLoader> = {
   'mini-player': () => import('./components/layout/MiniPlayerWindow.vue'),
   'tray-menu': () => import('./components/layout/TrayMenuWindow.vue'),
   'taskbar-player': () => import('./components/layout/TaskbarControlWindow.vue'),
+  'song-notification': () => import('./components/window/SongNotificationWindow.vue'),
 };
 
 export function resolveWindowKind(windowLabel: string | null | undefined): WindowKind {
@@ -36,6 +39,8 @@ export function resolveWindowKind(windowLabel: string | null | undefined): Windo
       return 'tray-menu';
     case TASKBAR_PLAYER_WINDOW_LABEL:
       return 'taskbar-player';
+    case SONG_NOTIFICATION_WINDOW_LABEL:
+      return 'song-notification';
     case MAIN_WINDOW_LABEL:
     default:
       return 'main';

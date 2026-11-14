@@ -6,15 +6,28 @@ import type {
   LyricsFontPreset,
   LyricsPlayerAlignment,
   LyricsPlayerRenderMode,
+  LyricsPlayerWritingMode,
+  LyricsVerticalScrollDirection,
   LyricsSettings,
 } from '../../types';
+import {
+  DEFAULT_LYRICS_READING_ORDER,
+  normalizeLyricsReadingOrder,
+  normalizeLyricsReadingOrderOverrides,
+} from './readingOrder';
 
 export const LEGACY_LYRICS_SETTINGS_KEY = 'lyrics_settings';
 export const LEGACY_DESKTOP_LYRICS_SETTINGS_KEY = 'desktop_lyrics_settings';
 
+export const DEFAULT_LYRICS_BLUR_STRENGTH = 1;
+export const MIN_LYRICS_BLUR_STRENGTH = 0;
+export const MAX_LYRICS_BLUR_STRENGTH = 2;
 export const DEFAULT_PLAYER_FONT_SCALE = 1;
 export const MIN_PLAYER_FONT_SCALE = 0.5;
-export const MAX_PLAYER_FONT_SCALE = 3.0;
+export const MAX_PLAYER_FONT_SCALE = 2.0;
+export const DEFAULT_PLAYER_TRANSLATION_FONT_SCALE = 1;
+export const MIN_PLAYER_TRANSLATION_FONT_SCALE = 0.5;
+export const MAX_PLAYER_TRANSLATION_FONT_SCALE = 2;
 export const DEFAULT_PLAYER_LINE_GAP = 1;
 export const MIN_PLAYER_LINE_GAP = 0.5;
 export const MAX_PLAYER_LINE_GAP = 3.0;
@@ -28,6 +41,8 @@ export const DEFAULT_PLAYER_ALIGNMENT: LyricsPlayerAlignment = 'left';
 export const DEFAULT_DESKTOP_PLAYER_ALIGNMENT: DesktopLyricsPlayerAlignment = 'center';
 export const DEFAULT_PLAYER_FONT_PRESET: LyricsFontPreset = 'system';
 export const DEFAULT_PLAYER_RENDER_MODE: LyricsPlayerRenderMode = 'amll';
+export const DEFAULT_PLAYER_WRITING_MODE: LyricsPlayerWritingMode = 'horizontal';
+export const DEFAULT_PLAYER_VERTICAL_SCROLL_DIRECTION: LyricsVerticalScrollDirection = 'left';
 export const DEFAULT_DESKTOP_CUSTOM_PLAYED_COLOR = '#EC4141';
 export const DEFAULT_DESKTOP_CUSTOM_UNPLAYED_COLOR = '#FFFFFF';
 export const DEFAULT_DESKTOP_CUSTOM_ROMAJI_PLAYED_COLOR = '#BFDBFE';
@@ -105,8 +120,15 @@ export const LYRICS_FONT_OPTIONS = [
 export const defaultLyricsSettings: LyricsSettings = {
   showTranslation: true,
   showRomaji: false,
+  enableBlur: true,
+  blurStrength: DEFAULT_LYRICS_BLUR_STRENGTH,
+  readingOrder: DEFAULT_LYRICS_READING_ORDER,
+  readingOrderOverrides: {},
   playerRenderMode: DEFAULT_PLAYER_RENDER_MODE,
+  playerWritingMode: DEFAULT_PLAYER_WRITING_MODE,
+  playerVerticalScrollDirection: DEFAULT_PLAYER_VERTICAL_SCROLL_DIRECTION,
   playerFontScale: DEFAULT_PLAYER_FONT_SCALE,
+  playerTranslationFontScale: DEFAULT_PLAYER_TRANSLATION_FONT_SCALE,
   playerLineGap: DEFAULT_PLAYER_LINE_GAP,
   playerOffsetX: DEFAULT_PLAYER_OFFSET_X,
   playerOffsetY: DEFAULT_PLAYER_OFFSET_Y,
@@ -120,6 +142,7 @@ export const defaultDesktopLyricsSettings: DesktopLyricsSettings = {
   autoHideWhenFullscreen: true,
   autoHideWhenPaused: false,
   showDoubleLine: false,
+  overflowMode: 'scroll',
   enableWordEffect: true,
   isLocked: false,
   persistLock: false,
@@ -146,16 +169,29 @@ export const defaultDesktopLyricsSettings: DesktopLyricsSettings = {
 };
 
 export function createDefaultLyricsSettings(): LyricsSettings {
-  return { ...defaultLyricsSettings };
+  return {
+    ...defaultLyricsSettings,
+    readingOrderOverrides: { ...defaultLyricsSettings.readingOrderOverrides },
+  };
 }
 
 export function createDefaultDesktopLyricsSettings(): DesktopLyricsSettings {
   return { ...defaultDesktopLyricsSettings };
 }
 
+export function clampLyricsBlurStrength(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_LYRICS_BLUR_STRENGTH;
+  return Math.min(MAX_LYRICS_BLUR_STRENGTH, Math.max(MIN_LYRICS_BLUR_STRENGTH, value));
+}
+
 export function clampPlayerFontScale(value: number) {
   if (!Number.isFinite(value)) return DEFAULT_PLAYER_FONT_SCALE;
   return Math.min(MAX_PLAYER_FONT_SCALE, Math.max(MIN_PLAYER_FONT_SCALE, value));
+}
+
+export function clampPlayerTranslationFontScale(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_PLAYER_TRANSLATION_FONT_SCALE;
+  return Math.min(MAX_PLAYER_TRANSLATION_FONT_SCALE, Math.max(MIN_PLAYER_TRANSLATION_FONT_SCALE, value));
 }
 
 export function clampPlayerLineGap(value: number) {
@@ -281,6 +317,14 @@ export function normalizeLyricsPlayerRenderMode(value: unknown): LyricsPlayerRen
   return value === 'light' || value === 'amll' ? value : DEFAULT_PLAYER_RENDER_MODE;
 }
 
+export function normalizeLyricsPlayerWritingMode(value: unknown): LyricsPlayerWritingMode {
+  return value === 'vertical' || value === 'horizontal' ? value : DEFAULT_PLAYER_WRITING_MODE;
+}
+
+export function normalizeLyricsVerticalScrollDirection(value: unknown): LyricsVerticalScrollDirection {
+  return value === 'left' || value === 'right' ? value : DEFAULT_PLAYER_VERTICAL_SCROLL_DIRECTION;
+}
+
 export function extractPrimaryFontFamily(fontFamily: string): string {
   return fontFamily
     .split(',')[0]
@@ -293,14 +337,25 @@ export function normalizeLyricsSettingsPatch(patch: Partial<LyricsSettings>): Ly
   return {
     ...defaultLyricsSettings,
     ...patch,
+    enableBlur: typeof patch.enableBlur === 'boolean'
+      ? patch.enableBlur
+      : defaultLyricsSettings.enableBlur,
+    blurStrength: clampLyricsBlurStrength(patch.blurStrength ?? DEFAULT_LYRICS_BLUR_STRENGTH),
     showTranslation: typeof patch.showTranslation === 'boolean'
       ? patch.showTranslation
       : defaultLyricsSettings.showTranslation,
     showRomaji: typeof patch.showRomaji === 'boolean'
       ? patch.showRomaji
       : defaultLyricsSettings.showRomaji,
+    readingOrder: normalizeLyricsReadingOrder(patch.readingOrder),
+    readingOrderOverrides: normalizeLyricsReadingOrderOverrides(patch.readingOrderOverrides),
     playerRenderMode: normalizeLyricsPlayerRenderMode(patch.playerRenderMode),
+    playerWritingMode: normalizeLyricsPlayerWritingMode(patch.playerWritingMode),
+    playerVerticalScrollDirection: normalizeLyricsVerticalScrollDirection(patch.playerVerticalScrollDirection),
     playerFontScale: clampPlayerFontScale(patch.playerFontScale ?? DEFAULT_PLAYER_FONT_SCALE),
+    playerTranslationFontScale: clampPlayerTranslationFontScale(
+      patch.playerTranslationFontScale ?? DEFAULT_PLAYER_TRANSLATION_FONT_SCALE,
+    ),
     playerLineGap: clampPlayerLineGap(patch.playerLineGap ?? DEFAULT_PLAYER_LINE_GAP),
     playerOffsetX: clampPlayerOffsetX(patch.playerOffsetX ?? DEFAULT_PLAYER_OFFSET_X),
     playerOffsetY: clampPlayerOffsetY(patch.playerOffsetY ?? DEFAULT_PLAYER_OFFSET_Y),
@@ -337,6 +392,7 @@ export function normalizeDesktopLyricsSettingsPatch(
     showDoubleLine: typeof patch.showDoubleLine === 'boolean'
       ? patch.showDoubleLine
       : defaultDesktopLyricsSettings.showDoubleLine,
+    overflowMode: patch.overflowMode === 'wrap' ? 'wrap' : 'scroll',
     enableWordEffect: typeof patch.enableWordEffect === 'boolean'
       ? patch.enableWordEffect
       : defaultDesktopLyricsSettings.enableWordEffect,

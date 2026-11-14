@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useLyrics } from '../../composables/lyrics';
 import { useSongDetailCache } from '../../composables/useSongDetailCache';
@@ -10,22 +11,31 @@ import { useToast } from '../../composables/toast';
 import { windowApi } from '../../services/tauri/windowApi';
 import type { SongDetail } from '../../types';
 import LyricsView from './LyricsView.vue';
+import LyricsAppearancePanel from './LyricsAppearancePanel.vue';
+import { readLyricsAppearanceDraft } from './useLyricsAppearanceDraft';
 import PlayerDetailBackground from './PlayerDetailBackground.vue';
 import PlayerDetailLeft from './PlayerDetailLeft.vue';
+import ImmersiveTransitionOverlay from './ImmersiveTransitionOverlay.vue';
 import QueueList from './QueueList.vue';
 import { resolvePlayerDetailEscapeAction } from './playerDetailKeyboard';
 import { hideMainWindowToTray } from '../../composables/renderingPower';
+import { useUiStore } from '../../shared/stores/ui';
 
 const {
   showPlayerDetail,
   showQueue,
+  showPlaylist,
   currentSong,
   closePlayerDetail,
 } = usePlaybackController();
 
 const { settings } = useSettings();
 
-const { parsedLyrics } = useLyrics();
+const { parsedLyrics, lyricsStatus, lyricsSettings, showLyricsPlayerSettingsPanel } = useLyrics();
+const lyricsAppearancePreview = ref(readLyricsAppearanceDraft(lyricsSettings));
+const hasLyricsPresentation = computed(() => lyricsStatus.value === 'loading'
+  || lyricsStatus.value === 'error'
+  || (lyricsStatus.value === 'ready' && parsedLyrics.value.length > 0));
 const { staggerPhase } = useSharedTransition();
 const { loadSongDetail, clearSongDetailCache } = useSongDetailCache();
 const { showToast } = useToast();
@@ -40,16 +50,54 @@ let immersiveCursorHideTimer: ReturnType<typeof setTimeout> | null = null;
 const currentSongDetail = ref<SongDetail | null>(null);
 let detailRequestId = 0;
 
+const { isPlayerCoverFocused: isCoverFocused } = storeToRefs(useUiStore());
+const isFocusContentMounted = ref(!isCoverFocused.value);
+const isFocusContentTransitioning = ref(false);
+const canInteractWithFocusContent = computed(() => showPlayerDetail.value
+  && !isCoverFocused.value && !isFocusContentTransitioning.value);
+
+watch(isCoverFocused, (focused) => {
+  isFocusContentTransitioning.value = true;
+  if (!focused) isFocusContentMounted.value = true;
+});
+
+const handleFocusContentHidden = () => {
+  if (!isCoverFocused.value) return;
+  // Dispose the hidden lyric renderer only after its fade, so it does no background work.
+  isFocusContentMounted.value = false;
+  isFocusContentTransitioning.value = false;
+};
+
+const handleFocusContentShown = () => {
+  if (!isCoverFocused.value) isFocusContentTransitioning.value = false;
+};
+
+// Opening a right-side tool should never leave it hidden behind the focused cover.
+watch([showQueue, showPlaylist, showLyricsPlayerSettingsPanel], (opened, previous) => {
+  if (opened.some((visible, index) => visible && !previous[index])) isCoverFocused.value = false;
+});
+
 const appWindow = getCurrentWindow();
 
 const isFullscreen = ref(false);
 const wasMaximizedBeforeFullscreen = ref(false);
 const isFullscreenTransitioning = ref(false);
+const immersiveTransition = ref<InstanceType<typeof ImmersiveTransitionOverlay> | null>(null);
 let unlistenResize: (() => void) | null = null;
 let pendingFullscreenTransitions = 0;
+let fullscreenTransitionVersion = 0;
 let fullscreenTransitionQueue = Promise.resolve();
 
+const withImmersiveTransition = async (operation: () => Promise<void>) => {
+  if (showPlayerDetail.value && immersiveTransition.value) {
+    await immersiveTransition.value.play(operation);
+  } else {
+    await operation();
+  }
+};
+
 const enqueueFullscreenTransition = (operation: () => Promise<void>) => {
+  fullscreenTransitionVersion += 1;
   pendingFullscreenTransitions += 1;
   isFullscreenTransitioning.value = true;
 
@@ -63,16 +111,21 @@ const enqueueFullscreenTransition = (operation: () => Promise<void>) => {
 };
 
 const toggleFullscreen = async () => {
+  if (isFullscreenTransitioning.value) return;
   try {
     await enqueueFullscreenTransition(async () => {
       const currentFullscreen = await appWindow.isFullscreen();
-      const state = await windowApi.setImmersiveFullscreen(
-        !currentFullscreen,
-        currentFullscreen && wasMaximizedBeforeFullscreen.value,
-      );
+      await withImmersiveTransition(async () => {
+        // Closing the details during the lead-in must not enter fullscreen.
+        if (!currentFullscreen && !showPlayerDetail.value) return;
+        const state = await windowApi.setImmersiveFullscreen(
+          !currentFullscreen,
+          currentFullscreen && wasMaximizedBeforeFullscreen.value,
+        );
 
-      isFullscreen.value = state.isFullscreen;
-      wasMaximizedBeforeFullscreen.value = state.wasMaximizedBeforeFullscreen;
+        isFullscreen.value = state.isFullscreen;
+        wasMaximizedBeforeFullscreen.value = state.wasMaximizedBeforeFullscreen;
+      });
       showTopChrome();
       scheduleTopChromeHide();
     });
@@ -92,12 +145,14 @@ const exitImmersiveFullscreen = async () => {
         return;
       }
 
-      const state = await windowApi.setImmersiveFullscreen(
-        false,
-        wasMaximizedBeforeFullscreen.value,
-      );
-      isFullscreen.value = state.isFullscreen;
-      wasMaximizedBeforeFullscreen.value = false;
+      await withImmersiveTransition(async () => {
+        const state = await windowApi.setImmersiveFullscreen(
+          false,
+          wasMaximizedBeforeFullscreen.value,
+        );
+        isFullscreen.value = state.isFullscreen;
+        wasMaximizedBeforeFullscreen.value = false;
+      });
     });
   } catch (error) {
     console.error('Failed to exit fullscreen:', error);
@@ -108,6 +163,7 @@ const exitImmersiveFullscreen = async () => {
 
 const minimize = () => appWindow.minimize();
 const toggleMaximize = async () => {
+  if (isFullscreenTransitioning.value) return;
   const isMaximized = await appWindow.isMaximized();
   if (isMaximized) {
     await appWindow.unmaximize();
@@ -193,6 +249,10 @@ watch(showPlayerDetail, async (visible) => {
   }
 
   isTopChromeVisible.value = false;
+  // Closing is not a layout change. Keep the preference and finish transient
+  // content state so even a quick reopen cannot flash partially faded lyrics.
+  isFocusContentTransitioning.value = false;
+  isFocusContentMounted.value = !isCoverFocused.value;
   currentSongDetail.value = null;
   clearSongDetailCache();
 
@@ -264,11 +324,19 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
   if (!showPlayerDetail.value) return;
 
   if (event.key === 'Escape') {
+    // The drawers own Escape (including their teleported submenus). Do not
+    // collapse the page or leave immersive mode underneath an open drawer.
+    if (showLyricsPlayerSettingsPanel.value || showPlaylist.value) return;
     if (isTypingTarget(event.target)) return;
     if (isModalOrMenuOpen()) return;
 
     event.preventDefault();
     event.stopPropagation();
+
+    if (isCoverFocused.value) {
+      isCoverFocused.value = false;
+      return;
+    }
 
     const action = resolvePlayerDetailEscapeAction(
       isFullscreen.value,
@@ -309,7 +377,14 @@ onMounted(async () => {
 
   // Listen to window resize to synchronize fullscreen state changes
   const unlisten = await appWindow.listen('tauri://resize', async () => {
-    isFullscreen.value = await appWindow.isFullscreen();
+    // The native operation owns the state during its intermediate restore and
+    // resize events. Do not let a delayed query overwrite its final result.
+    if (isFullscreenTransitioning.value) return;
+    const version = fullscreenTransitionVersion;
+    const fullscreen = await appWindow.isFullscreen();
+    if (!isFullscreenTransitioning.value && version === fullscreenTransitionVersion) {
+      isFullscreen.value = fullscreen;
+    }
   });
   unlistenResize = unlisten;
 
@@ -389,13 +464,18 @@ const metaInfo = computed(() => {
 </script>
 
 <template>
+  <ImmersiveTransitionOverlay ref="immersiveTransition" :active="showPlayerDetail" />
   <div
-    class="fixed inset-x-0 bottom-0 z-[50] flex h-[100vh] flex-col overflow-visible font-sans select-none text-white"
+    class="player-detail fixed inset-x-0 bottom-0 z-[50] flex h-[100vh] flex-col overflow-visible font-sans select-none text-white"
     :class="[
       showPlayerDetail ? 'pointer-events-auto' : 'pointer-events-none',
       isImmersiveCursorHidden ? 'immersive-cursor-hidden' : '',
     ]"
   >
+    <LyricsAppearancePanel
+      v-if="showPlayerDetail"
+      @preview="lyricsAppearancePreview = $event"
+    />
     <div class="relative flex h-[100vh] w-full flex-col pt-[calc(100vh-100%)]">
       <div
         class="absolute inset-0 transition-all duration-600 ease-[cubic-bezier(0.22,1,0.36,1)]"
@@ -491,40 +571,62 @@ const metaInfo = computed(() => {
         </div>
       </div>
 
-      <PlayerDetailLeft :isExpanded="showPlayerDetail" />
+      <PlayerDetailLeft
+        :isExpanded="showPlayerDetail"
+        :isResizingWindow="isFullscreenTransitioning"
+        :isCoverFocused="isCoverFocused"
+        :isFocusTransitioning="isFocusContentTransitioning"
+        @toggle-focus="isCoverFocused = !isCoverFocused"
+      />
 
-      <div class="relative z-50 flex min-h-0 flex-1 pl-8 pr-0 pb-22">
+      <!-- Let the left spacer pass pointer events through to the shared cover. -->
+      <div class="pointer-events-none relative z-50 flex min-h-0 flex-1 pl-8 pr-0 pb-22">
         <div class="pointer-events-none h-full w-[40%] min-w-[300px]"></div>
 
         <div
           class="flex h-full min-h-0 flex-1 flex-col justify-center pt-0 pb-0 pl-2 pr-8"
+          :class="canInteractWithFocusContent ? 'pointer-events-auto' : 'pointer-events-none'"
+          :inert="!canInteractWithFocusContent"
+          :aria-hidden="!showPlayerDetail || isCoverFocused"
           :style="staggerStyle(2, 'X', 20)"
         >
-          <transition name="fade-scale" mode="out-in">
-            <QueueList
-              v-if="showQueue"
-              class="h-full rounded-2xl border border-white/5 bg-black/10 p-4 shadow-xl backdrop-blur-sm"
-            />
+          <Transition
+            name="cover-focus-content"
+            @after-leave="handleFocusContentHidden"
+            @after-enter="handleFocusContentShown"
+          >
+            <div v-show="!isCoverFocused" class="h-full min-h-0 w-full">
+              <transition v-if="isFocusContentMounted" name="fade-scale" mode="out-in">
+                <QueueList
+                  v-if="showQueue"
+                  class="h-full rounded-2xl border border-white/5 bg-black/10 p-4 shadow-xl backdrop-blur-sm"
+                />
 
-            <LyricsView v-else-if="showPlayerDetail && parsedLyrics.length > 0" class="h-full" />
+                <LyricsView
+                  v-else-if="showPlayerDetail && hasLyricsPresentation"
+                  :appearance-preview="lyricsAppearancePreview"
+                  class="h-full"
+                />
 
-            <transition v-else name="song-switch-meta" mode="out-in">
-              <div
-                :key="currentSong?.path"
-                class="flex h-full flex-col items-center justify-center opacity-80"
-                style="text-shadow: 0 2px 10px rgba(0,0,0,0.4);"
-              >
-                <div
-                  v-for="(info, index) in metaInfo"
-                  :key="index"
-                  class="mb-4 flex items-center text-xl font-medium tracking-wider sm:text-2xl"
-                >
-                  <span class="mr-4 text-white/40">{{ info.label }}</span>
-                  <span class="text-white drop-shadow-md">{{ info.value }}</span>
-                </div>
-              </div>
-            </transition>
-          </transition>
+                <transition v-else name="song-switch-meta" mode="out-in">
+                  <div
+                    :key="currentSong?.path"
+                    class="flex h-full flex-col items-center justify-center opacity-80"
+                    style="text-shadow: 0 2px 10px rgba(0,0,0,0.4);"
+                  >
+                    <div
+                      v-for="(info, index) in metaInfo"
+                      :key="index"
+                      class="mb-4 flex items-center text-xl font-medium tracking-wider sm:text-2xl"
+                    >
+                      <span class="mr-4 text-white/40">{{ info.label }}</span>
+                      <span class="text-white drop-shadow-md">{{ info.value }}</span>
+                    </div>
+                  </div>
+                </transition>
+              </transition>
+            </div>
+          </Transition>
         </div>
       </div>
     </div>
@@ -532,6 +634,31 @@ const metaInfo = computed(() => {
 </template>
 
 <style scoped>
+.player-detail {
+  --player-cover-focus-duration: 600ms;
+  --player-cover-focus-easing: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cover-focus-content-enter-active {
+  transition: opacity 450ms ease-out 150ms;
+}
+
+.cover-focus-content-leave-active {
+  transition: opacity 450ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cover-focus-content-enter-from,
+.cover-focus-content-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover-focus-content-enter-active,
+  .cover-focus-content-leave-active {
+    transition: none;
+  }
+}
+
 .fade-scale-enter-active,
 .fade-scale-leave-active {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);

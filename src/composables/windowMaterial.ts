@@ -2,8 +2,8 @@ import { Effect, getCurrentWindow, type Color } from '@tauri-apps/api/window';
 import { ref } from 'vue';
 import { windowApi, type WindowMaterialCapabilities as TauriWindowMaterialCapabilities } from '../services/tauri/windowApi';
 
-export type WindowMaterialMode = 'none' | 'mica' | 'acrylic' | 'blur';
-export type ResolvedWindowMaterial = 'none' | 'mica' | 'acrylic' | 'blur';
+export type WindowMaterialMode = 'none' | 'mica' | 'acrylic' | 'blur' | 'transparent';
+export type ResolvedWindowMaterial = WindowMaterialMode;
 
 export interface WindowMaterialCapabilities {
   isWindows: boolean;
@@ -28,9 +28,17 @@ const activeWindowMaterial = ref<ResolvedWindowMaterial>('none');
 const isWindowMaterialReady = ref(false);
 
 let loadPromise: Promise<WindowMaterialCapabilities> | null = null;
+let materialOperation: Promise<unknown> = Promise.resolve();
 
+// Supported by Tauri's Rust WindowEffect enum, but missing from its JS enum.
 const MICA_DARK_EFFECT = 'micaDark' as Effect;
 const MICA_LIGHT_EFFECT = 'micaLight' as Effect;
+
+function enqueueMaterialOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const pending = materialOperation.then(operation, operation);
+  materialOperation = pending.then(() => undefined, () => undefined);
+  return pending;
+}
 
 function normalizeCapabilities(
   value: Partial<WindowMaterialCapabilities> | null | undefined,
@@ -46,6 +54,10 @@ export function resolveWindowMaterial(
   value: WindowMaterialCapabilities = capabilities.value,
 ): ResolvedWindowMaterial {
   const isWindows11 = value.isWindows && value.windowsBuildNumber !== null && value.windowsBuildNumber >= 22000;
+
+  if (mode === 'transparent') {
+    return value.isWindows ? 'transparent' : 'none';
+  }
 
   if (value.systemTransparencyEnabled === false) {
     return 'none';
@@ -76,9 +88,11 @@ function normalizeTintValue(value = 50): number {
 
 function getBlurTint(isDark: boolean, tintValue = 50): Color {
   const value = normalizeTintValue(tintValue);
+  // Keep the legacy midpoint and upper range, but remove the tint floor
+  // below 50 so the lowest setting does not keep a dark native mask.
   const alpha = isDark
-    ? 50 + Math.round(value * 1.2)
-    : 40 + value;
+    ? value < 50 ? Math.round(value * 2.2) : 50 + Math.round(value * 1.2)
+    : value < 50 ? Math.round(value * 1.8) : 40 + value;
   return isDark ? [18, 18, 18, alpha] : [248, 248, 248, alpha];
 }
 
@@ -96,8 +110,18 @@ function waitForCompositorFrame(): Promise<void> {
   }
 
   return new Promise(resolve => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => resolve());
+    const finish = () => {
+      clearTimeout(timeout);
+      if (typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(frame);
+      }
+      resolve();
+    };
+    // Hidden/minimized WebViews may suspend animation frames. Do not let a
+    // compositor rebuild block every later material operation indefinitely.
+    const timeout = setTimeout(finish, 100);
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(finish);
     });
   });
 }
@@ -125,12 +149,12 @@ async function trySetWindowShadow(enabled: boolean): Promise<void> {
 }
 
 export async function loadWindowMaterialCapabilities(force = false): Promise<WindowMaterialCapabilities> {
-  if (isWindowMaterialReady.value && !force) {
-    return capabilities.value;
+  if (loadPromise) {
+    return loadPromise;
   }
 
-  if (loadPromise && !force) {
-    return loadPromise;
+  if (isWindowMaterialReady.value && !force) {
+    return capabilities.value;
   }
 
   loadPromise = windowApi.getWindowMaterialCapabilities()
@@ -154,7 +178,7 @@ export async function loadWindowMaterialCapabilities(force = false): Promise<Win
   return loadPromise;
 }
 
-export async function applyWindowMaterial(
+async function applyWindowMaterialNow(
   mode: WindowMaterialMode,
   isDark: boolean,
   blurTint = 50,
@@ -164,20 +188,32 @@ export async function applyWindowMaterial(
   const appWindow = getCurrentWindow();
 
   try {
+    // Clear an existing material when switching native APIs. A plain window
+    // has no effect to clear, and compositor rebuilds already clear once.
+    // Keep the legacy direct apply path for startup and rebuilding Blur.
+    if (
+      activeWindowMaterial.value !== 'none'
+      && resolved !== 'none'
+      && resolved !== 'transparent'
+      && resolved !== activeWindowMaterial.value
+    ) {
+      await appWindow.clearEffects();
+    }
+
     if (resolved === 'mica') {
       await trySetWindowBackgroundColor(getTransparentWindowColor());
+      await trySetWindowShadow(true);
       await appWindow.setEffects({
         effects: [isDark ? MICA_DARK_EFFECT : MICA_LIGHT_EFFECT],
       });
-      await trySetWindowShadow(true);
     } else if (resolved === 'acrylic') {
       await trySetWindowBackgroundColor(getTransparentWindowColor());
       await windowApi.setDarkModeForWindow(isDark);
+      await trySetWindowShadow(true);
       await appWindow.setEffects({
         effects: [Effect.Acrylic],
         color: getAcrylicTint(isDark),
       });
-      await trySetWindowShadow(true);
     } else if (resolved === 'blur') {
       await trySetWindowBackgroundColor(getTransparentWindowColor());
       await windowApi.setDarkModeForWindow(isDark);
@@ -186,6 +222,10 @@ export async function applyWindowMaterial(
         color: getBlurTint(isDark, blurTint),
       });
       await trySetWindowShadow(false);
+    } else if (resolved === 'transparent') {
+      await appWindow.clearEffects();
+      await trySetWindowShadow(false);
+      await windowApi.applyTransparentWindow();
     } else {
       await appWindow.clearEffects();
       await trySetWindowBackgroundColor(getBaseWindowColor(isDark));
@@ -195,10 +235,25 @@ export async function applyWindowMaterial(
     activeWindowMaterial.value = resolved;
   } catch (error) {
     console.error('Failed to apply window material:', error);
+    try {
+      await appWindow.clearEffects();
+    } catch (clearError) {
+      console.warn('Failed to clear window material after an error:', clearError);
+    }
+    await trySetWindowBackgroundColor(getBaseWindowColor(isDark));
+    await trySetWindowShadow(true);
     activeWindowMaterial.value = 'none';
   }
 
   return activeWindowMaterial.value;
+}
+
+export function applyWindowMaterial(
+  mode: WindowMaterialMode,
+  isDark: boolean,
+  blurTint = 50,
+): Promise<ResolvedWindowMaterial> {
+  return enqueueMaterialOperation(() => applyWindowMaterialNow(mode, isDark, blurTint));
 }
 
 interface RebuildWindowMaterialDeps {
@@ -207,29 +262,31 @@ interface RebuildWindowMaterialDeps {
   applyMaterial: (mode: WindowMaterialMode, isDark: boolean, blurTint: number) => Promise<ResolvedWindowMaterial>;
 }
 
-export async function rebuildWindowMaterialForCompositor(
+export function rebuildWindowMaterialForCompositor(
   mode: WindowMaterialMode,
   isDark: boolean,
   blurTint = 50,
   deps?: Partial<RebuildWindowMaterialDeps>,
 ): Promise<ResolvedWindowMaterial> {
-  const clearEffects = deps?.clearEffects ?? (() => getCurrentWindow().clearEffects());
-  const waitForRepaint = deps?.waitForRepaint ?? waitForCompositorFrame;
-  const applyMaterial = deps?.applyMaterial ?? applyWindowMaterial;
+  return enqueueMaterialOperation(async () => {
+    const clearEffects = deps?.clearEffects ?? (() => getCurrentWindow().clearEffects());
+    const waitForRepaint = deps?.waitForRepaint ?? waitForCompositorFrame;
+    const applyMaterial = deps?.applyMaterial ?? applyWindowMaterialNow;
 
-  if (mode === 'none') {
+    if (mode === 'none') {
+      return applyMaterial(mode, isDark, blurTint);
+    }
+
+    try {
+      await clearEffects();
+      activeWindowMaterial.value = 'none';
+      await waitForRepaint();
+    } catch (error) {
+      console.warn('Failed to rebuild window material compositor:', error);
+    }
+
     return applyMaterial(mode, isDark, blurTint);
-  }
-
-  try {
-    await clearEffects();
-    activeWindowMaterial.value = 'none';
-    await waitForRepaint();
-  } catch (error) {
-    console.warn('Failed to rebuild window material compositor:', error);
-  }
-
-  return applyMaterial(mode, isDark, blurTint);
+  });
 }
 
 export function useWindowMaterial() {

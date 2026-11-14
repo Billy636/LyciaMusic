@@ -6,6 +6,7 @@ import { libraryApi } from '../services/tauri/libraryApi';
 import { useLibraryStore } from '../features/library/store';
 import { usePlaybackStore } from '../features/playback/store';
 import { useSettingsStore } from '../features/settings/store';
+import { usePlaylistImportDialog } from '../features/playlistImport/dialog';
 
 interface ProcessExternalPathsOptions {
   source?: 'drop' | 'open';
@@ -31,6 +32,7 @@ export interface ProcessExternalPathsResult {
   skippedFolderCount: number;
   playableSongs: Song[];
   ignoredFileCount: number;
+  playlistFileCount?: number;
 }
 
 export const createPlayerLibraryManager = ({
@@ -119,7 +121,10 @@ export const createPlayerLibraryManager = ({
     );
 
     const directoryPaths = pathKinds.filter(item => item.isDirectory).map(item => item.path);
-    const filePaths = pathKinds.filter(item => !item.isDirectory).map(item => item.path);
+    const allFiles = pathKinds.filter(item => !item.isDirectory).map(item => item.path);
+    const playlistFiles = allFiles.filter(path => /\.(m3u8?|csv|json|txt)$/i.test(path));
+    const filePaths = allFiles.filter(path => !playlistFiles.includes(path));
+    if (playlistFiles.length) usePlaylistImportDialog().open(null, playlistFiles[0]);
 
     const existingLibraryPaths = new Set(
       libraryStore.libraryFolders.map(folder => normalizePath(folder.path)),
@@ -173,6 +178,7 @@ export const createPlayerLibraryManager = ({
       skippedFolderCount,
       playableSongs,
       ignoredFileCount: Math.max(0, filePaths.length - playableSongs.length),
+      ...(playlistFiles.length ? { playlistFileCount: playlistFiles.length } : {}),
     };
   };
 

@@ -1,5 +1,6 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue';
 import { useLibraryStore } from './store';
+import { useFolderSongScope } from './useFolderSongScope';
 import { storeToRefs } from 'pinia';
 import { useNavigationStore } from '../../shared/stores/navigation';
 import { tauriInvoke } from '../../services/tauri/invoke';
@@ -17,6 +18,7 @@ import { isProfilingEnabled } from '../../utils/profiling';
 import {
   compareSongPathsByTrackNumber,
   getSongArtistSearchText,
+  sortSongPathsByArtist,
 } from './playerLibraryViewShared';
 
 interface UseLibraryCurrentViewSongsOptions {
@@ -67,16 +69,16 @@ export function useLibraryCurrentViewSongs({
   debugOwnerId = 0,
 }: UseLibraryCurrentViewSongsOptions) {
   const libraryStore = useLibraryStore();
-  const { searchRevision } = storeToRefs(useNavigationStore());
+  const { includeSubfolders } = useFolderSongScope(currentFolderFilter);
+  const { searchRevision, currentArtistBrowseMode } = storeToRefs(useNavigationStore());
 
   const allViewLoading = ref(false);
   const allViewUseCanonicalFallback = ref(false);
   const lastSuccessfulAllViewSongPaths = ref<string[]>([]);
-  const currentQueryKey = ref('');
 
   const { loadAllViewSongPaths } = useLibraryAllSongPathCache();
   const { loadFavoriteSongPaths, loadRecentSongPaths } = useLibraryCollectionSongPathCache();
-  const { loadAlbumSongPaths } = useLibraryDetailSongPathCache();
+  const { loadAlbumSongPaths, loadGenreSongPaths } = useLibraryDetailSongPathCache();
   const { loadFolderViewSongPaths, libraryFolderSongPathCacheVersion } = useLibraryFolderSongPathCache();
   const allViewSongPaths = ref<string[]>([]);
   const allSearchTotal = ref(0);
@@ -87,6 +89,7 @@ export function useLibraryCurrentViewSongs({
   const folderViewSongPaths = ref<string[]>([]);
   const playlistViewSongPaths = ref<string[]>([]);
   const detailViewSongPaths = ref<string[]>([]);
+  const genreViewSongPaths = ref<string[]>([]);
   const favoriteSearchHasMore = ref(false);
   const recentSearchHasMore = ref(false);
   const folderSearchHasMore = ref(false);
@@ -99,6 +102,7 @@ export function useLibraryCurrentViewSongs({
   let folderViewRequestId = 0;
   let playlistViewRequestId = 0;
   let detailViewRequestId = 0;
+  let genreViewRequestId = 0;
   const canonicalPathSet = computed(() => new Set(canonicalSongPaths.value));
 
   watch(
@@ -147,16 +151,9 @@ export function useLibraryCurrentViewSongs({
       }
 
       const nextQueryKey = `${musicTab}\u0001${artistFilter}\u0001${albumFilter}\u0001${sortMode}\u0001${query}`;
-      const isQueryKeyChanged = currentQueryKey.value !== nextQueryKey;
-      currentQueryKey.value = nextQueryKey;
 
-      // 如果过滤/查询条件变了，立即清空上一次结果，防旧数据筛选错乱
-      if (isQueryKeyChanged) {
-        allViewSongPaths.value = [];
-        allViewUseCanonicalFallback.value = false;
-        lastSuccessfulAllViewSongPaths.value = [];
-      }
-
+      // 查询/过滤条件变化时保留旧结果渲染，直到新结果到达（实时输入时不闪烁）；
+      // 过期响应由 requestId 与 activeAllSearchKey 双守卫拦截，不会错误落地
       allViewLoading.value = true;
 
       if (query.trim() && sortMode !== 'custom') {
@@ -404,13 +401,20 @@ export function useLibraryCurrentViewSongs({
       currentFolderFilter,
       searchQuery,
       folderSortMode,
+      includeSubfolders,
       currentFolderSongPaths,
       canonicalSongPaths,
       libraryFolderSongPathCacheVersion,
       searchRevision,
     ],
-    async ([viewMode, folderFilter, query, sortMode]) => {
+    async ([viewMode, folderFilter, query, sortMode, recursive], previous) => {
       const requestId = ++folderViewRequestId;
+      // Cache fills and metadata hydration can re-run this watcher for the same folder.
+      // Keep its visible rows until the replacement is ready; never carry rows into another folder.
+      if (viewMode !== previous?.[0] || folderFilter !== previous?.[1]) {
+        folderViewSongPaths.value = [];
+      }
+      folderSearchHasMore.value = false;
 
       if (viewMode !== 'folder' || !folderFilter) {
         folderViewSongPaths.value = [];
@@ -422,6 +426,7 @@ export function useLibraryCurrentViewSongs({
         if (query.trim() && sortMode !== 'custom') {
           const nextPaths = await tauriInvoke('get_library_song_paths_for_folder_view', {
             folderPath: folderFilter,
+            includeSubfolders: recursive,
             query,
             sortMode,
             offset: 0,
@@ -436,6 +441,7 @@ export function useLibraryCurrentViewSongs({
         folderSearchHasMore.value = false;
         const nextPaths = await loadFolderViewSongPaths({
           folderPath: folderFilter,
+          includeSubfolders: recursive,
           query,
           sortMode: sortMode === 'custom' ? 'title' : sortMode,
         });
@@ -519,9 +525,11 @@ export function useLibraryCurrentViewSongs({
       albumDetailSortMode,
       canonicalSongPaths,
       searchRevision,
+      currentArtistBrowseMode,
     ],
     async ([viewMode, filter, query, currentLocalSortMode, currentAlbumSortMode]) => {
       const requestId = ++detailViewRequestId;
+      const albumArtist = viewMode === 'artist' && currentArtistBrowseMode.value === 'albumArtist';
 
       if (!filter || (viewMode !== 'artist' && viewMode !== 'album')) {
         detailViewSongPaths.value = [];
@@ -538,6 +546,7 @@ export function useLibraryCurrentViewSongs({
             query,
             artistFilter: viewMode === 'artist' ? filter : '',
             albumFilter: viewMode === 'album' ? filter : '',
+            ...(albumArtist ? { albumArtist: true } : {}),
             sortMode,
             offset: 0,
             limit: 256,
@@ -555,11 +564,13 @@ export function useLibraryCurrentViewSongs({
                 query,
                 artistFilter: filter,
                 sortMode: 'title',
+                ...(albumArtist ? { albumArtist: true } : {}),
               })
             : await loadAllViewSongPaths({
                 query,
                 artistFilter: filter,
                 sortMode: currentLocalSortMode,
+                ...(albumArtist ? { albumArtist: true } : {}),
               })
           : currentAlbumSortMode === 'track_number' || currentAlbumSortMode === 'track_number_desc'
             ? await loadAlbumSongPaths(filter, currentAlbumSortMode)
@@ -585,6 +596,46 @@ export function useLibraryCurrentViewSongs({
     { immediate: true },
   );
 
+  watch(
+    [
+      currentViewMode,
+      filterCondition,
+      searchQuery,
+      localSortMode,
+      canonicalSongPaths,
+      searchRevision,
+      () => libraryStore.genreCatalog,
+    ],
+    async ([viewMode, filter, query, sortMode], previous) => {
+      const requestId = ++genreViewRequestId;
+
+      if (viewMode !== 'genre' || !filter) {
+        genreViewSongPaths.value = [];
+        return;
+      }
+
+      // A different selection must never briefly play or display the previous genre.
+      if (filter !== previous?.[1] || viewMode !== previous?.[0]) {
+        genreViewSongPaths.value = [];
+      }
+
+      try {
+        const paths = await loadGenreSongPaths(filter, query, sortMode === 'custom' ? 'title' : sortMode);
+        if (requestId !== genreViewRequestId) {
+          return;
+        }
+        // 库同步窗口内过滤掉已不存在的路径，避免残留幽灵行。
+        genreViewSongPaths.value = paths.filter(path => canonicalPathSet.value.has(path));
+      } catch {
+        if (requestId !== genreViewRequestId) {
+          return;
+        }
+        genreViewSongPaths.value = [];
+      }
+    },
+    { immediate: true },
+  );
+
   const materializeSongPaths = (paths: string[]) =>
     paths
       .map(path => songLookup.value.get(path))
@@ -604,9 +655,7 @@ export function useLibraryCurrentViewSongs({
         ),
       );
     } else if (mode === 'artist') {
-      sortedPaths.sort((left, right) =>
-        (songLookup.value.get(left)?.artist || '').localeCompare(songLookup.value.get(right)?.artist || '', 'zh-CN'),
-      );
+      return sortSongPathsByArtist(paths, path => songLookup.value.get(path));
     } else if (mode === 'added_at') {
       sortedPaths.sort((left, right) =>
         (songLookup.value.get(right)?.added_at || 0) - (songLookup.value.get(left)?.added_at || 0),
@@ -716,6 +765,10 @@ export function useLibraryCurrentViewSongs({
         return playlistViewSongPaths.value;
       }
 
+      if (currentViewMode.value === 'genre') {
+        return genreViewSongPaths.value;
+      }
+
       return canonicalSongPaths.value.filter(matchesQuery);
     }
 
@@ -749,13 +802,26 @@ export function useLibraryCurrentViewSongs({
     }
 
     if (currentViewMode.value === 'artist') {
-      return localSortMode.value === 'custom'
+      // Artist grouping is ordered by the backend across the complete result.
+      // The metadata window can be sparse, so sorting it again would move unloaded songs.
+      return localSortMode.value === 'custom' || localSortMode.value === 'artist'
         ? detailViewSongPaths.value
         : sortSongPathsByLocalMode(detailViewSongPaths.value, localSortMode.value);
     }
 
     if (currentViewMode.value === 'album') {
+      if (albumDetailSortMode.value === 'artist') {
+        return detailViewSongPaths.value;
+      }
       return sortSongPathsByAlbumDetailMode(detailViewSongPaths.value, albumDetailSortMode.value);
+    }
+
+    if (currentViewMode.value === 'genre') {
+      if (!filterCondition.value) {
+        return [];
+      }
+      // Query and ordering cover the complete genre, independent of the metadata window.
+      return genreViewSongPaths.value;
     }
 
     if (currentViewMode.value === 'recent') {
@@ -877,14 +943,21 @@ export function useLibraryCurrentViewSongs({
           recentSearchHasMore.value = paths.length === 256;
         }
       } else if (viewMode === 'folder' && folderSearchHasMore.value && folderSortMode.value !== 'custom') {
+        const requestId = folderViewRequestId;
+        const folderPath = currentFolderFilter.value;
+        const recursive = includeSubfolders.value;
+        const offset = folderViewSongPaths.value.length;
         const paths = await tauriInvoke('get_library_song_paths_for_folder_view', {
-          folderPath: currentFolderFilter.value,
+          folderPath,
+          includeSubfolders: recursive,
           query,
           sortMode: folderSortMode.value,
-          offset: folderViewSongPaths.value.length,
+          offset,
           limit: 256,
         });
-        if (query === searchQuery.value && viewMode === currentViewMode.value) {
+        if (requestId === folderViewRequestId && query === searchQuery.value && viewMode === currentViewMode.value
+          && folderPath === currentFolderFilter.value && recursive === includeSubfolders.value
+          && offset === folderViewSongPaths.value.length) {
           folderViewSongPaths.value = [...folderViewSongPaths.value, ...paths];
           folderSearchHasMore.value = paths.length === 256;
         }
@@ -905,17 +978,24 @@ export function useLibraryCurrentViewSongs({
         if (viewMode === 'artist' && localSortMode.value === 'custom') {
           return;
         }
+        const requestId = detailViewRequestId;
+        const filter = filterCondition.value;
+        const artistMode = currentArtistBrowseMode.value;
+        const offset = detailViewSongPaths.value.length;
         const page = await tauriInvoke('get_library_song_path_page_for_all_view', {
           query,
-          artistFilter: viewMode === 'artist' ? filterCondition.value : '',
-          albumFilter: viewMode === 'album' ? filterCondition.value : '',
+          artistFilter: viewMode === 'artist' ? filter : '',
+          albumFilter: viewMode === 'album' ? filter : '',
+          ...(viewMode === 'artist' && artistMode === 'albumArtist' ? { albumArtist: true } : {}),
           sortMode: viewMode === 'artist'
             ? localSortMode.value === 'custom' ? 'title' : localSortMode.value
             : albumDetailSortMode.value,
-          offset: detailViewSongPaths.value.length,
+          offset,
           limit: 256,
         });
-        if (query === searchQuery.value && viewMode === currentViewMode.value) {
+        if (requestId === detailViewRequestId && query === searchQuery.value && viewMode === currentViewMode.value
+          && filter === filterCondition.value && artistMode === currentArtistBrowseMode.value
+          && offset === detailViewSongPaths.value.length) {
           detailViewSongPaths.value = [...detailViewSongPaths.value, ...page.paths];
           detailSearchHasMore.value = detailViewSongPaths.value.length < page.total;
         }

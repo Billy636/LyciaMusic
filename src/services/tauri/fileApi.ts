@@ -1,16 +1,23 @@
 import type { Song } from '../../types';
+import type { SaveSongInfoResponse } from './contracts';
 import { tauriInvoke } from './invoke';
 
 export const fileApi = {
+  refreshSongMetadata: (path: string): Promise<SaveSongInfoResponse> =>
+    tauriInvoke('refresh_song_metadata', { path }),
   deleteFolder: (path: string): Promise<void> => tauriInvoke('delete_folder', { path }),
+  moveFolderToFolder: (sourcePath: string, targetFolder: string) =>
+    tauriInvoke('move_folder_to_folder', { sourcePath, targetFolder }),
   moveFileToFolder: (sourcePath: string, targetFolder: string) =>
     tauriInvoke('move_file_to_folder', { sourcePath, targetFolder }),
   batchMoveMusicFiles: (paths: string[], targetFolder: string) =>
     tauriInvoke('batch_move_music_files', { paths, targetFolder }),
   getFolderFirstSong: (folderPath: string) =>
     tauriInvoke('get_folder_first_song', { folderPath }),
-  scanMusicFolder: (folderPath: string, minimumDurationSeconds = 0) =>
-    tauriInvoke('scan_music_folder', { folderPath, minimumDurationSeconds }),
+  scanMusicFolder: (folderPath: string, minimumDurationSeconds = 0, forceMetadataRefresh = false) =>
+    tauriInvoke('scan_music_folder', { folderPath, minimumDurationSeconds, forceMetadataRefresh }),
+  scanMusicFolderPaths: (folderPath: string, minimumDurationSeconds = 0, forceMetadataRefresh = false) =>
+    tauriInvoke('scan_music_folder_paths', { folderPath, minimumDurationSeconds, forceMetadataRefresh }),
   moveMusicFile: (oldPath: string, newPath: string) =>
     tauriInvoke('move_music_file', { oldPath, newPath }),
   showInFolder: (path: string): Promise<void> => tauriInvoke('show_in_folder', { path }),

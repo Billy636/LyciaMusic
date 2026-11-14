@@ -1,182 +1,307 @@
 <script setup lang="ts">
-import { LogicalPosition } from '@tauri-apps/api/dpi';
 import { invoke } from '@tauri-apps/api/core';
 import { emitTo, listen } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { availableMonitors, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window';
+import { Expand, Music, X } from 'lucide-vue-next';
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 
 import {
   TASKBAR_PLAYER_ACTION_EVENT,
   TASKBAR_PLAYER_STATE_EVENT,
+  TASKBAR_PLAYER_PLAYBACK_EVENT,
   TASKBAR_PLAYER_STATE_APPLIED_EVENT,
   TASKBAR_PLAYER_VISIBILITY_EVENT,
   TASKBAR_PLAYER_DRAG_EVENT,
-  TASKBAR_PLAYER_WINDOW_HEIGHT,
-  TASKBAR_PLAYER_WINDOW_WIDTH,
-  writeSavedTaskbarPositionX,
+  TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
+  normalizeTaskbarTextColor,
+  normalizeTaskbarContentMode,
+  normalizeTaskbarCoverShape,
+  normalizeTaskbarLyricEffect,
+  normalizeTaskbarLyricHighlightColor,
   type TaskbarTrayGeometry,
   type TaskbarPlayerStatePayload,
+  type TaskbarPlayerPlaybackPayload,
   type TaskbarPlayerAction,
+  type TaskbarContentMode,
+  type TaskbarCoverShape,
+  type TaskbarLyricEffect,
 } from '../../features/taskbarPlayer/shared';
-import { windowApi } from '../../services/tauri/windowApi';
+import {
+  clampTaskbarLeftOffset,
+  resolveTaskbarHorizontalPosition,
+  resolveTaskbarPositionScaleFactor,
+  type TaskbarHorizontalPosition,
+} from '../../features/taskbarPlayer/position';
+import {
+  createTaskbarLyricDisplayLines,
+  projectTaskbarPlaybackTime,
+  resolveTaskbarDoubleLyricLines,
+  resolveTaskbarLyricInterlude,
+  resolveTaskbarLyricLine,
+} from '../../features/taskbarPlayer/lyrics';
+import type { LyricLine, LyricsStatus } from '../../composables/lyrics/types';
+import { useCoverRotation } from '../player/useCoverRotation';
 import type { Song } from '../../types';
+import TaskbarLyricLine from './TaskbarLyricLine.vue';
 
 const appWindow = getCurrentWindow();
 
 const currentSong = ref<Song | null>(null);
 const localCoverUrl = ref('');
 const isPlaying = ref(false);
-const isDarkTheme = ref(true); // 任务栏播控默认采用高质感暗色毛玻璃设计，适配大多数用户底色
 const isVisible = ref(false);
 const isDragging = ref(false);
-let dragSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+const canDrag = ref(true);
+const contentMode = ref<TaskbarContentMode>('adaptive');
+const coverShape = ref<TaskbarCoverShape>('square');
+const coverRotate = ref(false);
+const artwork = ref<HTMLElement | null>(null);
+const reflection = ref<HTMLElement | null>(null);
+const isDocumentVisible = ref(!document.hidden);
+useCoverRotation(artwork, reflection,
+  () => coverShape.value === 'circle' && coverRotate.value,
+  () => isPlaying.value && isVisible.value && isDocumentVisible.value);
+const backgroundOpacity = ref(TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY);
+const textColor = ref('#ffffff');
+const lyricEffect = ref<TaskbarLyricEffect>('karaoke');
+const lyricHighlightColor = ref<string | null>(null);
+const translationKaraoke = ref(true);
+const backgroundStyle = computed(() => ({
+  // A fully transparent WebView2 surface can pass native mouse hit testing through.
+  // Keep an imperceptible painted surface even at the transparent setting.
+  backgroundColor: `rgba(18, 18, 20, ${Math.max(1 / 255, backgroundOpacity.value / 100)})`,
+  '--taskbar-text-rgb': [1, 3, 5].map(offset => parseInt(textColor.value.slice(offset, offset + 2), 16)).join(' '),
+}));
+const parsedLyrics = shallowRef<LyricLine[]>([]);
+const lyricsStatus = ref<LyricsStatus>('idle');
+const playbackTime = ref(0);
+const playbackAnchor = shallowRef<TaskbarPlayerPlaybackPayload | null>(null);
+const lyricTime = computed(() => playbackTime.value - (playbackAnchor.value?.audioDelay ?? 0));
+const taskbarLyrics = computed(() => createTaskbarLyricDisplayLines(parsedLyrics.value));
+const lyricInterlude = computed(() => currentSong.value && lyricsStatus.value === 'ready'
+  ? resolveTaskbarLyricInterlude(parsedLyrics.value, lyricTime.value) : null);
+const interludeDotProgress = (index: number) => {
+  const gap = lyricInterlude.value;
+  if (!gap) return 0;
+  return Math.max(0, Math.min(1, (lyricTime.value - gap.start) / (gap.end - gap.start) * 3 - index));
+};
+const sourceLyric = computed(() => currentSong.value && lyricsStatus.value === 'ready'
+  ? resolveTaskbarLyricLine(parsedLyrics.value, lyricTime.value) : null);
+const resolvedContentMode = computed(() => {
+  if (contentMode.value !== 'adaptive') return contentMode.value;
+  return sourceLyric.value?.translation?.trim() ? 'bilingual' : 'double-line';
+});
+const lyricRows = computed(() => {
+  if (!currentSong.value || lyricsStatus.value !== 'ready' || lyricInterlude.value) return [];
+  // Keep selection on source cues so finishing the highlight does not clear the line.
+  const sourceLines = resolvedContentMode.value === 'double-line'
+    ? resolveTaskbarDoubleLyricLines(parsedLyrics.value, lyricTime.value)
+    : sourceLyric.value ? [sourceLyric.value] : [];
+  return sourceLines.map(sourceLine => {
+    const index = parsedLyrics.value.indexOf(sourceLine);
+    return { key: `${currentSong.value?.path}:${index}:source`, line: taskbarLyrics.value[index] };
+  });
+});
+const currentLyric = computed(() => lyricRows.value[0]?.line ?? null);
+const isReversingLyrics = ref(false);
+watch(() => currentLyric.value?.time, (time, previous) => {
+  isReversingLyrics.value = time !== undefined && previous !== undefined && time < previous;
+});
+const songTitle = computed(() => currentSong.value
+  ? currentSong.value.title || currentSong.value.name
+  : 'Lycia Player');
+const fallbackText = computed(() => currentSong.value?.artist || (currentSong.value ? '暂无歌词' : '享受音乐时光'));
+const lyricFallbackText = computed(() => {
+  if (!currentSong.value) return '享受音乐时光';
+  if (lyricsStatus.value === 'loading') return '歌词加载中…';
+  if (lyricsStatus.value === 'error') return '歌词暂不可用';
+  if (lyricsStatus.value === 'ready' && parsedLyrics.value.length) return '';
+  return '暂无歌词';
+});
+const hasTranslation = computed(() => resolvedContentMode.value === 'bilingual' && !!currentLyric.value?.translation?.trim());
+const coverTitle = computed(() => `${songTitle.value}${currentSong.value?.artist ? ` · ${currentSong.value.artist}` : ''}\n显示/收起主窗口`);
+let lyricFrame = 0;
+let isFinishingDrag = false;
+let activeDragBounds: TaskbarHorizontalPosition | null = null;
+let activeDragScaleFactor = 1;
+let activeDragPromise: Promise<number> | null = null;
+let activeNativeDragSessionId: number | null = null;
+let nextNativeDragSessionId = Date.now() * 1000;
 let cleanupDragListeners: (() => void) | null = null;
-let dragFrame = 0;
-let pendingDragPosition: LogicalPosition | null = null;
+let dragSession = 0;
 
-interface DragBounds {
-  minX: number;
-  maxX: number;
-  y: number;
-}
-
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
-const finishDrag = async () => {
+const finishDrag = async (finalPhysicalX?: number) => {
   if (!isDragging.value) return;
+  isFinishingDrag = true;
   isDragging.value = false;
-  if (dragSafetyTimer) clearTimeout(dragSafetyTimer);
+  dragSession++;
   cleanupDragListeners?.();
   cleanupDragListeners = null;
-  void emitTo('main', TASKBAR_PLAYER_DRAG_EVENT, { dragging: false });
-  const factor = await appWindow.scaleFactor();
-  const position = (await appWindow.outerPosition()).toLogical(factor);
-  writeSavedTaskbarPositionX(position.x);
-};
-
-const scheduleDragPosition = (position: LogicalPosition) => {
-  pendingDragPosition = position;
-  if (dragFrame !== 0) return;
-
-  dragFrame = window.requestAnimationFrame(() => {
-    dragFrame = 0;
-    const nextPosition = pendingDragPosition;
-    pendingDragPosition = null;
-    if (nextPosition) {
-      void appWindow.setPosition(nextPosition);
+  let leftOffset: number | undefined;
+  const operation = activeDragPromise;
+  const nativeSessionId = activeNativeDragSessionId;
+  const bounds = activeDragBounds;
+  const scaleFactor = activeDragScaleFactor;
+  try {
+    if (operation) {
+      await invoke('cancel_taskbar_player_drag', { sessionId: nativeSessionId }).catch(error => {
+        console.warn('Failed to cancel taskbar drag:', error);
+      });
+      finalPhysicalX = await operation;
     }
-  });
+    if (bounds) {
+      const physicalX = finalPhysicalX ?? (await appWindow.outerPosition()).x;
+      leftOffset = clampTaskbarLeftOffset(bounds.baseX - physicalX / scaleFactor, bounds);
+    }
+  } catch (error) {
+    console.warn('Failed to save taskbar drag position:', error);
+  } finally {
+    activeDragBounds = null;
+    activeDragPromise = null;
+    activeNativeDragSessionId = null;
+    // Carry the final offset with the end event so the main window saves it
+    // before resuming automatic positioning with the previous offset.
+    try {
+      await emitTo('main', TASKBAR_PLAYER_DRAG_EVENT, { dragging: false, leftOffset });
+    } catch (error) {
+      console.warn('Failed to finish taskbar drag:', error);
+    } finally {
+      isFinishingDrag = false;
+    }
+  }
 };
 
-const getTaskbarDragBounds = async (): Promise<DragBounds | null> => {
+interface TaskbarDragBounds extends TaskbarHorizontalPosition {
+  scaleFactor: number;
+  windowScaleFactor: number;
+}
+
+const getTaskbarDragBounds = async (): Promise<TaskbarDragBounds | null> => {
   const geometry = await invoke<TaskbarTrayGeometry>('get_taskbar_tray_geometry').catch((error) => {
     console.warn('Failed to get taskbar drag bounds:', error);
     return null;
   });
   if (!geometry) return null;
 
-  const factor = await appWindow.scaleFactor();
-  const taskbarRect = {
-    left: geometry.taskbar_rect_physical.left / factor,
-    top: geometry.taskbar_rect_physical.top / factor,
-    right: geometry.taskbar_rect_physical.right / factor,
-    bottom: geometry.taskbar_rect_physical.bottom / factor,
-  };
-  const taskbarWidth = taskbarRect.right - taskbarRect.left;
-  const taskbarHeight = taskbarRect.bottom - taskbarRect.top;
-  if (taskbarWidth <= taskbarHeight) {
-    return null;
+  let monitor = await primaryMonitor().catch(() => null);
+  if (!monitor) {
+    const monitors = await availableMonitors().catch(() => []);
+    monitor = monitors.find(candidate => candidate.position.x === 0 && candidate.position.y === 0) ?? monitors[0] ?? null;
   }
-
-  return {
-    minX: taskbarRect.left,
-    maxX: Math.max(taskbarRect.left, taskbarRect.right - TASKBAR_PLAYER_WINDOW_WIDTH),
-    y: Math.round(taskbarRect.top + (taskbarHeight - TASKBAR_PLAYER_WINDOW_HEIGHT) / 2),
-  };
+  const factor = resolveTaskbarPositionScaleFactor(geometry, monitor?.scaleFactor);
+  const windowFactor = await appWindow.scaleFactor();
+  const width = (await appWindow.innerSize()).toLogical(windowFactor).width;
+  const bounds = resolveTaskbarHorizontalPosition(geometry, width, factor);
+  return bounds ? { ...bounds, scaleFactor: factor, windowScaleFactor: windowFactor } : null;
 };
 
 const startDrag = async (event: PointerEvent) => {
-  if (event.button !== 0) return;
-
+  if (!canDrag.value || event.button !== 0 || !event.isPrimary || isDragging.value || isFinishingDrag) return;
+  const grabOffsetX = event.clientX;
+  const session = ++dragSession;
   isDragging.value = true;
-  void emitTo('main', TASKBAR_PLAYER_DRAG_EVENT, { dragging: true });
-
-  cleanupDragListeners?.();
-  if (dragSafetyTimer) clearTimeout(dragSafetyTimer);
-  dragSafetyTimer = setTimeout(() => {
-    if (isDragging.value) {
-      void finishDrag();
-    }
-  }, 30000);
-
-  const factor = await appWindow.scaleFactor();
-  const startPosition = (await appWindow.outerPosition()).toLogical(factor);
-  const dragBounds = await getTaskbarDragBounds();
-  const startScreenX = event.screenX;
-
-  const handlePointerMove = (moveEvent: PointerEvent) => {
-    if (!isDragging.value || !dragBounds) return;
-    const nextX = clamp(
-      startPosition.x + moveEvent.screenX - startScreenX,
-      dragBounds.minX,
-      dragBounds.maxX,
-    );
-    scheduleDragPosition(new LogicalPosition(Math.round(nextX), dragBounds.y));
+  const target = event.currentTarget as HTMLElement;
+  const pointerId = event.pointerId;
+  const handlePointerRelease = (release: PointerEvent) => {
+    // A WebView capture cancellation must not stop native tracking. Keep the
+    // actual release listener until completion so a queued command cannot pick
+    // up the next mouse press after a quick release.
+    if (release.type === 'pointercancel' && activeDragPromise) return;
+    if (release.pointerId === pointerId && session === dragSession) void finishDrag();
   };
-
-  const handleDragEnd = () => {
-    void finishDrag();
-  };
-
-  (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
-  window.addEventListener('pointermove', handlePointerMove, true);
-  window.addEventListener('pointerup', handleDragEnd, true);
-  window.addEventListener('pointercancel', handleDragEnd, true);
-  window.addEventListener('blur', handleDragEnd, true);
+  window.addEventListener('pointerup', handlePointerRelease, true);
+  window.addEventListener('pointercancel', handlePointerRelease, true);
   cleanupDragListeners = () => {
-    window.removeEventListener('pointermove', handlePointerMove, true);
-    window.removeEventListener('pointerup', handleDragEnd, true);
-    window.removeEventListener('pointercancel', handleDragEnd, true);
-    window.removeEventListener('blur', handleDragEnd, true);
+    window.removeEventListener('pointerup', handlePointerRelease, true);
+    window.removeEventListener('pointercancel', handlePointerRelease, true);
+    if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
   };
+  try { target.setPointerCapture(pointerId); } catch {
+    // Native movement and release tracking do not depend on DOM capture.
+  }
+  let operation: Promise<number> | null = null;
+  try {
+    // Suspend automatic positioning before native dragging starts. The native
+    // loop tracks mouse movement and release even when the WebView loses capture.
+    await emitTo('main', TASKBAR_PLAYER_DRAG_EVENT, { dragging: true });
+    const bounds = await getTaskbarDragBounds();
+    if (!isDragging.value || session !== dragSession) return;
+    activeDragBounds = bounds;
+    if (!bounds) { await finishDrag(); return; }
+    activeDragScaleFactor = bounds.scaleFactor;
+    activeNativeDragSessionId = ++nextNativeDragSessionId;
+    operation = invoke<number>('drag_taskbar_player', {
+      sessionId: activeNativeDragSessionId,
+      minX: Math.ceil(bounds.minX * bounds.scaleFactor),
+      maxX: Math.floor(bounds.maxX * bounds.scaleFactor),
+      y: Math.round(bounds.y * bounds.scaleFactor),
+      grabOffsetX: Math.round(grabOffsetX * bounds.windowScaleFactor),
+    });
+    activeDragPromise = operation;
+    const physicalX = await operation;
+    if (activeDragPromise === operation) activeDragPromise = null;
+    if (isDragging.value && session === dragSession) await finishDrag(physicalX);
+  } catch (error) {
+    console.warn('Failed to start taskbar drag:', error);
+    if (activeDragPromise === operation) activeDragPromise = null;
+    if (isDragging.value && session === dragSession) await finishDrag();
+  }
 };
 
-const titleElement = ref<HTMLElement | null>(null);
-const titleWrapperElement = ref<HTMLElement | null>(null);
-const shouldScroll = ref(false);
-
 let unlistenState: (() => void) | null = null;
+let unlistenPlayback: (() => void) | null = null;
 let unlistenVisibility: (() => void) | null = null;
 let unlistenMoved: (() => void) | null = null;
 
-const sendAction = (actionType: TaskbarPlayerAction['type']) => {
+type TaskbarSimpleActionType = Exclude<TaskbarPlayerAction['type'], 'set-left-offset'>;
+const sendAction = (actionType: TaskbarSimpleActionType) => {
   void emitTo<TaskbarPlayerAction>('main', TASKBAR_PLAYER_ACTION_EVENT, { type: actionType });
 };
 
 const refreshTaskbarWindowTopmost = async () => {
   try {
-    await appWindow.setAlwaysOnTop(true);
-    await windowApi.refreshCurrentWindowTopmost(true);
+    const refreshed = await invoke<boolean>('refresh_taskbar_window_topmost');
+    if (!refreshed) console.warn('Taskbar player topmost refresh could not find its window.');
   } catch (error) {
     console.warn('Failed to refresh taskbar player topmost state:', error);
   }
 };
 
-const checkTitleScroll = () => {
-  void nextTick(() => {
-    if (titleElement.value && titleWrapperElement.value) {
-      const scrollWidth = titleElement.value.scrollWidth;
-      const clientWidth = titleWrapperElement.value.clientWidth;
-      shouldScroll.value = scrollWidth > clientWidth;
-    } else {
-      shouldScroll.value = false;
-    }
-  });
+const stopLyricClock = () => {
+  if (lyricFrame !== 0) window.cancelAnimationFrame(lyricFrame);
+  lyricFrame = 0;
 };
 
-watch(currentSong, () => {
-  checkTitleScroll();
+const refreshLyricClock = () => {
+  stopLyricClock();
+  if (!isVisible.value || !isPlaying.value || document.hidden || !parsedLyrics.value.length) return;
+
+  const tick = () => {
+    if (playbackAnchor.value) {
+      playbackTime.value = projectTaskbarPlaybackTime(playbackAnchor.value);
+    }
+    lyricFrame = window.requestAnimationFrame(tick);
+  };
+  lyricFrame = window.requestAnimationFrame(tick);
+};
+
+const applyPlayback = (payload: TaskbarPlayerPlaybackPayload) => {
+  // A queued tick from the previous song must never advance the new song's lyrics.
+  if (payload.songPath !== (currentSong.value?.path ?? null)) return;
+  playbackAnchor.value = payload;
+  playbackTime.value = projectTaskbarPlaybackTime(payload);
+  isPlaying.value = payload.isPlaying;
+};
+
+watch([isVisible, isPlaying, parsedLyrics], refreshLyricClock);
+watch(canDrag, enabled => {
+  if (!enabled && isDragging.value) void finishDrag();
 });
+const onDocumentVisibilityChange = () => {
+  isDocumentVisible.value = !document.hidden;
+  if (document.hidden && isDragging.value) void finishDrag();
+  refreshLyricClock();
+};
 
 onMounted(async () => {
   try {
@@ -190,24 +315,39 @@ onMounted(async () => {
   // 1. 监听状态更新
   unlistenState = await listen<TaskbarPlayerStatePayload>(TASKBAR_PLAYER_STATE_EVENT, (event) => {
     currentSong.value = event.payload.currentSong;
+    const opacity = event.payload.backgroundOpacity;
+    textColor.value = normalizeTaskbarTextColor(event.payload.textColor);
+    lyricEffect.value = normalizeTaskbarLyricEffect(event.payload.lyricEffect);
+    lyricHighlightColor.value = normalizeTaskbarLyricHighlightColor(event.payload.lyricHighlightColor);
+    translationKaraoke.value = event.payload.translationKaraoke !== false;
+    contentMode.value = normalizeTaskbarContentMode(event.payload.contentMode);
+    coverShape.value = normalizeTaskbarCoverShape(event.payload.coverShape);
+    coverRotate.value = event.payload.coverRotate === true;
+    canDrag.value = event.payload.canDrag !== false;
+    backgroundOpacity.value = typeof opacity === 'number' && Number.isFinite(opacity)
+      ? Math.min(100, Math.max(0, opacity)) : TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY;
     localCoverUrl.value = event.payload.coverUrl;
-    isPlaying.value = event.payload.isPlaying;
-    isDarkTheme.value = event.payload.isDarkTheme;
+    parsedLyrics.value = event.payload.parsedLyrics;
+    lyricsStatus.value = event.payload.lyricsStatus;
+    applyPlayback(event.payload);
     void nextTick(() => {
       void emitTo('main', TASKBAR_PLAYER_STATE_APPLIED_EVENT);
-      checkTitleScroll();
     });
   });
+  unlistenPlayback = await listen<TaskbarPlayerPlaybackPayload>(TASKBAR_PLAYER_PLAYBACK_EVENT, event => {
+    applyPlayback(event.payload);
+  });
+  document.addEventListener('visibilitychange', onDocumentVisibilityChange);
 
   // 2. 监听可见性
   unlistenVisibility = await listen<{ visible: boolean }>(TASKBAR_PLAYER_VISIBILITY_EVENT, (event) => {
     isVisible.value = event.payload.visible;
     if (event.payload.visible) {
       void refreshTaskbarWindowTopmost();
-    }
+    } else if (isDragging.value) void finishDrag();
   });
 
-  // 3. 监听位置移动：拖动结束时由 pointerup 保存位置，这里只保留窗口生命周期清理句柄
+  // 3. 原生拖动结束时保存位置；这里只保留窗口生命周期清理句柄。
   unlistenMoved = await appWindow.onMoved(() => {});
 
   // 4. 发送 Ready 握手并请求一次最新状态
@@ -216,199 +356,430 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (isDragging.value) {
+    dragSession++;
+    isDragging.value = false;
+    cleanupDragListeners?.();
+    cleanupDragListeners = null;
+    if (activeNativeDragSessionId !== null) {
+      void invoke('cancel_taskbar_player_drag', { sessionId: activeNativeDragSessionId }).catch(error => {
+        console.warn('Failed to cancel taskbar drag on unmount:', error);
+      });
+    }
+    void emitTo('main', TASKBAR_PLAYER_DRAG_EVENT, { dragging: false });
+  }
   unlistenState?.();
+  unlistenPlayback?.();
   unlistenVisibility?.();
   unlistenMoved?.();
-  if (dragSafetyTimer) clearTimeout(dragSafetyTimer);
-  cleanupDragListeners?.();
-  if (dragFrame !== 0) {
-    window.cancelAnimationFrame(dragFrame);
-    dragFrame = 0;
-  }
+  stopLyricClock();
+  document.removeEventListener('visibilitychange', onDocumentVisibilityChange);
 });
 </script>
 
 <template>
   <div
-    class="group w-[280px] h-[40px] relative flex items-center justify-between select-none overflow-hidden rounded-xl border pl-2 pr-3.5 transition-all duration-300 bg-transparent"
-    :class="[
-      isDragging 
-        ? 'bg-[#121214]/65 border-white/5 shadow-2xl backdrop-blur-md' 
-        : 'border-transparent shadow-none hover:bg-[#121214]/65 hover:border-white/5 hover:shadow-2xl hover:backdrop-blur-md'
-    ]"
+    class="taskbar-player group"
+    :class="{ 'is-locked': !canDrag, 'is-dragging': isDragging, 'has-translation': hasTranslation }"
+    :style="backgroundStyle"
   >
-    <!-- 极简白色竖条拉手（采用外层 22px 宽的隐形热区, 并在悬停时 group 联动触发内层竖条呼吸显隐与高亮） -->
-    <div 
-      class="group w-[22px] h-[34px] -ml-1.5 mr-1 shrink-0 flex items-center justify-center cursor-move"
+    <div
+      v-if="canDrag"
+      class="taskbar-drag-handle"
       title="按住拖拽调整播控条位置"
       @pointerdown.prevent.stop="startDrag"
     >
-      <div 
-        class="w-[4px] h-[16px] rounded-full bg-white/50 opacity-0 group-hover:opacity-100 group-active:bg-white transition-all duration-300 pointer-events-none group-hover:scale-x-125 group-hover:shadow-[0_0_8px_rgba(255,255,255,0.6)]"
-        :class="[isDragging ? 'opacity-100 bg-white scale-x-125 shadow-[0_0_8px_rgba(255,255,255,0.6)]' : '']"
-      ></div>
+      <span class="taskbar-drag-grip" aria-hidden="true"><span></span><span></span><span></span></span>
     </div>
 
-    <!-- 左侧：封面与歌曲信息 -->
-    <div class="flex items-center gap-2.5 min-w-0 flex-1 mr-1 pointer-events-none">
-      <!-- 封面 -->
-      <div 
-        class="group/cover w-8 h-8 rounded-lg overflow-hidden shrink-0 bg-white/5 border border-white/5 flex items-center justify-center text-white/40 relative cursor-pointer pointer-events-auto"
+    <div class="taskbar-content">
+      <button
+        type="button"
+        class="taskbar-cover group/cover"
+        :class="{ 'is-circle': coverShape === 'circle' }"
+        :title="coverTitle"
+        aria-label="显示或收起主窗口"
         @mousedown.stop.prevent
-        title="显示/收起主窗口"
         @click.stop="sendAction('toggle-main-window')"
       >
-        <img 
-          v-if="localCoverUrl" 
-          :src="localCoverUrl" 
-          class="w-full h-full object-cover transition-all duration-200 group-hover/cover:scale-[0.96] group-hover/cover:brightness-[0.75]" 
-          draggable="false"
-        />
-        <svg 
-          v-else 
-          xmlns="http://www.w3.org/2000/svg" 
-          class="h-[18px] w-[18px] transition-all duration-200 group-hover/cover:scale-[0.96] group-hover/cover:brightness-[0.75]" 
-          viewBox="0 0 24 24" 
-          fill="none" 
-          stroke="currentColor" 
-          stroke-width="2" 
-          stroke-linecap="round" 
-          stroke-linejoin="round"
-        >
-          <path d="M9 18V5l12-2v13"></path>
-          <circle cx="6" cy="18" r="3"></circle>
-          <circle cx="18" cy="16" r="3"></circle>
-        </svg>
-
-        <!-- 精美、轻量对角双向箭头覆盖层 -->
-        <div 
-          class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 group-hover/cover:opacity-100 transition-opacity duration-200 ease-out"
-        >
-          <svg 
-            xmlns="http://www.w3.org/2000/svg" 
-            class="h-4 w-4 text-white stroke-[2.5]" 
-            viewBox="0 0 24 24" 
-            fill="none" 
-            stroke="currentColor" 
-            stroke-linecap="round" 
-            stroke-linejoin="round"
-          >
-            <polyline points="15 3 21 3 21 9" />
-            <polyline points="9 21 3 21 3 15" />
-            <line x1="21" y1="3" x2="14" y2="10" />
-            <line x1="3" y1="21" x2="10" y2="14" />
-          </svg>
+        <div ref="artwork" class="taskbar-artwork">
+          <img v-if="localCoverUrl" :src="localCoverUrl" alt="歌曲封面" draggable="false" />
+          <Music v-else :size="18" />
         </div>
-      </div>
+        <span class="taskbar-cover-overlay"><Expand :size="16" :stroke-width="2.5" /></span>
+      </button>
 
-      <!-- 文字信息（歌名/歌手） -->
-      <div class="flex flex-col min-w-0 leading-tight">
-        <!-- 歌曲标题（带跑马灯逻辑） -->
-        <div 
-          ref="titleWrapperElement" 
-          class="text-xs text-white/95 font-semibold truncate max-w-[112px] w-full overflow-hidden relative"
+      <div class="taskbar-song-info">
+        <div v-if="contentMode === 'title-lyrics'" class="taskbar-song-title" :title="songTitle">{{ songTitle }}</div>
+        <div
+          v-if="lyricInterlude"
+          class="taskbar-interlude"
+          role="img"
+          aria-label="等待下一句歌词"
+          title="等待下一句歌词"
+          :style="{ color: lyricHighlightColor ?? undefined }"
+        >
+          <span v-for="index in 3" :key="index" class="taskbar-interlude-dot" aria-hidden="true"
+            :style="{ '--dot-progress': interludeDotProgress(index - 1) }" />
+        </div>
+        <TransitionGroup
+          v-else-if="resolvedContentMode === 'double-line' && currentLyric"
+          tag="div"
+          name="taskbar-lyric-stack"
+          class="taskbar-double-lyrics"
+          :class="{ 'is-reversing': isReversingLyrics }"
         >
           <div
-            ref="titleElement"
-            class="inline-block whitespace-nowrap"
-            :class="{ 'marquee-scroll': shouldScroll }"
+            v-for="(row, index) in lyricRows"
+            :key="row.key"
+            class="taskbar-double-row"
+            :class="{ 'is-upcoming': index > 0 }"
+            :style="{ '--lyric-row-index': index }"
           >
-            {{ currentSong ? (currentSong.title || currentSong.name) : 'Lycia Player' }}
+            <TaskbarLyricLine
+              :text="row.line.text"
+              :words="row.line.words"
+              :time="row.line.time"
+              :end-time="row.line.endTime"
+              :playback-time="lyricTime"
+              :effect="lyricEffect"
+              :highlight-color="lyricHighlightColor"
+            />
           </div>
-        </div>
-
-        <!-- 歌手名 -->
-        <div class="text-[10px] text-white/50 truncate max-w-[112px] w-full">
-          {{ currentSong ? currentSong.artist : '享受音乐时光' }}
-        </div>
+        </TransitionGroup>
+        <template v-else-if="currentLyric">
+          <TaskbarLyricLine
+            :key="lyricRows[0].key"
+            :text="currentLyric.text"
+            :words="currentLyric.words"
+            :time="currentLyric.time"
+            :end-time="currentLyric.endTime"
+            :playback-time="lyricTime"
+            :effect="lyricEffect"
+            :highlight-color="lyricHighlightColor"
+          />
+          <TaskbarLyricLine
+            v-if="hasTranslation"
+            :key="`${currentSong?.path}:${currentLyric.time}:translation`"
+            :text="currentLyric.translation"
+            :words="currentLyric.translationWords"
+            :time="currentLyric.time"
+            :end-time="currentLyric.endTime"
+            :playback-time="lyricTime"
+            :effect="translationKaraoke ? lyricEffect : 'none'"
+            :highlight-color="lyricHighlightColor"
+            translation
+          />
+        </template>
+        <div v-else class="taskbar-fallback">{{ contentMode === 'title-lyrics' ? fallbackText : lyricFallbackText }}</div>
       </div>
     </div>
 
-    <!-- 右侧：上一首、播放/暂停、下一首控制 -->
-    <div class="flex items-center gap-2.5 shrink-0 z-20 mr-1">
-      <!-- 上一首 -->
-      <button 
-        @click.stop="sendAction('prev-song')" 
-        class="text-white/60 hover:text-white transition-colors duration-200 active:scale-90"
+    <div class="taskbar-controls">
+      <button
+        type="button"
+        class="taskbar-control"
         title="上一首"
+        aria-label="上一首"
+        @mousedown.prevent
+        @click.stop="sendAction('prev-song')"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4.5 w-4.5 fill-current" viewBox="0 0 24 24">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M6 6h2v12H6V6zm3.5 6l8.5 6V6l-8.5 6z" />
         </svg>
       </button>
-
-      <!-- 播放/暂停（经典汽水胶囊药丸宽圆角背景） -->
-      <button 
-        @click.stop="sendAction('toggle-play')" 
-        class="w-11 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all duration-200 active:scale-95 border border-white/5"
-        title="播放/暂停"
+      <button
+        type="button"
+        class="taskbar-play"
+        :title="isPlaying ? '暂停' : '播放'"
+        :aria-label="isPlaying ? '暂停' : '播放'"
+        @mousedown.prevent
+        @click.stop="sendAction('toggle-play')"
       >
-        <svg v-if="isPlaying" xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 fill-current" viewBox="0 0 24 24">
+        <svg v-if="isPlaying" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
         </svg>
-        <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 fill-current ml-0.5" viewBox="0 0 24 24">
+        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="ml-0.5" aria-hidden="true">
           <path d="M8 5v14l11-7z" />
         </svg>
       </button>
-
-      <!-- 下一首 -->
-      <button 
-        @click.stop="sendAction('next-song')" 
-        class="text-white/60 hover:text-white transition-colors duration-200 active:scale-90"
+      <button
+        type="button"
+        class="taskbar-control"
         title="下一首"
+        aria-label="下一首"
+        @mousedown.prevent
+        @click.stop="sendAction('next-song')"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4.5 w-4.5 fill-current" viewBox="0 0 24 24">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
         </svg>
       </button>
     </div>
-
-    <!-- 右上角 x 退出按钮定位容器（跟随主面板悬停阴影同步显隐） -->
-    <div 
-      class="absolute top-0 right-0 w-7 h-7 flex items-start justify-end pt-1 pr-1.5 pointer-events-none z-30 transition-opacity duration-300"
-      :class="[isDragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100']"
-    >
-      <svg 
-        xmlns="http://www.w3.org/2000/svg" 
-        class="h-2.5 w-2.5 text-white/30 hover:text-white/90 cursor-pointer pointer-events-auto transition-colors duration-200 active:scale-95"
-        @click.stop="sendAction('close')"
+    <div class="taskbar-close">
+      <button
+        type="button"
         title="退出播控"
-        viewBox="0 0 24 24" 
-        fill="none" 
-        stroke="currentColor" 
-        stroke-width="3.5" 
-        stroke-linecap="round" 
-        stroke-linejoin="round"
-      >
-        <line x1="18" y1="6" x2="6" y2="18"></line>
-        <line x1="6" y1="6" x2="18" y2="18"></line>
-      </svg>
+        aria-label="退出播控"
+        @mousedown.prevent
+        @click.stop="sendAction('close')"
+      ><X :size="10" :stroke-width="3.5" /></button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.marquee-scroll {
-  display: inline-block;
-  animation: marquee-anim 8s linear infinite;
-  padding-left: 20px;
+.taskbar-player {
+  width: 100%;
+  height: 40px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 12px;
+  padding: 0 14px 0 8px;
+  overflow: hidden;
+  user-select: none;
+  pointer-events: auto;
+  transition: background-color 200ms ease;
 }
-
-@keyframes marquee-anim {
-  0% {
-    transform: translate3d(0, 0, 0);
-  }
-  50% {
-    transform: translate3d(-35%, 0, 0);
-  }
-  100% {
-    transform: translate3d(0, 0, 0);
-  }
+.taskbar-player.is-locked { padding-left: 0; }
+.taskbar-drag-handle {
+  width: 22px;
+  height: 34px;
+  margin-left: -6px;
+  margin-right: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: move;
+}
+.taskbar-drag-grip {
+  width: 4px;
+  height: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  color: rgb(255 255 255 / 50%);
+  opacity: 0;
+  transition: opacity 200ms ease, transform 200ms ease, color 200ms ease;
+}
+.taskbar-drag-grip > span { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.taskbar-player:hover .taskbar-drag-grip,
+.taskbar-player.is-dragging .taskbar-drag-grip { opacity: 1; }
+.taskbar-drag-handle:hover .taskbar-drag-grip,
+.taskbar-player.is-dragging .taskbar-drag-grip { transform: scaleX(1.25); color: white; }
+.taskbar-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.taskbar-cover {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  position: relative;
+  background: rgb(255 255 255 / 5%);
+  border: 1px solid rgb(255 255 255 / 5%);
+  color: rgb(255 255 255 / 40%);
+  cursor: pointer;
+}
+.taskbar-cover.is-circle { border-radius: 50%; }
+.taskbar-artwork { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.taskbar-artwork img { width: 100%; height: 100%; object-fit: cover; }
+.taskbar-cover-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 45%);
+  color: white;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+.taskbar-cover:hover .taskbar-cover-overlay,
+.taskbar-cover:focus-visible .taskbar-cover-overlay { opacity: 1; }
+.taskbar-song-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  flex: 1;
+  transition: opacity 150ms ease;
+}
+.taskbar-double-lyrics {
+  --lyric-row-height: 16px;
+  --lyric-transition: 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  height: calc(var(--lyric-row-height) * 2);
+  overflow: hidden;
+  --lyric-enter-offset: var(--lyric-row-height);
+  --lyric-leave-offset: calc(var(--lyric-row-height) * -1);
+}
+.taskbar-double-lyrics.is-reversing {
+  --lyric-enter-offset: calc(var(--lyric-row-height) * -1);
+  --lyric-leave-offset: var(--lyric-row-height);
+}
+.taskbar-double-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--lyric-row-height);
+  min-width: 0;
+  transform: translateY(calc(var(--lyric-row-index) * var(--lyric-row-height)));
+  transition: transform var(--lyric-transition), opacity var(--lyric-transition);
+  will-change: transform;
+}
+.taskbar-double-row.is-upcoming { opacity: 0.62; }
+.taskbar-double-row :deep(.taskbar-lyric-viewport) {
+  font-size: 12px;
+  line-height: var(--lyric-row-height);
+}
+/* Row offsets own the movement; per-frame lyric updates must not restart FLIP. */
+.taskbar-lyric-stack-move { transition: none; }
+.taskbar-double-row.taskbar-lyric-stack-enter-from {
+  opacity: 0;
+  transform: translateY(calc(var(--lyric-row-index) * var(--lyric-row-height) + var(--lyric-enter-offset)));
+}
+.taskbar-double-row.taskbar-lyric-stack-leave-to {
+  opacity: 0;
+  transform: translateY(calc(var(--lyric-row-index) * var(--lyric-row-height) + var(--lyric-leave-offset)));
+}
+.taskbar-song-title {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  color: rgb(var(--taskbar-text-rgb, 255 255 255) / 80%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.taskbar-interlude {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 17px;
+  color: rgb(var(--taskbar-text-rgb, 255 255 255) / 95%);
+}
+.taskbar-interlude-dot {
+  position: relative;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgb(var(--taskbar-text-rgb, 255 255 255) / 30%);
+  transform: scale(calc(0.8 + var(--dot-progress) * 0.2));
+}
+.taskbar-interlude-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: var(--dot-progress);
+}
+.taskbar-fallback {
+  color: rgb(var(--taskbar-text-rgb, 255 255 255) / 85%);
+  font-size: 13px;
+  line-height: 17px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.taskbar-controls {
+  position: absolute;
+  inset-block: 0;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  z-index: 20;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+.taskbar-player:hover .taskbar-song-info,
+.taskbar-player:focus-within .taskbar-song-info,
+.taskbar-player.is-dragging .taskbar-song-info { opacity: 0; }
+.taskbar-player:hover .taskbar-controls,
+.taskbar-player:focus-within .taskbar-controls,
+.taskbar-player.is-dragging .taskbar-controls { opacity: 1; pointer-events: auto; }
+.taskbar-control {
+  width: 18px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgb(255 255 255 / 60%);
+  transition: color 200ms ease, transform 150ms ease;
+}
+.taskbar-control:hover { color: white; }
+.taskbar-control:active { transform: scale(0.9); }
+.taskbar-play {
+  width: 44px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 10%);
+  border: 1px solid rgb(255 255 255 / 5%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 200ms ease, transform 150ms ease;
+}
+.taskbar-play:hover { background: rgb(255 255 255 / 20%); }
+.taskbar-play:active { transform: scale(0.95); }
+.taskbar-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 28px;
+  height: 28px;
+  padding: 4px 6px 0 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  z-index: 30;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+.taskbar-player:hover .taskbar-close,
+.taskbar-player:focus-within .taskbar-close,
+.taskbar-player.is-dragging .taskbar-close { opacity: 1; }
+.taskbar-close button { color: rgb(255 255 255 / 30%); pointer-events: auto; transition: color 200ms ease, transform 150ms ease; }
+.taskbar-close button:hover { color: rgb(255 255 255 / 90%); }
+.taskbar-close button:active { transform: scale(0.95); }
+.taskbar-player button { cursor: pointer; }
+.taskbar-player button:focus-visible { outline: 2px solid rgb(255 255 255 / 65%); outline-offset: -2px; }
+@media (min-width: 360px) {
+  .taskbar-player:hover .taskbar-content,
+  .taskbar-player:focus-within .taskbar-content,
+  .taskbar-player.is-dragging .taskbar-content { padding-right: 150px; }
+  .taskbar-player:hover .taskbar-song-info,
+  .taskbar-player:focus-within .taskbar-song-info,
+  .taskbar-player.is-dragging .taskbar-song-info { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .taskbar-player, .taskbar-drag-grip, .taskbar-cover-overlay,
+  .taskbar-song-info, .taskbar-controls, .taskbar-control, .taskbar-play, .taskbar-close,
+  .taskbar-close button, .taskbar-double-row, .taskbar-lyric-stack-move,
+  .taskbar-lyric-stack-enter-active, .taskbar-lyric-stack-leave-active { transition: none; }
+  .taskbar-interlude-dot { transform: none; }
 }
 </style>
 
 <style>
-/* 强制窗口背景绝对透明，彻底去除圆角外多余的拐角黑色边缘 */
+/* The standalone taskbar window must retain a transparent WebView surface. */
 html, body, #app {
   background: transparent !important;
   background-color: transparent !important;

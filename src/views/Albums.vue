@@ -1,38 +1,48 @@
 <script setup lang="ts">
 defineOptions({ name: 'Albums' });
 
-import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { albumViewportCoverSnapshotCache } from '../caches/imageCaches';
-import { dragSession } from '../composables/dragState';
 import { useCoverCache } from '../composables/useCoverCache';
 import { useHomeNavigation } from '../composables/useHomeNavigation';
 import { useListScrollMemory } from '../composables/useListScrollMemory';
+import { useVisibleCoverUrls } from '../composables/useVisibleCoverUrls';
 import SortModeIcon from '../components/common/SortModeIcon.vue';
 import { useLibraryBrowse } from '../features/library/useLibraryBrowse';
+import { useFolderAlbumCollections } from '../features/library/useFolderAlbumCollections';
 import type { AlbumListItem } from '../features/library/playerLibraryViewShared';
+import type { AlbumSortMode } from '../services/storage/playerStorage';
 import { getAlphabetIndexKey } from '../utils/alphabetIndex';
 import ArtistAlbumContextMenu from '../components/overlays/ArtistAlbumContextMenu.vue';
 
-const { filteredAlbumList, albumSortMode, updateAlbumOrder, searchQuery } = useLibraryBrowse();
+const { filteredAlbumList, albumSortMode, searchQuery } = useLibraryBrowse();
+const folderAlbumCollections = useFolderAlbumCollections();
 const router = useRouter();
 const route = useRoute();
-const { openHomeAlbum } = useHomeNavigation(router);
-const isSearchActive = computed(() => searchQuery.value.trim().length > 0);
-const { coverCache, loadCover, touchCoverPaths, isCoverLoading, preloadPriorityCovers } = useCoverCache();
+const { openHomeAlbum, openHomeFolder } = useHomeNavigation(router);
+const { preloadPriorityCovers } = useCoverCache();
 
 const showSortMenu = ref(false);
-const dragOverKey = ref<string | null>(null);
+const sortButtonRef = ref<HTMLButtonElement | null>(null);
+const sortOptions: Array<{ value: AlbumSortMode; label: string }> = [
+  { value: 'name', label: '名称 A–Z' },
+  { value: 'name_desc', label: '名称 Z–A' },
+  { value: 'artist', label: '艺人 A–Z' },
+  { value: 'artist_desc', label: '艺人 Z–A' },
+  { value: 'count', label: '歌曲最多' },
+  { value: 'count_asc', label: '歌曲最少' },
+];
+const currentSortLabel = computed(() => sortOptions.find(option => option.value === albumSortMode.value)?.label);
+const isNameSort = computed(() => albumSortMode.value === 'name' || albumSortMode.value === 'name_desc');
 const containerRef = ref<HTMLElement | null>(null);
 const containerScrollTop = ref(0);
 const containerHeight = ref(720);
 const containerWidth = ref(1200);
 const measuredAlbumCardHeight = ref(0);
-const displayedCoverUrls = reactive(new Map<string, string>());
 let coverObserver: IntersectionObserver | null = null;
 let containerResizeObserver: ResizeObserver | null = null;
 let coverObserverRefreshFrame = 0;
-let visibleCoverPaths = new Set<string>();
 const VIEWPORT_SNAPSHOT_KEY = 'albums-current';
 const VIEWPORT_SNAPSHOT_LIMIT = 72;
 const ALBUM_GRID_GAP_X = 24;
@@ -42,13 +52,23 @@ const ALBUM_CARD_EXTRA_HEIGHT = 108;
 const ALBUM_SECTION_HEADER_HEIGHT = 24;
 const ALBUM_OVERSCAN_ROWS = 2;
 
-const handleAlbumClick = (albumKey: string) => {
-  void openHomeAlbum(albumKey);
+const handleAlbumClick = (album: AlbumListItem) => {
+  if (album.folderPath) {
+    searchQuery.value = '';
+    void openHomeFolder(album.folderPath, { collection: true });
+    return;
+  }
+  void openHomeAlbum(album.key);
 };
 
-const handleSortChange = (mode: 'count' | 'name' | 'artist' | 'custom') => {
-  albumSortMode.value = mode;
+const closeSortMenu = () => {
   showSortMenu.value = false;
+  sortButtonRef.value?.focus();
+};
+
+const handleSortChange = (mode: AlbumSortMode) => {
+  albumSortMode.value = mode;
+  closeSortMenu();
 };
 
 const getAlbumGridColumns = () => {
@@ -117,21 +137,13 @@ const handleContainerScroll = (event: Event) => {
   containerScrollTop.value = (event.target as HTMLElement).scrollTop;
 };
 
-const getDisplayedCoverUrl = (path: string | undefined) => {
-  if (!path) {
-    return '';
-  }
-
-  return displayedCoverUrls.get(path) ?? coverCache.get(path) ?? '';
-};
-
 const restoreViewportCoverSnapshot = () => {
   const snapshot = albumViewportCoverSnapshotCache.get(VIEWPORT_SNAPSHOT_KEY);
   if (!snapshot || snapshot.length === 0) {
     return;
   }
 
-  preloadPriorityCovers(snapshot);
+  preloadPriorityCovers(snapshot, 'card');
 };
 
 const saveViewportCoverSnapshot = () => {
@@ -177,67 +189,31 @@ const saveViewportCoverSnapshot = () => {
   albumViewportCoverSnapshotCache.delete(VIEWPORT_SNAPSHOT_KEY);
 };
 
-restoreViewportCoverSnapshot();
-
-const syncVisibleCoverUrls = (paths: string[]) => {
-  const nextVisiblePaths = new Set(paths.filter(Boolean));
-  visibleCoverPaths = nextVisiblePaths;
-
-  for (const path of Array.from(displayedCoverUrls.keys())) {
-    if (!nextVisiblePaths.has(path)) {
-      displayedCoverUrls.delete(path);
-    }
-  }
-
-  const nextPaths = Array.from(nextVisiblePaths);
-  touchCoverPaths(nextPaths);
-
-  nextPaths.forEach((path) => {
-    const cachedUrl = coverCache.get(path);
-    if (cachedUrl) {
-      displayedCoverUrls.set(path, cachedUrl);
-      return;
-    }
-
-    if (displayedCoverUrls.has(path)) {
-      return;
-    }
-
-    void loadCover(path).then((coverUrl) => {
-      if (!coverUrl || !visibleCoverPaths.has(path)) {
-        return;
-      }
-
-      displayedCoverUrls.set(path, coverUrl);
-    });
-  });
-};
-
 const albumSections = computed(() => {
   const sections: Array<{
     key: string;
-    items: Array<{ album: AlbumListItem; index: number }>;
+    items: Array<{ album: AlbumListItem }>;
   }> = [];
 
-  filteredAlbumList.value.forEach((album, index) => {
+  filteredAlbumList.value.forEach((album) => {
     const key = getAlphabetIndexKey(album.name);
     const lastSection = sections[sections.length - 1];
 
     if (!lastSection || lastSection.key !== key) {
       sections.push({
         key,
-        items: [{ album, index }],
+        items: [{ album }],
       });
       return;
     }
 
-    lastSection.items.push({ album, index });
+    lastSection.items.push({ album });
   });
 
   return sections;
 });
 
-type AlbumSectionEntry = { album: AlbumListItem; index: number };
+type AlbumSectionEntry = { album: AlbumListItem };
 type AlbumVirtualHeaderRow = { type: 'header'; key: string; title: string };
 type AlbumVirtualItemsRow = { type: 'items'; key: string; items: AlbumSectionEntry[]; bottomGap: number };
 type AlbumVirtualRow = AlbumVirtualHeaderRow | AlbumVirtualItemsRow;
@@ -325,7 +301,7 @@ const groupedAlbumVirtualState = computed(() => {
 });
 
 const stickyAlbumHeader = computed(() => {
-  if (albumSortMode.value !== 'name') {
+  if (!isNameSort.value) {
     return null;
   }
 
@@ -382,9 +358,8 @@ const flatAlbumVirtualState = computed(() => {
   const endIndex = Math.min(filteredAlbumList.value.length, endRow * albumGridColumns.value);
 
   return {
-    items: filteredAlbumList.value.slice(startIndex, endIndex).map((album, offset) => ({
+    items: filteredAlbumList.value.slice(startIndex, endIndex).map((album) => ({
       album,
-      index: startIndex + offset,
     })),
     paddingTop: `${startRow * albumRowSpan.value}px`,
     paddingBottom: `${Math.max(0, (totalRows - endRow) * albumRowSpan.value)}px`,
@@ -392,7 +367,7 @@ const flatAlbumVirtualState = computed(() => {
 });
 
 const visibleAlbumCoverPaths = computed(() => {
-  if (albumSortMode.value === 'name') {
+  if (isNameSort.value) {
     return groupedAlbumVirtualState.value.rows.flatMap((row) => {
       if (row.type !== 'items') {
         return [];
@@ -408,6 +383,10 @@ const visibleAlbumCoverPaths = computed(() => {
     .map(item => item.album.firstSongPath)
     .filter((path): path is string => !!path);
 });
+
+const { getDisplayedCoverUrl, isCoverLoading } = useVisibleCoverUrls(visibleAlbumCoverPaths, 'card');
+
+restoreViewportCoverSnapshot();
 
 const initCoverObserver = async () => {
   await nextTick();
@@ -427,7 +406,7 @@ const initCoverObserver = async () => {
           const target = entry.target as HTMLElement;
           const path = target.dataset.coverPath;
           if (path) {
-            preloadPriorityCovers([path]);
+            preloadPriorityCovers([path], 'card');
           }
           coverObserver?.unobserve(target);
         });
@@ -465,9 +444,7 @@ useListScrollMemory(scrollMemoryKey, containerRef);
 
 watch(
   [visibleAlbumCoverPaths, albumSortMode],
-  ([paths]) => {
-    syncVisibleCoverUrls(paths);
-    preloadPriorityCovers(paths);
+  () => {
     scheduleCoverObserverRefresh();
   },
   { immediate: true, flush: 'post' },
@@ -486,79 +463,15 @@ const contextMenuX = ref(0);
 const contextMenuY = ref(0);
 const contextMenuTargetKey = ref('');
 const contextMenuTargetName = ref('');
+const contextMenuFolderPath = ref<string>();
 
 const handleContextMenu = (event: MouseEvent, album: AlbumListItem) => {
   contextMenuX.value = event.clientX;
   contextMenuY.value = event.clientY;
   contextMenuTargetKey.value = album.key;
   contextMenuTargetName.value = album.name;
+  contextMenuFolderPath.value = album.folderPath;
   showContextMenu.value = true;
-};
-
-let pointerDownInfo: { x: number; y: number; index: number; album: AlbumListItem } | null = null;
-
-const handlePointerDown = (event: PointerEvent, index: number, album: AlbumListItem) => {
-  if (isSearchActive.value || (event.pointerType === 'mouse' && event.button !== 0)) {
-    return;
-  }
-
-  pointerDownInfo = { x: event.clientX, y: event.clientY, index, album };
-};
-
-const handleGlobalPointerMove = (event: PointerEvent) => {
-  if (!pointerDownInfo || dragSession.active) {
-    return;
-  }
-
-  if (event.pointerType !== 'mouse') {
-    event.preventDefault();
-  }
-
-  const dist = Math.hypot(event.clientX - pointerDownInfo.x, event.clientY - pointerDownInfo.y);
-  if (dist <= 5) {
-    return;
-  }
-
-  dragSession.active = true;
-  dragSession.type = 'album';
-  dragSession.data = { index: pointerDownInfo.index, key: pointerDownInfo.album.key };
-};
-
-const resetAlbumDrag = () => {
-  pointerDownInfo = null;
-  if (dragSession.type === 'album') {
-    dragSession.active = false;
-    dragSession.type = 'song';
-    dragSession.data = null;
-    dragOverKey.value = null;
-  }
-};
-
-const handleGlobalPointerEnd = (cancelled = false) => {
-  if (!cancelled && dragSession.active && dragSession.type === 'album' && dragOverKey.value && pointerDownInfo) {
-    const fromIndex = pointerDownInfo.index;
-    const toIndex = filteredAlbumList.value.findIndex((album) => album.key === dragOverKey.value);
-
-    if (toIndex !== -1 && fromIndex !== toIndex) {
-      const list = [...filteredAlbumList.value];
-      const [removed] = list.splice(fromIndex, 1);
-      if (removed) {
-        list.splice(toIndex, 0, removed);
-        updateAlbumOrder(list.map((album) => album.key));
-      }
-    }
-  }
-
-  resetAlbumDrag();
-};
-
-const handleGlobalPointerUp = () => handleGlobalPointerEnd(false);
-const handleGlobalPointerCancel = () => handleGlobalPointerEnd(true);
-
-const handleItemPointerMove = (_event: PointerEvent, albumKey: string) => {
-  if (dragSession.active && dragSession.type === 'album') {
-    dragOverKey.value = albumKey;
-  }
 };
 
 const closeMenu = (event: MouseEvent) => {
@@ -570,9 +483,6 @@ const closeMenu = (event: MouseEvent) => {
 
 onMounted(() => {
   updateViewportMetrics();
-  window.addEventListener('pointermove', handleGlobalPointerMove);
-  window.addEventListener('pointerup', handleGlobalPointerUp);
-  window.addEventListener('pointercancel', handleGlobalPointerCancel);
   window.addEventListener('click', closeMenu);
   window.addEventListener('resize', updateViewportMetrics);
   if (containerRef.value) {
@@ -593,9 +503,6 @@ onBeforeUnmount(() => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener('pointermove', handleGlobalPointerMove);
-  window.removeEventListener('pointerup', handleGlobalPointerUp);
-  window.removeEventListener('pointercancel', handleGlobalPointerCancel);
   window.removeEventListener('click', closeMenu);
   window.removeEventListener('resize', updateViewportMetrics);
   if (containerResizeObserver) {
@@ -610,8 +517,6 @@ onUnmounted(() => {
     cancelAnimationFrame(coverObserverRefreshFrame);
     coverObserverRefreshFrame = 0;
   }
-  displayedCoverUrls.clear();
-  visibleCoverPaths = new Set<string>();
 });
 </script>
 
@@ -623,51 +528,57 @@ onUnmounted(() => {
           <h2 class="text-xl font-bold text-gray-900 dark:text-white">专辑列表</h2>
         </div>
 
-        <div class="relative z-50 flex items-center gap-2">
+        <div class="relative z-50 flex items-center gap-2" @keydown.esc.stop="closeSortMenu">
           <button
-            title="排序方式"
-            class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-7 h-7 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
+            ref="sortButtonRef"
+            type="button"
+            :title="`排序方式：${currentSortLabel}`"
+            :aria-label="`排序方式：${currentSortLabel}`"
+            :aria-expanded="showSortMenu"
+            aria-controls="album-sort-options"
+            class="album-sort-control bg-white/1 hover:bg-white/10 border border-white/1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 h-7 px-2.5 flex items-center justify-center gap-1.5 rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20 whitespace-nowrap text-xs"
             @click.stop="showSortMenu = !showSortMenu"
           >
-            <SortModeIcon class="h-4 w-4" />
+            <SortModeIcon class="h-4 w-4 shrink-0" />
+            <span>{{ currentSortLabel }}</span>
+            <svg aria-hidden="true" class="h-3 w-3 transition-transform" :class="{ 'rotate-180': showSortMenu }" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 6 4 4 4-4" /></svg>
           </button>
 
-          <div v-if="showSortMenu" class="absolute right-0 top-full mt-2 w-48 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md rounded-xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-top-right">
+          <div v-if="showSortMenu" id="album-sort-options" role="group" aria-label="排序方式" class="absolute right-0 top-full mt-2 w-56 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md rounded-xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-top-right" @click.stop>
+            <div class="px-4 pt-3 pb-1 text-xs text-gray-500 dark:text-gray-400">排序方式</div>
             <div class="py-1">
               <button
-                class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-between"
-                :class="albumSortMode === 'artist' ? 'text-[#EC4141] font-medium' : 'text-gray-700 dark:text-gray-200'"
-                @click="handleSortChange('artist')"
+                v-for="option in sortOptions"
+                :key="option.value"
+                type="button"
+                :aria-pressed="albumSortMode === option.value"
+                class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 focus-visible:bg-gray-100 dark:focus-visible:bg-white/10 flex items-center justify-between"
+                :class="albumSortMode === option.value ? 'text-[#EC4141] font-medium' : 'text-gray-700 dark:text-gray-200'"
+                @click="handleSortChange(option.value)"
               >
-                <span>按专辑艺人排序</span>
-                <svg v-if="albumSortMode === 'artist'" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
-              </button>
-              <button
-                class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-between"
-                :class="albumSortMode === 'name' ? 'text-[#EC4141] font-medium' : 'text-gray-700 dark:text-gray-200'"
-                @click="handleSortChange('name')"
-              >
-                <span>按名称排序 (A-Z)</span>
-                <svg v-if="albumSortMode === 'name'" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
-              </button>
-              <button
-                class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-between"
-                :class="albumSortMode === 'count' ? 'text-[#EC4141] font-medium' : 'text-gray-700 dark:text-gray-200'"
-                @click="handleSortChange('count')"
-              >
-                <span>按数量排序 (多->少)</span>
-                <svg v-if="albumSortMode === 'count'" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
-              </button>
-              <button
-                class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-between cursor-default"
-                :class="albumSortMode === 'custom' ? 'text-[#EC4141] font-medium' : 'text-gray-700 dark:text-gray-200'"
-              >
-                <span>自定义排序 (拖拽触发)</span>
-                <svg v-if="albumSortMode === 'custom'" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                <span>{{ option.label }}</span>
+                <svg v-if="albumSortMode === option.value" aria-hidden="true" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
             </div>
+            <p class="px-4 pt-2 pb-3 border-t border-gray-100 dark:border-white/10 text-xs leading-relaxed text-gray-500 dark:text-gray-400">艺人排序：按专辑所属艺人的名字排列，同一艺人的专辑放在一起。</p>
           </div>
         </div>
+      </div>
+      <div
+        v-if="folderAlbumCollections.loading || folderAlbumCollections.error"
+        role="status"
+        aria-live="polite"
+        class="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
+      >
+        <span v-if="folderAlbumCollections.error" :title="folderAlbumCollections.error">文件夹合集更新失败，请重试</span>
+        <span v-else>正在更新专辑展示…</span>
+        <button
+          v-if="folderAlbumCollections.error"
+          type="button"
+          class="text-[#EC4141] hover:underline disabled:opacity-50"
+          :disabled="folderAlbumCollections.loading"
+          @click.stop="folderAlbumCollections.refresh()"
+        >重试</button>
       </div>
     </header>
 
@@ -688,8 +599,10 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <Transition name="search-refresh">
       <div
-        v-if="albumSortMode === 'name'"
+        v-if="isNameSort"
+        :key="`album-grouped-${searchQuery.trim()}`"
         :style="{ paddingTop: groupedAlbumVirtualState.paddingTop, paddingBottom: groupedAlbumVirtualState.paddingBottom }"
       >
         <template v-for="row in groupedAlbumVirtualState.rows" :key="row.key">
@@ -712,14 +625,9 @@ onUnmounted(() => {
               v-for="item in row.items"
               :key="item.album.key"
               data-album-card
-              class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5 [touch-action:none]"
-              :class="[
-                dragSession.active && dragSession.type === 'album' && dragSession.data?.key === item.album.key ? 'opacity-50' : '',
-                { 'ring-2 ring-[#EC4141] bg-red-50 dark:bg-red-900/20': dragSession.active && dragSession.type === 'album' && dragOverKey === item.album.key && dragSession.data?.key !== item.album.key },
-              ]"
-              @pointerdown="handlePointerDown($event, item.index, item.album)"
-              @pointermove="handleItemPointerMove($event, item.album.key)"
-              @click="handleAlbumClick(item.album.key)"
+              :title="item.album.folderPath ? `文件夹合集：${item.album.folderPath}` : undefined"
+              class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5"
+              @click="handleAlbumClick(item.album)"
               @contextmenu.prevent="handleContextMenu($event, item.album)"
             >
               <div class="relative w-full aspect-square mb-3 mt-1" :data-cover-path="item.album.firstSongPath">
@@ -757,7 +665,7 @@ onUnmounted(() => {
                 <p class="text-xs text-gray-500 dark:text-gray-400 truncate w-full mt-1.5 flex items-center gap-1.5 opacity-80">
                   <span class="font-medium">{{ item.album.count }}首</span>
                   <span class="w-0.5 h-0.5 rounded-full bg-gray-400"></span>
-                  <span>{{ item.album.artist }}</span>
+                  <span>{{ item.album.folderPath ? '文件夹合集' : item.album.artist }}</span>
                 </p>
               </div>
             </div>
@@ -767,6 +675,7 @@ onUnmounted(() => {
 
       <div
         v-else
+        :key="`album-flat-${searchQuery.trim()}`"
         class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-x-6 gap-y-10"
         :style="{ paddingTop: flatAlbumVirtualState.paddingTop, paddingBottom: flatAlbumVirtualState.paddingBottom }"
       >
@@ -774,14 +683,9 @@ onUnmounted(() => {
           v-for="item in flatAlbumVirtualState.items"
           :key="item.album.key"
           data-album-card
-          class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5 [touch-action:none]"
-          :class="[
-            dragSession.active && dragSession.type === 'album' && dragSession.data?.key === item.album.key ? 'opacity-50' : '',
-            { 'ring-2 ring-[#EC4141] bg-red-50 dark:bg-red-900/20': dragSession.active && dragSession.type === 'album' && dragOverKey === item.album.key && dragSession.data?.key !== item.album.key },
-          ]"
-          @pointerdown="handlePointerDown($event, item.index, item.album)"
-          @pointermove="handleItemPointerMove($event, item.album.key)"
-          @click="handleAlbumClick(item.album.key)"
+          :title="item.album.folderPath ? `文件夹合集：${item.album.folderPath}` : undefined"
+          class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5"
+          @click="handleAlbumClick(item.album)"
           @contextmenu.prevent="handleContextMenu($event, item.album)"
         >
           <div class="relative w-full aspect-square mb-3 mt-1" :data-cover-path="item.album.firstSongPath">
@@ -819,11 +723,12 @@ onUnmounted(() => {
             <p class="text-xs text-gray-500 dark:text-gray-400 truncate w-full mt-1.5 flex items-center gap-1.5 opacity-80">
               <span class="font-medium">{{ item.album.count }}首</span>
               <span class="w-0.5 h-0.5 rounded-full bg-gray-400"></span>
-              <span>{{ item.album.artist }}</span>
+              <span>{{ item.album.folderPath ? '文件夹合集' : item.album.artist }}</span>
             </p>
           </div>
         </div>
       </div>
+      </Transition>
     </section>
 
     <ArtistAlbumContextMenu
@@ -833,13 +738,29 @@ onUnmounted(() => {
       type="album"
       :targetKey="contextMenuTargetKey"
       :targetName="contextMenuTargetName"
+      :folderPath="contextMenuFolderPath"
       @close="showContextMenu = false"
     />
   </div>
 </template>
 
 <style scoped>
+/* 搜索结果刷新过渡：新列表淡入上移，旧列表立即移除保持实时 */
+.search-refresh-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.search-refresh-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
 .albums-scroll-container {
   overflow-anchor: none;
+}
+
+.album-sort-control:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 </style>

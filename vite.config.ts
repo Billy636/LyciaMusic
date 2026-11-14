@@ -1,14 +1,12 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
-import wasm from "vite-plugin-wasm";
-import topLevelAwait from "vite-plugin-top-level-await";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [vue(), wasm(), topLevelAwait()],
+  plugins: [vue()],
   build: {
     chunkSizeWarningLimit: 600,
     rollupOptions: {
@@ -23,8 +21,14 @@ export default defineConfig(async () => ({
           ) {
             return 'vendor-vue';
           }
-          if (normalizedId.includes('/node_modules/@applemusic-like-lyrics/')) {
+          if (normalizedId.includes('/node_modules/@applemusic-like-lyrics/core/')) {
             return 'vendor-amll';
+          }
+          if (
+            normalizedId.includes('/node_modules/@applemusic-like-lyrics/')
+            || normalizedId.includes('/node_modules/pako/')
+          ) {
+            return 'vendor-lyric-parser';
           }
           if (normalizedId.includes('/node_modules/@pixi/')) {
             return 'vendor-pixi';

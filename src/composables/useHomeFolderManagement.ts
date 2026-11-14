@@ -1,6 +1,7 @@
 import { ref, watch, type Ref } from 'vue';
 
 import type { FolderNode } from '../types';
+import { isWithinFolder } from '../utils/folderMove';
 
 interface ConfirmOptions {
   title: string;
@@ -15,7 +16,7 @@ interface UseHomeFolderManagementOptions {
   currentFolderFilter: Ref<string>;
   libraryHierarchy: Ref<FolderNode[]>;
   sourceSongPaths: Ref<string[]>;
-  refreshFolder: (folderPath: string) => Promise<unknown>;
+  refreshFolder: (folderPath: string, forceMetadataRefresh?: boolean) => Promise<unknown>;
   fetchFolderTree: () => Promise<unknown>;
   createFolder: (parentPath: string, folderName: string) => Promise<string>;
   deleteFolder: (path: string) => Promise<unknown>;
@@ -68,29 +69,23 @@ export function useHomeFolderManagement({
 
   const syncRootSelection = async (path: string | null, options: { forceRefresh?: boolean } = {}) => {
     const normalizedPath = path || '';
-    const shouldRefresh =
-      !!normalizedPath && (
-        options.forceRefresh ||
-        activeRootPath.value !== normalizedPath ||
-        currentFolderFilter.value !== normalizedPath
-      );
-
     activeRootPath.value = path;
     currentFolderFilter.value = normalizedPath;
 
-    if (!shouldRefresh) {
+    // Browsing uses cached library paths; only explicit mutation flows request a rescan.
+    if (!normalizedPath || !options.forceRefresh) {
       return;
     }
 
     try {
-      await refreshFolder(normalizedPath);
+      await refreshFolder(normalizedPath, false);
     } catch (error: any) {
       showToast(`切换文件夹失败: ${error?.message || error}`, 'error');
     }
   };
 
   const handleActiveRootChange = (path: string | null) => {
-    void syncRootSelection(path, { forceRefresh: true });
+    void syncRootSelection(path);
   };
 
   watch(activeRootPath, (newPath, oldPath) => {
@@ -102,6 +97,10 @@ export function useHomeFolderManagement({
     if (!newPath || newPath === oldPath) {
       return;
     }
+
+    // A move/restoration may already have selected a child under the new root.
+    // Explicit root clicks use syncRootSelection and still select the root itself.
+    if (isWithinFolder(currentFolderFilter.value, newPath)) return;
 
     void syncRootSelection(newPath);
   });
@@ -231,7 +230,7 @@ export function useHomeFolderManagement({
         } else if (removedCount > 0) {
           showToast(`刷新成功，检测到少了 ${removedCount} 首歌曲`, 'success');
         } else {
-          showToast('刷新成功，文件夹歌曲已是最新', 'success');
+          showToast('刷新成功，已重新读取歌曲标签和封面', 'success');
         }
         return;
       }

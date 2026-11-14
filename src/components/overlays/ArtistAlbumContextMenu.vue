@@ -3,11 +3,14 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSPropert
 import { usePlayer } from '../../composables/player';
 import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver';
 import { useLibraryDetailSongPathCache } from '../../composables/useLibraryDetailSongPathCache';
+import { useLibraryFolderSongPathCache } from '../../composables/useLibraryFolderSongPathCache';
 import { usePlaybackStore } from '../../features/playback/store';
+import { useFolderAlbumCollections } from '../../features/library/useFolderAlbumCollections';
 import { useAddToPlaylistDialog } from '../../features/collections/addToPlaylistDialog';
 import { useLibraryCollections } from '../../features/collections/useLibraryCollections';
 import { useToast } from '../../composables/toast';
 import ModernInputModal from '../common/ModernInputModal.vue';
+import type { ArtistBrowseMode } from '../../shared/stores/navigation';
 
 const props = defineProps<{
   visible: boolean;
@@ -16,6 +19,8 @@ const props = defineProps<{
   type: 'artist' | 'album';
   targetKey: string;
   targetName: string;
+  folderPath?: string;
+  artistMode?: ArtistBrowseMode;
 }>();
 
 const emit = defineEmits(['close']);
@@ -89,22 +94,46 @@ const motionDelay = (index: number): CSSProperties => ({
 const { playSong } = usePlayer();
 const { loadSong } = useLibrarySongResolver();
 const { loadArtistSongPaths, loadAlbumSongPaths } = useLibraryDetailSongPathCache();
+const { loadFolderViewSongPaths } = useLibraryFolderSongPathCache();
+const folderAlbumCollections = useFolderAlbumCollections();
 const { openAddToPlaylistDialog } = useAddToPlaylistDialog();
 const { createPlaylist } = useLibraryCollections();
 const { showToast } = useToast();
 const playbackStore = usePlaybackStore();
 
-const getSongPaths = async (): Promise<string[]> => {
-  if (props.type === 'artist') {
-    return await loadArtistSongPaths(props.targetKey);
+type SongTarget = {
+  type: 'artist' | 'album';
+  targetKey: string;
+  folderPath?: string;
+  artistMode?: ArtistBrowseMode;
+};
+
+const captureSongTarget = (): SongTarget => ({
+  type: props.type,
+  targetKey: props.targetKey,
+  folderPath: props.folderPath,
+  artistMode: props.artistMode,
+});
+
+const getSongPaths = async (target: SongTarget): Promise<string[]> => {
+  if (target.folderPath) {
+    return await loadFolderViewSongPaths({
+      folderPath: target.folderPath,
+      includeSubfolders: true,
+      sortMode: 'title',
+    });
+  }
+  if (target.type === 'artist') {
+    return await loadArtistSongPaths(target.targetKey, target.artistMode === 'albumArtist');
   } else {
-    return await loadAlbumSongPaths(props.targetKey, 'track_number');
+    return await loadAlbumSongPaths(target.targetKey, 'track_number');
   }
 };
 
 const handlePlay = async () => {
+  const target = captureSongTarget();
   emit('close');
-  const paths = await getSongPaths();
+  const paths = await getSongPaths(target);
   if (paths.length === 0) {
     showToast('未找到该内容的歌曲', 'info');
     return;
@@ -119,8 +148,9 @@ const handlePlay = async () => {
 };
 
 const handleAddToQueue = async () => {
+  const target = captureSongTarget();
   emit('close');
-  const paths = await getSongPaths();
+  const paths = await getSongPaths(target);
   if (paths.length === 0) {
     showToast('未找到该内容的歌曲', 'info');
     return;
@@ -130,14 +160,18 @@ const handleAddToQueue = async () => {
 };
 
 const showCreatePlaylistModal = ref(false);
+const createPlaylistTarget = ref<SongTarget | null>(null);
 
 const handleCreatePlaylistClick = () => {
+  createPlaylistTarget.value = captureSongTarget();
   emit('close');
   showCreatePlaylistModal.value = true;
 };
 
 const confirmCreatePlaylist = async (name: string) => {
-  const paths = await getSongPaths();
+  const target = createPlaylistTarget.value;
+  if (!target) return;
+  const paths = await getSongPaths(target);
   if (paths.length === 0) {
     showToast('未找到该内容的歌曲', 'info');
     return;
@@ -147,13 +181,25 @@ const confirmCreatePlaylist = async (name: string) => {
 };
 
 const handleAddToPlaylist = async () => {
+  const target = captureSongTarget();
   emit('close');
-  const paths = await getSongPaths();
+  const paths = await getSongPaths(target);
   if (paths.length === 0) {
     showToast('未找到该内容的歌曲', 'info');
     return;
   }
   openAddToPlaylistDialog(paths);
+};
+
+const cancelFolderCollection = () => {
+  if (!props.folderPath) return;
+  try {
+    folderAlbumCollections.setMerged(props.folderPath, false);
+    emit('close');
+    showToast('已取消合并显示，恢复原专辑展示', 'success');
+  } catch (error) {
+    showToast(`无法保存合并设置：${error instanceof Error ? error.message : String(error)}`, 'error');
+  }
 };
 </script>
 
@@ -168,8 +214,8 @@ const handleAddToPlaylist = async () => {
           :style="menuStyle"
           @contextmenu.prevent
         >
-          <div :class="sectionTitleClass" :style="motionDelay(0)" :title="targetName">
-            {{ type === 'artist' ? '歌手：' : '专辑：' }}{{ targetName }}
+          <div :class="sectionTitleClass" :style="motionDelay(0)" :title="folderPath || targetName">
+            {{ folderPath ? '文件夹合集：' : type === 'artist' ? artistMode === 'albumArtist' ? '专辑艺术家：' : '歌手：' : '专辑：' }}{{ targetName }}
           </div>
 
           <div class="song-menu-divider" :style="motionDelay(1)"></div>
@@ -211,6 +257,25 @@ const handleAddToPlaylist = async () => {
             </div>
             <span class="min-w-0 flex-1 truncate">添加到歌单</span>
           </div>
+
+          <template v-if="folderPath">
+            <div class="song-menu-divider" :style="motionDelay(7)"></div>
+            <button
+              type="button"
+              :class="itemClass"
+              class="w-[calc(100%-0.75rem)] text-left"
+              :style="motionDelay(8)"
+              title="恢复此文件夹及子文件夹中歌曲的原专辑展示，不修改歌曲标签"
+              @click="cancelFolderCollection"
+            >
+              <div class="mr-3 flex h-5 w-5 shrink-0 items-center justify-center text-[#6b778c] dark:text-white/60">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 4h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1zM8 12h8" />
+                </svg>
+              </div>
+              <span class="min-w-0 flex-1 truncate">取消合并显示</span>
+            </button>
+          </template>
         </div>
       </Transition>
     </Teleport>

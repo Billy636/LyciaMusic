@@ -3,6 +3,8 @@ import { storeToRefs } from 'pinia';
 import { playbackApi } from '../services/tauri/playbackApi';
 import { useLibraryStore } from '../features/library/store';
 import { usePlaybackStore } from '../features/playback/store';
+import { createShuffleCycle } from '../features/playback/shuffle';
+import { playerStorage, playerStorageKeys } from '../services/storage/playerStorage';
 import type { Song } from '../types';
 import { useLibrarySongResolver } from './useLibrarySongResolver';
 
@@ -35,12 +37,40 @@ export const createPlayerQueue = ({
     tempQueuePaths,
   } = storeToRefs(playbackStore);
   const { loadSong, loadSongs, peekSong, rememberSongs } = useLibrarySongResolver();
-  const shuffleHistory: string[] = [];
-  const shuffleFuture: string[] = [];
+  const savedShuffle = playerStorage.readObject<{
+    version?: number;
+    cycle?: unknown;
+    history?: unknown;
+    future?: unknown;
+  }>(playerStorageKeys.shuffleState);
+  const restoredShuffle = savedShuffle?.version === 1 ? savedShuffle : null;
+  const readHistory = (value: unknown): string[] => Array.isArray(value)
+    ? value.filter((path): path is string => typeof path === 'string' && !!path).slice(-SHUFFLE_HISTORY_LIMIT)
+    : [];
+  const shuffleCycle = createShuffleCycle(restoredShuffle?.cycle);
+  const shuffleHistory = readHistory(restoredShuffle?.history);
+  const shuffleFuture = readHistory(restoredShuffle?.future);
+  let navigationRequestId = 0;
+
+  const persistShuffle = () => {
+    try {
+      playerStorage.setString(playerStorageKeys.shuffleState, JSON.stringify({
+        version: 1,
+        cycle: shuffleCycle.snapshot(),
+        history: shuffleHistory,
+        future: shuffleFuture,
+      }));
+    } catch (error) {
+      console.warn('Failed to save shuffle progress:', error);
+    }
+  };
 
   const resetShuffleState = () => {
+    navigationRequestId += 1;
     shuffleHistory.length = 0;
     shuffleFuture.length = 0;
+    shuffleCycle.reset();
+    persistShuffle();
   };
 
   const pushBounded = (target: string[], path: string) => {
@@ -51,6 +81,7 @@ export const createPlayerQueue = ({
   };
 
   const handleBeforePlay = (song: Song, options: QueuePlaySongOptions = {}) => {
+    if (!options.preserveQueue) navigationRequestId += 1;
     const shouldUpdateShuffleHistory = options.updateShuffleHistory ?? true;
     const shouldClearShuffleFuture = options.clearShuffleFuture ?? true;
     const previousSong = currentSong.value;
@@ -66,6 +97,12 @@ export const createPlayerQueue = ({
         shuffleFuture.length = 0;
       }
     }
+    if (playMode.value === 2) {
+      shuffleCycle.record(song.path, getNavigationPaths(), previousSong?.path);
+    } else {
+      shuffleCycle.remember(song.path);
+    }
+    persistShuffle();
   };
 
   const getNavigationPaths = () =>
@@ -90,6 +127,7 @@ export const createPlayerQueue = ({
 
   const playPath = (path: string | undefined, options: QueuePlaySongOptions = {}) => {
     if (!path) return;
+    const requestId = ++navigationRequestId;
     const playOptions: QueuePlaySongOptions = {
       preserveQueue: true,
       ...options,
@@ -101,21 +139,19 @@ export const createPlayerQueue = ({
     }
     void loadSong(path)
       .then((song) => {
+        if (requestId !== navigationRequestId) return;
         if (song) {
           void playSong(song, playOptions);
+        } else if (playMode.value === 2) {
+          shuffleCycle.discard(path);
+          persistShuffle();
         }
       })
       .catch(() => {});
   };
 
   const pickRandomPath = (paths: string[]) => {
-    if (paths.length === 0) return null;
-    if (paths.length === 1) return paths[0];
-
-    const currentPath = currentSong.value?.path;
-    const candidates = currentPath ? paths.filter(path => path !== currentPath) : paths;
-    if (candidates.length === 0) return paths[0];
-    return candidates[Math.floor(Math.random() * candidates.length)];
+    return shuffleCycle.peekNext(paths, currentSong.value?.path);
   };
 
   const nextSong = () => {
@@ -132,10 +168,12 @@ export const createPlayerQueue = ({
     if (!navigationPaths.length) return;
 
     if (playMode.value === 2) {
-      const futurePath = shuffleFuture.pop();
-      if (futurePath && navigationPaths.includes(futurePath)) {
-        playPath(futurePath, { updateShuffleHistory: false, clearShuffleFuture: false });
-        return;
+      while (shuffleFuture.length > 0) {
+        const futurePath = shuffleFuture.pop()!;
+        if (navigationPaths.includes(futurePath)) {
+          playPath(futurePath, { clearShuffleFuture: false });
+          return;
+        }
       }
 
       const randomPath = pickRandomPath(navigationPaths);
@@ -156,13 +194,15 @@ export const createPlayerQueue = ({
     if (!navigationPaths.length) return;
 
     if (playMode.value === 2) {
-      const previousPath = shuffleHistory.pop();
-      if (previousPath && navigationPaths.includes(previousPath)) {
-        if (currentSong.value) {
-          pushBounded(shuffleFuture, currentSong.value.path);
+      while (shuffleHistory.length > 0) {
+        const previousPath = shuffleHistory.pop()!;
+        if (navigationPaths.includes(previousPath)) {
+          if (currentSong.value) {
+            pushBounded(shuffleFuture, currentSong.value.path);
+          }
+          playPath(previousPath, { updateShuffleHistory: false, clearShuffleFuture: false });
+          return;
         }
-        playPath(previousPath, { updateShuffleHistory: false, clearShuffleFuture: false });
-        return;
       }
 
       const randomPath = pickRandomPath(navigationPaths);

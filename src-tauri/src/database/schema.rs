@@ -14,6 +14,15 @@ pub(crate) fn configure_connection(conn: &Connection) -> Result<(), String> {
 
 pub(crate) fn ensure_base_schema(conn: &Connection) -> Result<(), String> {
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS library_scan_settings (
+            source_key TEXT PRIMARY KEY,
+            settings_json TEXT NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS songs (
             id INTEGER PRIMARY KEY,
             path TEXT NOT NULL UNIQUE,
@@ -48,7 +57,8 @@ pub(crate) fn ensure_base_schema(conn: &Connection) -> Result<(), String> {
             cue_source_path TEXT,
             cue_start_offset INTEGER,
             cue_end_offset INTEGER,
-            comment TEXT
+            comment TEXT,
+            genre TEXT
         )",
         [],
     )

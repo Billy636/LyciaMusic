@@ -19,6 +19,7 @@ const COLLECTION_VIEW_PATH_CACHE_NAMESPACE = 'collection';
 
 const inFlightRequests = new Map<string, Promise<string[]>>();
 const cacheVersion = ref(0);
+let cacheGeneration = 0;
 
 const serializeHistoryItems = (items: HistoryItem[]) =>
   items
@@ -64,8 +65,14 @@ const loadWithCache = async (key: string, loader: () => Promise<string[]>) => {
     return inFlight;
   }
 
+  const requestGeneration = cacheGeneration;
   const request = loader()
     .then((paths) => {
+      if (requestGeneration !== cacheGeneration) {
+        throw Object.assign(new Error('Stale library path request'), {
+          code: 'STALE_LIBRARY_PATH_REQUEST',
+        });
+      }
       setLibrarySongPathCacheEntry(
         COLLECTION_VIEW_PATH_CACHE_NAMESPACE,
         key,
@@ -76,7 +83,7 @@ const loadWithCache = async (key: string, loader: () => Promise<string[]>) => {
       return paths;
     })
     .finally(() => {
-      inFlightRequests.delete(key);
+      if (inFlightRequests.get(key) === request) inFlightRequests.delete(key);
     });
 
   inFlightRequests.set(key, request);
@@ -141,6 +148,7 @@ export function useLibraryCollectionSongPathCache() {
     loadFavoriteSongPaths,
     loadRecentSongPaths,
     clearLibraryCollectionSongPathCache: () => {
+      cacheGeneration += 1;
       clearLibrarySongPathCacheNamespace(COLLECTION_VIEW_PATH_CACHE_NAMESPACE);
       inFlightRequests.clear();
       cacheVersion.value += 1;

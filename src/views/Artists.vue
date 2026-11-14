@@ -1,37 +1,51 @@
 <script setup lang="ts">
 defineOptions({ name: 'Artists' });
 
-import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { useRoute, useRouter } from 'vue-router';
-import { artistHeaderCache, artistViewportCoverSnapshotCache } from '../caches/imageCaches';
-import { dragSession } from '../composables/dragState';
+import { artistHeaderCache, artistViewportCoverSnapshotCache, listScrollCache } from '../caches/imageCaches';
 import { useCoverCache } from '../composables/useCoverCache';
 import { useHomeNavigation } from '../composables/useHomeNavigation';
 import { useListScrollMemory } from '../composables/useListScrollMemory';
+import { useVisibleCoverUrls } from '../composables/useVisibleCoverUrls';
 import SortModeIcon from '../components/common/SortModeIcon.vue';
+import ArtistModeIcon from '../components/common/ArtistModeIcon.vue';
+import ArtistImageControl from '../components/headers/ArtistImageControl.vue';
+import { useArtistImages } from '../features/library/artistImages';
 import { useLibraryBrowse } from '../features/library/useLibraryBrowse';
 import type { ArtistListItem } from '../features/library/playerLibraryViewShared';
+import type { ArtistSortMode } from '../services/storage/playerStorage';
 import { getAlphabetIndexKey } from '../utils/alphabetIndex';
 import ArtistAlbumContextMenu from '../components/overlays/ArtistAlbumContextMenu.vue';
 
-const { filteredArtistList, artistSortMode, updateArtistOrder, searchQuery } = useLibraryBrowse();
+const { filteredArtistList, artistSortMode, artistBrowseMode, searchQuery } = useLibraryBrowse();
+const isAlbumArtistMode = computed(() => artistBrowseMode.value === 'albumArtist');
+const modeSwitchLabel = computed(() => isAlbumArtistMode.value
+  ? '当前：专辑艺术家模式，点击切换为艺术家模式'
+  : '当前：艺术家模式，点击切换为专辑艺术家模式');
 const router = useRouter();
 const route = useRoute();
 const { openHomeArtist } = useHomeNavigation(router);
-const isSearchActive = computed(() => searchQuery.value.trim().length > 0);
-const { coverCache, loadCover, touchCoverPaths, isCoverLoading, preloadPriorityCovers } = useCoverCache();
+const { preloadPriorityCovers } = useCoverCache();
+const artistImages = useArtistImages();
 
 const showSortMenu = ref(false);
-const dragOverName = ref<string | null>(null);
+const sortButtonRef = ref<HTMLButtonElement | null>(null);
+const sortOptions: Array<{ value: ArtistSortMode; label: string }> = [
+  { value: 'name', label: '名称 A–Z' },
+  { value: 'name_desc', label: '名称 Z–A' },
+  { value: 'count', label: '歌曲最多' },
+  { value: 'count_asc', label: '歌曲最少' },
+];
+const currentSortLabel = computed(() => sortOptions.find(option => option.value === artistSortMode.value)?.label);
+const isNameSort = computed(() => artistSortMode.value === 'name' || artistSortMode.value === 'name_desc');
 const containerRef = ref<HTMLElement | null>(null);
 const containerScrollTop = ref(0);
 const containerHeight = ref(720);
-const displayedCoverUrls = reactive(new Map<string, string>());
 let coverObserver: IntersectionObserver | null = null;
 let containerResizeObserver: ResizeObserver | null = null;
-let visibleCoverPaths = new Set<string>();
-const VIEWPORT_SNAPSHOT_KEY = 'artists-current';
+const viewportSnapshotKey = computed(() => `artists-current::${artistBrowseMode.value}`);
 const VIEWPORT_SNAPSHOT_LIMIT = 72;
 const ARTIST_GRID_GAP_Y = 16;
 const ARTIST_SECTION_GAP_Y = 8;
@@ -56,15 +70,20 @@ const handleContextMenu = (event: MouseEvent, artist: ArtistListItem) => {
 
 const handleArtistClick = (artist: ArtistListItem) => {
   const avatarUrl = getArtistAvatarUrl(artist);
-  if (avatarUrl) {
+  if (avatarUrl && !artistImages.urlFor(artist.name)) {
     artistHeaderCache.set(artist.name, avatarUrl);
   }
-  void openHomeArtist(artist.name);
+  void openHomeArtist(artist.name, { artistMode: artistBrowseMode.value });
 };
 
-const handleSortChange = (mode: 'count' | 'name' | 'custom') => {
-  artistSortMode.value = mode;
+const closeSortMenu = () => {
   showSortMenu.value = false;
+  sortButtonRef.value?.focus();
+};
+
+const handleSortChange = (mode: ArtistSortMode) => {
+  artistSortMode.value = mode;
+  closeSortMenu();
 };
 
 const getArtistGridColumns = () => {
@@ -97,39 +116,33 @@ const handleContainerScroll = (event: Event) => {
   containerScrollTop.value = (event.target as HTMLElement).scrollTop;
 };
 
-const getDisplayedCoverUrl = (path: string | undefined) => {
-  if (!path) {
-    return '';
-  }
-
-  return displayedCoverUrls.get(path) ?? coverCache.get(path) ?? '';
-};
-
 const getArtistAvatarUrl = (artist: ArtistListItem) => {
   if (artist.avatarPath) {
     return convertFileSrc(artist.avatarPath);
   }
-  return getDisplayedCoverUrl(artist.firstSongPath);
+  return artistImages.urlFor(artist.name) || getDisplayedCoverUrl(artist.firstSongPath);
 };
 
 const isArtistAvatarLoading = (artist: ArtistListItem) => {
-  if (artist.avatarPath) {
+  if (artist.avatarPath || artistImages.urlFor(artist.name)) {
     return false;
   }
   return isCoverLoading(artist.firstSongPath);
 };
 
 const restoreViewportCoverSnapshot = () => {
-  const snapshot = artistViewportCoverSnapshotCache.get(VIEWPORT_SNAPSHOT_KEY);
+  const snapshot = artistViewportCoverSnapshotCache.get(viewportSnapshotKey.value);
   if (!snapshot || snapshot.length === 0) {
     return;
   }
 
-  displayedCoverUrls.clear();
+  const visiblePaths = new Set(visibleArtistCoverPaths.value);
   snapshot
-    .filter(entry => !!entry.path && !!entry.url)
+    .filter(entry => !!entry.path && !!entry.url && visiblePaths.has(entry.path))
     .forEach((entry) => {
-      displayedCoverUrls.set(entry.path, entry.url);
+      if (!displayedCoverUrls.has(entry.path)) {
+        displayedCoverUrls.set(entry.path, entry.url);
+      }
     });
   preloadPriorityCovers(snapshot.map(entry => entry.path));
 };
@@ -171,74 +184,38 @@ const saveViewportCoverSnapshot = () => {
   });
 
   if (snapshot.length > 0) {
-    artistViewportCoverSnapshotCache.set(VIEWPORT_SNAPSHOT_KEY, snapshot);
+    artistViewportCoverSnapshotCache.set(viewportSnapshotKey.value, snapshot);
     return;
   }
 
-  artistViewportCoverSnapshotCache.delete(VIEWPORT_SNAPSHOT_KEY);
-};
-
-restoreViewportCoverSnapshot();
-
-const syncVisibleCoverUrls = (paths: string[]) => {
-  const nextVisiblePaths = new Set(paths.filter(Boolean));
-  visibleCoverPaths = nextVisiblePaths;
-
-  for (const path of Array.from(displayedCoverUrls.keys())) {
-    if (!nextVisiblePaths.has(path)) {
-      displayedCoverUrls.delete(path);
-    }
-  }
-
-  const nextPaths = Array.from(nextVisiblePaths);
-  touchCoverPaths(nextPaths);
-
-  nextPaths.forEach((path) => {
-    const cachedUrl = coverCache.get(path);
-    if (cachedUrl) {
-      displayedCoverUrls.set(path, cachedUrl);
-      return;
-    }
-
-    if (displayedCoverUrls.has(path)) {
-      return;
-    }
-
-    void loadCover(path).then((coverUrl) => {
-      if (!coverUrl || !visibleCoverPaths.has(path)) {
-        return;
-      }
-
-      displayedCoverUrls.set(path, coverUrl);
-    });
-  });
+  artistViewportCoverSnapshotCache.delete(viewportSnapshotKey.value);
 };
 
 const artistSections = computed(() => {
   const sections: Array<{
     key: string;
-    items: Array<{ artist: ArtistListItem; index: number }>;
+    items: Array<{ artist: ArtistListItem }>;
   }> = [];
 
-  filteredArtistList.value.forEach((artist, index) => {
+  filteredArtistList.value.forEach((artist) => {
     const key = getAlphabetIndexKey(artist.name);
     const lastSection = sections[sections.length - 1];
 
     if (!lastSection || lastSection.key !== key) {
       sections.push({
         key,
-        items: [{ artist, index }],
+        items: [{ artist }],
       });
       return;
     }
 
-    lastSection.items.push({ artist, index });
+    lastSection.items.push({ artist });
   });
 
   return sections;
 });
 
-type ArtistSectionEntry = { artist: ArtistListItem; index: number };
+type ArtistSectionEntry = { artist: ArtistListItem };
 type ArtistVirtualHeaderRow = { type: 'header'; key: string; title: string };
 type ArtistVirtualItemsRow = { type: 'items'; key: string; items: ArtistSectionEntry[]; bottomGap: number };
 type ArtistVirtualRow = ArtistVirtualHeaderRow | ArtistVirtualItemsRow;
@@ -322,7 +299,7 @@ const groupedArtistVirtualState = computed(() => {
 });
 
 const stickyArtistHeader = computed(() => {
-  if (artistSortMode.value !== 'name') {
+  if (!isNameSort.value) {
     return null;
   }
 
@@ -379,9 +356,8 @@ const flatArtistVirtualState = computed(() => {
   const endIndex = Math.min(filteredArtistList.value.length, endRow * artistGridColumns.value);
 
   return {
-    items: filteredArtistList.value.slice(startIndex, endIndex).map((artist, offset) => ({
+    items: filteredArtistList.value.slice(startIndex, endIndex).map((artist) => ({
       artist,
-      index: startIndex + offset,
     })),
     paddingTop: `${startRow * ARTIST_ROW_SPAN}px`,
     paddingBottom: `${Math.max(0, (totalRows - endRow) * ARTIST_ROW_SPAN)}px`,
@@ -389,7 +365,7 @@ const flatArtistVirtualState = computed(() => {
 });
 
 const visibleArtistCoverPaths = computed(() => {
-  if (artistSortMode.value === 'name') {
+  if (isNameSort.value) {
     return groupedArtistVirtualState.value.rows.flatMap((row) => {
       if (row.type !== 'items') {
         return [];
@@ -407,6 +383,10 @@ const visibleArtistCoverPaths = computed(() => {
     .map(item => item.artist.firstSongPath)
     .filter((path): path is string => !!path);
 });
+
+const { displayedCoverUrls, getDisplayedCoverUrl, isCoverLoading } = useVisibleCoverUrls(visibleArtistCoverPaths);
+
+restoreViewportCoverSnapshot();
 
 const initCoverObserver = async () => {
   await nextTick();
@@ -446,16 +426,14 @@ const initCoverObserver = async () => {
 };
 
 const scrollMemoryKey = computed(
-  () => ['artists-view', route.path, artistSortMode.value, searchQuery.value.trim()].join('::'),
+  () => ['artists-view', route.path, artistBrowseMode.value, artistSortMode.value, searchQuery.value.trim()].join('::'),
 );
 
 useListScrollMemory(scrollMemoryKey, containerRef);
 
 watch(
   [visibleArtistCoverPaths, artistSortMode],
-  ([paths]) => {
-    syncVisibleCoverUrls(paths);
-    preloadPriorityCovers(paths);
+  () => {
     void initCoverObserver();
   },
   { immediate: true, flush: 'post' },
@@ -481,70 +459,17 @@ const getGradientForArtist = (name: string) => {
   return gradients[Math.abs(hash) % gradients.length];
 };
 
-let pointerDownInfo: { x: number; y: number; index: number; artist: ArtistListItem } | null = null;
-
-const handlePointerDown = (event: PointerEvent, index: number, artist: ArtistListItem) => {
-  if (isSearchActive.value || (event.pointerType === 'mouse' && event.button !== 0)) {
-    return;
+const toggleArtistMode = async () => {
+  saveViewportCoverSnapshot();
+  showSortMenu.value = false;
+  showContextMenu.value = false;
+  artistBrowseMode.value = isAlbumArtistMode.value ? 'artist' : 'albumArtist';
+  if (!listScrollCache.has(scrollMemoryKey.value)) {
+    listScrollCache.set(scrollMemoryKey.value, 0);
   }
-
-  pointerDownInfo = { x: event.clientX, y: event.clientY, index, artist };
-};
-
-const handleGlobalPointerMove = (event: PointerEvent) => {
-  if (!pointerDownInfo || dragSession.active) {
-    return;
-  }
-
-  if (event.pointerType !== 'mouse') {
-    event.preventDefault();
-  }
-
-  const dist = Math.hypot(event.clientX - pointerDownInfo.x, event.clientY - pointerDownInfo.y);
-  if (dist <= 5) {
-    return;
-  }
-
-  dragSession.active = true;
-  dragSession.type = 'artist';
-  dragSession.data = { index: pointerDownInfo.index, name: pointerDownInfo.artist.name };
-};
-
-const resetArtistDrag = () => {
-  pointerDownInfo = null;
-  if (dragSession.type === 'artist') {
-    dragSession.active = false;
-    dragSession.type = 'song';
-    dragSession.data = null;
-    dragOverName.value = null;
-  }
-};
-
-const handleGlobalPointerEnd = (cancelled = false) => {
-  if (!cancelled && dragSession.active && dragSession.type === 'artist' && dragOverName.value && pointerDownInfo) {
-    const fromIndex = pointerDownInfo.index;
-    const toIndex = filteredArtistList.value.findIndex((artist) => artist.name === dragOverName.value);
-
-    if (toIndex !== -1 && fromIndex !== toIndex) {
-      const list = [...filteredArtistList.value];
-      const [removed] = list.splice(fromIndex, 1);
-      if (removed) {
-        list.splice(toIndex, 0, removed);
-        updateArtistOrder(list.map((artist) => artist.name));
-      }
-    }
-  }
-
-  resetArtistDrag();
-};
-
-const handleGlobalPointerUp = () => handleGlobalPointerEnd(false);
-const handleGlobalPointerCancel = () => handleGlobalPointerEnd(true);
-
-const handleItemPointerMove = (_event: PointerEvent, artistName: string) => {
-  if (dragSession.active && dragSession.type === 'artist') {
-    dragOverName.value = artistName;
-  }
+  containerScrollTop.value = listScrollCache.get(scrollMemoryKey.value) ?? 0;
+  await nextTick();
+  restoreViewportCoverSnapshot();
 };
 
 const closeMenu = (event: MouseEvent) => {
@@ -556,9 +481,6 @@ const closeMenu = (event: MouseEvent) => {
 
 onMounted(() => {
   updateViewportMetrics();
-  window.addEventListener('pointermove', handleGlobalPointerMove);
-  window.addEventListener('pointerup', handleGlobalPointerUp);
-  window.addEventListener('pointercancel', handleGlobalPointerCancel);
   window.addEventListener('click', closeMenu);
   window.addEventListener('resize', updateViewportMetrics);
   if (containerRef.value) {
@@ -577,9 +499,6 @@ onBeforeUnmount(() => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener('pointermove', handleGlobalPointerMove);
-  window.removeEventListener('pointerup', handleGlobalPointerUp);
-  window.removeEventListener('pointercancel', handleGlobalPointerCancel);
   window.removeEventListener('click', closeMenu);
   window.removeEventListener('resize', updateViewportMetrics);
   if (containerResizeObserver) {
@@ -590,8 +509,6 @@ onUnmounted(() => {
     coverObserver.disconnect();
     coverObserver = null;
   }
-  displayedCoverUrls.clear();
-  visibleCoverPaths = new Set<string>();
 });
 </script>
 
@@ -600,42 +517,48 @@ onUnmounted(() => {
     <header class="h-auto px-6 pt-2 pb-3 shrink-0 select-none flex flex-col justify-center z-10 relative">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2 pb-1">
-          <h2 class="text-xl font-bold text-gray-900 dark:text-white">歌手列表</h2>
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white">{{ isAlbumArtistMode ? '专辑艺术家列表' : '歌手列表' }}</h2>
         </div>
 
-        <div class="relative z-50 flex items-center gap-2">
+        <div class="relative z-50 flex items-center gap-2" @keydown.esc.stop="closeSortMenu">
           <button
-            title="排序方式"
-            class="bg-white/1 hover:bg-white/10 border border-white/1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 w-7 h-7 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
+            type="button"
+            :title="modeSwitchLabel"
+            :aria-label="modeSwitchLabel"
+            :aria-pressed="isAlbumArtistMode"
+            class="artist-mode-switch bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white w-7 h-7 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
+            @click="toggleArtistMode"
+          >
+            <ArtistModeIcon :album-artist="isAlbumArtistMode" class="h-4 w-4" />
+          </button>
+          <ArtistImageControl :other-menu-open="showSortMenu" @open="showSortMenu = false" />
+          <button
+            ref="sortButtonRef"
+            type="button"
+            :title="`排序方式：${currentSortLabel}`"
+            :aria-label="`排序方式：${currentSortLabel}`"
+            :aria-expanded="showSortMenu"
+            aria-controls="artist-sort-options"
+            class="artist-sort-control bg-white/1 hover:bg-white/10 border border-white/1 text-gray-900 dark:text-gray-100 hover:text-black dark:hover:text-white w-7 h-7 flex items-center justify-center rounded-full transition active:scale-95 shadow-sm hover:border-gray-200 dark:hover:border-white/20"
             @click.stop="showSortMenu = !showSortMenu"
           >
-            <SortModeIcon class="h-4 w-4" />
+            <SortModeIcon class="h-4 w-4 shrink-0" />
           </button>
 
-          <div v-if="showSortMenu" class="absolute right-0 top-full mt-2 w-48 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md rounded-xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-top-right">
+          <div v-if="showSortMenu" id="artist-sort-options" role="group" aria-label="排序方式" class="absolute right-0 top-full mt-2 w-44 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md rounded-xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-top-right" @click.stop>
+            <div class="px-4 pt-3 pb-1 text-xs text-gray-500 dark:text-gray-400">排序方式</div>
             <div class="py-1">
               <button
-                class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-between"
-                :class="artistSortMode === 'name' ? 'text-[#EC4141] font-medium' : 'text-gray-700 dark:text-gray-200'"
-                @click="handleSortChange('name')"
+                v-for="option in sortOptions"
+                :key="option.value"
+                type="button"
+                :aria-pressed="artistSortMode === option.value"
+                class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 focus-visible:bg-gray-100 dark:focus-visible:bg-white/10 flex items-center justify-between"
+                :class="artistSortMode === option.value ? 'text-[#EC4141] font-medium' : 'text-gray-700 dark:text-gray-200'"
+                @click="handleSortChange(option.value)"
               >
-                <span>按名称排序 (A-Z)</span>
-                <svg v-if="artistSortMode === 'name'" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
-              </button>
-              <button
-                class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-between"
-                :class="artistSortMode === 'count' ? 'text-[#EC4141] font-medium' : 'text-gray-700 dark:text-gray-200'"
-                @click="handleSortChange('count')"
-              >
-                <span>按数量排序 (多->少)</span>
-                <svg v-if="artistSortMode === 'count'" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
-              </button>
-              <button
-                class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-between cursor-default"
-                :class="artistSortMode === 'custom' ? 'text-[#EC4141] font-medium' : 'text-gray-700 dark:text-gray-200'"
-              >
-                <span>自定义排序 (拖拽触发)</span>
-                <svg v-if="artistSortMode === 'custom'" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                <span>{{ option.label }}</span>
+                <svg v-if="artistSortMode === option.value" aria-hidden="true" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
             </div>
           </div>
@@ -660,8 +583,10 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <Transition name="search-refresh">
       <div
-        v-if="artistSortMode === 'name'"
+        v-if="isNameSort"
+        :key="`artist-grouped-${artistBrowseMode}-${searchQuery.trim()}`"
         :style="{ paddingTop: groupedArtistVirtualState.paddingTop, paddingBottom: groupedArtistVirtualState.paddingBottom }"
       >
         <template v-for="row in groupedArtistVirtualState.rows" :key="row.key">
@@ -683,22 +608,16 @@ onUnmounted(() => {
             <div
               v-for="item in row.items"
               :key="item.artist.name"
-              class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/5 p-2 rounded-lg transition-colors relative select-none [touch-action:none]"
-              :class="[
-                dragSession.active && dragSession.type === 'artist' && dragSession.data?.name === item.artist.name ? 'opacity-50' : '',
-              ]"
-              @pointerdown="handlePointerDown($event, item.index, item.artist)"
-              @pointermove="handleItemPointerMove($event, item.artist.name)"
+              class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/5 p-2 rounded-lg transition-colors relative select-none"
               @click="handleArtistClick(item.artist)"
               @contextmenu.prevent="handleContextMenu($event, item.artist)"
             >
               <div
                 class="relative w-12 h-12 md:w-14 md:h-14 shrink-0"
                 :data-cover-path="item.artist.avatarPath ? undefined : item.artist.firstSongPath"
-                :class="{ 'ring-2 ring-[#EC4141] ring-offset-2 ring-offset-gray-50 dark:ring-offset-[#222222] rounded-full': dragSession.active && dragSession.type === 'artist' && dragOverName === item.artist.name && dragSession.data?.name !== item.artist.name }"
               >
                 <div class="w-full h-full rounded-full overflow-hidden shadow-sm group-hover:shadow transition-shadow duration-300 relative bg-gray-100 dark:bg-white/5 flex items-center justify-center">
-                  <img v-if="getArtistAvatarUrl(item.artist)" :src="getArtistAvatarUrl(item.artist)" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="item.artist.name">
+                  <img v-if="getArtistAvatarUrl(item.artist)" :src="getArtistAvatarUrl(item.artist)" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="item.artist.name" @error="!item.artist.avatarPath && artistImages.markFailed(item.artist.name)">
                   <div v-else class="w-full h-full flex items-center justify-center text-lg md:text-xl font-bold text-white bg-gradient-to-br animate-in fade-in duration-300" :class="[getGradientForArtist(item.artist.name), { 'animate-pulse': isArtistAvatarLoading(item.artist) }]">
                     {{ item.artist.name.charAt(0).toUpperCase() }}
                   </div>
@@ -718,28 +637,23 @@ onUnmounted(() => {
 
       <div
         v-else
+        :key="`artist-flat-${artistBrowseMode}-${searchQuery.trim()}`"
         class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-6 gap-y-4"
         :style="{ paddingTop: flatArtistVirtualState.paddingTop, paddingBottom: flatArtistVirtualState.paddingBottom }"
       >
         <div
           v-for="item in flatArtistVirtualState.items"
           :key="item.artist.name"
-          class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/5 p-2 rounded-lg transition-colors relative select-none [touch-action:none]"
-          :class="[
-            dragSession.active && dragSession.type === 'artist' && dragSession.data?.name === item.artist.name ? 'opacity-50' : '',
-          ]"
-          @pointerdown="handlePointerDown($event, item.index, item.artist)"
-          @pointermove="handleItemPointerMove($event, item.artist.name)"
+          class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/5 p-2 rounded-lg transition-colors relative select-none"
           @click="handleArtistClick(item.artist)"
           @contextmenu.prevent="handleContextMenu($event, item.artist)"
         >
           <div
             class="relative w-12 h-12 md:w-14 md:h-14 shrink-0"
             :data-cover-path="item.artist.avatarPath ? undefined : item.artist.firstSongPath"
-            :class="{ 'ring-2 ring-[#EC4141] ring-offset-2 ring-offset-gray-50 dark:ring-offset-[#222222] rounded-full': dragSession.active && dragSession.type === 'artist' && dragOverName === item.artist.name && dragSession.data?.name !== item.artist.name }"
           >
             <div class="w-full h-full rounded-full overflow-hidden shadow-sm group-hover:shadow transition-shadow duration-300 relative bg-gray-100 dark:bg-white/5 flex items-center justify-center">
-              <img v-if="getArtistAvatarUrl(item.artist)" :src="getArtistAvatarUrl(item.artist)" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="item.artist.name">
+              <img v-if="getArtistAvatarUrl(item.artist)" :src="getArtistAvatarUrl(item.artist)" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="item.artist.name" @error="!item.artist.avatarPath && artistImages.markFailed(item.artist.name)">
               <div v-else class="w-full h-full flex items-center justify-center text-lg md:text-xl font-bold text-white bg-gradient-to-br animate-in fade-in duration-300" :class="[getGradientForArtist(item.artist.name), { 'animate-pulse': isArtistAvatarLoading(item.artist) }]">
                 {{ item.artist.name.charAt(0).toUpperCase() }}
               </div>
@@ -754,6 +668,7 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+      </Transition>
     </section>
 
     <ArtistAlbumContextMenu
@@ -761,6 +676,7 @@ onUnmounted(() => {
       :x="contextMenuX"
       :y="contextMenuY"
       type="artist"
+      :artistMode="artistBrowseMode"
       :targetKey="contextMenuTargetKey"
       :targetName="contextMenuTargetName"
       @close="showContextMenu = false"
@@ -769,7 +685,23 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* 搜索结果刷新过渡：新列表淡入上移，旧列表立即移除保持实时 */
+.search-refresh-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.search-refresh-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
 .artists-scroll-container {
   overflow-anchor: none;
+}
+
+.artist-mode-switch:focus-visible,
+.artist-sort-control:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 </style>

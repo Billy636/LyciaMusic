@@ -1,4 +1,5 @@
 use crate::player::equalizer::EqualizerHandle;
+use crate::player::loudness::{VolumeNormalizer, VolumeNormalizerHandle};
 use crate::player::output::{OutputBackend, OutputError};
 use crate::player::types::{SharedProgress, TimedSource};
 use cpal::traits::{DeviceTrait, HostTrait};
@@ -77,17 +78,20 @@ pub(crate) fn restore_current_playback(
     current_path: &str,
     is_playing_flag: bool,
     progress: &Arc<SharedProgress>,
+    volume_balance_gain: f32,
+    current_normalizer_handle: &mut Option<VolumeNormalizerHandle>,
     equalizer_handle: Arc<EqualizerHandle>,
     user_volume: Arc<AtomicU32>,
     cue_start_offset: Duration,
     total_duration: Option<Duration>,
-) {
+) -> Result<(), String> {
+    *current_normalizer_handle = None;
     if current_path.is_empty() {
-        return;
+        return Ok(());
     }
 
     if let Some(output) = output {
-        *current_sink = output.create_sink().ok();
+        *current_sink = None;
 
         let current_samples = progress.samples_played.load(Ordering::Relaxed);
         let rate = progress.sample_rate.load(Ordering::Relaxed);
@@ -95,41 +99,34 @@ pub(crate) fn restore_current_playback(
         let time_played = progress_seconds_from_samples(current_samples, rate, channels);
         let jump_target = Duration::from_secs_f64(time_played);
 
-        if let Ok(file) = File::open(current_path) {
-            if let Ok(prefetch_source) = crate::player::decoder_thread::create_prefetch_source(
-                file,
-                Some(jump_target),
-                cue_start_offset,
-                total_duration,
-            ) {
-                // 1. Equalizer
-                let eq_source =
-                    crate::player::equalizer::Equalizer::new(prefetch_source, equalizer_handle);
+        let file = File::open(current_path).map_err(|error| error.to_string())?;
+        let prefetch_source = crate::player::decoder_thread::create_prefetch_source(
+            file,
+            Some(jump_target),
+            cue_start_offset,
+            total_duration,
+        )?;
+        let sink = output.create_sink().map_err(|error| error.to_string())?;
 
-                // 2. UserVolumeSource
-                let vol_source =
-                    crate::player::equalizer::UserVolumeSource::new(eq_source, user_volume);
+        // Media time advances only as decoded samples leave the prefetch source.
+        let (normalized_source, handle) = VolumeNormalizer::new(
+            prefetch_source.with_progress(progress.samples_played.clone()),
+            volume_balance_gain,
+            100,
+        );
+        let eq_source =
+            crate::player::equalizer::Equalizer::new(normalized_source, equalizer_handle);
+        let vol_source = crate::player::equalizer::UserVolumeSource::new(eq_source, user_volume);
+        let clip_source = crate::player::equalizer::ClipGuardSource::new(vol_source);
+        let timed_source = TimedSource::new(clip_source, progress.visualizer.clone());
 
-                // 3. ClipGuardSource
-                let clip_source = crate::player::equalizer::ClipGuardSource::new(vol_source);
-
-                // 4. TimedSource
-                let timed_source = TimedSource::new(
-                    clip_source,
-                    progress.samples_played.clone(),
-                    progress.visualizer.clone(),
-                );
-
-                if let Some(sink) = current_sink.as_ref() {
-                    sink.set_volume(1.0); // 固定共享模式 Sink 音量恒为 1.0
-                    sink.append(timed_source);
-                    if is_playing_flag {
-                        sink.play();
-                    } else {
-                        sink.pause();
-                    }
-                }
-            }
+        sink.set_volume(1.0); // 固定共享模式 Sink 音量恒为 1.0
+        if !is_playing_flag {
+            sink.pause();
         }
+        sink.append(timed_source);
+        *current_sink = Some(sink);
+        *current_normalizer_handle = Some(handle);
     }
+    Ok(())
 }

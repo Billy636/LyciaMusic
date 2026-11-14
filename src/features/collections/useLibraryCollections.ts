@@ -11,7 +11,7 @@ const LEGACY_PLAYER_HISTORY_KEY = 'player_history';
 
 export function useLibraryCollections() {
   const collectionsStore = useCollectionsStore();
-  const { openHomeAll, openHomePlaylist } = useHomeNavigation(router);
+  const { openHomeDefault, openHomePlaylist } = useHomeNavigation(router);
   const collectionsRefs = storeToRefs(collectionsStore);
   const { openAddToPlaylistDialog: openDialog } = useAddToPlaylistDialog();
 
@@ -27,7 +27,7 @@ export function useLibraryCollections() {
         : undefined;
 
     if (deleted && openedPlaylistId === id) {
-      void openHomeAll({ replace: true });
+      void openHomeDefault({ replace: true });
     }
 
     return deleted;

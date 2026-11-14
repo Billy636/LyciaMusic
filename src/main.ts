@@ -4,7 +4,12 @@ import './style.css'
 import { applyPersistedStartupTheme, shouldApplyStartupThemePaint } from './composables/startupTheme'
 import { loadWindowRoot, resolveWindowKind, windowUsesPinia, windowUsesRouter } from './windowBootstrap'
 import { installTouchClickSupport } from './utils/touchClickSupport'
+import { createWindowScriptErrorHandler } from './utils/windowScriptErrors'
+import { getApplicationStyleNonce } from './utils/styleNonce'
+import { initializeDataStorage } from './services/storage/dataStorage'
+import { tauriInvoke } from './services/tauri/invoke'
 
+getApplicationStyleNonce()
 installTouchClickSupport()
 
 const currentWindowLabel = (() => {
@@ -14,10 +19,6 @@ const currentWindowLabel = (() => {
     return 'main'
   }
 })()
-
-if (shouldApplyStartupThemePaint(currentWindowLabel)) {
-  applyPersistedStartupTheme()
-}
 
 const escapeHtml = (value: unknown) =>
   String(value ?? '')
@@ -60,7 +61,7 @@ const showFatalError = (title: string, error: unknown) => {
     <div style="height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#f5f5f5;color:#111827;font-family:'Segoe UI',system-ui,sans-serif;">
       <div style="width:min(920px,100%);background:#ffffff;border:1px solid rgba(17,24,39,0.08);border-radius:16px;box-shadow:0 20px 50px rgba(15,23,42,0.08);padding:24px;">
         <div style="font-size:20px;font-weight:600;margin-bottom:12px;">${escapeHtml(title)}</div>
-        <div style="font-size:14px;line-height:1.6;color:#4b5563;margin-bottom:16px;">应用启动时发生异常。请把下面的错误信息反馈给开发者。</div>
+        <div style="font-size:14px;line-height:1.6;color:#4b5563;margin-bottom:16px;">应用运行时发生异常。请把下面的错误信息反馈给开发者。</div>
         <pre style="margin:0;white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;padding:16px;border-radius:12px;background:#111827;color:#f9fafb;font-size:12px;line-height:1.6;">${escapeHtml(message)}</pre>
       </div>
     </div>
@@ -69,15 +70,21 @@ const showFatalError = (title: string, error: unknown) => {
 
 document.addEventListener('contextmenu', (e) => e.preventDefault())
 
-window.addEventListener('error', (event) => {
-  showFatalError('窗口脚本错误', event.error ?? event.message)
-})
+const handleWindowScriptError = createWindowScriptErrorHandler(
+  showFatalError,
+  (message, count) => console.warn(`[layout] ResizeObserver notification (${count}): ${message}`),
+)
+window.addEventListener('error', handleWindowScriptError)
 
 window.addEventListener('unhandledrejection', (event) => {
   showFatalError('未处理的异步错误', event.reason)
 })
 
 const bootstrapApp = async () => {
+  let storage = await initializeDataStorage()
+  if (shouldApplyStartupThemePaint(currentWindowLabel)) {
+    applyPersistedStartupTheme()
+  }
   const windowKind = resolveWindowKind(currentWindowLabel)
   const [rootModule, routerModule, piniaModule] = await Promise.all([
     loadWindowRoot(windowKind),
@@ -97,6 +104,18 @@ const bootstrapApp = async () => {
   }
 
   app.mount('#app')
+  if (currentWindowLabel === 'main' && storage) {
+    try {
+      storage = await tauriInvoke('complete_data_storage_migration')
+    } catch (error) {
+      const { useToast } = await import('./composables/toast')
+      useToast().showToast(`原目录清理未完成：${String(error)}`, 'error')
+    }
+  }
+  if (currentWindowLabel === 'main' && storage?.warning) {
+    const { useToast } = await import('./composables/toast')
+    useToast().showToast(storage.warning, 'error')
+  }
 }
 
 void bootstrapApp().catch(error => {

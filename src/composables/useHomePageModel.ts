@@ -3,7 +3,6 @@ import { useRoute, useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import type { Song } from '../types';
 
-import { useCoverCache } from './useCoverCache';
 import { useHomeArtistAlbums } from './useHomeArtistAlbums';
 import { useHomeBatchActions } from './useHomeBatchActions';
 import { useHomeFolderManagement } from './useHomeFolderManagement';
@@ -20,9 +19,11 @@ import { useAddToPlaylistDialog } from '../features/collections/addToPlaylistDia
 import { useLibraryCollections } from '../features/collections/useLibraryCollections';
 import { useLibraryRuntimeActions } from '../features/library/useLibraryRuntimeActions';
 import { usePlayerLibraryView } from '../features/library/usePlayerLibraryView';
+import { useFolderSongScope } from '../features/library/useFolderSongScope';
 import { usePlaybackController } from '../features/playback/usePlaybackController';
 import { useLibraryStore } from '../features/library/store';
 import { useLibrarySongResolver } from './useLibrarySongResolver';
+import { useLibraryFolderSongPathCache } from './useLibraryFolderSongPathCache';
 
 export function useHomePageModel() {
   const route = useRoute();
@@ -37,7 +38,6 @@ export function useHomePageModel() {
     sourceSongPaths,
     albumCatalog,
     albumSortMode,
-    albumCustomOrder,
   } = storeToRefs(libraryStore);
 
   const {
@@ -45,6 +45,7 @@ export function useHomePageModel() {
     activeRootPath,
     currentFolderFilter,
     filterCondition,
+    currentArtistBrowseMode,
   } = usePlayerViewState();
   const {
     displaySongList,
@@ -55,15 +56,16 @@ export function useHomePageModel() {
   } = usePlayerLibraryView();
   const { playSong } = usePlaybackController();
   const { loadSong } = useLibrarySongResolver();
+  const { loadFolderViewSongPaths } = useLibraryFolderSongPathCache();
   const {
     moveFilesToFolder,
     refreshAllFolders,
     deleteFromDisk,
     addLibraryFolder,
-    getSongsInFolder,
     createFolder,
     deleteFolder,
     expandFolderPath,
+    ensureFolderChildrenLoaded,
     fetchFolderTree,
     removeLibraryFolderLinked,
     refreshFolder,
@@ -74,8 +76,6 @@ export function useHomePageModel() {
     removeFromHistory,
     playlists,
   } = useLibraryCollections();
-  const { coverCache, loadingSet, preloadCovers } = useCoverCache();
-
   const isManagementMode = ref(false);
   const songTableRef = ref<any>(null);
   const setSongTableRef = (instance: any | null) => {
@@ -86,12 +86,17 @@ export function useHomePageModel() {
     localViewMode,
     localFilterCondition,
     artistActiveTab,
-    viewTransitionKey,
+    genreActiveTab,
+    viewTransitionKey: baseViewTransitionKey,
   } = useHomeViewState({
     currentViewMode,
     filterCondition,
     isManagementMode,
   });
+
+  const viewTransitionKey = computed(() => localViewMode.value === 'artist'
+    ? `${baseViewTransitionKey.value}:${currentArtistBrowseMode.value}`
+    : baseViewTransitionKey.value);
 
   const localSongList = computed(() => displaySongList.value);
   const localSongPaths = computed(() => currentViewSongPaths.value);
@@ -115,26 +120,21 @@ export function useHomePageModel() {
       duration: 0,
     };
   });
+  const { includeSubfolders } = useFolderSongScope();
   const batchSelectionScopeKey = computed(() =>
     [
       route.path,
       currentViewMode.value,
       filterCondition.value,
+      currentViewMode.value === 'artist' ? currentArtistBrowseMode.value : '',
       currentFolderFilter.value,
+      currentViewMode.value === 'folder' && includeSubfolders.value,
     ].join('::'),
   );
   const {
     isBatchMode,
     selectedPaths,
   } = useScopedBatchSelection(batchSelectionScopeKey);
-
-  const { handleTableDragStart } = useSongDrag(
-    localSongList,
-    isBatchMode,
-    selectedPaths,
-    songTableRef,
-    localSongPaths,
-  );
 
   const {
     showContextMenu,
@@ -153,7 +153,11 @@ export function useHomePageModel() {
 
   const {
     showMoveToFolderModal,
+    pendingMovePaths,
+    isMovingSongs,
+    requestSongDrop,
     showConfirm,
+    confirmType,
     confirmTitle,
     confirmButtonText,
     confirmMessage,
@@ -169,6 +173,7 @@ export function useHomePageModel() {
     selectedPaths,
     isBatchMode,
     isManagementMode,
+    selectionScope: batchSelectionScopeKey,
     canonicalSongPaths,
     sourceSongPaths,
     favoritePaths,
@@ -178,6 +183,22 @@ export function useHomePageModel() {
     showToast,
     getRoutePath: () => route.path,
   });
+
+  const { handleTableDragStart } = useSongDrag(
+    localSongList,
+    isBatchMode,
+    selectedPaths,
+    songTableRef,
+    localSongPaths,
+    {
+      canDropToFolder: () => currentViewMode.value === 'folder' && isManagementMode.value && !isMovingSongs.value,
+      onDropToFolder: requestSongDrop,
+      expandFolder: async path => {
+        await ensureFolderChildrenLoaded(path);
+        await expandFolderPath(path);
+      },
+    },
+  );
 
   const {
     showCreateFolderModal,
@@ -240,10 +261,9 @@ export function useHomePageModel() {
   const { artistAlbumList } = useHomeArtistAlbums({
     localFilterCondition,
     filterCondition,
+    currentArtistBrowseMode,
     librarySongs,
     albumSortMode,
-    albumCustomOrder,
-    preloadCovers,
   });
 
   const handlePlayAll = async () => {
@@ -256,7 +276,7 @@ export function useHomePageModel() {
   const handlePlaySong = (song: Song) => {
     const shouldInsertAfterCurrent =
       searchQuery.value.trim().length > 0 &&
-      ['all', 'artist', 'album', 'folder'].includes(currentViewMode.value);
+      ['all', 'artist', 'album', 'folder', 'genre'].includes(currentViewMode.value);
 
     void playSong(song, shouldInsertAfterCurrent ? { insertAfterCurrent: true } : undefined);
   };
@@ -303,15 +323,24 @@ export function useHomePageModel() {
     }
   };
 
-  const handleRootCreatePlaylistRequest = (folderPath: string, folderName: string) => {
-    const songs = getSongsInFolder(folderPath);
-    if (songs.length === 0) {
-      showToast('该文件夹下没有可用于创建歌单的歌曲', 'info');
-      return;
-    }
+  const handleRootCreatePlaylistRequest = async (folderPath: string, folderName: string) => {
+    try {
+      // Query all paths: song details may only be loaded for the visible rows.
+      const songPaths = await loadFolderViewSongPaths({
+        folderPath,
+        sortMode: 'title',
+        includeSubfolders: false,
+      });
+      if (songPaths.length === 0) {
+        showToast('该文件夹下没有可用于创建歌单的歌曲', 'info');
+        return;
+      }
 
-    createPlaylist(folderName, songs.map(song => song.path));
-    showToast('已根据文件夹创建歌单', 'success');
+      createPlaylist(folderName, songPaths);
+      showToast(`已根据文件夹创建歌单，共 ${songPaths.length} 首歌曲`, 'success');
+    } catch (error) {
+      showToast(`创建歌单失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    }
   };
 
   const handleArtistAlbumClick = (albumKey: string) => {
@@ -331,11 +360,10 @@ export function useHomePageModel() {
     localSongList,
     localSongPaths,
     artistActiveTab,
+    genreActiveTab,
     localFilterCondition,
     selectedAlbumSong,
     artistAlbumList,
-    coverCache,
-    loadingSet,
     songTableRef,
     setSongTableRef,
     handlePlayAll,
@@ -358,12 +386,15 @@ export function useHomePageModel() {
     handleTableDragStart,
     handleArtistAlbumClick,
     showMoveToFolderModal,
+    pendingMovePaths,
+    isMovingSongs,
     confirmBatchMove,
     showContextMenu,
     contextMenuX,
     contextMenuY,
     contextMenuTargetSong,
     showConfirm,
+    confirmType,
     confirmTitle,
     confirmMessage,
     confirmButtonText,

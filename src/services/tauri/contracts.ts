@@ -2,7 +2,11 @@ import type {
   AlbumCatalogItem,
   ArtistCatalogItem,
   FolderNode,
+  GenreCatalogItem,
+  GenreGroups,
   LibraryFolder,
+  LibraryScanSettings,
+  LibraryScanSource,
   LibrarySong,
   LibrarySongLabel,
   LibrarySongPage,
@@ -25,6 +29,22 @@ import type {
   SaveArtistAvatarResponse,
 } from '../../types';
 import type { AudioOutputMode } from '../../types';
+import type { SourceInput, SourceDocument, SourceTrack, TrackMatch, FileBinding, MatchFields } from '../../features/playlistImport/types';
+import type { LocalSortMode } from '../storage/playerStorage';
+import type {
+  DuplicateDeleteGroup,
+  DuplicateDeleteResult,
+  DuplicateScanResult,
+} from '../../features/duplicates/types';
+
+export interface DataStorageInfo {
+  path: string;
+  webviewPath: string;
+  portable: boolean;
+  pendingPath: string | null;
+  warning: string | null;
+  pathMappings: [string, string][];
+}
 
 export interface AudioDevice {
   id: string;
@@ -49,7 +69,53 @@ export interface BatchMoveMusicFilesResult {
   moved_paths: MovedMusicFilePath[];
 }
 
+export interface ToolboxPreviewConfig {
+  template: string;
+  remove_track_prefix: boolean;
+  remove_source_prefix: boolean;
+  replace_underscore: boolean;
+  collapse_spaces: boolean;
+  /** 重名/占用冲突时自动追加 (2)、(3) 序号后缀 */
+  resolve_conflicts: boolean;
+}
+
+export type ToolboxConflictReason = 'duplicate' | 'occupied';
+
+export interface ToolboxPreviewItem {
+  original_path: string;
+  original_name: string;
+  cleaned_name: string;
+  tag_name: string | null;
+  missing_fields: string[];
+  final_name: string;
+  will_change: boolean;
+  conflict: boolean;
+  conflict_reason: ToolboxConflictReason | null;
+}
+
+export interface RenameOperation {
+  original_path: string;
+  new_name: string;
+}
+
+export interface RenameFailure {
+  original_path: string;
+  new_name: string;
+  error: string;
+}
+
+export interface RenameApplyResult {
+  success_count: number;
+  failures: RenameFailure[];
+}
+
 export type LyricsStorageSource = 'embedded' | 'sidecar' | 'empty';
+
+export interface SongLyricsSource {
+  rawLyrics: string;
+  sourceFormat: 'ttml' | 'yrc' | 'qrc' | 'lys' | 'lrc' | 'txt' | null;
+  sourcePath: string | null;
+}
 
 export interface SongLyricsForEdit {
   lyrics: string;
@@ -134,6 +200,7 @@ export interface LoudnessRecord {
 }
 
 export interface PlayAudioOptions {
+  fadeEnabled?: boolean;
   path: string;
   title: string;
   artist: string;
@@ -200,6 +267,11 @@ export interface ImmersiveFullscreenState {
 }
 
 export interface TauriCommandMap {
+  read_playlist_source: { payload: { input: SourceInput }; response: SourceDocument };
+  match_playlist_tracks: { payload: { tracks: SourceTrack[]; fields?: MatchFields | null }; response: TrackMatch[] };
+  prepare_playlist_paths: { payload: { playlistId: string; paths: string[] }; response: string[] };
+  configure_playlist_files: { payload: { bindings: FileBinding[]; retained: { id: string; paths: string[] }[] }; response: void };
+  export_playlist_m3u8: { payload: { path: string; paths: string[]; relative: boolean }; response: void };
   add_library_folder: { payload: { path: string }; response: void };
   // Deprecated compat command. Do not use in new main-flow code.
   add_sidebar_folder: { payload: { path: string }; response: void };
@@ -209,15 +281,19 @@ export interface TauriCommandMap {
   get_library_hierarchy: { payload: undefined; response: FolderNode[] };
   get_library_artist_catalog: { payload: undefined; response: ArtistCatalogItem[] };
   save_artist_avatar: { payload: { artistId: number; imagePath: string; writeToTags: boolean }; response: SaveArtistAvatarResponse };
-  get_library_album_catalog: { payload: undefined; response: AlbumCatalogItem[] };
-  get_library_album_catalog_by_artist: { payload: { artistName: string }; response: AlbumCatalogItem[] };
-  get_library_song_paths_by_artist: { payload: { artistName: string }; response: string[] };
+  get_library_album_catalog: { payload: { folderCollections?: string[] } | undefined; response: AlbumCatalogItem[] };
+  get_library_album_catalog_by_artist: { payload: { artistName: string; albumArtist?: boolean }; response: AlbumCatalogItem[] };
+  get_library_song_paths_by_artist: { payload: { artistName: string; albumArtist?: boolean }; response: string[] };
   get_library_song_paths_by_album: { payload: { albumKey: string; sortMode?: 'title' | 'track_number' | 'track_number_desc' }; response: string[] };
+  get_library_genre_catalog: { payload: undefined; response: GenreCatalogItem[] };
+  get_library_song_paths_by_genre: { payload: { genre: string; query?: string; sortMode?: Exclude<LocalSortMode, 'custom'> }; response: string[] };
+  get_library_genre_groups: { payload: { genre: string; query?: string }; response: GenreGroups };
   get_library_song_paths_for_all_view: {
     payload: {
       query?: string;
       artistFilter?: string;
       albumFilter?: string;
+      albumArtist?: boolean;
       sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
     };
     response: string[];
@@ -225,6 +301,7 @@ export interface TauriCommandMap {
   get_library_song_paths_for_folder_view: {
     payload: {
       folderPath: string;
+      includeSubfolders?: boolean;
       query?: string;
       sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'track_number';
       offset?: number;
@@ -234,6 +311,11 @@ export interface TauriCommandMap {
   };
   get_folder_children: { payload: { folderPath: string }; response: FolderNode[] };
   get_library_folders: { payload: undefined; response: LibraryFolder[] };
+  get_library_scan_settings: { payload: { source: LibraryScanSource }; response: LibraryScanSettings };
+  set_library_scan_settings: {
+    payload: { source: LibraryScanSource; settings: LibraryScanSettings };
+    response: LibraryScanSettings;
+  };
   get_remote_sources: { payload: undefined; response: RemoteSource[] };
   test_remote_source: { payload: { source: RemoteSourceInput }; response: RemoteConnectionResult };
   add_remote_source: { payload: { source: RemoteSourceInput }; response: RemoteSource };
@@ -243,7 +325,10 @@ export interface TauriCommandMap {
   precache_remote_song: { payload: { remoteUri: string }; response: void };
   get_remote_cache_usage: { payload: undefined; response: RemoteCacheUsage };
   clear_remote_cache: { payload: undefined; response: RemoteCacheUsage };
-  list_remote_directory: { payload: { sourceId: string; path: string }; response: RemoteFileEntry[] };
+  list_remote_directory: {
+    payload: ({ sourceId: string; source?: never } | { source: RemoteSourceInput; sourceId?: never }) & { path: string };
+    response: RemoteFileEntry[];
+  };
   // Deprecated compat command. Main folder-tree flow must use get_library_hierarchy.
   get_sidebar_hierarchy: { payload: undefined; response: FolderNode[] };
   create_folder: { payload: { parentPath: string; folderName: string }; response: string };
@@ -252,6 +337,10 @@ export interface TauriCommandMap {
     response: void;
   };
   delete_folder: { payload: { path: string }; response: void };
+  move_folder_to_folder: {
+    payload: { sourcePath: string; targetFolder: string };
+    response: { old_path: string; new_path: string };
+  };
   move_file_to_folder: {
     payload: { sourcePath: string; targetFolder: string };
     response: void;
@@ -265,8 +354,12 @@ export interface TauriCommandMap {
     response: string | null;
   };
   scan_music_folder: {
-    payload: { folderPath: string; minimumDurationSeconds?: number };
+    payload: { folderPath: string; minimumDurationSeconds?: number; forceMetadataRefresh?: boolean };
     response: Song[];
+  };
+  scan_music_folder_paths: {
+    payload: { folderPath: string; minimumDurationSeconds?: number; forceMetadataRefresh?: boolean };
+    response: string[];
   };
   move_music_file: { payload: { oldPath: string; newPath: string }; response: void };
   show_in_folder: { payload: { path: string }; response: void };
@@ -294,8 +387,8 @@ export interface TauriCommandMap {
     };
     response: void;
   };
-  get_song_cover_thumbnail: { payload: { path: string }; response: string };
-  get_song_cover: { payload: { path: string }; response: string };
+  get_song_cover_thumbnail: { payload: { path: string; edge?: number; preferFolderCover?: boolean }; response: string };
+  get_song_cover: { payload: { path: string; preferFolderCover?: boolean }; response: string };
   clear_cover_cache: { payload: undefined; response: void };
   prepare_custom_background_image: {
     payload: {
@@ -303,10 +396,17 @@ export interface TauriCommandMap {
       targetWidth: number;
       targetHeight: number;
       blurRadius: number;
+      consumerId?: string;
+      requestId?: number;
     };
     response: PreparedCustomBackgroundImage;
   };
+  cancel_custom_background_image: {
+    payload: { consumerId: string; requestId: number };
+    response: void;
+  };
   get_song_lyrics: { payload: { path: string }; response: string };
+  get_song_lyrics_source: { payload: { path: string }; response: SongLyricsSource };
   get_song_lyrics_for_edit: { payload: { path: string }; response: SongLyricsForEdit };
   save_song_lyrics: {
     payload: {
@@ -325,12 +425,14 @@ export interface TauriCommandMap {
     response: SaveSongInfoResponse;
   };
   get_song_detail: { payload: { path: string }; response: SongDetail };
+  refresh_song_metadata: { payload: { path: string }; response: SaveSongInfoResponse };
   get_song_runtime_metadata: { payload: { path: string }; response: SongRuntimeMetadata | null };
   get_library_song_page: {
     payload: {
       query?: string;
       artistFilter?: string;
       albumFilter?: string;
+      albumArtist?: boolean;
       sortMode: 'title' | 'name' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
       offset: number;
       limit: number;
@@ -342,6 +444,7 @@ export interface TauriCommandMap {
       query?: string;
       artistFilter?: string;
       albumFilter?: string;
+      albumArtist?: boolean;
       sortMode: 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc' | 'track_number' | 'track_number_desc';
       offset: number;
       limit: number;
@@ -358,16 +461,17 @@ export interface TauriCommandMap {
     response: SearchIndexStatus;
   };
   get_library_songs_by_paths: { payload: { paths: string[] }; response: LibrarySong[] };
+  get_library_song_artist_index_keys: { payload: { paths: string[] }; response: string[] };
   get_library_song_paths_cached: { payload: undefined; response: string[] };
   get_library_song_labels_for_all_view: {
-    payload: { query?: string; artistFilter?: string; albumFilter?: string };
+    payload: { query?: string; artistFilter?: string; albumFilter?: string; albumArtist?: boolean };
     response: LibrarySongLabel[];
   };
   play_audio: { payload: PlayAudioOptions; response: number };
   update_playback_metadata: { payload: UpdatePlaybackMetadataOptions; response: void };
-  pause_audio: { payload: undefined; response: void };
+  pause_audio: { payload: { fadeEnabled: boolean }; response: void };
   stop_audio: { payload: undefined; response: void };
-  resume_audio: { payload: undefined; response: void };
+  resume_audio: { payload: { fadeEnabled: boolean }; response: void };
   seek_audio: { payload: SeekAudioOptions; response: void };
   set_audio_output_mode: { payload: { outputMode: AudioOutputMode }; response: void };
   set_output_device: { payload: { deviceId: string | null }; response: void };
@@ -451,6 +555,7 @@ export interface TauriCommandMap {
     payload: undefined;
     response: WindowMaterialCapabilities;
   };
+  apply_transparent_window: { payload: undefined; response: void };
   get_foreground_fullscreen_state: {
     payload: undefined;
     response: ForegroundFullscreenState;
@@ -466,7 +571,14 @@ export interface TauriCommandMap {
   refresh_taskbar_window_topmost: { payload: undefined; response: boolean };
   start_topmost_guard: { payload: undefined; response: void };
   stop_topmost_guard: { payload: undefined; response: void };
+  get_data_storage_info: { payload: undefined; response: DataStorageInfo };
+  set_data_storage_directory: { payload: { path: string }; response: DataStorageInfo };
+  cancel_data_storage_migration: { payload: undefined; response: DataStorageInfo };
+  complete_data_storage_migration: { payload: undefined; response: DataStorageInfo };
+  restart_app: { payload: undefined; response: void };
   clear_all_app_data: { payload: undefined; response: void };
+  get_launch_on_startup: { payload: undefined; response: boolean };
+  set_launch_on_startup: { payload: { enabled: boolean }; response: boolean };
   open_external_program: {
     payload: { path: string; args: string[] };
     response: void;
@@ -487,5 +599,21 @@ export interface TauriCommandMap {
   file_exists: {
     payload: { path: string };
     response: boolean;
+  };
+  preview_toolbox: {
+    payload: { rootPath: string; config: ToolboxPreviewConfig };
+    response: ToolboxPreviewItem[];
+  };
+  scan_duplicate_songs: {
+    payload: { rootPaths: string[]; recursive: boolean };
+    response: DuplicateScanResult;
+  };
+  delete_duplicate_songs: {
+    payload: { groups: DuplicateDeleteGroup[] };
+    response: DuplicateDeleteResult;
+  };
+  apply_rename: {
+    payload: { operations: RenameOperation[] };
+    response: RenameApplyResult;
   };
 }

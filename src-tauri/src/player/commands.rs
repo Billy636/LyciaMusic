@@ -6,7 +6,8 @@ use crate::player::loudness::{
     calculate_playback_gain, get_song_loudness_record, process_song_on_play, LoudnessRecord,
 };
 use crate::player::types::{
-    AudioCommand, AudioOutputMode, AudioSource, PlayerState, VISUALIZER_BAND_COUNT,
+    AudioCommand, AudioOutputMode, AudioPathRelocation, AudioSource, PlayerState,
+    VISUALIZER_BAND_COUNT,
 };
 use crate::remote::cache::{
     ensure_cached_path, is_remote_uri, remote_playback_source, RemotePlaybackSource,
@@ -18,7 +19,26 @@ use souvlaki::{MediaMetadata, MediaPlayback, MediaPosition};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
+
+/// Call only after the filesystem move and database commit, with no DB lock held.
+/// A stopped audio worker must not turn a successful move into a frontend failure.
+pub(crate) fn notify_audio_paths_relocated(
+    app: &tauri::AppHandle,
+    relocation: AudioPathRelocation,
+) {
+    let Some(state) = app.try_state::<PlayerState>() else {
+        eprintln!("Audio path relocation skipped: player state is unavailable");
+        return;
+    };
+    let Ok(tx) = state.tx.lock() else {
+        eprintln!("Audio path relocation skipped: player command lock is unavailable");
+        return;
+    };
+    if let Err(error) = tx.send(AudioCommand::RelocatePaths(relocation)) {
+        eprintln!("Failed to notify audio worker of moved files: {error}");
+    }
+}
 
 const REMOTE_LYRICS_CACHE_READY_EVENT: &str = "remote-lyrics-cache-ready";
 
@@ -63,6 +83,7 @@ pub async fn play_audio(
     volume_balance_enabled: Option<bool>,
     gain_offset_db: Option<f32>,
     prevent_clipping: Option<bool>,
+    fade_enabled: Option<bool>,
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbState>,
     state: tauri::State<'_, PlayerState>,
@@ -112,7 +133,12 @@ pub async fn play_audio(
         .cue_start_offset_ms
         .store(cue_offset_ms, Ordering::Relaxed);
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
+    // Keep the initial SMTC update ordered before the worker's error update.
+    // A decoder can fail as soon as Play is sent; it must not have its Stopped
+    // state overwritten by the Playing initialization below.
+    let mut controls_guard = state.controls.lock().ok();
     tx.send(AudioCommand::Play {
+        fade_enabled: fade_enabled.unwrap_or(false),
         source,
         output_mode: selected_output_mode,
         start_offset_ms,
@@ -123,7 +149,7 @@ pub async fn play_audio(
     })
     .map_err(|e| e.to_string())?;
 
-    if let Ok(mut controls) = state.controls.lock() {
+    if let Some(controls) = controls_guard.as_mut() {
         if let Some(mc) = controls.as_mut() {
             let _ = mc.set_metadata(MediaMetadata {
                 title: Some(&title),
@@ -280,9 +306,15 @@ pub fn update_playback_metadata(
 }
 
 #[tauri::command]
-pub fn pause_audio(state: tauri::State<PlayerState>) -> Result<(), String> {
+pub fn pause_audio(
+    fade_enabled: Option<bool>,
+    state: tauri::State<PlayerState>,
+) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
-    tx.send(AudioCommand::Pause).map_err(|e| e.to_string())?;
+    tx.send(AudioCommand::Pause {
+        fade_enabled: fade_enabled.unwrap_or(false),
+    })
+    .map_err(|e| e.to_string())?;
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
             let _ = mc.set_playback(MediaPlayback::Paused {
@@ -308,9 +340,15 @@ pub fn stop_audio(state: tauri::State<PlayerState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn resume_audio(state: tauri::State<PlayerState>) -> Result<(), String> {
+pub fn resume_audio(
+    fade_enabled: Option<bool>,
+    state: tauri::State<PlayerState>,
+) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
-    tx.send(AudioCommand::Resume).map_err(|e| e.to_string())?;
+    tx.send(AudioCommand::Resume {
+        fade_enabled: fade_enabled.unwrap_or(false),
+    })
+    .map_err(|e| e.to_string())?;
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
             let _ = mc.set_playback(MediaPlayback::Playing {
@@ -330,9 +368,15 @@ pub fn seek_audio(
     request_id: u64,
     state: tauri::State<PlayerState>,
 ) -> Result<(), String> {
+    let sanitized_time = if time.is_finite() && time >= 0.0 {
+        time
+    } else {
+        0.0
+    };
+
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
     tx.send(AudioCommand::Seek {
-        time,
+        time: sanitized_time,
         is_playing,
         request_id,
     })
@@ -341,7 +385,7 @@ pub fn seek_audio(
     if let Ok(mut controls) = state.controls.lock() {
         if let Some(mc) = controls.as_mut() {
             let progress = MediaPosition(Duration::from_secs_f64(
-                state.progress.media_seconds_from_absolute(time),
+                state.progress.media_seconds_from_absolute(sanitized_time),
             ));
             if is_playing {
                 let _ = mc.set_playback(MediaPlayback::Playing {

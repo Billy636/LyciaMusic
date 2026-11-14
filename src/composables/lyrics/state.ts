@@ -1,14 +1,17 @@
-import { computed, ref, shallowRef } from 'vue';
+import { computed, ref, shallowRef, watch, type WatchStopHandle } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 import { usePlaybackStore } from '../../features/playback/store';
 import { useSettingsStore } from '../../features/settings/store';
 import { useLyricsSettingsStore } from '../../features/lyricsSettings/store';
-import { getCurrentLyricDisplayLines, semanticLineToLyricLine } from './converters';
+import { getCurrentLyricDisplayLines } from './converters';
+import { parseOfficialLyrics } from './officialParser';
+import { resolveLyricsReadingOrder } from './readingOrder';
+import { findDisplayLyricIndex } from './selection';
 import {
   amlLineToLegacyLyricLine,
+  hasRenderableLyricContent,
   isTtmlLyrics,
-  parseNativeTtml,
   type NativeAmlLyricLine,
 } from './ttml';
 import type {
@@ -16,24 +19,115 @@ import type {
   CurrentLyricDisplayState,
   DesktopLyricsSettings,
   LyricLine,
-  LyricDocument,
-  LyricsPayload,
+  LyricsSource,
   LyricsSettings,
   LyricsStatus,
-  SemanticLine,
 } from './types';
 
 export const showDesktopLyrics = ref(false);
 export const showLyricsPlayerSettingsPanel = ref(false);
 export const lyricsStatus = ref<LyricsStatus>('idle');
-export const parsedLyrics = ref<LyricLine[]>([]);
-export const lyricDocument = ref<LyricDocument | null>(null);
 export const activeLyricsFormat = ref<ActiveLyricsFormat>('unknown');
+// One canonical, millisecond-based document. Renderers never write back to it.
 export const nativeAmlLyrics = shallowRef<NativeAmlLyricLine[]>([]);
+export const lyricsIssues = shallowRef<string[]>([]);
+export const lyricsSource = shallowRef<LyricsSource | null>(null);
+// Legacy consumers (desktop, taskbar and light player) still use seconds.
+// Sort only this projection: the canonical order preserves AMLL vocal groups.
+export const parsedLyrics = computed<LyricLine[]>(() => nativeAmlLyrics.value
+  .map(amlLineToLegacyLyricLine)
+  .sort((left, right) => left.time - right.time));
 
 const rawLyrics = ref('');
-const semanticLyrics = ref<SemanticLine[]>([]);
 let loadRequestId = 0;
+let parseRequestId = 0;
+interface LoadedLyricsSource {
+  requestId: number;
+  songPath: string;
+  durationMs: number;
+  source: LyricsSource;
+}
+let loadedSource: LoadedLyricsSource | null = null;
+let watchedSettingsStore: ReturnType<typeof useSettingsStore> | undefined;
+let stopReadingOrderWatch: WatchStopHandle | undefined;
+
+const getEffectiveLyricsReadingOrder = () => resolveLyricsReadingOrder(
+  useSettingsStore().settings.lyrics,
+  usePlaybackStore().currentSong?.path,
+);
+
+function isCurrentSource(source: LoadedLyricsSource): boolean {
+  return loadedSource === source && source.requestId === loadRequestId
+    && usePlaybackStore().currentSong?.path === source.songPath;
+}
+
+function hasNativeRoleStructure(source: LoadedLyricsSource): boolean {
+  const format = source.source.sourceFormat?.toLowerCase();
+  return isTtmlLyrics(source.source.rawLyrics) || format === 'ttml' || format === 'lys';
+}
+
+async function parseLoadedSource(source: LoadedLyricsSource) {
+  if (!isCurrentSource(source)) return;
+  const revision = ++parseRequestId;
+  const readingOrder = getEffectiveLyricsReadingOrder();
+  const nativeRoles = hasNativeRoleStructure(source);
+  const isCurrent = () => revision === parseRequestId && isCurrentSource(source)
+    && (nativeRoles || readingOrder === getEffectiveLyricsReadingOrder());
+  try {
+    const result = await parseOfficialLyrics(source.source.rawLyrics, {
+      format: source.source.sourceFormat,
+      durationMs: source.durationMs,
+      readingOrder,
+    });
+    if (!isCurrent()) return;
+
+    activeLyricsFormat.value = result.format;
+    lyricsIssues.value = result.issues;
+    nativeAmlLyrics.value = result.lines;
+    lyricsStatus.value = result.error ? 'error'
+      : result.lines.some(hasRenderableLyricContent) ? 'ready' : 'empty';
+  } catch (error) {
+    if (!isCurrent()) return;
+    lyricsIssues.value = [error instanceof Error ? error.message : String(error)];
+    nativeAmlLyrics.value = [];
+    lyricsStatus.value = 'error';
+    console.error('Failed to parse lyrics:', error);
+  }
+}
+
+function ensureReadingOrderWatch() {
+  const settingsStore = useSettingsStore();
+  if (settingsStore === watchedSettingsStore) return;
+  // Reusing the same settings store installs only one watcher. Dispose the old
+  // subscription when a new Pinia instance is used (tests / app recreation).
+  stopReadingOrderWatch?.();
+  watchedSettingsStore = settingsStore;
+  const playbackStore = usePlaybackStore();
+  stopReadingOrderWatch = watch(
+    () => resolveLyricsReadingOrder(settingsStore.settings.lyrics, playbackStore.currentSong?.path),
+    () => {
+      const source = loadedSource;
+      if (!source || !isCurrentSource(source)) return;
+      // Native role/vocal formats are not reinterpreted by a manual order.
+      if (hasNativeRoleStructure(source)) return;
+      // Reinterpret the cached raw source, never reread or overwrite the file.
+      // Keep the current view visible until the newest parse is ready.
+      void parseLoadedSource(source);
+    },
+    { flush: 'post' },
+  );
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    stopReadingOrderWatch?.();
+    stopReadingOrderWatch = undefined;
+    watchedSettingsStore = undefined;
+    loadedSource = null;
+    loadRequestId += 1;
+    parseRequestId += 1;
+  });
+}
 
 function createSettingsProxy<T extends object>(
   read: () => T,
@@ -74,84 +168,39 @@ export const desktopLyricsSettings = createSettingsProxy<DesktopLyricsSettings>(
 );
 
 export async function loadLyrics() {
+  ensureReadingOrderWatch();
   const requestId = ++loadRequestId;
+  parseRequestId += 1;
   const playbackStore = usePlaybackStore();
   const song = playbackStore.currentSong;
 
-  if (!song) {
-    rawLyrics.value = '';
-    lyricDocument.value = null;
-    semanticLyrics.value = [];
-    parsedLyrics.value = [];
-    activeLyricsFormat.value = 'unknown';
-    nativeAmlLyrics.value = [];
-    lyricsStatus.value = 'idle';
-    return;
-  }
-
-  lyricsStatus.value = 'loading';
+  loadedSource = null;
   rawLyrics.value = '';
-  lyricDocument.value = null;
-  semanticLyrics.value = [];
-  parsedLyrics.value = [];
+  lyricsSource.value = null;
+  lyricsIssues.value = [];
   activeLyricsFormat.value = 'unknown';
   nativeAmlLyrics.value = [];
+  lyricsStatus.value = song ? 'loading' : 'idle';
+  if (!song) return;
+
+  const isCurrentRequest = () => requestId === loadRequestId
+    && playbackStore.currentSong?.path === song.path;
 
   try {
     const lyricsPath = song.cue_source_path || song.path;
-    const payload = await invoke<LyricsPayload>('get_song_lyrics_payload', { path: lyricsPath });
+    const source = await invoke<LyricsSource>('get_song_lyrics_source', { path: lyricsPath });
+    if (!isCurrentRequest()) return;
 
-    if (requestId !== loadRequestId || playbackStore.currentSong?.path !== song.path) return;
-
-    rawLyrics.value = payload?.rawLyrics || '';
-    lyricDocument.value = payload?.document ?? null;
-    semanticLyrics.value = payload?.semanticLines ?? [];
-
-    if (isTtmlLyrics(rawLyrics.value)) {
-      activeLyricsFormat.value = 'ttml';
-      try {
-        const nativeLines = await parseNativeTtml(rawLyrics.value);
-        if (requestId !== loadRequestId || playbackStore.currentSong?.path !== song.path) return;
-
-        if (nativeLines.length > 0) {
-          nativeAmlLyrics.value = nativeLines;
-          parsedLyrics.value = nativeLines.map(amlLineToLegacyLyricLine);
-          lyricsStatus.value = 'ready';
-          return;
-        }
-      } catch (error) {
-        console.error('Failed to parse TTML with the official AMLL parser:', error);
-      }
-    } else {
-      activeLyricsFormat.value = lyricDocument.value?.metadata.sourceFormats[0] ?? 'unknown';
-    }
-
-    const sourceLines = semanticLyrics.value.length > 0
-      ? semanticLyrics.value.map((line) => semanticLineToLyricLine(line))
-      : (payload?.displayLines ?? []);
-
-    parsedLyrics.value = sourceLines.map((line) => ({
-      ...line,
-      translation: line.translation || '',
-      romaji: line.romaji || '',
-      words: line.words?.map((word) => ({
-        ...word,
-        romaji: word.romaji || '',
-      })),
-      romajiWords: line.romajiWords?.map((word) => ({
-        ...word,
-        romaji: word.romaji || '',
-      })),
-      secondary: line.secondary ? [...line.secondary] : undefined,
-    })) as LyricLine[];
-    lyricsStatus.value = parsedLyrics.value.length > 0 ? 'ready' : 'empty';
+    lyricsSource.value = source;
+    rawLyrics.value = source.rawLyrics;
+    const cached = { requestId, songPath: song.path, durationMs: song.duration * 1000, source };
+    loadedSource = cached;
+    await parseLoadedSource(cached);
   } catch (error) {
-    if (requestId !== loadRequestId || playbackStore.currentSong?.path !== song.path) return;
+    if (!isCurrentRequest()) return;
 
-    rawLyrics.value = '';
-    lyricDocument.value = null;
-    semanticLyrics.value = [];
-    parsedLyrics.value = [];
+    // Keep the raw source for diagnostics instead of discarding unparsed text.
+    lyricsIssues.value = [error instanceof Error ? error.message : String(error)];
     activeLyricsFormat.value = 'unknown';
     nativeAmlLyrics.value = [];
     lyricsStatus.value = 'error';
@@ -159,29 +208,11 @@ export async function loadLyrics() {
   }
 }
 
-function findLyricIndexByTime(lines: LyricLine[], targetTime: number): number {
-  let left = 0;
-  let right = lines.length - 1;
-  let answer = -1;
-
-  while (left <= right) {
-    const mid = (left + right) >> 1;
-    if (lines[mid].time <= targetTime) {
-      answer = mid;
-      left = mid + 1;
-    } else {
-      right = mid - 1;
-    }
-  }
-
-  return answer;
-}
-
 export const currentLyricIndex = computed(() => {
   if (parsedLyrics.value.length === 0) return -1;
 
   const targetTime = usePlaybackStore().currentTime - useSettingsStore().audioDelay;
-  return findLyricIndexByTime(parsedLyrics.value, targetTime);
+  return findDisplayLyricIndex(parsedLyrics.value, targetTime);
 });
 
 export const currentLyricLine = computed<CurrentLyricDisplayState>(() => {
@@ -201,7 +232,7 @@ export const currentLyricLine = computed<CurrentLyricDisplayState>(() => {
     };
   }
 
-  if (parsedLyrics.value.length === 0) {
+  if (lyricsStatus.value === 'empty' || parsedLyrics.value.length === 0) {
     const fallback = rawLyrics.value.trim() ? 'No synchronized lyrics' : 'Instrumental / No lyrics';
     return {
       text: fallback,
@@ -227,7 +258,12 @@ export const currentLyricLine = computed<CurrentLyricDisplayState>(() => {
     };
   }
 
-  const first = parsedLyrics.value[0];
+  const previewIndex = findDisplayLyricIndex(
+    parsedLyrics.value,
+    usePlaybackStore().currentTime - useSettingsStore().audioDelay,
+    true,
+  );
+  const first = parsedLyrics.value[Math.max(0, previewIndex)];
   return {
     text: first.text,
     lines: [first.text],
@@ -247,8 +283,8 @@ export function useLyrics() {
     parsedLyrics,
     activeLyricsFormat,
     nativeAmlLyrics,
-    lyricDocument,
+    lyricsSource,
+    lyricsIssues,
     loadLyrics,
-    semanticLyrics,
   };
 }

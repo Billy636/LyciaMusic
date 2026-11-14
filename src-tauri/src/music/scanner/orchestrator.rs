@@ -1,13 +1,16 @@
 use super::super::types::{FolderNode, GeneratedFolder, Song};
-use super::super::utils::{descendant_like_patterns, is_dot_prefixed_path, normalize_path};
-use super::diff::{collect_scan_diff, load_db_snapshot_for_folder};
+use super::super::utils::{
+    descendant_like_patterns, describe_scan_io_error, is_dot_prefixed_path, normalize_path,
+};
+use super::diff::{collect_scan_diff_with_rules, load_db_snapshot_for_folder};
 use super::parser::parse_audio_files_internal;
 use super::progress::ScanProgressReporter;
 use super::repository::apply_scan_changes;
 use super::ScanOptions;
 use crate::database::DbState;
+use crate::music::scan_settings::load_local_rules;
 use rusqlite::{params, OptionalExtension};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -15,7 +18,15 @@ use tauri::{AppHandle, State};
 
 struct ScanDirectoryOutcome {
     songs: Option<Vec<Song>>,
+    paths: Option<Vec<String>>,
     song_count: usize,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ScanResultMode {
+    Songs,
+    Paths,
+    Summary,
 }
 
 pub fn scan_single_directory_internal(
@@ -33,7 +44,7 @@ pub fn scan_single_directory_internal(
         folder_index,
         folder_total,
         options,
-        true,
+        ScanResultMode::Songs,
     )
     .map(|outcome| outcome.songs.unwrap_or_default())
 }
@@ -53,7 +64,7 @@ pub(crate) fn scan_single_directory_summary_internal(
         folder_index,
         folder_total,
         options,
-        false,
+        ScanResultMode::Summary,
     )
     .map(|outcome| outcome.song_count)
 }
@@ -65,7 +76,7 @@ fn scan_single_directory_with_mode(
     folder_index: usize,
     folder_total: usize,
     options: ScanOptions,
-    return_songs: bool,
+    result_mode: ScanResultMode,
 ) -> Result<ScanDirectoryOutcome, String> {
     #[cfg(debug_assertions)]
     let start_time = std::time::Instant::now();
@@ -80,37 +91,100 @@ fn scan_single_directory_with_mode(
         )
     });
 
-    let db_snapshot = {
+    let retain_existing = |message: String| -> Result<ScanDirectoryOutcome, String> {
+        let message = format!("{message}；本次扫描未完成，保留已有记录，请恢复访问后重新扫描");
+        eprintln!("[扫描] {message}");
+        if let Some(reporter) = reporter.as_ref() {
+            reporter.emit_error(message.clone());
+        }
+        if options.force_metadata_refresh {
+            return Err(message);
+        }
         let conn = db_conn.lock().map_err(|error| error.to_string())?;
-        load_db_snapshot_for_folder(&conn, &normalized_folder)?
+        let snapshot = load_db_snapshot_for_folder(&conn, &normalized_folder)?;
+        let song_count = snapshot.len();
+        let paths =
+            (result_mode == ScanResultMode::Paths).then(|| snapshot.keys().cloned().collect());
+        let songs = (result_mode == ScanResultMode::Songs)
+            .then(|| snapshot.into_values().map(|entry| entry.song).collect());
+        Ok(ScanDirectoryOutcome {
+            songs,
+            paths,
+            song_count,
+        })
     };
 
-    let original_db_count = db_snapshot.len();
-    let mut scan_diff =
-        collect_scan_diff(&normalized_folder, db_snapshot, reporter.as_ref(), options)?;
+    // Check before traversing, and once more before writing. No failure should
+    // turn a temporarily unavailable share (or child directory) into deletions.
+    if let Err(error) = fs::read_dir(&normalized_folder) {
+        return retain_existing(describe_scan_io_error(
+            Path::new(&normalized_folder),
+            "访问文件夹",
+            &error,
+        ));
+    }
+
+    let (db_snapshot, rules) = {
+        let conn = db_conn.lock().map_err(|error| error.to_string())?;
+        (
+            load_db_snapshot_for_folder(&conn, &normalized_folder)?,
+            load_local_rules(&conn, &normalized_folder)?,
+        )
+    };
+
+    let mut scan_diff = match collect_scan_diff_with_rules(
+        &normalized_folder,
+        db_snapshot,
+        reporter.as_ref(),
+        options,
+        &rules,
+    ) {
+        Ok(diff) => diff,
+        Err(error) => return retain_existing(error),
+    };
     let song_count = scan_diff.songs.len();
-    if !return_songs {
+    if let Some(reporter) = reporter.as_ref() {
+        reporter.set_excluded_paths(&scan_diff.excluded_paths);
+    }
+    let paths = (result_mode == ScanResultMode::Paths).then(|| {
+        scan_diff
+            .songs
+            .iter()
+            .map(|song| song.path.clone())
+            .collect()
+    });
+    if result_mode != ScanResultMode::Songs {
         scan_diff.songs = Vec::new();
     }
 
-    let folder_is_accessible =
-        Path::new(&normalized_folder).is_dir() && fs::read_dir(&normalized_folder).is_ok();
-
-    if !folder_is_accessible {
-        scan_diff.to_delete.clear();
-        let error = "文件夹可能已断开连接或已被锁定（如 BitLocker），保留已有记录".to_string();
-        if let Some(reporter) = reporter.as_ref() {
-            reporter.emit_error(error.clone());
-        }
-        return Ok(ScanDirectoryOutcome {
-            songs: if return_songs { Some(Vec::new()) } else { None },
-            song_count: original_db_count,
-        });
+    if let Err(error) = fs::read_dir(&normalized_folder) {
+        return retain_existing(describe_scan_io_error(
+            Path::new(&normalized_folder),
+            "扫描结束时访问文件夹",
+            &error,
+        ));
     }
 
     let covers_dir = app
         .as_ref()
         .map(|a| crate::music::covers::get_cover_cache_dir(a));
+
+    if options.force_metadata_refresh {
+        if let Some(app) = app.as_ref() {
+            let mut refreshed_sources = HashSet::new();
+            for song in scan_diff.to_add.iter().chain(scan_diff.to_update.iter()) {
+                let source_path = song.cue_source_path.as_deref().unwrap_or(&song.path);
+                if refreshed_sources.insert(source_path) {
+                    if let Err(error) = crate::music::covers::invalidate_song_cover_cache(
+                        Path::new(source_path),
+                        app,
+                    ) {
+                        return retain_existing(error);
+                    }
+                }
+            }
+        }
+    }
 
     // 按歌曲规范化路径进行稳定排序，保证入库及头像更新时序的唯一性
     scan_diff.to_add.sort_by(|a, b| a.path.cmp(&b.path));
@@ -157,7 +231,10 @@ fn scan_single_directory_with_mode(
     }
 
     if let Some(reporter) = reporter.as_ref() {
-        reporter.emit_complete(song_count);
+        reporter.emit_complete(song_count, &scan_diff.warnings);
+    }
+    for warning in &scan_diff.warnings {
+        eprintln!("[扫描警告] {warning}");
     }
 
     #[cfg(debug_assertions)]
@@ -173,11 +250,12 @@ fn scan_single_directory_with_mode(
     }
 
     Ok(ScanDirectoryOutcome {
-        songs: if return_songs {
+        songs: if result_mode == ScanResultMode::Songs {
             Some(scan_diff.songs)
         } else {
             None
         },
+        paths,
         song_count,
     })
 }
@@ -186,14 +264,51 @@ fn scan_single_directory_with_mode(
 pub async fn scan_music_folder(
     folder_path: String,
     minimum_duration_seconds: Option<u32>,
+    force_metadata_refresh: Option<bool>,
     app: AppHandle,
     db_state: State<'_, DbState>,
 ) -> Result<Vec<Song>, String> {
     let db_conn = db_state.conn.clone();
-    let options = ScanOptions::from_minimum_duration_seconds(minimum_duration_seconds);
+    // A user-requested folder refresh must reread tags even when an external
+    // editor preserves the audio file's size and modification timestamp.
+    let options = ScanOptions {
+        force_metadata_refresh: force_metadata_refresh.unwrap_or(false),
+        ..ScanOptions::from_minimum_duration_seconds(minimum_duration_seconds)
+    };
 
     tauri::async_runtime::spawn_blocking(move || {
         scan_single_directory_internal(folder_path, db_conn, Some(app), 1, 1, options)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Folder refreshes only need membership; metadata stays in the database and is
+/// fetched separately for records that are already materialized by the UI.
+#[tauri::command]
+pub async fn scan_music_folder_paths(
+    folder_path: String,
+    minimum_duration_seconds: Option<u32>,
+    force_metadata_refresh: Option<bool>,
+    app: AppHandle,
+    db_state: State<'_, DbState>,
+) -> Result<Vec<String>, String> {
+    let db_conn = db_state.conn.clone();
+    let options = ScanOptions {
+        force_metadata_refresh: force_metadata_refresh.unwrap_or(false),
+        ..ScanOptions::from_minimum_duration_seconds(minimum_duration_seconds)
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        scan_single_directory_with_mode(
+            folder_path,
+            db_conn,
+            Some(app),
+            1,
+            1,
+            options,
+            ScanResultMode::Paths,
+        )
+        .map(|outcome| outcome.paths.unwrap_or_default())
     })
     .await
     .map_err(|error| error.to_string())?
@@ -220,8 +335,14 @@ pub async fn scan_folder_as_playlists(
     app: AppHandle,
     db_state: State<'_, DbState>,
 ) -> Result<Vec<GeneratedFolder>, String> {
-    let songs =
-        scan_music_folder(root_path.clone(), minimum_duration_seconds, app, db_state).await?;
+    let songs = scan_music_folder(
+        root_path.clone(),
+        minimum_duration_seconds,
+        None,
+        app,
+        db_state,
+    )
+    .await?;
 
     let mut grouped: HashMap<PathBuf, Vec<Song>> = HashMap::new();
     for song in songs {

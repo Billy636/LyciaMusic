@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 
 import { tauriInvoke } from '../services/tauri/invoke';
+import type { LocalSortMode } from '../services/storage/playerStorage';
 import {
   activateLibrarySongPathCacheEntry,
   clearLibrarySongPathCacheNamespace,
@@ -13,8 +14,10 @@ const DETAIL_PATH_CACHE_NAMESPACE = 'detail';
 
 const inFlightRequests = new Map<string, Promise<string[]>>();
 const cacheVersion = ref(0);
+let cacheGeneration = 0;
 
-const makeArtistKey = (artistName: string) => `artist::${artistName}`;
+const makeArtistKey = (artistName: string, albumArtist: boolean) =>
+  `${albumArtist ? 'albumArtist' : 'artist'}::${artistName}`;
 const makeAlbumKey = (albumKey: string, sortMode: string) => `album::${sortMode}::${albumKey}`;
 
 const loadWithCache = async (key: string, loader: () => Promise<string[]>) => {
@@ -29,8 +32,14 @@ const loadWithCache = async (key: string, loader: () => Promise<string[]>) => {
     return inFlight;
   }
 
+  const requestGeneration = cacheGeneration;
   const request = loader()
     .then((paths) => {
+      if (requestGeneration !== cacheGeneration) {
+        throw Object.assign(new Error('Stale library path request'), {
+          code: 'STALE_LIBRARY_PATH_REQUEST',
+        });
+      }
       setLibrarySongPathCacheEntry(
         DETAIL_PATH_CACHE_NAMESPACE,
         key,
@@ -41,7 +50,7 @@ const loadWithCache = async (key: string, loader: () => Promise<string[]>) => {
       return paths;
     })
     .finally(() => {
-      inFlightRequests.delete(key);
+      if (inFlightRequests.get(key) === request) inFlightRequests.delete(key);
     });
 
   inFlightRequests.set(key, request);
@@ -49,13 +58,16 @@ const loadWithCache = async (key: string, loader: () => Promise<string[]>) => {
 };
 
 export function useLibraryDetailSongPathCache() {
-  const loadArtistSongPaths = async (artistName: string) => {
+  const loadArtistSongPaths = async (artistName: string, albumArtist = false) => {
     if (!artistName) {
       return [];
     }
 
-    return loadWithCache(makeArtistKey(artistName), () =>
-      tauriInvoke('get_library_song_paths_by_artist', { artistName }),
+    return loadWithCache(makeArtistKey(artistName, albumArtist), () =>
+      tauriInvoke('get_library_song_paths_by_artist', {
+        artistName,
+        ...(albumArtist ? { albumArtist: true } : {}),
+      }),
     );
   };
 
@@ -75,7 +87,19 @@ export function useLibraryDetailSongPathCache() {
   return {
     loadArtistSongPaths,
     loadAlbumSongPaths,
+    loadGenreSongPaths: (
+      genre: string,
+      query: string,
+      sortMode: Exclude<LocalSortMode, 'custom'>,
+    ) => {
+      const loader = () => tauriInvoke('get_library_song_paths_by_genre', { genre, query, sortMode });
+      // Search results depend on the evolving search index; cache only browsing queries.
+      return query.trim()
+        ? loader()
+        : loadWithCache(`genre::${JSON.stringify([genre, sortMode])}`, loader);
+    },
     clearLibraryDetailSongPathCache: () => {
+      cacheGeneration += 1;
       clearLibrarySongPathCacheNamespace(DETAIL_PATH_CACHE_NAMESPACE);
       inFlightRequests.clear();
       cacheVersion.value += 1;

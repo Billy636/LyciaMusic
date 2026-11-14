@@ -1,4 +1,5 @@
 import type { LyricLine, LyricWord } from '../../composables/lyrics';
+import { findDisplayLyricIndex } from '../../composables/lyrics/selection';
 
 export const LIGHT_LYRIC_VISIBLE_BEFORE = 3;
 export const LIGHT_LYRIC_VISIBLE_AFTER = 4;
@@ -31,23 +32,7 @@ function clampProgress(value: number) {
 }
 
 export function findLightLyricIndexByTime(lines: LyricLine[], currentTime: number) {
-  if (lines.length === 0) return -1;
-
-  let left = 0;
-  let right = lines.length - 1;
-  let answer = -1;
-
-  while (left <= right) {
-    const mid = (left + right) >> 1;
-    if (lines[mid].time <= currentTime) {
-      answer = mid;
-      left = mid + 1;
-    } else {
-      right = mid - 1;
-    }
-  }
-
-  return answer;
+  return findDisplayLyricIndex(lines, currentTime);
 }
 
 export function getLightLyricVisibleWindow(
@@ -112,9 +97,9 @@ export function resolveLightLyricLineProgress(
   const start = line.time;
   const nextStart = nextLine?.time;
   const explicitEnd = line.endTime > line.time ? line.endTime : undefined;
-  const end = nextStart && nextStart > start
+  const end = explicitEnd ?? (nextStart && nextStart > start
     ? nextStart
-    : explicitEnd ?? start + DEFAULT_LINE_DURATION_SECONDS;
+    : start + DEFAULT_LINE_DURATION_SECONDS);
 
   if (end <= start) return currentTime >= start ? 1 : 0;
   return clampProgress((currentTime - start) / (end - start));

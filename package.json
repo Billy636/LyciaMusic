@@ -1,12 +1,14 @@
 {
   "name": "lycia-music",
   "private": true,
-  "version": "1.3.12",
+  "version": "1.5.4",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:lyrics": "vite --config scripts/lyrics-smoke/vite.config.ts --open /scripts/lyrics-smoke/index.html",
     "build": "npm run typecheck && vite build",
+    "build:installer": "npm run version:check && tauri build --bundles nsis --config src-tauri/tauri.installer.conf.json",
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "eslint .",
@@ -24,9 +26,13 @@
     "build:releases": "node scripts/build-releases.js"
   },
   "dependencies": {
-    "@applemusic-like-lyrics/core": "^0.2.0",
-    "@applemusic-like-lyrics/lyric": "^0.3.0",
-    "@applemusic-like-lyrics/vue": "^0.2.0",
+    "@applemusic-like-lyrics/core": "0.6.0",
+    "@applemusic-like-lyrics/lyric": "1.1.0",
+    "@applemusic-like-lyrics/ttml": "1.0.1",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
     "@pixi/app": "^7.4.3",
     "@pixi/core": "^7.4.3",
     "@pixi/display": "^7.4.3",
@@ -53,6 +59,7 @@
     "@tailwindcss/postcss": "^4.1.18",
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@xmldom/xmldom": "0.9.12",
     "autoprefixer": "^10.4.23",
     "eslint": "^10.0.3",
     "eslint-plugin-vue": "^10.8.0",
@@ -62,8 +69,6 @@
     "typescript": "~5.6.2",
     "typescript-eslint": "^8.57.1",
     "vite": "^6.0.3",
-    "vite-plugin-top-level-await": "^1.6.0",
-    "vite-plugin-wasm": "^3.5.0",
     "vitest": "^4.1.0",
     "vue-tsc": "^2.1.10"
   }

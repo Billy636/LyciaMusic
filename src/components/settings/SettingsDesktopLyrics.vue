@@ -30,10 +30,17 @@ import {
   createDefaultDesktopLyricsSettings,
 } from '../../composables/lyrics';
 import { DESKTOP_LYRICS_RESET_BOUNDS_EVENT } from '../../features/desktopLyrics/shared';
+import { usesNativeDesktopLyrics } from '../../features/desktopLyrics/native';
 import { useSettings } from '../../features/settings/useSettings';
 import { useLyricsSettingsStore } from '../../features/lyricsSettings/store';
+import SettingsSelect from './SettingsSelect.vue';
 
 
+
+const OVERFLOW_OPTIONS = [
+  { value: 'scroll', label: '横向跟随（推荐）' },
+  { value: 'wrap', label: '自动换行（正文最多两行）' },
+];
 
 const ALIGNMENT_OPTIONS: Array<{ value: DesktopLyricsPlayerAlignment; label: string }> = [
   { value: 'left', label: '靠左' },
@@ -727,7 +734,7 @@ function updateFontPresetMenuPosition() {
   const rect = trigger.getBoundingClientRect();
   const viewportPadding = 16;
   const gap = 10;
-  const preferredWidth = Math.max(rect.width, 320);
+  const preferredWidth = Math.max(rect.width, 260);
   const menuWidth = Math.min(preferredWidth, window.innerWidth - viewportPadding * 2);
 
   let left = rect.right - menuWidth;
@@ -834,7 +841,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="w-full space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+  <div class="desktop-lyrics-settings w-full space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
     <section class="space-y-3">
       <h2 class="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-200">
         <span class="h-4 w-1 rounded-full bg-[#EC4141]"></span>
@@ -848,6 +855,7 @@ onUnmounted(() => {
         >
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">窗口置顶</div>
+            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">开启后优先保持显示，游戏请使用无边框全屏；独占全屏可能无法覆盖</div>
           </div>
           <span class="desktop-switch" :class="desktopLyricsSettings.isAlwaysOnTop ? 'desktop-switch--on' : ''">
             <span class="desktop-switch-thumb" :class="desktopLyricsSettings.isAlwaysOnTop ? 'translate-x-5' : ''" />
@@ -876,10 +884,13 @@ onUnmounted(() => {
         <button
           type="button"
           class="desktop-setting-row"
+          :disabled="desktopLyricsSettings.isAlwaysOnTop"
+          :class="desktopLyricsSettings.isAlwaysOnTop ? 'cursor-not-allowed opacity-50' : ''"
           @click="desktopLyricsSettings.autoHideWhenFullscreen = !desktopLyricsSettings.autoHideWhenFullscreen"
         >
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">全屏时自动隐藏</div>
+            <div v-if="desktopLyricsSettings.isAlwaysOnTop" class="mt-1 text-xs text-gray-500 dark:text-gray-400">窗口置顶已开启，此设置在关闭置顶后生效</div>
           </div>
           <span class="desktop-switch" :class="desktopLyricsSettings.autoHideWhenFullscreen ? 'desktop-switch--on' : ''">
             <span class="desktop-switch-thumb" :class="desktopLyricsSettings.autoHideWhenFullscreen ? 'translate-x-5' : ''" />
@@ -912,7 +923,15 @@ onUnmounted(() => {
           </span>
         </button>
 
-
+        <div v-if="usesNativeDesktopLyrics()" class="desktop-setting-row desktop-overflow-row">
+          <div class="desktop-overflow-copy">
+            <label for="desktop-lyrics-overflow" class="text-sm font-medium text-gray-800 dark:text-gray-200">长句处理</label>
+          </div>
+          <SettingsSelect class="desktop-overflow-select" label="长句处理" hide-label
+            trigger-id="desktop-lyrics-overflow"
+            :model-value="desktopLyricsSettings.overflowMode ?? 'scroll'" :options="OVERFLOW_OPTIONS"
+            @update:model-value="desktopLyricsSettings.overflowMode = $event === 'wrap' ? 'wrap' : 'scroll'" />
+        </div>
 
         <button
           type="button"
@@ -946,7 +965,7 @@ onUnmounted(() => {
           @click="desktopLyricsSettings.centerHorizontally = !desktopLyricsSettings.centerHorizontally"
         >
           <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">桌面歌词自动居中</div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">桌面歌词水平居中</div>
           </div>
           <span class="desktop-switch" :class="desktopLyricsSettings.centerHorizontally ? 'desktop-switch--on' : ''">
             <span class="desktop-switch-thumb" :class="desktopLyricsSettings.centerHorizontally ? 'translate-x-5' : ''" />
@@ -983,7 +1002,7 @@ onUnmounted(() => {
           @click="showLyricsSyncOffsetPanel = !showLyricsSyncOffsetPanel"
         >
           <div>
-            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">同步偏移</div>
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">同步偏移（全局）</div>
           </div>
           <div class="flex items-center gap-3 shrink-0">
             <div class="rounded-full bg-[#EC4141]/10 px-3 py-1 text-xs font-medium text-[#EC4141] tabular-nums">
@@ -1001,7 +1020,7 @@ onUnmounted(() => {
           <div v-if="showLyricsSyncOffsetPanel" class="desktop-setting-expand">
             <div class="desktop-setting-expand-inner">
               <div class="text-xs text-gray-600 dark:text-white/60">
-                正值让歌词更晚显示，负值让歌词更早显示。用于修正不同输出设备的播放缓冲差异，默认值为 0 ms。
+                正值让歌词更晚显示，负值让歌词更早显示。用于补偿音频输出延迟，默认值为 0 ms。此设置同时影响播放页、桌面歌词、mini 模式及任务栏歌词。
               </div>
 
               <div class="mt-4 flex flex-col gap-4 md:flex-row md:items-center">
@@ -1046,12 +1065,12 @@ onUnmounted(() => {
       <!-- 桌面歌词排版效果预览区 (回归单栏顶部，与下方紧凑滑块同视口呈现) -->
       <div class="desktop-lyrics-preview-container select-none">
         <div class="desktop-lyrics-preview-header">
-          <div class="text-xs font-semibold text-gray-500 dark:text-gray-400">效果实时预览</div>
+          <div class="text-xs font-semibold app-text-secondary">效果实时预览</div>
           <div class="flex items-center gap-2">
             <!-- 深浅色预览背景切换按钮 -->
             <button
               type="button"
-              class="desktop-preview-btn desktop-preview-btn--theme flex items-center gap-1.5"
+              class="desktop-preview-btn desktop-preview-btn--theme flex items-center gap-1.5 text-gray-700 dark:text-gray-100"
               :title="previewBgMode === 'dark' ? '切换至浅色预览背景' : '切换至深色预览背景'"
               @click="previewBgMode = previewBgMode === 'dark' ? 'light' : 'dark'"
             >
@@ -1061,8 +1080,8 @@ onUnmounted(() => {
             </button>
             <button
               type="button"
-              class="desktop-preview-btn desktop-preview-btn--cancel"
-              :class="!isModified ? 'opacity-50 cursor-not-allowed' : ''"
+              class="desktop-preview-btn desktop-preview-btn--cancel text-gray-700 dark:text-gray-100"
+              :class="!isModified ? 'opacity-40 cursor-not-allowed' : ''"
               :disabled="!isModified"
               @click="cancelChanges"
             >
@@ -1070,8 +1089,8 @@ onUnmounted(() => {
             </button>
             <button
               type="button"
-              class="desktop-preview-btn"
-              :class="isModified ? 'desktop-preview-btn--apply' : 'desktop-preview-btn--cancel opacity-50 cursor-not-allowed'"
+              class="desktop-preview-btn text-gray-700 dark:text-gray-100"
+              :class="isModified ? 'desktop-preview-btn--apply !text-white' : 'desktop-preview-btn--cancel opacity-40 cursor-not-allowed'"
               :disabled="!isModified"
               @click="applyChanges"
             >
@@ -1141,7 +1160,7 @@ onUnmounted(() => {
         <div class="desktop-compact-row">
           <!-- 字号 -->
           <div class="desktop-compact-slider-cell">
-            <div class="desktop-compact-label shrink-0 text-left">字号</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0 text-left">字号</div>
             <input
               v-model.number="localSettings.playerFontScale"
               type="range"
@@ -1151,13 +1170,13 @@ onUnmounted(() => {
               aria-label="字号"
               class="desktop-compact-range-slider"
             />
-            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-300">
+            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-200">
               {{ Math.round(localSettings.playerFontScale * 100) }}%
             </span>
           </div>
           <!-- 行距 -->
           <div class="desktop-compact-slider-cell">
-            <div class="desktop-compact-label shrink-0 text-left">行距</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0 text-left">行距</div>
             <input
               v-model.number="localSettings.playerLineGap"
               type="range"
@@ -1167,7 +1186,7 @@ onUnmounted(() => {
               aria-label="行距"
               class="desktop-compact-range-slider"
             />
-            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-300">
+            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-200">
               {{ Math.round(localSettings.playerLineGap * 100) }}%
             </span>
           </div>
@@ -1178,7 +1197,7 @@ onUnmounted(() => {
         <div class="desktop-compact-row">
           <!-- 文字不透明度 -->
           <div class="desktop-compact-slider-cell">
-            <div class="desktop-compact-label shrink-0 text-left">不透明度</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0 text-left">不透明度</div>
             <input
               v-model.number="localSettings.textOpacity"
               type="range"
@@ -1188,13 +1207,13 @@ onUnmounted(() => {
               aria-label="不透明度"
               class="desktop-compact-range-slider"
             />
-            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-300">
+            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-200">
               {{ Math.round(localSettings.textOpacity * 100) }}%
             </span>
           </div>
           <!-- 描边阴影 -->
           <div class="desktop-compact-slider-cell">
-            <div class="desktop-compact-label shrink-0 text-left">描边阴影</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0 text-left">描边阴影</div>
             <input
               type="range"
               min="0"
@@ -1205,7 +1224,7 @@ onUnmounted(() => {
               aria-label="描边阴影"
               class="desktop-compact-range-slider"
             />
-            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-300">
+            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-200">
               {{ localSettings.firstLineTextShadowStrength }}
             </span>
           </div>
@@ -1215,7 +1234,7 @@ onUnmounted(() => {
         <div class="desktop-compact-row">
           <!-- 阴影颜色 -->
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label">阴影颜色</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200">阴影颜色</div>
             <div class="desktop-compact-selector-shadow flex items-center gap-1.5">
               <button
                 v-for="preset in SHADOW_COLOR_PRESETS"
@@ -1244,13 +1263,13 @@ onUnmounted(() => {
           </div>
           <!-- 对齐方式 (Segmented Control) -->
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label shrink-0">对齐</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">对齐</div>
             <div class="desktop-segmented-control flex overflow-hidden rounded-xl border border-gray-200 bg-white/40 dark:border-white/10 dark:bg-white/5">
               <button
                 v-for="option in ALIGNMENT_OPTIONS"
                 :key="option.value"
                 type="button"
-                class="desktop-segmented-btn text-center text-xs font-semibold py-1.5 px-3 transition-all"
+                class="desktop-segmented-btn text-gray-600 dark:text-gray-300 text-center text-xs font-semibold py-1.5 px-3 transition-all"
                 :class="localSettings.playerAlignment === option.value ? 'desktop-segmented-btn--active' : ''"
                 @click="setDesktopAlignment(option.value)"
               >
@@ -1263,7 +1282,7 @@ onUnmounted(() => {
         <!-- 行五：描边深度 & 描边颜色 -->
         <div class="desktop-compact-row">
           <div class="desktop-compact-slider-cell">
-            <div class="desktop-compact-label shrink-0 text-left">描边深度</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0 text-left">描边深度</div>
             <input
               type="range"
               min="0"
@@ -1274,13 +1293,13 @@ onUnmounted(() => {
               aria-label="描边深度"
               class="desktop-compact-range-slider"
             />
-            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-300">
+            <span class="desktop-compact-value-label text-right font-mono text-[13px] font-bold text-gray-700 dark:text-gray-200">
               {{ localSettings.textStrokeDepth }}
             </span>
           </div>
 
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label">描边颜色</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200">描边颜色</div>
             <div class="desktop-compact-selector-shadow flex items-center gap-1.5">
               <button
                 v-for="preset in STROKE_COLOR_PRESETS"
@@ -1312,7 +1331,7 @@ onUnmounted(() => {
         <!-- 行六：显示翻译 & 显示罗马音 -->
         <div class="desktop-compact-row">
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label shrink-0">显示翻译</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">显示翻译</div>
             <div class="desktop-segmented-control flex overflow-hidden rounded-xl border border-gray-200 bg-white/40 dark:border-white/10 dark:bg-white/5">
               <button
                 v-if="lyricsSettings.showTranslation"
@@ -1325,7 +1344,7 @@ onUnmounted(() => {
               <button
                 v-else
                 type="button"
-                class="desktop-segmented-btn text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
+                class="desktop-segmented-btn text-gray-600 dark:text-gray-300 text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
                 @click="lyricsSettings.showTranslation = true"
               >
                 关
@@ -1333,7 +1352,7 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label shrink-0">显示罗马音</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">显示罗马音</div>
             <div class="desktop-segmented-control flex overflow-hidden rounded-xl border border-gray-200 bg-white/40 dark:border-white/10 dark:bg-white/5">
               <button
                 v-if="lyricsSettings.showRomaji"
@@ -1346,7 +1365,7 @@ onUnmounted(() => {
               <button
                 v-else
                 type="button"
-                class="desktop-segmented-btn text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
+                class="desktop-segmented-btn text-gray-600 dark:text-gray-300 text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
                 @click="lyricsSettings.showRomaji = true"
               >
                 关
@@ -1358,7 +1377,7 @@ onUnmounted(() => {
         <!-- 行六：双行显示 & 字体方案 -->
         <div class="desktop-compact-row">
           <div class="desktop-compact-cell flex items-center justify-between">
-            <div class="desktop-compact-label shrink-0">双行显示</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0" title="第一行显示当前句，第二行显示下一句，每句自动推进">双行显示</div>
             <div class="desktop-segmented-control flex overflow-hidden rounded-xl border border-gray-200 bg-white/40 dark:border-white/10 dark:bg-white/5">
               <button
                 v-if="desktopLyricsSettings.showDoubleLine"
@@ -1371,7 +1390,7 @@ onUnmounted(() => {
               <button
                 v-else
                 type="button"
-                class="desktop-segmented-btn text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
+                class="desktop-segmented-btn text-gray-600 dark:text-gray-300 text-center text-xs font-semibold py-1.5 px-3 transition-all animate-fade-in"
                 @click="desktopLyricsSettings.showDoubleLine = true"
               >
                 关
@@ -1380,19 +1399,21 @@ onUnmounted(() => {
           </div>
 
           <div class="desktop-compact-cell flex items-center justify-between gap-4">
-            <div class="desktop-compact-label shrink-0">字体方案</div>
-            <div ref="fontPresetFieldRef" class="desktop-font-picker flex-1 min-w-0">
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">字体方案</div>
+            <div ref="fontPresetFieldRef" class="desktop-font-picker desktop-font-picker--inline min-w-0">
               <button
                 ref="fontPresetTriggerRef"
                 type="button"
+                aria-label="字体方案"
+                :aria-expanded="isFontPresetMenuOpen"
                 class="desktop-font-trigger desktop-font-trigger--compact flex items-center justify-between w-full"
                 :class="isFontPresetMenuOpen ? 'desktop-font-trigger--open' : ''"
                 @click="toggleFontPresetMenu"
               >
-                <span class="truncate text-[14px] font-semibold text-gray-800 dark:text-gray-100 flex-1 text-right mr-1.5" :style="{ fontFamily: selectedFontFamily }">
+                <span class="truncate text-[14px] font-medium flex-1 text-left" :title="selectedFontLabel" :style="{ fontFamily: selectedFontFamily }">
                   {{ selectedFontLabel }}
                 </span>
-                <ChevronDown :size="14" class="text-gray-400 shrink-0" />
+                <ChevronDown :size="14" class="shrink-0 opacity-70" />
               </button>
 
               <Teleport to="body">
@@ -1426,7 +1447,7 @@ onUnmounted(() => {
                         <Check
                           v-if="localSettings.playerFontPreset === option.value"
                           :size="16"
-                          class="shrink-0 text-[#EC4141]"
+                          class="shrink-0"
                         />
                       </button>
                     </div>
@@ -1440,7 +1461,7 @@ onUnmounted(() => {
         <!-- 行七：配色方案 (独占一行，展示小圆点 Preset，极致美观与对称) -->
         <div class="desktop-compact-row-full">
           <div class="desktop-compact-cell w-full flex items-center justify-between gap-4">
-            <div class="desktop-compact-label shrink-0">配色方案</div>
+            <div class="desktop-compact-label text-gray-700 dark:text-gray-200 shrink-0">配色方案</div>
             <div class="desktop-compact-selector-scheme flex items-center gap-1.5">
               <button
                 v-for="option in COLOR_SCHEME_OPTIONS"
@@ -1638,7 +1659,9 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-:root {
+.desktop-lyrics-settings,
+.desktop-font-menu,
+.desktop-custom-modal {
   /* 桌面歌词设置组件 - 浅色模式 CSS 变量 */
   --desktop-chip-bg: rgba(255, 255, 255, 0.72);
   --desktop-chip-border: rgba(15, 23, 42, 0.08);
@@ -1648,16 +1671,17 @@ onUnmounted(() => {
   --desktop-chip-active-border: rgba(236, 65, 65, 0.28);
   --desktop-chip-active-text: #ec4141;
 
-  --desktop-font-trigger-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.68));
-  --desktop-font-trigger-border: rgba(148, 163, 184, 0.2);
-  --desktop-font-trigger-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 10px 26px rgba(15, 23, 42, 0.05);
+  --desktop-font-trigger-bg: #f5f6f9;
+  --desktop-font-trigger-text: #273449;
+  --desktop-font-trigger-border: #d7dce5;
+  --desktop-font-trigger-shadow: none;
 
-  --desktop-font-trigger-active-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 244, 244, 0.78));
+  --desktop-font-trigger-active-bg: #fff5f5;
   --desktop-font-trigger-active-border: rgba(236, 65, 65, 0.32);
   --desktop-font-trigger-active-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 14px 30px rgba(236, 65, 65, 0.08);
 
-  --desktop-font-menu-bg: rgba(255, 255, 255, 0.88);
-  --desktop-font-menu-border: rgba(255, 255, 255, 0.5);
+  --desktop-font-menu-bg: #fafbfc;
+  --desktop-font-menu-border: #d7dce5;
   --desktop-font-menu-shadow: 0 24px 60px rgba(15, 23, 42, 0.16), 0 10px 24px rgba(15, 23, 42, 0.08);
   --desktop-font-menu-header-color: rgba(71, 85, 105, 0.92);
   --desktop-font-menu-header-border: rgba(148, 163, 184, 0.12);
@@ -1669,10 +1693,12 @@ onUnmounted(() => {
 
   --desktop-font-option-active-bg: linear-gradient(180deg, rgba(236, 65, 65, 0.12), rgba(236, 65, 65, 0.06));
   --desktop-font-option-active-border: rgba(236, 65, 65, 0.2);
-  --desktop-font-option-active-text: #ec4141;
+  --desktop-font-option-active-text: #c83232;
 }
 
-:global(.dark) {
+.dark .desktop-lyrics-settings,
+.dark .desktop-font-menu,
+.dark .desktop-custom-modal {
   /* 桌面歌词设置组件 - 深色模式 CSS 变量重写 */
   --desktop-chip-bg: rgba(255, 255, 255, 0.04);
   --desktop-chip-border: rgba(255, 255, 255, 0.08);
@@ -1682,18 +1708,19 @@ onUnmounted(() => {
   --desktop-chip-active-border: rgba(236, 65, 65, 0.35);
   --desktop-chip-active-text: #ff8b8b;
 
-  --desktop-font-trigger-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.04));
-  --desktop-font-trigger-border: rgba(255, 255, 255, 0.08);
-  --desktop-font-trigger-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 12px 28px rgba(0, 0, 0, 0.18);
+  --desktop-font-trigger-bg: #30343e;
+  --desktop-font-trigger-text: #edf0f5;
+  --desktop-font-trigger-border: #4a5160;
+  --desktop-font-trigger-shadow: none;
 
-  --desktop-font-trigger-active-bg: linear-gradient(180deg, rgba(236, 65, 65, 0.16), rgba(255, 255, 255, 0.05));
+  --desktop-font-trigger-active-bg: #3b2d35;
   --desktop-font-trigger-active-border: rgba(236, 65, 65, 0.34);
   --desktop-font-trigger-active-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 16px 36px rgba(0, 0, 0, 0.24);
 
-  --desktop-font-menu-bg: rgba(17, 17, 19, 0.88);
-  --desktop-font-menu-border: rgba(255, 255, 255, 0.08);
+  --desktop-font-menu-bg: #24262d;
+  --desktop-font-menu-border: #414652;
   --desktop-font-menu-shadow: 0 24px 60px rgba(0, 0, 0, 0.34), 0 10px 24px rgba(0, 0, 0, 0.24);
-  --desktop-font-menu-header-color: rgba(255, 255, 255, 0.58);
+  --desktop-font-menu-header-color: #b5bfce;
   --desktop-font-menu-header-border: rgba(255, 255, 255, 0.06);
 
   --desktop-font-option-text: rgba(255, 255, 255, 0.84);
@@ -1712,7 +1739,7 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 16px;
   padding: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom: 1px solid var(--settings-divider);
   text-align: left;
   transition: background-color 160ms ease;
 }
@@ -1722,40 +1749,34 @@ onUnmounted(() => {
 }
 
 .desktop-setting-row:hover {
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(128, 128, 128, 0.04);
 }
 
-:global(.dark) .desktop-setting-row {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+.dark .desktop-setting-row:hover {
+  background: rgba(255, 255, 255, 0.035);
 }
 
-:global(.dark) .desktop-setting-row:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
+.desktop-overflow-row { flex-wrap: wrap; }
+.desktop-overflow-copy { flex: 1 1 auto; min-width: 0; }
+.desktop-overflow-select { flex: 0 1 220px; width: 220px; max-width: 100%; }
 
 .desktop-typography-panel {
   display: flex;
   flex-direction: column;
-  border-radius: 16px;
-  overflow: hidden;
 }
 
 .desktop-setting-expand {
   overflow: hidden;
-  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  border-top: 1px solid var(--settings-divider);
 }
 
 .desktop-setting-expand-inner {
   padding: 16px;
 }
 
-:global(.dark) .desktop-setting-expand {
-  border-top-color: rgba(255, 255, 255, 0.05);
-}
-
 .desktop-typography-row {
   padding: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom: 1px solid var(--settings-divider);
   transition: background-color 160ms ease;
 }
 
@@ -1764,15 +1785,11 @@ onUnmounted(() => {
 }
 
 .desktop-typography-row:hover {
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(128, 128, 128, 0.04);
 }
 
-:global(.dark) .desktop-typography-row {
-  border-bottom-color: rgba(255, 255, 255, 0.05);
-}
-
-:global(.dark) .desktop-typography-row:hover {
-  background: rgba(255, 255, 255, 0.08);
+.dark .desktop-typography-row:hover {
+  background: rgba(255, 255, 255, 0.035);
 }
 
 .desktop-typography-row--inline {
@@ -1842,11 +1859,11 @@ onUnmounted(() => {
   background: #ec4141;
 }
 
-:global(.dark) .desktop-switch {
+.dark .desktop-switch {
   background: rgb(55 65 81);
 }
 
-:global(.dark) .desktop-switch--on {
+.dark .desktop-switch--on {
   background: #ec4141;
 }
 
@@ -1868,7 +1885,7 @@ onUnmounted(() => {
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
 }
 
-:global(.dark) .desktop-card {
+.dark .desktop-card {
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.2);
 }
@@ -1893,8 +1910,8 @@ onUnmounted(() => {
 }
 
 .desktop-font-picker--inline {
-  width: min(185px, 100%);
-  flex-shrink: 0;
+  width: min(224px, 100%);
+  flex: 0 1 224px;
 }
 
 .desktop-font-trigger {
@@ -1907,6 +1924,7 @@ onUnmounted(() => {
   border: 1px solid var(--desktop-font-trigger-border);
   border-radius: 18px;
   background: var(--desktop-font-trigger-bg);
+  color: var(--desktop-font-trigger-text);
   box-shadow: var(--desktop-font-trigger-shadow);
   transition:
     border-color 180ms ease,
@@ -1933,13 +1951,13 @@ onUnmounted(() => {
 }
 
 .desktop-font-menu {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--desktop-font-menu-border);
-  border-radius: 20px;
+  border-radius: 12px;
   background: var(--desktop-font-menu-bg);
   box-shadow: var(--desktop-font-menu-shadow);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
   z-index: 120;
 }
 
@@ -1948,7 +1966,8 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 16px 12px;
+  padding: 12px 14px;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--desktop-font-menu-header-border);
   color: var(--desktop-font-menu-header-color);
   font-size: 12px;
@@ -1957,6 +1976,7 @@ onUnmounted(() => {
 }
 
 .desktop-font-menu-list {
+  min-height: 0;
   max-height: 320px;
   overflow-y: auto;
   padding: 8px;
@@ -1967,9 +1987,9 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 12px 14px;
+  padding: 9px 10px;
   border: 1px solid transparent;
-  border-radius: 16px;
+  border-radius: 8px;
   text-align: left;
   color: var(--desktop-font-option-text);
   transition:
@@ -2124,7 +2144,7 @@ onUnmounted(() => {
   box-shadow: 0 26px 70px rgba(15, 23, 42, 0.22);
 }
 
-:global(.dark) .desktop-custom-modal {
+.dark .desktop-custom-modal {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(18, 18, 20, 0.92);
 }
@@ -2159,7 +2179,7 @@ onUnmounted(() => {
   word-break: keep-all;
 }
 
-:global(.dark) .desktop-color-picker {
+.dark .desktop-color-picker {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.88);
@@ -2199,7 +2219,7 @@ onUnmounted(() => {
   box-shadow: 0 24px 64px rgba(15, 23, 42, 0.24);
 }
 
-:global(.dark) .desktop-custom-color-panel {
+.dark .desktop-custom-color-panel {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(18, 18, 20, 0.96);
 }
@@ -2211,7 +2231,7 @@ onUnmounted(() => {
   font-weight: 800;
 }
 
-:global(.dark) .desktop-custom-color-panel-title {
+.dark .desktop-custom-color-panel-title {
   color: rgba(255, 255, 255, 0.9);
 }
 
@@ -2304,7 +2324,7 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
-:global(.dark) .desktop-custom-rgb-row label {
+.dark .desktop-custom-rgb-row label {
   color: rgba(255, 255, 255, 0.82);
 }
 
@@ -2321,7 +2341,7 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
-:global(.dark) .desktop-custom-rgb-row input {
+.dark .desktop-custom-rgb-row input {
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.9);
@@ -2446,10 +2466,6 @@ onUnmounted(() => {
     justify-content: flex-start;
   }
 
-  .desktop-font-picker--inline {
-    width: 100%;
-  }
-
   .desktop-custom-modal {
     padding: 18px;
   }
@@ -2531,14 +2547,14 @@ onUnmounted(() => {
   background: rgba(148, 163, 184, 0.16);
   border-color: rgba(148, 163, 184, 0.36);
 }
-:global(.dark) .desktop-preview-btn--cancel {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.76);
-}
-.desktop-preview-btn--cancel:hover {
+.dark .desktop-preview-btn--cancel {
+  border-color: rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.16);
+  color: #f1f5f9 !important;
+}
+.dark .desktop-preview-btn--cancel:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .desktop-preview-btn--theme {
@@ -2550,14 +2566,14 @@ onUnmounted(() => {
   background: rgba(148, 163, 184, 0.16);
   border-color: rgba(148, 163, 184, 0.36);
 }
-:global(.dark) .desktop-preview-btn--theme {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.76);
-}
-:global(.dark) .desktop-preview-btn--theme:hover {
+.dark .desktop-preview-btn--theme {
+  border-color: rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.16);
+  color: #f1f5f9 !important;
+}
+.dark .desktop-preview-btn--theme:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .desktop-preview-btn--apply {
@@ -2603,7 +2619,7 @@ onUnmounted(() => {
     linear-gradient(135deg, #1e293b, #0f172a);
 }
 
-:global(.dark) .desktop-lyrics-preview-card--dark {
+.dark .desktop-lyrics-preview-card--dark {
   border-color: rgba(255, 255, 255, 0.06);
   background:
     radial-gradient(circle at top left, rgba(71, 85, 105, 0.22), transparent 45%),
@@ -2620,7 +2636,7 @@ onUnmounted(() => {
     linear-gradient(135deg, #f8fafc, #e2e8f0);
 }
 
-:global(.dark) .desktop-lyrics-preview-card--light {
+.dark .desktop-lyrics-preview-card--light {
   border-color: rgba(255, 255, 255, 0.08);
   background:
     radial-gradient(circle at top left, rgba(236, 65, 65, 0.08), transparent 45%),
@@ -2785,31 +2801,19 @@ onUnmounted(() => {
    网易云式极致紧凑排版仪表盘样式 (Compact Panel)
    ========================================================================== */
 
-/* 紧凑容器：使用极具现代感和高级感的磨砂边框与圆角 */
+/* 紧凑容器 */
 .desktop-typography-panel--compact {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: rgba(255, 255, 255, 0.45);
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  border-radius: 20px;
-  padding: 14px;
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.6), 0 8px 24px rgba(15, 23, 42, 0.03);
-  transition: all 250ms ease;
 }
 
-:global(.dark) .desktop-typography-panel--compact {
-  background: rgba(255, 255, 255, 0.02);
-  border-color: rgba(255, 255, 255, 0.05);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.02), 0 8px 24px rgba(0, 0, 0, 0.12);
-}
-
-/* 紧凑控制行：横向二等分 */
+/* 紧凑控制行：横向二等分，更舒展的列间距 */
 .desktop-compact-row {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 12px 24px;
   width: 100%;
 }
 
@@ -2819,84 +2823,46 @@ onUnmounted(() => {
   width: 100%;
 }
 
-/* 紧凑单元格：平分 50% 宽度 */
+/* 紧凑单元格：纯净无卡片设计 */
 .desktop-compact-cell {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  height: 40px;
-  padding: 0 4px 0 10px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(15, 23, 42, 0.04);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
-  transition: all 180ms ease;
-}
-
-:global(.dark) .desktop-compact-cell {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.03);
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border: none;
   box-shadow: none;
 }
 
-.desktop-compact-cell:hover {
-  background: rgba(255, 255, 255, 0.85);
-  border-color: rgba(236, 65, 65, 0.18);
-  box-shadow: 0 4px 12px rgba(236, 65, 65, 0.03);
-}
-
-:global(.dark) .desktop-compact-cell:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(236, 65, 65, 0.28);
-}
-
-/* 精致等宽网格单元格：专门用于滑块 Cell，强制使用 Grid 布局保证 Label 56px 固定且滑块起点完美对齐 */
+/* 纯净等宽网格单元格：专门用于滑块 Cell，强制使用 Grid 布局保证 Label 60px 固定且滑块起点完美对齐 */
 .desktop-compact-slider-cell {
   flex: 1;
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) 46px;
+  grid-template-columns: 60px minmax(0, 1fr) 46px;
   align-items: center;
   gap: 12px;
   min-width: 0;
-  height: 40px;
-  padding: 0 10px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(15, 23, 42, 0.04);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
-  transition: all 180ms ease;
-}
-
-:global(.dark) .desktop-compact-slider-cell {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.03);
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border: none;
   box-shadow: none;
-}
-
-.desktop-compact-slider-cell:hover {
-  background: rgba(255, 255, 255, 0.85);
-  border-color: rgba(236, 65, 65, 0.18);
-  box-shadow: 0 4px 12px rgba(236, 65, 65, 0.03);
-}
-
-:global(.dark) .desktop-compact-slider-cell:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(236, 65, 65, 0.28);
 }
 
 /* 紧凑标签：左侧标签，易读大气 */
 .desktop-compact-label {
   font-size: 13px;
-  font-weight: 700;
-  color: rgb(55 65 81);
+  font-weight: 600;
+  color: #374151;
   user-select: none;
   white-space: nowrap;
 }
 
-:global(.dark) .desktop-compact-label {
-  color: rgba(255, 255, 255, 0.68);
+.dark .desktop-compact-label {
+  color: #e5e7eb !important;
 }
 
 
@@ -2942,16 +2908,16 @@ onUnmounted(() => {
   box-shadow: 0 0 0 2px #ec4141, 0 3px 8px rgba(236, 65, 65, 0.24) !important;
 }
 
-:global(.dark) .desktop-compact-color-preset {
+.dark .desktop-compact-color-preset {
   border-color: rgba(0, 0, 0, 0.4);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
-:global(.dark) .desktop-compact-color-preset:hover {
+.dark .desktop-compact-color-preset:hover {
   box-shadow: 0 0 0 1.5px #ff8b8b, 0 2px 6px rgba(236, 65, 65, 0.2);
 }
 
-:global(.dark) .desktop-compact-color-preset--active {
+.dark .desktop-compact-color-preset--active {
   box-shadow: 0 0 0 2px #ff8b8b, 0 3px 8px rgba(236, 65, 65, 0.3) !important;
 }
 
@@ -2988,7 +2954,7 @@ onUnmounted(() => {
   background-position: 0 0, 0 2px, 2px -2px, -2px 0;
 }
 
-:global(.dark) .desktop-compact-color-custom-swatch {
+.dark .desktop-compact-color-custom-swatch {
   border-color: rgba(0, 0, 0, 0.4);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.2);
 }
@@ -3003,11 +2969,11 @@ onUnmounted(() => {
   box-shadow: 0 0 0 2px #ec4141, 0 3px 8px rgba(236, 65, 65, 0.24) !important;
 }
 
-:global(.dark) .desktop-compact-color-custom:hover {
+.dark .desktop-compact-color-custom:hover {
   box-shadow: 0 0 0 1.5px #ff8b8b, 0 2px 6px rgba(236, 65, 65, 0.2);
 }
 
-:global(.dark) .desktop-compact-color-custom--active {
+.dark .desktop-compact-color-custom--active {
   box-shadow: 0 0 0 2px #ff8b8b, 0 3px 8px rgba(236, 65, 65, 0.3) !important;
 }
 
@@ -3022,7 +2988,7 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-:global(.dark) .desktop-segmented-control {
+.dark .desktop-segmented-control {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.03);
 }
@@ -3045,8 +3011,8 @@ onUnmounted(() => {
   user-select: none;
 }
 
-:global(.dark) .desktop-segmented-btn {
-  color: rgba(255, 255, 255, 0.68);
+.dark .desktop-segmented-btn {
+  color: rgba(255, 255, 255, 0.85) !important;
 }
 
 .desktop-segmented-btn:hover {
@@ -3054,9 +3020,9 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.5);
 }
 
-:global(.dark) .desktop-segmented-btn:hover {
-  color: #ff8b8b;
-  background: rgba(255, 255, 255, 0.05);
+.dark .desktop-segmented-btn:hover {
+  color: #ff8b8b !important;
+  background: rgba(255, 255, 255, 0.1) !important;
 }
 
 /* 激活态的分段按钮 */
@@ -3066,10 +3032,10 @@ onUnmounted(() => {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 4px 10px rgba(15, 23, 42, 0.03);
 }
 
-:global(.dark) .desktop-segmented-btn--active {
-  background: rgba(255, 255, 255, 0.12) !important;
+.dark .desktop-segmented-btn--active {
+  background: rgba(255, 255, 255, 0.18) !important;
   color: #ff8b8b !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 /* ==========================================================================
@@ -3098,16 +3064,16 @@ onUnmounted(() => {
   transition: background 150ms ease;
 }
 
-:global(.dark) .desktop-compact-range-slider::-webkit-slider-runnable-track {
-  background: rgba(255, 255, 255, 0.16);
+.dark .desktop-compact-range-slider::-webkit-slider-runnable-track {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .desktop-compact-range-slider:hover::-webkit-slider-runnable-track {
   background: rgba(15, 23, 42, 0.16);
 }
 
-:global(.dark) .desktop-compact-range-slider:hover::-webkit-slider-runnable-track {
-  background: rgba(255, 255, 255, 0.24);
+.dark .desktop-compact-range-slider:hover::-webkit-slider-runnable-track {
+  background: rgba(255, 255, 255, 0.32);
 }
 
 /* Firefox Runnable Track 轨道 */
@@ -3120,16 +3086,16 @@ onUnmounted(() => {
   border: none;
 }
 
-:global(.dark) .desktop-compact-range-slider::-moz-range-track {
-  background: rgba(255, 255, 255, 0.16);
+.dark .desktop-compact-range-slider::-moz-range-track {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .desktop-compact-range-slider:hover::-moz-range-track {
   background: rgba(15, 23, 42, 0.16);
 }
 
-:global(.dark) .desktop-compact-range-slider:hover::-moz-range-track {
-  background: rgba(255, 255, 255, 0.24);
+.dark .desktop-compact-range-slider:hover::-moz-range-track {
+  background: rgba(255, 255, 255, 0.32);
 }
 
 /* Chrome / Safari / Edge / Tauri Thumb 圆形按钮 (居中) */

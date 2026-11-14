@@ -11,6 +11,8 @@ export const windowApi = {
     tauriInvoke('set_dark_mode_for_window', { dark }),
   getWindowMaterialCapabilities: () =>
     tauriInvoke('get_window_material_capabilities') as Promise<WindowMaterialCapabilities>,
+  applyTransparentWindow: () =>
+    tauriInvoke('apply_transparent_window'),
   getForegroundFullscreenState: () =>
     tauriInvoke('get_foreground_fullscreen_state') as Promise<ForegroundFullscreenState>,
   setImmersiveFullscreen: (fullscreen: boolean, restoreMaximized: boolean) =>

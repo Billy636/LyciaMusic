@@ -1,0 +1,47 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import PlayerColorBackground from '../player/PlayerColorBackground.vue';
+
+const props = withDefaults(defineProps<{
+  coverSrc: string;
+  coverPending?: boolean;
+  paused?: boolean;
+  dark?: boolean;
+}>(), { coverPending: false, paused: false, dark: false });
+
+const pageHidden = ref(typeof document !== 'undefined' && document.hidden);
+const renderingSuspended = computed(() => props.paused || pageHidden.value);
+const onVisibilityChanged = () => { pageHidden.value = document.hidden; };
+
+onMounted(() => {
+  document.addEventListener('visibilitychange', onVisibilityChanged);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChanged);
+});
+</script>
+
+<template>
+  <div class="flow-background" :class="{ 'flow-background--dark': dark }" aria-hidden="true">
+    <PlayerColorBackground
+      mode="soft"
+      palette="cover"
+      :light="!dark"
+      :cover-src="coverSrc"
+      :cover-pending="coverPending"
+      :suspended="renderingSuspended"
+    />
+  </div>
+</template>
+
+<style scoped>
+.flow-background {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: #fafafa;
+}
+.flow-background--dark { background: #121212; }
+</style>

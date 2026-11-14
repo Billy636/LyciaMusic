@@ -28,7 +28,7 @@ const TEXT = {
   peakPeriod: '\u6700\u6d3b\u8dc3\u65f6\u6bb5',
   topByCount: '\u6700\u5e38\u64ad\u653e(\u6309\u6b21\u6570)',
   topByDuration: '\u6700\u5e38\u64ad\u653e(\u6309\u65f6\u957f)',
-  hourlyDistribution: '24 \u5c0f\u65f6\u64ad\u653e\u5206\u5e03',
+  dailyDuration: '\u6700\u8fd1\u4e03\u5929\u6bcf\u65e5\u64ad\u653e\u65f6\u957f',
   topArtists: '\u5e38\u542c\u6b4c\u624b',
   topAlbums: '\u5e38\u542c\u4e13\u8f91',
   loadFailed: '\u52a0\u8f7d\u5931\u8d25\uff1a',
@@ -58,7 +58,7 @@ const CARD_TITLES = {
   peakPeriod: TEXT.peakPeriod,
   topByCount: TEXT.topByCount,
   topByDuration: TEXT.topByDuration,
-  hourlyDistribution: TEXT.hourlyDistribution,
+  dailyDuration: TEXT.dailyDuration,
   topArtists: TEXT.topArtists,
   topAlbums: TEXT.topAlbums,
 } as const;
@@ -82,7 +82,7 @@ const managerCards = [
   CARD_TITLES.peakPeriod,
   CARD_TITLES.topByCount,
   CARD_TITLES.topByDuration,
-  CARD_TITLES.hourlyDistribution,
+  CARD_TITLES.dailyDuration,
   CARD_TITLES.topArtists,
   CARD_TITLES.topAlbums,
 ];
@@ -250,6 +250,10 @@ function loadHiddenSettings() {
 
   try {
     hiddenCards.value = new Set(JSON.parse(saved));
+    if (hiddenCards.value.delete('24 \u5c0f\u65f6\u64ad\u653e\u5206\u5e03')) {
+      hiddenCards.value.add(CARD_TITLES.dailyDuration);
+      saveHiddenSettings();
+    }
   } catch (e) {
     console.error('Failed to parse hidden cards settings:', e);
   }

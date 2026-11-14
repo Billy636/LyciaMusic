@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, onScopeDispose, reactive, ref } from 'vue';
+import { computed, onMounted, onScopeDispose, reactive, ref, watch } from 'vue';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useToast } from '../../composables/toast';
 import { remoteLibraryApi } from '../../services/tauri/remoteLibraryApi';
-import type { RemoteCacheUsage, RemoteFileEntry, RemoteSource, RemoteSyncProgress } from '../../types';
+import { libraryApi } from '../../services/tauri/libraryApi';
+import type { LibraryScanSettings, RemoteCacheUsage, RemoteFileEntry, RemoteSource, RemoteSyncProgress } from '../../types';
 import { useLibraryRuntimeActions } from '../../features/library/useLibraryRuntimeActions';
 import ConfirmModal from '../overlays/ConfirmModal.vue';
+import LibraryScanOptions from './LibraryScanOptions.vue';
+import { copyLibraryScanSettings, defaultLibraryScanSettings, hasLibraryScanFormats, normalizeScanDirectory, scanSettingsEqual } from './libraryScanOptions';
 
 const { showToast } = useToast();
 const { loadLibrarySongsFromCache } = useLibraryRuntimeActions();
@@ -23,6 +26,14 @@ const browsingPath = ref('/');
 const browserEntries = ref<RemoteFileEntry[]>([]);
 const isBrowsing = ref(false);
 const currentView = ref<'list' | 'form'>('list');
+const scanSettingsDraft = ref<LibraryScanSettings>(defaultLibraryScanSettings('remote'));
+const originalScanSettings = ref<LibraryScanSettings>(defaultLibraryScanSettings('remote'));
+const originalRootPath = ref('/');
+const scanSettingsLoading = ref(false);
+const scanSettingsLoadFailed = ref(false);
+const scanSettingsError = ref('');
+const pendingFormSync = ref(false);
+let scanSettingsRequest = 0;
 let unlistenRemoteSync: UnlistenFn | null = null;
 
 const form = reactive({
@@ -41,14 +52,24 @@ const resetForm = () => {
   form.username = '';
   form.password = '';
   form.rootPath = '/';
+  scanSettingsRequest++;
+  scanSettingsDraft.value = defaultLibraryScanSettings('remote');
+  originalScanSettings.value = defaultLibraryScanSettings('remote');
+  originalRootPath.value = '/';
+  scanSettingsLoading.value = false;
+  scanSettingsLoadFailed.value = false;
+  scanSettingsError.value = '';
+  pendingFormSync.value = false;
 };
 
 const openAddForm = () => {
+  if (isSaving.value) return;
   resetForm();
   currentView.value = 'form';
 };
 
 const closeForm = () => {
+  if (isSaving.value) return;
   resetForm();
   currentView.value = 'list';
 };
@@ -61,6 +82,17 @@ const buildPayload = () => ({
   username: form.username.trim() || null,
   password: form.password || null,
   rootPath: form.rootPath.trim() || '/',
+});
+
+const scanSettingsChanged = computed(() => !scanSettingsEqual(scanSettingsDraft.value, originalScanSettings.value)
+  || normalizeScanDirectory(form.rootPath || '/', 'remote') !== normalizeScanDirectory(originalRootPath.value, 'remote'));
+const formNeedsSync = computed(() => !form.id || pendingFormSync.value || scanSettingsChanged.value);
+const formLocked = computed(() => isSaving.value || testing.value || scanSettingsLoading.value);
+
+watch(() => form.rootPath, (path, previous) => {
+  if (normalizeScanDirectory(path || '/', 'remote') !== normalizeScanDirectory(previous || '/', 'remote')) {
+    scanSettingsDraft.value = { ...scanSettingsDraft.value, excludedDirectories: [] };
+  }
 });
 
 const syncPercent = computed(() => {
@@ -118,7 +150,7 @@ const clearRemoteCache = async () => {
   }
 };
 
-const browseSource = async (source: RemoteSource, path = source.rootPath || '/') => {
+const browseSource = async (source: RemoteSource, path = '/') => {
   browsingSourceId.value = source.id;
   browsingPath.value = path;
   isBrowsing.value = true;
@@ -154,38 +186,66 @@ const testConnection = async () => {
 };
 
 const saveSource = async () => {
+  if (formLocked.value || scanSettingsLoadFailed.value || !hasLibraryScanFormats(scanSettingsDraft.value, 'remote')) return;
   if (!form.name.trim() || !form.baseUrl.trim()) {
     showToast('名称和服务器地址不能为空', 'error');
     return;
   }
 
   isSaving.value = true;
+  scanSettingsError.value = '';
   try {
+    const shouldSync = formNeedsSync.value;
+    let source: RemoteSource;
     if (form.id) {
-      await remoteLibraryApi.updateRemoteSource(buildPayload());
+      source = await remoteLibraryApi.updateRemoteSource(buildPayload());
     } else {
-      await remoteLibraryApi.addRemoteSource(buildPayload());
+      source = await remoteLibraryApi.addRemoteSource(buildPayload());
+      form.id = source.id;
     }
+    pendingFormSync.value = shouldSync;
+    await libraryApi.setLibraryScanSettings({ kind: 'remote', sourceId: source.id }, copyLibraryScanSettings(scanSettingsDraft.value));
+    originalScanSettings.value = copyLibraryScanSettings(scanSettingsDraft.value);
+    originalRootPath.value = form.rootPath || '/';
     resetForm();
-    await loadSources();
-    showToast('远程音乐库已保存', 'success');
     currentView.value = 'list';
+    await loadSources();
+    if (shouldSync && !await syncSource(source)) return;
+    if (!shouldSync) showToast('远程音乐库已保存', 'success');
   } catch (error) {
     console.error('Failed to save remote source:', error);
-    showToast('保存远程音乐库失败', 'error');
+    scanSettingsError.value = `保存远程音乐库失败：${String(error)}`;
   } finally {
     isSaving.value = false;
   }
 };
 
-const editSource = (source: RemoteSource) => {
+const editSource = async (source: RemoteSource) => {
+  if (isSaving.value || syncingSourceId.value === source.id) return;
+  resetForm();
   form.id = source.id;
   form.name = source.name;
   form.baseUrl = source.baseUrl;
   form.username = source.username ?? '';
   form.password = '';
   form.rootPath = source.rootPath || '/';
+  originalRootPath.value = form.rootPath;
   currentView.value = 'form';
+  const request = ++scanSettingsRequest;
+  scanSettingsLoading.value = true;
+  try {
+    const settings = await libraryApi.getLibraryScanSettings({ kind: 'remote', sourceId: source.id });
+    if (request !== scanSettingsRequest) return;
+    scanSettingsDraft.value = copyLibraryScanSettings(settings);
+    originalScanSettings.value = copyLibraryScanSettings(settings);
+  } catch (error) {
+    if (request === scanSettingsRequest) {
+      scanSettingsLoadFailed.value = true;
+      scanSettingsError.value = `加载扫描设置失败：${String(error)}`;
+    }
+  } finally {
+    if (request === scanSettingsRequest) scanSettingsLoading.value = false;
+  }
 };
 
 const syncSource = async (source: RemoteSource) => {
@@ -204,10 +264,12 @@ const syncSource = async (source: RemoteSource) => {
     await loadLibrarySongsFromCache();
     await loadSources();
     showToast(`已同步 ${result.audioFiles} 首远程歌曲`, 'success');
+    return true;
   } catch (error) {
     console.error('Failed to sync remote source:', error);
     await loadSources();
     showToast('同步远程音乐库失败', 'error');
+    return false;
   } finally {
     syncingSourceId.value = null;
   }
@@ -238,6 +300,7 @@ onMounted(async () => {
 });
 
 onScopeDispose(() => {
+  scanSettingsRequest++;
   unlistenRemoteSync?.();
   unlistenRemoteSync = null;
 });
@@ -253,7 +316,8 @@ onScopeDispose(() => {
         </h2>
         <button
           type="button"
-          class="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600/50 bg-transparent py-5 text-sm font-bold text-gray-500 dark:text-gray-400 hover:border-[#EC4141] hover:text-[#EC4141] hover:bg-[#EC4141]/5 transition-all duration-200"
+          class="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600/50 bg-transparent py-5 text-sm font-bold app-text-secondary hover:border-[#EC4141] hover:text-[#EC4141] hover:bg-[#EC4141]/5 transition-all duration-200"
+          :disabled="isSaving"
           @click="openAddForm"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -287,7 +351,7 @@ onScopeDispose(() => {
                 </div>
               </div>
               <div class="flex shrink-0 items-center gap-2">
-                <button type="button" class="remote-icon-action" title="编辑" @click="editSource(source)">
+                <button type="button" class="remote-icon-action" title="编辑" :disabled="isSaving || syncingSourceId === source.id" @click="editSource(source)">
                   编辑
                 </button>
                 <button
@@ -365,7 +429,7 @@ onScopeDispose(() => {
         </div>
 
         <div class="remote-panel">
-          <div class="remote-form-grid">
+          <fieldset class="remote-form-grid" :disabled="formLocked">
             <label class="remote-field">
               <span>名称</span>
               <input v-model="form.name" type="text" class="remote-input" placeholder="我的 WebDAV" />
@@ -386,17 +450,23 @@ onScopeDispose(() => {
               <span>根目录</span>
               <input v-model="form.rootPath" type="text" class="remote-input" placeholder="/" />
             </label>
+          </fieldset>
+
+          <div class="remote-scan-options">
+            <div v-if="scanSettingsLoading" class="remote-empty" role="status">加载扫描设置中…</div>
+            <LibraryScanOptions v-else-if="!scanSettingsLoadFailed" v-model="scanSettingsDraft" :source="{ kind: 'remote', sourceId: form.id }" root-path="/" :remote-source-input="buildPayload()" :disabled="isSaving || testing" />
+            <p v-if="scanSettingsError" class="remote-form-error" role="alert">{{ scanSettingsError }}</p>
           </div>
 
           <div class="mt-6 flex flex-wrap items-center justify-end gap-3">
-            <button type="button" class="remote-action remote-action--soft" @click="closeForm">
+            <button type="button" class="remote-action remote-action--soft" :disabled="isSaving" @click="closeForm">
               取消
             </button>
-            <button type="button" class="remote-action remote-action--soft" :disabled="testing" @click="testConnection">
+            <button type="button" class="remote-action remote-action--soft" :disabled="formLocked" @click="testConnection">
               {{ testing ? '测试中...' : '测试连接' }}
             </button>
-            <button type="button" class="remote-action" :disabled="isSaving" @click="saveSource">
-              {{ isSaving ? '保存中...' : '保存' }}
+            <button type="button" class="remote-action" :disabled="formLocked || scanSettingsLoadFailed || !hasLibraryScanFormats(scanSettingsDraft, 'remote')" @click="saveSource">
+              {{ isSaving ? '处理中…' : formNeedsSync ? '保存并同步' : '保存' }}
             </button>
           </div>
         </div>
@@ -437,7 +507,14 @@ onScopeDispose(() => {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 14px;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+  border: 0;
 }
+
+.remote-scan-options { margin-top: 20px; }
+.remote-form-error { margin: 0 0 14px; color: #ec4141; font-size: 12px; overflow-wrap: anywhere; }
 
 .remote-field {
   display: flex;
@@ -590,38 +667,38 @@ onScopeDispose(() => {
   font-weight: 700;
 }
 
-:global(.dark) .remote-source-list,
-:global(.dark) .remote-cache-row,
-:global(.dark) .remote-browser,
-:global(.dark) .remote-panel {
+.dark .remote-source-list,
+.dark .remote-cache-row,
+.dark .remote-browser,
+.dark .remote-panel {
   background: rgba(255, 255, 255, 0.04);
 }
 
-:global(.dark) .remote-field {
+.dark .remote-field {
   color: rgba(255, 255, 255, 0.72);
 }
 
-:global(.dark) .remote-input {
+.dark .remote-input {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.92);
 }
 
-:global(.dark) .remote-source-row {
+.dark .remote-source-row {
   background: rgba(255, 255, 255, 0.06);
 }
 
-:global(.dark) .remote-cache-row,
-:global(.dark) .remote-browser__bar,
-:global(.dark) .remote-browser__entry {
+.dark .remote-cache-row,
+.dark .remote-browser__bar,
+.dark .remote-browser__entry {
   color: rgba(255, 255, 255, 0.86);
 }
 
-:global(.dark) .remote-browser__entry {
+.dark .remote-browser__entry {
   background: rgba(255, 255, 255, 0.06);
 }
 
-:global(.dark) .remote-progress__top {
+.dark .remote-progress__top {
   color: rgba(255, 255, 255, 0.7);
 }
 </style>

@@ -31,7 +31,7 @@ export const listScrollCache = new MemoryCache<string, number>({
 });
 
 export const artistViewportCoverSnapshotCache = new MemoryCache<string, ViewportCoverUrlSnapshot>({
-  maxEntries: 1,
+  maxEntries: 2,
   ttlMs: 10 * 60 * 1000,
 });
 

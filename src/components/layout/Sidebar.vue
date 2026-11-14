@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 
 import ModernInputModal from '../common/ModernInputModal.vue';
@@ -7,7 +8,9 @@ import ModernModal from '../common/ModernModal.vue';
 import PlaylistContextMenu from '../overlays/PlaylistContextMenu.vue';
 import { useCoverCache } from '../../composables/useCoverCache';
 import { useHomeNavigation } from '../../composables/useHomeNavigation';
+import { useSidebarNavigationPath } from '../../composables/useSidebarNavigationPath';
 import { useLibraryCollections } from '../../features/collections/useLibraryCollections';
+import { usePlaylistLibraryStore } from '../../features/collections/playlistLibrary';
 import { usePlaybackController } from '../../features/playback/usePlaybackController';
 import { usePlayerLibraryView } from '../../features/library/usePlayerLibraryView';
 import { dragSession } from '../../composables/dragState';
@@ -17,9 +20,11 @@ import { useSidebarPlaylistContextMenu } from '../../composables/useSidebarPlayl
 import { useSidebarPlaylistCovers } from '../../composables/useSidebarPlaylistCovers';
 import { useSidebarPlaylistDragDrop } from '../../composables/useSidebarPlaylistDragDrop';
 import { useSidebarPlaylistSelection } from '../../composables/useSidebarPlaylistSelection';
+import { SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, useUiStore } from '../../shared/stores/ui';
 import SidebarBrand from './SidebarBrand.vue';
 import SidebarNavigation from './SidebarNavigation.vue';
 import SidebarPlaylists from './SidebarPlaylists.vue';
+import type { Playlist } from '../../types';
 
 const { artistList, albumList } = usePlayerLibraryView();
 const { playSong, addSongsToQueue, clearQueue } = usePlaybackController();
@@ -38,16 +43,20 @@ const {
   reorderPlaylists,
   getSongsFromPlaylist,
 } = useLibraryCollections();
+const { shortcutPlaylists, pinnedIds } = storeToRefs(usePlaylistLibraryStore());
 
 const route = useRoute();
+const sidebarNavigationPath = useSidebarNavigationPath(() => route.path);
 const router = useRouter();
 const {
   openHomeAll,
   openHomeFolder,
+  openHomeGenre,
   openHomePlaylist,
   openHomeStatistics,
   openArtists,
   openAlbums,
+  openPlaylists,
   openFavorites,
   openRecent,
 } = useHomeNavigation(router);
@@ -55,24 +64,32 @@ const { preloadCovers, loadCover } = useCoverCache();
 
 const isPlaylistOpen = ref(true);
 const showCreateModal = ref(false);
+const activePlaylistId = ref<string>();
+watch([() => route.path, () => route.query.view, () => route.query.filter], ([path, view, filter]) => {
+  // Settings must not clear shortcut highlighting while the music sidebar leaves.
+  if (path !== sidebarNavigationPath.value) return;
+  activePlaylistId.value = path === '/' && view === 'playlist' && typeof filter === 'string'
+    ? filter
+    : undefined;
+}, { immediate: true });
+const visibleShortcutPlaylists = computed(() =>
+  settings.value.sidebar.showPlaylists && isPlaylistOpen.value ? shortcutPlaylists.value : [],
+);
 
-const SIDEBAR_MIN_WIDTH = 192;
-const SIDEBAR_MAX_WIDTH = 360;
 const SIDEBAR_KEYBOARD_STEP = 16;
-const sidebarWidth = ref(SIDEBAR_MIN_WIDTH);
+const uiStore = useUiStore();
+const { sidebarWidth } = storeToRefs(uiStore);
+const { setSidebarWidth } = uiStore;
 const isResizing = ref(false);
 let resizeStartX = 0;
 let resizeStartWidth = SIDEBAR_MIN_WIDTH;
-
-const clampSidebarWidth = (width: number) =>
-  Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, width));
 
 const handleSidebarResize = (event: PointerEvent) => {
   if (!isResizing.value) {
     return;
   }
 
-  sidebarWidth.value = clampSidebarWidth(
+  setSidebarWidth(
     resizeStartWidth + event.clientX - resizeStartX,
   );
 };
@@ -107,7 +124,7 @@ const startSidebarResize = (event: PointerEvent) => {
 };
 
 const resizeSidebarBy = (delta: number) => {
-  sidebarWidth.value = clampSidebarWidth(sidebarWidth.value + delta);
+  setSidebarWidth(sidebarWidth.value + delta);
 };
 
 onBeforeUnmount(stopSidebarResize);
@@ -130,7 +147,7 @@ const {
   handlePlaylistClick,
   handleBackgroundClick,
 } = useSidebarPlaylistSelection({
-  playlists,
+  playlists: shortcutPlaylists,
   currentViewMode,
   filterCondition,
   openHomePlaylist,
@@ -139,6 +156,15 @@ const {
 const clearPlaylistSelection = () => {
   selectedPlaylistIds.value.clear();
 };
+
+watch(activePlaylistId, (id) => {
+  if (!id) {
+    clearPlaylistSelection();
+  } else if (!selectedPlaylistIds.value.has(id)) {
+    clearPlaylistSelection();
+    selectedPlaylistIds.value.add(id);
+  }
+}, { immediate: true });
 
 const {
   showContextMenu,
@@ -176,8 +202,16 @@ const {
   reorderPlaylists,
 });
 
+const handleShortcutPointerDown = (event: PointerEvent, _index: number, playlist: Playlist) => {
+  // 快捷列表按置顶重排并截取，拖拽必须使用完整歌单列表中的索引。
+  const sourceIndex = playlists.value.findIndex(item => item.id === playlist.id);
+  if (sourceIndex !== -1) {
+    handlePointerDown(event, sourceIndex, playlist);
+  }
+};
+
 const { playlistCoverCacheVersion, getPlaylistCover } = useSidebarPlaylistCovers({
-  playlists,
+  playlists: visibleShortcutPlaylists,
   loadCover,
 });
 
@@ -201,6 +235,14 @@ const handleOpenArtistsView = () => {
 
 const handleOpenAlbumsView = () => {
   void openAlbums();
+};
+
+const handleOpenGenresView = () => {
+  void openHomeGenre();
+};
+
+const handleOpenPlaylistsView = () => {
+  void openPlaylists();
 };
 
 const handleOpenFavoritesView = () => {
@@ -242,15 +284,17 @@ const handleOpenStatisticsView = () => {
 
     <SidebarBrand />
 
-    <nav class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4" @click="handleBackgroundClick">
+    <nav data-song-drop-scroll class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4" @click="handleBackgroundClick">
       <SidebarNavigation
         :sidebar="settings.sidebar"
         :currentViewMode="currentViewMode"
-        :currentPath="route.path"
+        :currentPath="sidebarNavigationPath"
         :isDragActive="dragSession.active"
         @openAll="handleOpenAllView"
         @openArtists="handleOpenArtistsView"
         @openAlbums="handleOpenAlbumsView"
+        @openGenres="handleOpenGenresView"
+        @openPlaylists="handleOpenPlaylistsView"
         @openFavorites="handleOpenFavoritesView"
         @openRecent="handleOpenRecentView"
         @openFolder="handleOpenFolderView"
@@ -262,7 +306,10 @@ const handleOpenStatisticsView = () => {
       <SidebarPlaylists
         v-if="settings.sidebar.showPlaylists"
         v-model:isOpen="isPlaylistOpen"
-        :playlists="playlists"
+        :playlists="shortcutPlaylists"
+        :totalCount="playlists.length"
+        :pinnedIds="pinnedIds"
+        :activeId="activePlaylistId"
         :selectedPlaylistIds="selectedPlaylistIds"
         :playlistCoverCacheVersion="playlistCoverCacheVersion"
         :getPlaylistCover="getPlaylistCover"
@@ -270,7 +317,8 @@ const handleOpenStatisticsView = () => {
         :dragOverId="dragOverId"
         :dragPosition="dragPosition"
         @createPlaylist="handleCreatePlaylist"
-        @pointerDown="handlePointerDown"
+        @openAll="handleOpenPlaylistsView"
+        @pointerDown="handleShortcutPointerDown"
         @itemPointerMove="handleItemPointerMove"
         @playlistClick="handlePlaylistClick"
         @playlistContextMenu="handlePlaylistContextMenu"

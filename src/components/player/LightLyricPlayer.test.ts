@@ -5,6 +5,7 @@ import {
   LIGHT_LYRIC_VISIBLE_AFTER,
   LIGHT_LYRIC_VISIBLE_BEFORE,
   getLightLyricVisibleWindow,
+  findLightLyricIndexByTime,
   resolveLightLyricLineProgress,
   resolveLightLyricActiveWord,
 } from './lightLyricPlayerModel';
@@ -33,6 +34,24 @@ const lines: LyricLine[] = [
 ];
 
 describe('light lyric player model', () => {
+  it('holds ended cues, selects timed blanks, and ignores background replacements', () => {
+    const lyrics = [
+      { ...lines[1], time: 1, endTime: 2 },
+      { ...lines[2], time: 2, endTime: 6, isBG: true },
+      { ...lines[3], time: 4, endTime: 6, text: '' },
+    ];
+    expect(findLightLyricIndexByTime(lyrics, 3)).toBe(0);
+    expect(findLightLyricIndexByTime(lyrics, 4)).toBe(2);
+    expect(findLightLyricIndexByTime(lyrics, -1)).toBe(-1);
+  });
+
+  it('finishes a line fill at its true end without stretching it to the next start', () => {
+    const current = { ...lines[1], time: 1, endTime: 2 };
+    const next = { ...lines[3], time: 4 };
+    expect(resolveLightLyricLineProgress(current, next, 1.5)).toBe(0.5);
+    expect(resolveLightLyricLineProgress(current, next, 3)).toBe(1);
+  });
+
   it('keeps a bounded lyric window around the active line', () => {
     expect(LIGHT_LYRIC_VISIBLE_BEFORE).toBe(3);
     expect(LIGHT_LYRIC_VISIBLE_AFTER).toBe(4);
@@ -60,6 +79,14 @@ describe('light lyric player model', () => {
 });
 
 describe('LightLyricPlayer component source', () => {
+  it('routes explicit clock/seek keys through forced clock sync without disabling ordinary throttling', () => {
+    expect(source).toContain('watch(() => props.timeSyncKey');
+    expect(source).toContain('watch(() => props.seekKey');
+    expect(source).toContain('playbackClock.sync(props.currentTime, props.playing, force, progressFrameId !== 0)');
+    expect(source).toContain('syncExternalPlaybackTime(true)');
+    expect(source).toContain('LIGHT_LYRIC_PROGRESS_FRAME_MS');
+  });
+
   it('renders translation, romaji, and word fill layers', () => {
     expect(source).toContain('showTranslation');
     expect(source).toContain('showRomaji');

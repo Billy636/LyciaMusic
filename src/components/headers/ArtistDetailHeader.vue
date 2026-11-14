@@ -9,6 +9,7 @@ import { useSettings } from '../../features/settings/useSettings';
 import { useToast } from '../../composables/toast';
 import { artistHeaderCache } from '../../caches/imageCaches';
 import { useCoverCache } from '../../composables/useCoverCache';
+import { useArtistImages } from '../../features/library/artistImages';
 import { type ArtistTabId, getOrderedArtistTabs, saveTabsOrder } from '../../utils/artistTabsOrder';
 
 const props = defineProps<{
@@ -159,6 +160,7 @@ const onPointerUp = () => {
 };
 
 const libraryStore = useLibraryStore();
+const artistImages = useArtistImages();
 const { settings } = useSettings();
 const { showToast } = useToast();
 
@@ -170,7 +172,7 @@ const displayedCover = computed(() => {
   if (currentArtist.value?.avatarPath) {
     return convertFileSrc(currentArtist.value.avatarPath);
   }
-  return coverUrl.value;
+  return artistImages.urlFor(props.artistName) || coverUrl.value;
 });
 
 const isSavingAvatar = ref(false);
@@ -343,10 +345,10 @@ onUnmounted(() => {
 
 const coverUrl = ref<string>('');
 const isLoading = ref<boolean>(false);
-const { loadCover, peekCoverUrl } = useCoverCache();
+const { loadCover, peekCoverUrl, coverCacheResetVersion, coverCacheResumeVersion } = useCoverCache();
 let coverRequestId = 0;
 
-watch([() => props.artistName, () => props.songPaths, () => props.songs], async ([artistName, songPaths, newSongs]) => {
+watch([() => props.artistName, () => props.songPaths, () => props.songs, coverCacheResetVersion, coverCacheResumeVersion], async ([artistName, songPaths, newSongs, cacheVersion]) => {
   const requestId = ++coverRequestId;
 
   const firstSongPath = songPaths?.[0] ?? newSongs?.[0]?.path;
@@ -357,35 +359,34 @@ watch([() => props.artistName, () => props.songPaths, () => props.songs], async 
     return;
   }
 
-  const cachedHeaderCover = artistHeaderCache.get(artistName);
+  const cacheKey = `${artistName}::${firstSongPath}::card:${cacheVersion}`;
+  const cachedHeaderCover = artistHeaderCache.get(cacheKey);
   if (cachedHeaderCover) {
     coverUrl.value = cachedHeaderCover;
     isLoading.value = false;
     return;
   }
 
-  const cachedThumbnail = peekCoverUrl(firstSongPath);
-  if (cachedThumbnail) {
-    coverUrl.value = cachedThumbnail;
-    artistHeaderCache.set(artistName, cachedThumbnail);
+  const cachedCardCover = peekCoverUrl(firstSongPath, 'card');
+  if (cachedCardCover) {
+    coverUrl.value = cachedCardCover;
+    artistHeaderCache.set(cacheKey, cachedCardCover);
     isLoading.value = false;
     return;
   }
 
-  isLoading.value = true;
+  coverUrl.value = peekCoverUrl(firstSongPath) || '';
+  isLoading.value = !coverUrl.value;
   try {
-    const resolvedCover = await loadCover(firstSongPath);
+    const resolvedCover = await loadCover(firstSongPath, 'card');
     if (requestId !== coverRequestId) return;
 
     if (resolvedCover) {
       coverUrl.value = resolvedCover;
-      artistHeaderCache.set(artistName, resolvedCover);
-    } else {
-      coverUrl.value = '';
+      artistHeaderCache.set(cacheKey, resolvedCover);
     }
   } catch {
     if (requestId !== coverRequestId) return;
-    coverUrl.value = '';
   } finally {
     if (requestId === coverRequestId) {
       isLoading.value = false;
@@ -445,10 +446,11 @@ const handlePlayAll = () => {
       <!-- 封面图 (圆形) -->
       <div 
         @click="handleAvatarClick"
-        class="w-36 h-36 rounded-full shadow-sm flex items-center justify-center shrink-0 overflow-hidden group relative select-none bg-gray-100 dark:bg-white/5 border-4 border-white/50 dark:border-white/5 cursor-pointer"
+        class="w-36 h-36 rounded-full shadow-sm flex items-center justify-center shrink-0 overflow-hidden group relative select-none bg-gray-100 dark:bg-white/5 border-4 border-white/50 dark:border-white/5"
+        :class="{ 'cursor-pointer': !!currentArtist }"
       >
-        <div v-if="isLoading" class="w-full h-full bg-gray-200 dark:bg-white/10 animate-pulse"></div>
-        <img v-else-if="displayedCover" :src="displayedCover" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="artistName"/>
+        <div v-if="isLoading && !displayedCover" class="w-full h-full bg-gray-200 dark:bg-white/10 animate-pulse"></div>
+        <img v-else-if="displayedCover" :src="displayedCover" class="w-full h-full object-cover select-none animate-in fade-in duration-300" draggable="false" :alt="artistName" @error="!currentArtist?.avatarPath && artistImages.markFailed(artistName)"/>
         <div v-else class="w-full h-full flex items-center justify-center text-4xl font-bold text-white bg-gradient-to-br animate-in fade-in duration-300" :class="getGradientForArtist(artistName)">
           {{ artistName.charAt(0).toUpperCase() }}
         </div>
@@ -465,7 +467,7 @@ const handlePlayAll = () => {
         
         <!-- Hover Overlay Mask -->
         <div 
-          v-else
+          v-else-if="currentArtist"
           class="absolute inset-0 bg-black/50 opacity-0 flex flex-col items-center justify-center text-white transition-opacity duration-300 gap-1.5"
           :class="isSavingAvatar ? 'hidden' : 'group-hover:opacity-100'"
         >

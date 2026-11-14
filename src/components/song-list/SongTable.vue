@@ -27,8 +27,8 @@ import { isProfilingEnabled } from '../../utils/profiling';
 
 const { settings } = useSettings();
 const libraryStore = useLibraryStore();
-const { libraryScanProgress, lastLibraryScanError } = storeToRefs(libraryStore);
-const { currentSong, isPlaying, formatDuration } = usePlaybackController();
+const { libraryScanProgress, lastLibraryScanError, libraryDataVersion } = storeToRefs(libraryStore);
+const { currentSong, isPlaying, formatDuration, togglePlay } = usePlaybackController();
 
 const props = defineProps<{
   songs: Song[];
@@ -45,10 +45,20 @@ const emit = defineEmits<{
   (e: 'drag-start', payload: { event: PointerEvent; song: Song; index: number }): void;
 }>();
 
+const handleSongDoubleClick = (song: Song) => {
+  if (props.isBatchMode) return;
+  if (settings.value.doubleClickCurrentSongToPause && currentSong.value?.path === song.path) {
+    return togglePlay();
+  }
+  emit('play', song);
+};
+
 const {
   currentViewMode,
   localSortMode,
   folderSortMode,
+  playlistSortMode,
+  albumDetailSortMode,
   activeRootPath,
   currentFolderFilter,
 } = usePlayerViewState();
@@ -69,9 +79,13 @@ const { isFavorite, toggleFavorite } = useLibraryCollections();
 const router = useRouter();
 const route = useRoute();
 const { openHomeArtist } = useHomeNavigation(router);
-const { coverCache, loadCover, touchCoverPaths, preloadPriorityCovers, primeCoverPath } = useCoverCache();
+const { coverCache, coverCacheResetVersion, loadCover, touchCoverPaths, preloadPriorityCovers, primeCoverPath } = useCoverCache();
 const { loadSongDetail } = useSongDetailCache();
-const { ensureWindow: ensureSongWindow, getSongAt: getPagedSongAt } = useLibrarySongWindowCache();
+const {
+  ensureWindow: ensureSongWindow,
+  getSongAt: getPagedSongAt,
+  clearSongWindowCache,
+} = useLibrarySongWindowCache();
 
 const ROW_HEIGHT = 72;
 const OVERSCAN = 20;
@@ -86,6 +100,8 @@ const isScrollbarActive = computed(() => isScrollbarHot.value || isScrollbarScro
 const displayedCoverUrls = reactive(new Map<string, string>());
 const songCommentCache = reactive(new Map<string, string>());
 const loadingSongCommentPaths = new Set<string>();
+let visibleMetadataGeneration = 0;
+let canPrimeUnpagedCovers = coverCacheResetVersion.value === 0;
 let visibleCoverPaths = new Set<string>();
 let scrollbarActiveTimer: ReturnType<typeof window.setTimeout> | null = null;
 let scrollVelocityResetTimer: ReturnType<typeof window.setTimeout> | null = null;
@@ -144,15 +160,20 @@ const loadVisibleSongComments = (songs: Song[]) => {
     }
 
     loadingSongCommentPaths.add(song.path);
+    const requestGeneration = visibleMetadataGeneration;
     void loadSongDetail(song.path)
       .then((detail) => {
+        if (requestGeneration !== visibleMetadataGeneration) return;
         songCommentCache.set(song.path, detail?.comment?.trim() ?? '');
       })
       .catch(() => {
+        if (requestGeneration !== visibleMetadataGeneration) return;
         songCommentCache.set(song.path, '');
       })
       .finally(() => {
-        loadingSongCommentPaths.delete(song.path);
+        if (requestGeneration === visibleMetadataGeneration) {
+          loadingSongCommentPaths.delete(song.path);
+        }
       });
   });
 };
@@ -182,7 +203,7 @@ const restoreViewportCoverSnapshot = (key = tableViewportKey.value) => {
   preloadPriorityCovers(snapshot);
 };
 
-const syncVisibleCoverUrls = (songs: Song[]) => {
+const syncVisibleCoverUrls = (songs: Array<Song & { virtualIndex: number }>) => {
   const nextVisiblePaths = new Set(songs.map(song => song.path).filter(Boolean));
   visibleCoverPaths = nextVisiblePaths;
 
@@ -207,14 +228,22 @@ const syncVisibleCoverUrls = (songs: Song[]) => {
       return;
     }
 
-    const persistedCoverUrl = primeCoverPath(path, song.cover_thumb_path);
+    // Only freshly loaded pages can supply persisted paths after invalidation;
+    // a fallback row can still carry the thumbnail removed by the refresh.
+    const persistedSong = pagedRenderingEnabled.value
+      ? getPagedSongAt(song.virtualIndex)
+      : canPrimeUnpagedCovers ? song : undefined;
+    const persistedCoverUrl = persistedSong?.path === path
+      ? primeCoverPath(path, persistedSong.cover_thumb_path)
+      : '';
     if (persistedCoverUrl) {
       displayedCoverUrls.set(path, persistedCoverUrl);
       return;
     }
 
+    const requestGeneration = visibleMetadataGeneration;
     void loadCover(path).then((coverUrl) => {
-      if (!coverUrl || !visibleCoverPaths.has(path)) {
+      if (requestGeneration !== visibleMetadataGeneration || !coverUrl || !visibleCoverPaths.has(path)) {
         return;
       }
 
@@ -434,36 +463,44 @@ const onScroll = (event: Event) => {
   showScrollbarDuringScroll();
 };
 
+const ensureVisibleSongWindow = () => {
+  if (!pagedRenderingEnabled.value || !props.songPaths) {
+    return;
+  }
+  const firstVisibleIndex = Math.floor(scrollTop.value / ROW_HEIGHT);
+  const visibleCount = Math.ceil(containerHeight.value / ROW_HEIGHT);
+  void ensureSongWindow({
+    paths: props.songPaths,
+    start: Math.max(0, firstVisibleIndex - OVERSCAN),
+    end: Math.min(props.songPaths.length, firstVisibleIndex + visibleCount + OVERSCAN),
+    viewportHeight: containerHeight.value,
+    rowHeight: ROW_HEIGHT,
+    scrollVelocityPxPerSecond: scrollVelocityPxPerSecond.value,
+    memoryBudgetBytes: resolveSongWindowMemoryBudget(),
+  });
+  if (
+    searchQuery.value.trim()
+    && hasMoreCurrentSearchResults.value
+    && firstVisibleIndex + visibleCount + OVERSCAN >= props.songPaths.length - 32
+  ) {
+    void loadMoreCurrentSearchResults();
+  }
+};
+
 watch(
   [
+    libraryDataVersion,
     pagedRenderingEnabled,
     () => props.songPaths,
     scrollTop,
     containerHeight,
     scrollVelocityPxPerSecond,
   ],
-  () => {
-    if (!pagedRenderingEnabled.value || !props.songPaths) {
-      return;
+  ([version], previous) => {
+    if (version !== previous[0]) {
+      clearSongWindowCache();
     }
-    const firstVisibleIndex = Math.floor(scrollTop.value / ROW_HEIGHT);
-    const visibleCount = Math.ceil(containerHeight.value / ROW_HEIGHT);
-    void ensureSongWindow({
-      paths: props.songPaths,
-      start: Math.max(0, firstVisibleIndex - OVERSCAN),
-      end: Math.min(props.songPaths.length, firstVisibleIndex + visibleCount + OVERSCAN),
-      viewportHeight: containerHeight.value,
-      rowHeight: ROW_HEIGHT,
-      scrollVelocityPxPerSecond: scrollVelocityPxPerSecond.value,
-      memoryBudgetBytes: resolveSongWindowMemoryBudget(),
-    });
-    if (
-      searchQuery.value.trim()
-      && hasMoreCurrentSearchResults.value
-      && firstVisibleIndex + visibleCount + OVERSCAN >= props.songPaths.length - 32
-    ) {
-      void loadMoreCurrentSearchResults();
-    }
+    ensureVisibleSongWindow();
   },
   { immediate: true },
 );
@@ -491,7 +528,7 @@ const {
   scrollToTop,
 } = useSongTableAlphabetIndex({
   songs: computed(() => props.songs),
-  songPaths: computed(() => props.songPaths ?? []),
+  songPaths: computed(() => props.songPaths),
   scrollTop,
   containerHeight,
   containerRef,
@@ -500,6 +537,9 @@ const {
   currentViewMode,
   localSortMode,
   folderSortMode,
+  playlistSortMode,
+  albumDetailSortMode,
+  libraryDataVersion,
   activeRootPath,
   currentFolderFilter,
   folderTree,
@@ -517,6 +557,20 @@ watch(
   },
   { immediate: true },
 );
+
+watch(coverCacheResetVersion, () => {
+  visibleMetadataGeneration += 1;
+  displayedCoverUrls.clear();
+  songCommentCache.clear();
+  loadingSongCommentPaths.clear();
+  // An explicit reset can remove the persisted files as well. Older row
+  // metadata must not seed those stale paths back into the shared URL cache.
+  canPrimeUnpagedCovers = false;
+  clearSongWindowCache();
+  ensureVisibleSongWindow();
+  syncVisibleCoverUrls(virtualItems.value);
+  loadVisibleSongComments(virtualItems.value);
+}, { flush: 'sync' });
 
 watch(
   () => settings.value.showSongComments,
@@ -608,6 +662,9 @@ const displayHeroProgressNote = computed(() => {
 
 const displayHeroProgressDetail = computed(() => {
   const progress = libraryScanProgress.value;
+  if (progress?.done && !progress.failed && progress.warnings?.length) {
+    return progress.warnings.join('；');
+  }
   if (progress && progress.total > 0) {
     const folderPath = progress.folder_path?.trim();
     return folderPath || libraryScanPhaseLabel.value;
@@ -680,53 +737,42 @@ onUnmounted(() => {
 
 defineExpose({ containerRef });
 
-const getRowStyle = (songIndex: number, songPath: string) => {
-  const baseStyle: Record<string, string | number> = { height: `${ROW_HEIGHT}px` };
-
-  if (!dragSession.active || dragSession.insertIndex === -1) {
-    return baseStyle;
-  }
-
-  const dragSourcePath = dragSession.songs[0]?.path;
-  const dragIndex = props.songs.findIndex(song => song.path === dragSourcePath);
-  const targetIndex = dragSession.insertIndex;
-
-  if (songPath === dragSourcePath) {
-    const diff = targetIndex - dragIndex;
-    return {
-      ...baseStyle,
-      transform: `translateY(${diff * 100}%)`,
-      transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)',
-      opacity: 0,
-      zIndex: 0,
-    };
-  }
-
-  let translateY = 0;
-
-  if (targetIndex > dragIndex) {
-    if (songIndex > dragIndex && songIndex <= targetIndex) {
-      translateY = -100;
+const songDragLayout = computed(() => {
+  if (!dragSession.active || dragSession.type !== 'song') return null;
+  const indices = dragSession.songSourceIndices;
+  const paths = dragSession.songPaths;
+  if (!indices?.length || !paths?.length) return null;
+  // Metadata windows need not contain the first row of the drag selection.
+  const sourcePath = props.songPaths?.[indices[0]] ?? props.songs[indices[0]]?.path;
+  if (sourcePath !== paths[0]) return null;
+  const countBefore = (index: number) => {
+    let left = 0, right = indices.length;
+    while (left < right) {
+      const middle = (left + right) >>> 1;
+      if (indices[middle] < index) left = middle + 1;
+      else right = middle;
     }
-  } else if (targetIndex < dragIndex) {
-    if (songIndex >= targetIndex && songIndex < dragIndex) {
-      translateY = 100;
-    }
-  }
-
-  if (translateY !== 0) {
-    return {
-      ...baseStyle,
-      transform: `translateY(${translateY}%)`,
-      transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)',
-      zIndex: 1,
-    };
-  }
-
-  return {
-    ...baseStyle,
-    transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)',
+    return left;
   };
+  return {
+    paths: new Set(paths),
+    ranks: new Map(indices.map((index, rank) => [index, rank])),
+    countBefore,
+    count: indices.length,
+    slot: dragSession.insertIndex - countBefore(dragSession.insertIndex),
+  };
+});
+
+const isDraggedSong = (path: string) => songDragLayout.value?.paths.has(path) ?? false;
+const getRowStyle = (songIndex: number, songPath: string) => {
+  const layout = songDragLayout.value;
+  const baseStyle: Record<string, string | number> = { height: `${ROW_HEIGHT}px` };
+  if (!layout || dragSession.insertIndex < 0) return baseStyle;
+  const rank = layout.ranks.get(songIndex);
+  const remainingIndex = songIndex - layout.countBefore(songIndex);
+  const nextIndex = layout.paths.has(songPath) && rank !== undefined ? layout.slot + rank
+    : remainingIndex + (remainingIndex >= layout.slot ? layout.count : 0);
+  return { ...baseStyle, transform: `translate3d(0, ${(nextIndex - songIndex) * ROW_HEIGHT}px, 0)`, zIndex: rank === undefined ? 1 : 0 };
 };
 </script>
 
@@ -743,24 +789,32 @@ const getRowStyle = (songIndex: number, songPath: string) => {
       :class="{ 'song-list-scrollbar-active': isScrollbarActive }"
       @scroll="onScroll"
     >
-      <div class="w-full relative">
+      <Transition name="search-refresh">
+        <div :key="`song-list-${searchQuery.trim()}`" class="w-full relative">
         <div :style="{ height: virtualPaddingTop }"></div>
 
         <div
           v-for="song in virtualItems"
-          :key="song.path"
+          :key="`${song.path}:${song.virtualIndex}`"
           :data-index="song.virtualIndex"
           @pointerdown="handlePointerDown($event, song, song.virtualIndex)"
-          @dblclick="!isBatchMode && emit('play', song)"
+          @dblclick="handleSongDoubleClick(song)"
           @contextmenu.prevent="emit('contextmenu', $event, song)"
           @dragstart.prevent
           class="group w-full min-w-0 border-b border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5 select-none cursor-default relative flex items-center px-2 gap-3 [touch-action:none]"
-          :class="{ 'bg-red-500/10 dark:bg-red-500/20': selectedPaths.has(song.path) }"
+          :class="{
+            'bg-red-500/10 dark:bg-red-500/20': selectedPaths.has(song.path),
+            'song-drag-source': isDraggedSong(song.path),
+            'song-reorder-slot': isDraggedSong(song.path) && dragSession.insertIndex >= 0,
+          }"
           :style="getRowStyle(song.virtualIndex, song.path)"
         >
-          <div class="w-10 shrink-0 flex items-center justify-center">
-            <div v-if="isBatchMode" class="flex items-center justify-center">
+          <div class="w-10 shrink-0 flex items-center justify-center" :data-selection-control="isBatchMode ? '' : undefined">
+            <div v-if="isBatchMode" class="flex items-center justify-center gap-1">
               <input type="checkbox" :checked="selectedPaths.has(song.path)" class="rounded text-[#EC4141] focus:ring-[#EC4141] pointer-events-none" />
+              <button type="button" data-song-drag-handle class="cursor-grab text-gray-400 hover:text-[#EC4141] active:cursor-grabbing p-0.5" aria-label="拖动选中的歌曲" title="拖动选中的歌曲" @click.stop>
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-4" fill="currentColor" viewBox="0 0 12 16" aria-hidden="true"><circle cx="3" cy="3" r="1"/><circle cx="9" cy="3" r="1"/><circle cx="3" cy="8" r="1"/><circle cx="9" cy="8" r="1"/><circle cx="3" cy="13" r="1"/><circle cx="9" cy="13" r="1"/></svg>
+              </button>
             </div>
             <div v-else-if="currentSong?.path === song.path && isPlaying" class="flex items-center justify-center gap-[3px] w-5 h-5">
               <span class="spectrum-bar w-[3px] rounded-full bg-[#EC4141]" style="animation-delay: 0s"></span>
@@ -849,6 +903,7 @@ const getRowStyle = (songIndex: number, songPath: string) => {
 
         <div :style="{ height: virtualPaddingBottom }"></div>
       </div>
+      </Transition>
 
       <div v-if="displayedSongCount === 0" class="py-20 flex flex-col justify-center items-center select-none text-gray-500 dark:text-white/60">
         <template v-if="showLibraryOnboarding || showFolderEmpty || hasSearchQuery">
@@ -1013,6 +1068,32 @@ const getRowStyle = (songIndex: number, songPath: string) => {
 </template>
 
 <style scoped>
+.song-list-scroll-container [data-index] {
+  transition: transform 180ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 150ms ease;
+}
+
+.song-drag-source { opacity: 0.3; }
+.song-reorder-slot {
+  outline: 1px dashed #EC4141;
+  outline-offset: -4px;
+  background: rgb(236 65 65 / 8%);
+  border-radius: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .song-list-scroll-container [data-index] { transition: none; }
+}
+
+/* 搜索结果刷新过渡：新列表淡入上移，旧列表立即移除保持实时 */
+.search-refresh-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.search-refresh-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
 .song-list-scroll-container {
   overflow-anchor: none;
   scrollbar-color: rgba(0, 0, 0, 0.16) transparent;
@@ -1047,23 +1128,23 @@ const getRowStyle = (songIndex: number, songPath: string) => {
   background-color: rgba(236, 65, 65, 0.68);
 }
 
-:global(.dark) .song-list-scroll-container {
+.dark .song-list-scroll-container {
   scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
 }
 
-:global(.dark) .song-list-scroll-container::-webkit-scrollbar-thumb {
+.dark .song-list-scroll-container::-webkit-scrollbar-thumb {
   background-color: rgba(255, 255, 255, 0.22);
 }
 
-:global(.dark) .song-list-scroll-container.song-list-scrollbar-active {
+.dark .song-list-scroll-container.song-list-scrollbar-active {
   scrollbar-color: rgba(236, 65, 65, 0.7) transparent;
 }
 
-:global(.dark) .song-list-scroll-container.song-list-scrollbar-active::-webkit-scrollbar-thumb {
+.dark .song-list-scroll-container.song-list-scrollbar-active::-webkit-scrollbar-thumb {
   background-color: rgba(236, 65, 65, 0.72);
 }
 
-:global(.dark) .song-list-scroll-container::-webkit-scrollbar-thumb:hover {
+.dark .song-list-scroll-container::-webkit-scrollbar-thumb:hover {
   background-color: rgba(236, 65, 65, 0.82);
 }
 
@@ -1290,12 +1371,12 @@ const getRowStyle = (songIndex: number, songPath: string) => {
 }
 
 
-:global(.dark) .library-hero-backdrop {
+.dark .library-hero-backdrop {
   background: rgba(2, 6, 23, 0.68);
   backdrop-filter: blur(4px);
 }
 
-:global(.dark) .library-hero-card {
+.dark .library-hero-card {
   border-color: rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(12, 18, 28, 0.8), rgba(10, 16, 25, 0.84));
   box-shadow:
@@ -1303,56 +1384,56 @@ const getRowStyle = (songIndex: number, songPath: string) => {
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
-:global(.dark) .library-hero-card-success {
+.dark .library-hero-card-success {
   background: linear-gradient(180deg, rgba(7, 46, 39, 0.84), rgba(8, 58, 47, 0.86));
 }
 
-:global(.dark) .library-hero-card-error {
+.dark .library-hero-card-error {
   background: linear-gradient(180deg, rgba(67, 13, 13, 0.84), rgba(82, 18, 18, 0.86));
 }
 
-:global(.dark) .library-hero-title,
-:global(.dark) .library-hero-progress-value {
+.dark .library-hero-title,
+.dark .library-hero-progress-value {
   color: rgba(255, 255, 255, 0.96);
 }
 
-:global(.dark) .library-hero-phase {
+.dark .library-hero-phase {
   color: rgba(191, 201, 216, 0.8);
 }
 
-:global(.dark) .library-hero-card-success .library-hero-phase {
+.dark .library-hero-card-success .library-hero-phase {
   color: rgba(110, 231, 183, 0.82);
 }
 
-:global(.dark) .library-hero-card-error .library-hero-phase {
+.dark .library-hero-card-error .library-hero-phase {
   color: rgba(252, 165, 165, 0.88);
 }
 
-:global(.dark) .library-hero-progress-meta,
-:global(.dark) .library-hero-progress-note {
+.dark .library-hero-progress-meta,
+.dark .library-hero-progress-note {
   color: rgba(226, 232, 240, 0.72);
 }
 
-:global(.dark) .index-nav-item {
+.dark .index-nav-item {
   color: rgba(255, 255, 255, 0.72);
 }
 
-:global(.dark) .index-nav-item:hover {
+.dark .index-nav-item:hover {
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.96);
 }
 
-:global(.dark) .index-nav-item-active {
+.dark .index-nav-item-active {
   background: rgba(236, 65, 65, 0.24);
   color: #fda4af;
 }
 
-:global(.dark) .index-nav-item-hover {
+.dark .index-nav-item-hover {
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.96);
 }
 
-:global(.dark) .index-nav-item-drag {
+.dark .index-nav-item-drag {
   background: rgba(255, 255, 255, 0.14);
   color: rgba(255, 255, 255, 0.98);
 }
@@ -1416,13 +1497,13 @@ const getRowStyle = (songIndex: number, songPath: string) => {
   }
 }
 
-:global(.dark) .hero-secondary-btn {
+.dark .hero-secondary-btn {
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.9);
 }
 
-:global(.dark) .hero-secondary-btn:hover {
+.dark .hero-secondary-btn:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 

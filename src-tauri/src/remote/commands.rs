@@ -130,13 +130,26 @@ pub(crate) async fn clear_remote_cache(app: AppHandle) -> Result<RemoteCacheUsag
 
 #[tauri::command]
 pub(crate) async fn list_remote_directory(
-    source_id: String,
+    source_id: Option<String>,
+    source: Option<RemoteSourceInput>,
     path: String,
     db_state: State<'_, DbState>,
 ) -> Result<Vec<RemoteFileEntry>, String> {
-    let source = {
-        let conn = db_state.conn.lock().map_err(|error| error.to_string())?;
-        get_source(&conn, &source_id)?
+    let source = match (source_id, source) {
+        (Some(source_id), None) => {
+            let conn = db_state.conn.lock().map_err(|error| error.to_string())?;
+            get_source(&conn, &source_id)?
+        }
+        (None, Some(mut source)) => {
+            if source.password.is_none() {
+                if let Some(source_id) = source.id.as_deref() {
+                    let conn = db_state.conn.lock().map_err(|error| error.to_string())?;
+                    source.password = get_source(&conn, source_id)?.password;
+                }
+            }
+            input_to_credentials(source)?
+        }
+        _ => return Err("请选择一个远程音乐源".to_string()),
     };
     webdav::list_directory(webdav::shared_client(), &source, &path).await
 }

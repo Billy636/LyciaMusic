@@ -8,6 +8,7 @@ import {
   useSettingsStore,
 } from './store';
 import { restorePersistedAppSettings } from './restore';
+import { getVisibleSidebarNavigation } from './sidebarNavigation';
 
 let didMigrateLegacySettings = false;
 const restoredSettingsStores = new WeakSet<ReturnType<typeof useSettingsStore>>();
@@ -24,6 +25,9 @@ const migrateLegacySettings = (mergeSettings: (partialSettings: Partial<typeof d
   try {
     const parsed = JSON.parse(legacyRaw) as DeprecatedAppSettingsPatch;
     const migratedSettings = mergeAppSettings(defaultAppSettings, parsed);
+    if (parsed.sidebar?.homepageId === undefined) {
+      migratedSettings.sidebar.homepageId = getVisibleSidebarNavigation(migratedSettings.sidebar)[0]?.id ?? 'localMusic';
+    }
     mergeSettings(migratedSettings);
 
     if (!playerStorage.getString(playerStorageKeys.settings)) {

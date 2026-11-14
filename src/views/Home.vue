@@ -13,16 +13,16 @@
       :localSongList="localSongList"
       :localSongPaths="localSongPaths"
       :artistActiveTab="artistActiveTab"
+      :genreActiveTab="genreActiveTab"
       :localFilterCondition="localFilterCondition"
       :selectedAlbumSong="selectedAlbumSong"
       :artistAlbumList="artistAlbumList"
-      :coverCache="coverCache"
-      :loadingSet="loadingSet"
       :selectedPaths="selectedPaths"
       :setSongTableRef="setSongTableRef"
       @update:isBatchMode="isBatchMode = $event"
       @update:isManagementMode="isManagementMode = $event"
       @update:artistActiveTab="artistActiveTab = $event"
+      @update:genreActiveTab="genreActiveTab = $event"
       @update:selectedPaths="selectedPaths = $event"
       @playAll="handlePlayAll"
       @batchPlay="handleBatchPlay"
@@ -49,7 +49,9 @@
 
     <MoveToFolderModal
       :visible="showMoveToFolderModal"
-      :selectedCount="selectedPaths.size"
+      :selectedCount="pendingMovePaths.length"
+      :source-paths="pendingMovePaths"
+      :busy="isMovingSongs"
       @close="showMoveToFolderModal = false"
       @confirm="confirmBatchMove"
     />
@@ -71,7 +73,7 @@
       :visible="showConfirm"
       :title="confirmTitle"
       :content="confirmMessage"
-      type="danger"
+      :type="confirmType"
       :confirm-text="confirmButtonText"
       @confirm="executeConfirmAction"
       @cancel="showConfirm = false"
@@ -136,11 +138,10 @@ const {
   localSongList,
   localSongPaths,
   artistActiveTab,
+  genreActiveTab,
   localFilterCondition,
   selectedAlbumSong,
   artistAlbumList,
-  coverCache,
-  loadingSet,
   setSongTableRef,
   handlePlayAll,
   handleBatchPlay,
@@ -162,12 +163,15 @@ const {
   handleTableDragStart,
   handleArtistAlbumClick,
   showMoveToFolderModal,
+  pendingMovePaths,
+  isMovingSongs,
   confirmBatchMove,
   showContextMenu,
   contextMenuX,
   contextMenuY,
   contextMenuTargetSong,
   showConfirm,
+  confirmType,
   confirmTitle,
   confirmMessage,
   confirmButtonText,

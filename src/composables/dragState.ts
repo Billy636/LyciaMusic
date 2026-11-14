@@ -2,13 +2,17 @@ import { reactive } from 'vue';
 
 import type { Song } from '../types';
 
-export type DragSessionType = 'song' | 'playlist' | 'folder' | 'artist' | 'album';
+export type DragSessionType = 'song' | 'playlist' | 'folder';
 
 export interface DragSessionState {
   active: boolean;
   showGhost: boolean;
   type: DragSessionType;
   songs: Song[];
+  // Full drag payload, including selected rows outside the loaded metadata window.
+  songPaths?: string[];
+  songSourceIndices?: number[];
+  completedPlaylistId?: string;
   data: any;
   mouseX: number;
   mouseY: number;

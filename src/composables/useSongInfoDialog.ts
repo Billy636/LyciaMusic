@@ -14,8 +14,14 @@ export function useSongInfoDialog() {
     isSongInfoVisible.value = false;
     // 延迟清理对象以保持关闭动画过渡的平滑性
     setTimeout(() => {
-      currentSongInfo.value = null;
+      if (!isSongInfoVisible.value) currentSongInfo.value = null;
     }, 300);
+  };
+
+  const updateSongInfo = (song: Song) => {
+    if (isSongInfoVisible.value && currentSongInfo.value?.path === song.path) {
+      currentSongInfo.value = { ...song };
+    }
   };
 
   return {
@@ -23,5 +29,6 @@ export function useSongInfoDialog() {
     currentSongInfo,
     openSongInfo,
     closeSongInfo,
+    updateSongInfo,
   };
 }

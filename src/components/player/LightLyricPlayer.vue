@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import type { LyricLine } from '../../composables/lyrics';
+import { createLightPlaybackClock } from './lightPlaybackClock';
 import {
   LIGHT_LYRIC_PROGRESS_FRAME_MS,
   findLightLyricIndexByTime,
@@ -14,9 +15,12 @@ import {
 const props = withDefaults(defineProps<{
   lyricLines?: LyricLine[];
   currentTime?: number;
+  timeSyncKey?: string | number;
+  seekKey?: string | number;
   playing?: boolean;
   showTranslation?: boolean;
   showRomaji?: boolean;
+  translationFontScale?: number;
   lineGap?: number;
   title?: string;
   artist?: string;
@@ -24,9 +28,12 @@ const props = withDefaults(defineProps<{
 }>(), {
   lyricLines: () => [],
   currentTime: 0,
+  timeSyncKey: '',
+  seekKey: '',
   playing: true,
   showTranslation: true,
   showRomaji: false,
+  translationFontScale: 1,
   lineGap: 1,
   title: '',
   artist: '',
@@ -36,8 +43,6 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'line-click', line: LyricLine): void;
 }>();
-
-const EXTERNAL_SYNC_DRIFT_SECONDS = 0.35;
 
 // 平滑滚动所需要的状态和 DOM 引用
 const playerRef = ref<HTMLDivElement | null>(null);
@@ -72,8 +77,7 @@ const stackStyle = computed(() => {
 const progressTime = ref(props.currentTime);
 let progressFrameId = 0;
 let lastFrameTime = 0;
-let anchorPlaybackTime = props.currentTime;
-let anchorFrameTime = 0;
+const playbackClock = createLightPlaybackClock(props.currentTime);
 
 const activeLineIndex = computed(() => findLightLyricIndexByTime(props.lyricLines, progressTime.value));
 const activeLine = computed(() => props.lyricLines[activeLineIndex.value]);
@@ -149,12 +153,6 @@ const firstRealLyricIndex = computed(() => {
   return lines.length;
 });
 
-function resetProgressAnchor() {
-  progressTime.value = props.currentTime;
-  anchorPlaybackTime = props.currentTime;
-  anchorFrameTime = typeof performance !== 'undefined' ? performance.now() : 0;
-}
-
 function stopProgressLoop() {
   if (progressFrameId !== 0) {
     cancelAnimationFrame(progressFrameId);
@@ -171,8 +169,7 @@ function startProgressLoop() {
   stopProgressLoop();
   if (!shouldRunProgressLoop()) return;
 
-  anchorPlaybackTime = progressTime.value;
-  anchorFrameTime = performance.now();
+  playbackClock.reanchor(progressTime.value);
   lastFrameTime = 0;
 
   const tick = (frameTime: number) => {
@@ -182,7 +179,7 @@ function startProgressLoop() {
     }
 
     if (lastFrameTime === 0 || frameTime - lastFrameTime >= LIGHT_LYRIC_PROGRESS_FRAME_MS) {
-      progressTime.value = anchorPlaybackTime + Math.max(0, frameTime - anchorFrameTime) / 1000;
+      progressTime.value = playbackClock.current(true, frameTime);
       lastFrameTime = frameTime;
     }
 
@@ -193,10 +190,8 @@ function startProgressLoop() {
 }
 
 function syncExternalPlaybackTime(force = false) {
-  const drift = Math.abs(props.currentTime - progressTime.value);
-  if (!force && props.playing && drift <= EXTERNAL_SYNC_DRIFT_SECONDS) return;
-
-  resetProgressAnchor();
+  if (!playbackClock.sync(props.currentTime, props.playing, force, progressFrameId !== 0)) return;
+  progressTime.value = playbackClock.current(false);
   startProgressLoop();
 }
 
@@ -300,6 +295,27 @@ watch(activeLineIndex, () => {
 watch(() => props.currentTime, () => {
   syncExternalPlaybackTime();
 });
+
+watch(() => props.timeSyncKey, () => {
+  syncExternalPlaybackTime(true);
+  if (!isUserInteracting.value) scrollToActiveLine(false);
+});
+
+watch(() => props.seekKey, () => {
+  isUserInteracting.value = false;
+  if (autoScrollTimeout) {
+    clearTimeout(autoScrollTimeout);
+    autoScrollTimeout = null;
+  }
+  syncExternalPlaybackTime(true);
+  scrollToActiveLine(false);
+});
+
+// Translation scaling changes row heights without resizing the player root.
+// Recenter after the inherited CSS variable updates, respecting manual scroll.
+watch(() => props.translationFontScale, () => {
+  if (!isUserInteracting.value) scrollToActiveLine(true);
+}, { flush: 'post' });
 
 watch(() => props.playing, () => {
   syncExternalPlaybackTime(true);
@@ -527,15 +543,13 @@ onBeforeUnmount(() => {
   background: transparent;
   opacity: 0.35;
   transform: scale(0.98); /* 非激活行平面轻微缩小 */
-  transform-origin: left center; /* 明确默认以靠左为放大原点，防止使用非法的 flex-start 导致浏览器回退到 center 发生向左溢出裁剪 */
+  transform-origin: var(--lyrics-line-transform-origin, 0%) center;
   transition: opacity 550ms ease, transform 760ms cubic-bezier(0.34, 1.56, 0.64, 1); /* 物理缩放与滚动曲线联动，带有极微幅超调弹性 */
 }
 
 /* 制作团队信息置顶排版样式 */
 .light-lyric-line--credit {
   font-size: 0.72em !important;
-  align-items: flex-start !important;
-  text-align: left !important;
   color: rgba(255, 255, 255, 0.45);
   opacity: 0.45;
   cursor: pointer;
@@ -553,14 +567,6 @@ onBeforeUnmount(() => {
   text-shadow: 0 0 20px rgba(255, 255, 255, 0.12); /* 亮白高级微阴影 */
 }
 
-/* 适配不同的对齐方式，由 CSS 容器层自适应设定 transform-origin */
-:deep(.lyrics-align-center) .light-lyric-line {
-  transform-origin: center center;
-}
-:deep(.lyrics-align-right) .light-lyric-line {
-  transform-origin: right center;
-}
-
 .light-lyric-main {
   max-width: min(100%, 920px);
   font-size: calc(max(max(5vh, 2.5vw), 12px) * var(--lyrics-font-scale, 1));
@@ -572,11 +578,15 @@ onBeforeUnmount(() => {
 .light-lyric-subline {
   max-width: min(100%, 900px);
   margin-top: 0.42em;
-  font-size: calc(max(max(2.4vh, 1.2vw), 11px) * var(--lyrics-font-scale, 1));
+  font-size: calc(max(max(2.4vh, 1.2vw), 11px) * var(--lyrics-font-scale, 1) * var(--light-subline-font-scale, 1));
   font-weight: 600;
   line-height: 1.25;
   color: rgba(255, 255, 255, 0.52);
   overflow-wrap: anywhere;
+}
+
+.light-lyric-translation {
+  --light-subline-font-scale: var(--lyrics-translation-font-scale, 1);
 }
 
 .light-lyric-line--active .light-lyric-subline {
@@ -637,7 +647,7 @@ onBeforeUnmount(() => {
   }
 
   .light-lyric-subline {
-    font-size: calc(max(3.6vw, 11px) * var(--lyrics-font-scale, 1));
+    font-size: calc(max(3.6vw, 11px) * var(--lyrics-font-scale, 1) * var(--light-subline-font-scale, 1));
   }
 }
 </style>

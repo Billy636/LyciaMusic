@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ref } from 'vue';
+import { nextTick, ref } from 'vue';
 
 import { useDesktopLyricsDisplay } from './useDesktopLyricsDisplay';
 import type { DesktopLyricsStatePayload } from '../features/desktopLyrics/shared';
@@ -66,6 +66,54 @@ function createPayload(enableWordEffect: boolean): DesktopLyricsStatePayload {
 }
 
 describe('useDesktopLyricsDisplay', () => {
+  it('clears the old row of a double-line page at an explicit interlude, then resumes', async () => {
+    const display = useDesktopLyricsDisplay(ref(false));
+    const payload = createPayload(false);
+    display.handlePayload({
+      ...payload,
+      playbackTime: 1.5,
+      settings: { ...payload.settings, showDoubleLine: true },
+      parsedLyrics: [
+        { time: 1, endTime: 2, text: 'One', translation: '', romaji: '' },
+        { time: 4, endTime: 8, text: '', translation: '', romaji: '' },
+        { time: 8, endTime: 9, text: 'Two', translation: '', romaji: '' },
+      ],
+    });
+    await nextTick();
+    display.playbackTime.value = 3;
+    expect(display.activeLyricLine.value?.text).toBe('One');
+    display.playbackTime.value = 4;
+    await nextTick();
+    expect(display.visibleLyricLines.value.map(({ line }) => line.text)).toEqual(['']);
+    display.playbackTime.value = 8;
+    await nextTick();
+    expect(display.visibleLyricLines.value.map(({ line }) => line.text)).toEqual(['Two']);
+    display.playbackTime.value = 100;
+    expect(display.activeLyricLine.value?.text).toBe('Two');
+  });
+
+  it('previews foreground and keeps a longer overlap active without showing background rows', async () => {
+    const display = useDesktopLyricsDisplay(ref(false));
+    const payload = createPayload(false);
+    display.handlePayload({
+      ...payload,
+      playbackTime: 0,
+      settings: { ...payload.settings, showDoubleLine: true },
+      parsedLyrics: [
+        { time: 0, endTime: 10, text: 'BG', isBG: true, translation: '', romaji: '' },
+        { time: 1, endTime: 8, text: 'Main', translation: '', romaji: '' },
+        { time: 1, endTime: 2, text: 'Short voice', translation: '', romaji: '' },
+        { time: 3, endTime: 10, text: 'BG2', isBG: true, translation: '', romaji: '' },
+      ],
+    });
+    await nextTick();
+    expect(display.activeLyricLine.value?.text).toBe('Main');
+    display.playbackTime.value = 4;
+    await nextTick();
+    expect(display.activeLyricLine.value?.text).toBe('Main');
+    expect(display.visibleLyricLines.value.map(({ line }) => line.text)).toEqual(['Main', 'Short voice']);
+  });
+
   it('aligns playback time when playback state changes', () => {
     const display = useDesktopLyricsDisplay(ref(false));
 

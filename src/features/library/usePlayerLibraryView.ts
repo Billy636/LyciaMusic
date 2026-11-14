@@ -2,12 +2,15 @@ import { computed } from 'vue';
 import { getActivePinia, storeToRefs, type Pinia } from 'pinia';
 
 import { useCollectionsStore } from '../collections/store';
+import { usePlaylistSort } from '../collections/usePlaylistSort';
 import { useLibraryStore } from './store';
 import { useNavigationStore } from '../../shared/stores/navigation';
 import { useLibraryCatalogSelectors } from './useLibraryCatalogSelectors';
 import { useLibraryCollectionSelectors } from './useLibraryCollectionSelectors';
 import { useLibraryCurrentViewSongs } from './useLibraryCurrentViewSongs';
 import { useLibraryFolderSelectors } from './useLibraryFolderSelectors';
+import { useFolderSongScope } from './useFolderSongScope';
+import { useFolderAlbumCollections } from './useFolderAlbumCollections';
 import { isProfilingEnabled } from '../../utils/profiling';
 export type { AlbumListItem, ArtistListItem } from './playerLibraryViewShared';
 
@@ -47,16 +50,17 @@ const createPlayerLibraryView = () => {
     sourceSongPaths,
     watchedFolders,
     artistSortMode,
+    albumArtistSortMode,
     albumSortMode,
-    artistCustomOrder,
-    albumCustomOrder,
     folderSortMode,
     folderCustomOrder,
     localSortMode,
     albumDetailSortMode,
     localCustomOrder,
   } = storeToRefs(libraryStore);
-  const { favoritePaths, playlists, recentSongs, playlistSortMode } = storeToRefs(collectionsStore);
+  const { favoritePaths, playlists, recentSongs } = storeToRefs(collectionsStore);
+  const { playlistSortMode } = usePlaylistSort();
+  const { catalog: albumBrowseCatalog } = storeToRefs(useFolderAlbumCollections());
 
   const isLocalMusic = computed(() =>
     currentViewMode.value === 'all' ||
@@ -68,15 +72,17 @@ const createPlayerLibraryView = () => {
 
   const catalogSelectors = useLibraryCatalogSelectors({
     artistCatalog,
-    albumCatalog,
+    albumCatalog: albumBrowseCatalog,
+    metadataAlbumCatalog: albumCatalog,
     searchQuery,
     artistSortMode,
     albumSortMode,
-    artistCustomOrder,
-    albumCustomOrder,
+    albumArtistSortMode,
   });
 
+  const { includeSubfolders } = useFolderSongScope();
   const folderSelectors = useLibraryFolderSelectors({
+    includeSubfolders,
     watchedFolders,
     sourceSongPaths,
     songLookup,
@@ -133,6 +139,7 @@ const createPlayerLibraryView = () => {
     activeRootPath,
     albumList: catalogSelectors.albumList,
     artistList: catalogSelectors.artistList,
+    albumArtistList: catalogSelectors.albumArtistList,
     canonicalSongs,
     currentFolderSongs: folderSelectors.currentFolderSongs,
     currentViewSongPaths,
@@ -145,6 +152,7 @@ const createPlayerLibraryView = () => {
     favoriteSongList: collectionSelectors.favoriteSongList,
     filteredAlbumList: catalogSelectors.filteredAlbumList,
     filteredArtistList: catalogSelectors.filteredArtistList,
+    filteredAlbumArtistList: catalogSelectors.filteredAlbumArtistList,
     folderList: folderSelectors.folderList,
     isFolderMode,
     isLocalMusic,

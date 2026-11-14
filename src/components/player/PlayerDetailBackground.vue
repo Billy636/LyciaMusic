@@ -1,13 +1,37 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { usePlayer } from '../../composables/player';
+import { useThemeSettings } from '../../composables/useThemeSettings';
+import { useRenderingPower } from '../../composables/renderingPower';
+import { normalizePlayerBackgroundSettings } from '../../features/settings/playerBackground';
+import MistBackground from '../layout/MistBackground.vue';
+import PlayerColorBackground from './PlayerColorBackground.vue';
 
 const props = defineProps<{
   bgOpacity?: number;
   active?: boolean;
 }>();
 
-const { dominantColors, currentCover } = usePlayer();
+const { dominantColors, currentSong, currentCover, currentCoverPath } = usePlayer();
+const { theme } = useThemeSettings();
+const { isMainWindowLowPower } = useRenderingPower();
+const playerBackground = computed(() => normalizePlayerBackgroundSettings(theme.value));
+const usesMistBackground = computed(() => (
+  theme.value.dynamicBgType === 'mist'
+  && theme.value.mode !== 'custom'
+  && theme.value.windowMaterial === 'none'
+));
+const matchingCoverSrc = computed(() => {
+  const song = currentSong.value;
+  return song && currentCoverPath.value
+    && (currentCoverPath.value === song.path || currentCoverPath.value === song.cue_source_path)
+    ? currentCover.value : '';
+});
+const coverPending = computed(() => Boolean(
+  currentSong.value && currentCoverPath.value
+  && currentCoverPath.value !== currentSong.value.path
+  && currentCoverPath.value !== currentSong.value.cue_source_path
+));
 
 const viewportArea = ref(
   typeof window !== 'undefined' ? window.innerWidth * window.innerHeight : 0
@@ -37,32 +61,50 @@ onUnmounted(() => {
     class="absolute inset-0 z-0 overflow-hidden pointer-events-none select-none"
     :style="{ opacity: props.bgOpacity ?? 1, transition: 'opacity 350ms cubic-bezier(0.4, 0, 0.2, 1)' }"
   >
-    <div class="absolute inset-0 bg-[#0b1222] z-0"></div>
+    <PlayerColorBackground
+      v-if="playerBackground.playerBackgroundMode !== 'original'"
+      :mode="playerBackground.playerBackgroundMode"
+      :palette="playerBackground.playerBackgroundPalette"
+      :motion="playerBackground.playerBackgroundMotion"
+      :cover-src="matchingCoverSrc"
+      :cover-pending="coverPending"
+      :suspended="!(props.active ?? true) || isMainWindowLowPower"
+    />
 
-    <div
-      class="absolute inset-0 transition-colors duration-[1200ms]"
-      :class="isLargeViewport ? 'opacity-[0.04]' : 'opacity-[0.06]'"
-      :style="{ backgroundColor: dominantColors[0] }"
-    ></div>
+    <MistBackground
+      v-else-if="usesMistBackground"
+      :cover-src="matchingCoverSrc"
+      :suspended="!(props.active ?? true) || isMainWindowLowPower"
+      immersive
+    />
 
-    <transition name="song-switch-bg" mode="out-in">
-      <div v-if="thumbCoverUrl" :key="thumbCoverUrl" class="absolute inset-0 overflow-hidden z-[1]">
-        <img
-          :src="thumbCoverUrl"
-          class="w-full h-full object-cover scale-110 select-none"
-          :style="{ filter: isLargeViewport ? 'blur(40px) brightness(0.78) saturate(1.42) contrast(1.16)' : 'blur(52px) brightness(0.72) saturate(1.36) contrast(1.14)' }"
-          draggable="false"
-          decoding="async"
-        />
-      </div>
-    </transition>
+    <template v-else>
+      <div class="absolute inset-0 bg-[#0b1222] z-0"></div>
 
-    <div class="absolute inset-0 z-[2]" :style="{ background: `radial-gradient(circle at 24% 16%, ${dominantColors[1] || dominantColors[0]}22 0%, transparent 52%)` }"></div>
-    <div class="absolute inset-0 z-[3]" :style="{ background: `radial-gradient(circle at 78% 84%, ${dominantColors[2] || dominantColors[0]}18 0%, transparent 62%)` }"></div>
-    <div class="absolute inset-0 z-[4]" :style="{ background: `radial-gradient(circle at 50% 48%, ${dominantColors[0]}10 0%, transparent 58%)` }"></div>
+      <div
+        class="absolute inset-0 transition-colors duration-[1200ms]"
+        :class="isLargeViewport ? 'opacity-[0.04]' : 'opacity-[0.06]'"
+        :style="{ backgroundColor: dominantColors[0] }"
+      ></div>
 
-    <div class="absolute inset-0 bg-gradient-to-r from-black/6 via-transparent to-black/6 z-[18]"></div>
-    <div class="absolute inset-0 bg-gradient-to-b from-black/3 via-transparent to-black/22 z-20"></div>
+      <transition name="song-switch-bg" mode="out-in">
+        <div v-if="thumbCoverUrl" :key="thumbCoverUrl" class="absolute inset-0 overflow-hidden z-[1]">
+          <img
+            :src="thumbCoverUrl"
+            class="w-full h-full object-cover scale-110 select-none"
+            :style="{ filter: isLargeViewport ? 'blur(40px) brightness(0.78) saturate(1.42) contrast(1.16)' : 'blur(52px) brightness(0.72) saturate(1.36) contrast(1.14)' }"
+            draggable="false"
+            decoding="async"
+          />
+        </div>
+      </transition>
+
+      <div class="absolute inset-0 z-[2]" :style="{ background: `radial-gradient(circle at 24% 16%, ${dominantColors[1] || dominantColors[0]}22 0%, transparent 52%)` }"></div>
+      <div class="absolute inset-0 z-[3]" :style="{ background: `radial-gradient(circle at 78% 84%, ${dominantColors[2] || dominantColors[0]}18 0%, transparent 62%)` }"></div>
+      <div class="absolute inset-0 z-[4]" :style="{ background: `radial-gradient(circle at 50% 48%, ${dominantColors[0]}10 0%, transparent 58%)` }"></div>
+      <div class="absolute inset-0 bg-gradient-to-r from-black/6 via-transparent to-black/6 z-[18]"></div>
+      <div class="absolute inset-0 bg-gradient-to-b from-black/3 via-transparent to-black/22 z-20"></div>
+    </template>
   </div>
 </template>
 

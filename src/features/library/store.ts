@@ -13,6 +13,7 @@ import type {
   AlbumCatalogItem,
   ArtistCatalogItem,
   FolderNode,
+  GenreCatalogItem,
   LibraryFolder,
   LibrarySong,
   LibraryScanProgress,
@@ -132,6 +133,7 @@ export const useLibraryStore = defineStore('library', () => {
   const sourceSongPaths = shallowRef<string[]>([]);
   const artistCatalog = shallowRef<ArtistCatalogItem[]>([]);
   const albumCatalog = shallowRef<AlbumCatalogItem[]>([]);
+  const genreCatalog = shallowRef<GenreCatalogItem[]>([]);
 
   const internString = (value: string | undefined) => {
     if (!value) {
@@ -348,6 +350,33 @@ export const useLibraryStore = defineStore('library', () => {
     }
   };
 
+  // A folder refresh only hydrates records already held by the library. Keep
+  // their identity, including when Windows canonicalizes the spelling of a path.
+  const refreshRetainedSongRecords = (
+    updates: Array<{ previousSong: LibrarySong; song: LibrarySong }>,
+  ) => {
+    let changed = false;
+    for (const { previousSong, song } of updates) {
+      const previousPath = previousSong.path;
+      const target = songPool.get(song.path) ?? previousSong;
+      if (previousPath !== song.path && songPool.get(previousPath) === previousSong) {
+        songPool.delete(previousPath);
+        changed = true;
+      }
+      if (syncSongRecord(target, normalizeSongRecord(song)) || !songPool.has(song.path)) {
+        changed = true;
+      }
+      songPool.set(song.path, target);
+    }
+    return changed;
+  };
+
+  const notifyLibraryMetadataRefreshed = () => {
+    rebuildInternPools();
+    songCatalogVersion.value += 1;
+    libraryDataVersion.value += 1;
+  };
+
   const getSongByPath = (path: string | null | undefined, fallback?: Song | null) => {
     if (!path) {
       return fallback ?? null;
@@ -403,10 +432,9 @@ export const useLibraryStore = defineStore('library', () => {
   const lastLibraryScanError = ref<string | null>(null);
   const watchedFolders = ref<string[]>([]);
   const artistSortMode = ref<ArtistSortMode>('name');
+  const albumArtistSortMode = ref<ArtistSortMode>('name');
   const albumSortMode = ref<AlbumSortMode>('name');
   const albumDetailSortMode = ref<AlbumDetailSortMode>('track_number');
-  const artistCustomOrder = ref<string[]>([]);
-  const albumCustomOrder = ref<string[]>([]);
   const folderSortMode = ref<FolderSortMode>('title');
   const folderCustomOrder = ref<Record<string, string[]>>({});
   const localSortMode = ref<LocalSortMode>('title');
@@ -426,6 +454,10 @@ export const useLibraryStore = defineStore('library', () => {
 
   const setAlbumCatalog = (items: AlbumCatalogItem[]) => {
     albumCatalog.value = items;
+  };
+
+  const setGenreCatalog = (items: GenreCatalogItem[]) => {
+    genreCatalog.value = items;
   };
 
   const setLibraryScanProgress = (progress: LibraryScanProgress | null) => {
@@ -602,10 +634,13 @@ export const useLibraryStore = defineStore('library', () => {
     getSongByPath,
     resolveSongsByPaths,
     setSongRecord,
+    refreshRetainedSongRecords,
+    notifyLibraryMetadataRefreshed,
     libraryFolders,
     libraryHierarchy,
     artistCatalog,
     albumCatalog,
+    genreCatalog,
     songList: sourceSongs,
     librarySongs: canonicalSongs,
     folderTree: libraryHierarchy,
@@ -614,10 +649,9 @@ export const useLibraryStore = defineStore('library', () => {
     lastLibraryScanError,
     watchedFolders,
     artistSortMode,
+    albumArtistSortMode,
     albumSortMode,
     albumDetailSortMode,
-    artistCustomOrder,
-    albumCustomOrder,
     folderSortMode,
     folderCustomOrder,
     localSortMode,
@@ -629,6 +663,7 @@ export const useLibraryStore = defineStore('library', () => {
     setLibraryHierarchy,
     setArtistCatalog,
     setAlbumCatalog,
+    setGenreCatalog,
     setSongList: setSourceSongs,
     setLibrarySongs: setCanonicalSongs,
     setFolderTree: setLibraryHierarchy,

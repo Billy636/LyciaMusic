@@ -1,5 +1,6 @@
 use crate::database::DbState;
 use crate::music::search::load_matching_song_paths;
+use crate::music::sorting::{artist_song_sort_key, ArtistSongSortMetadata};
 use crate::music::utils::{format_distribution_bucket, is_lossless_audio, normalize_path};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -998,6 +999,8 @@ struct SongViewRow {
     album_key: String,
     added_at: Option<i64>,
     file_modified_at: Option<i64>,
+    disc_number: Option<String>,
+    track_number: Option<String>,
 }
 
 fn deserialize_string_list(raw: Option<String>) -> Vec<String> {
@@ -1093,6 +1096,22 @@ fn song_has_artist(row: &SongViewRow, artist_name: &str) -> bool {
 }
 
 fn sort_song_view_rows(rows: &mut [SongViewRow], sort_mode: &SongPathSortMode) {
+    if matches!(sort_mode, SongPathSortMode::Artist) {
+        rows.sort_by_cached_key(|row| {
+            artist_song_sort_key(ArtistSongSortMetadata {
+                artist: &row.artist,
+                album: &row.album,
+                album_artist: &row.album_artist,
+                album_key: &row.album_key,
+                disc_number: row.disc_number.as_deref(),
+                track_number: row.track_number.as_deref(),
+                title: &row.title,
+                path: &row.path,
+            })
+        });
+        return;
+    }
+
     rows.sort_by(|left, right| match sort_mode {
         SongPathSortMode::Title => song_title_label(left)
             .to_lowercase()
@@ -1109,15 +1128,7 @@ fn sort_song_view_rows(rows: &mut [SongViewRow], sort_mode: &SongPathSortMode) {
                     .to_string_lossy()
                     .to_lowercase(),
             ),
-        SongPathSortMode::Artist => left
-            .artist
-            .to_lowercase()
-            .cmp(&right.artist.to_lowercase())
-            .then_with(|| {
-                song_title_label(left)
-                    .to_lowercase()
-                    .cmp(&song_title_label(right).to_lowercase())
-            }),
+        SongPathSortMode::Artist => unreachable!("artist sorting uses the shared cached sort key"),
         SongPathSortMode::AddedAt => right
             .added_at
             .unwrap_or_default()
@@ -1187,7 +1198,7 @@ fn load_song_view_row(
     normalized_path: &str,
 ) -> Result<Option<SongViewRow>, String> {
     conn.query_row(
-        "SELECT path, title, artist, artist_names, effective_artist_names, album, album_artist, album_key, added_at, file_modified_at
+        "SELECT path, title, artist, artist_names, effective_artist_names, album, album_artist, album_key, added_at, file_modified_at, disc_number, track_number
          FROM songs
          WHERE path = ?1",
         [normalized_path],
@@ -1203,11 +1214,132 @@ fn load_song_view_row(
                 album_key: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
                 added_at: row.get::<_, Option<i64>>(8)?,
                 file_modified_at: row.get::<_, Option<i64>>(9)?,
+                disc_number: row.get::<_, Option<String>>(10)?,
+                track_number: row.get::<_, Option<String>>(11)?,
             })
         },
     )
     .optional()
     .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod song_view_sort_tests {
+    use super::*;
+
+    fn song_row(
+        path: &str,
+        title: &str,
+        artist: &str,
+        album: &str,
+        disc_number: Option<&str>,
+        track_number: Option<&str>,
+    ) -> SongViewRow {
+        SongViewRow {
+            path: path.to_string(),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            artist_names: vec![artist.to_string()],
+            effective_artist_names: vec![artist.to_string()],
+            album: album.to_string(),
+            album_artist: artist.to_string(),
+            album_key: format!("{album}::{artist}"),
+            added_at: None,
+            file_modified_at: None,
+            disc_number: disc_number.map(str::to_string),
+            track_number: track_number.map(str::to_string),
+        }
+    }
+
+    fn paths(rows: &[SongViewRow]) -> Vec<&str> {
+        rows.iter().map(|row| row.path.as_str()).collect()
+    }
+
+    #[test]
+    fn artist_sort_uses_pinyin_then_album_disc_and_track_for_collection_views() {
+        let mut rows = vec![
+            song_row("zhou-q", "A", "周杰伦", "七里香", Some("1"), Some("1")),
+            song_row("zhou-b-10", "B", "周杰伦", "八度空间", Some("1"), Some("10/12")),
+            song_row("zhang", "C", "张学友", "吻别", Some("1"), Some("1")),
+            song_row("zhou-b-disc-2", "D", "周杰伦", "八度空间", Some("2"), Some("1")),
+            song_row("lin", "E", "林俊杰", "江南", Some("1"), Some("1")),
+            song_row("zhou-b-missing-track", "F", "周杰伦", "八度空间", Some("1"), None),
+            song_row("zhou-b-missing-disc", "G", "周杰伦", "八度空间", None, Some("1")),
+            song_row("zhou-b-2", "Z", "周杰伦", "八度空间", Some("1"), Some("2/12")),
+            song_row("chen", "H", "陈奕迅", "十年", Some("1"), Some("1")),
+        ];
+
+        sort_song_view_rows(&mut rows, &SongPathSortMode::Artist);
+
+        assert_eq!(
+            paths(&rows),
+            [
+                "chen",
+                "lin",
+                "zhang",
+                "zhou-b-2",
+                "zhou-b-10",
+                "zhou-b-missing-track",
+                "zhou-b-disc-2",
+                "zhou-b-missing-disc",
+                "zhou-q",
+            ],
+        );
+    }
+
+    #[test]
+    fn artist_sort_keeps_distinct_same_named_albums_grouped() {
+        let mut rows = vec![
+            song_row("b-1", "A", "周杰伦", "同名专辑", Some("1"), Some("1")),
+            song_row("a-2", "B", "周杰伦", "同名专辑", Some("1"), Some("2")),
+            song_row("a-1", "C", "周杰伦", "同名专辑", Some("1"), Some("1")),
+            song_row("b-2", "D", "周杰伦", "同名专辑", Some("1"), Some("2")),
+        ];
+        for row in &mut rows {
+            row.album_key = row.path.chars().next().unwrap().to_string();
+        }
+
+        sort_song_view_rows(&mut rows, &SongPathSortMode::Artist);
+
+        assert_eq!(paths(&rows), ["a-1", "a-2", "b-1", "b-2"]);
+    }
+
+    #[test]
+    fn artist_sort_uses_path_as_a_stable_tie_breaker() {
+        let mut rows = vec![
+            song_row("/music/z.flac", "同名歌曲", "周杰伦", "七里香", Some("1"), Some("1")),
+            song_row("/music/a.flac", "同名歌曲", "周杰伦", "七里香", Some("1"), Some("1")),
+        ];
+
+        sort_song_view_rows(&mut rows, &SongPathSortMode::Artist);
+        assert_eq!(paths(&rows), ["/music/a.flac", "/music/z.flac"]);
+
+        rows.reverse();
+        sort_song_view_rows(&mut rows, &SongPathSortMode::Artist);
+        assert_eq!(paths(&rows), ["/music/a.flac", "/music/z.flac"]);
+    }
+
+    #[test]
+    fn song_view_row_loads_disc_and_track_metadata_for_artist_sorting() {
+        let conn = rusqlite::Connection::open_in_memory().expect("open database");
+        conn.execute_batch(
+            "CREATE TABLE songs (
+                path TEXT PRIMARY KEY, title TEXT, artist TEXT, artist_names TEXT,
+                effective_artist_names TEXT, album TEXT, album_artist TEXT, album_key TEXT,
+                added_at INTEGER, file_modified_at INTEGER, disc_number TEXT, track_number TEXT
+             );
+             INSERT INTO songs (path, title, artist, album, disc_number, track_number)
+             VALUES ('/music/song.flac', '歌曲', '周杰伦', '七里香', '2/3', '10/12');",
+        )
+        .expect("create song metadata");
+
+        let row = load_song_view_row(&conn, "/music/song.flac")
+            .expect("load song")
+            .expect("song exists");
+
+        assert_eq!(row.disc_number.as_deref(), Some("2/3"));
+        assert_eq!(row.track_number.as_deref(), Some("10/12"));
+    }
 }
 
 fn lookup_song_id(conn: &rusqlite::Connection, normalized_path: &str) -> Option<i64> {
@@ -1459,6 +1591,31 @@ fn query_daily_stats(conn: &rusqlite::Connection) -> Result<Vec<PortableDailySta
     Ok(rows.filter_map(|row| row.ok()).collect())
 }
 
+fn query_recent_activity(conn: &rusqlite::Connection) -> Result<Vec<i64>, String> {
+    // 按本地自然日排列，从六天前到今天；没有播放记录的日期保留为零。
+    let mut recent_activity = vec![0; 7];
+    let mut stmt = conn
+        .prepare(
+            "SELECT CAST(julianday(date) - julianday(date('now', 'localtime')) AS INTEGER) AS day_offset,
+                    play_time_ms
+             FROM daily_stats
+             WHERE date BETWEEN date('now', 'localtime', '-6 day') AND date('now', 'localtime')",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1).unwrap_or(0)))
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows.flatten() {
+        if (-6..=0).contains(&row.0) {
+            recent_activity[(row.0 + 6) as usize] = row.1.max(0) / 1000;
+        }
+    }
+
+    Ok(recent_activity)
+}
+
 fn query_hourly_stats(conn: &rusqlite::Connection) -> Result<Vec<PortableHourlyStats>, String> {
     let mut buckets = vec![
         PortableHourlyStats {
@@ -1526,8 +1683,6 @@ fn query_recent_plays(conn: &rusqlite::Connection) -> Result<Vec<PortableRecentP
 }
 
 fn aggregate_behavior_stats(conn: &rusqlite::Connection) -> Result<BehaviorStats, String> {
-    ensure_statistics_aggregates(conn)?;
-
     let global = query_global_stats(conn)?;
     let song_entries = query_song_stats(conn)?;
     let index = build_library_match_index(conn)?;
@@ -1630,29 +1785,7 @@ fn aggregate_behavior_stats(conn: &rusqlite::Connection) -> Result<BehaviorStats
         }
     }
 
-    let mut recent_activity = vec![0; 7];
-
-    let mut stmt = conn
-        .prepare(
-            "SELECT CAST(julianday(date) - julianday(date('now', 'localtime')) AS INTEGER) AS day_offset,
-                    play_time_ms
-             FROM daily_stats
-             WHERE date >= date('now', 'localtime', '-6 day')",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0).unwrap_or(0),
-                row.get::<_, i64>(1).unwrap_or(0),
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-    for row in rows.flatten() {
-        if (-6..=0).contains(&row.0) {
-            recent_activity[(row.0 + 6) as usize] = row.1 / 1000;
-        }
-    }
+    let recent_activity = query_recent_activity(conn)?;
 
     Ok(BehaviorStats {
         total_plays: global.total_play_count,
@@ -2040,6 +2173,7 @@ pub fn get_favorite_album_catalog(
                     row.album_artist.clone()
                 },
                 first_song_path: row.path.clone(),
+                folder_path: None,
             });
 
         existing.count = existing.count.saturating_add(1);
@@ -2472,6 +2606,7 @@ pub fn get_behavior_stats(
     time_range: TimeRange,
 ) -> Result<BehaviorStats, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    ensure_statistics_aggregates(&conn)?;
 
     if matches!(time_range, TimeRange::All) {
         return aggregate_behavior_stats(&conn);
@@ -2640,42 +2775,8 @@ pub fn get_behavior_stats(
         }
     }
 
-    // 指标 E: 最近 7 天播放趋势 (Timeline)
-    // 即使 time_range 不是 7Days，我们也始终返回最近 7 天的趋势供 UI 显示
-    let mut recent_activity: Vec<i64> = vec![0; 7];
-    {
-        // 算出 7 天前的零点时间戳 (简化处理，按 24h 倒推)
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let day_seconds = 24 * 60 * 60;
-        let start_time = now - 7 * day_seconds;
-
-        // 查询最近 7 天的每一天的播放时长
-        // Output: day_offset (0-6), total_duration
-        let sql_activity = format!(
-            "SELECT CAST((ph.played_at - {}) / {} AS INTEGER) as day_offset, 
-                    COALESCE(SUM(ph.played_seconds), 0) as duration 
-             FROM play_history ph 
-             INNER JOIN songs s ON ph.song_id = s.id 
-             WHERE ph.played_at >= {} AND ph.event = 'play' AND ph.song_id IS NOT NULL 
-             GROUP BY day_offset",
-            start_time, day_seconds, start_time
-        );
-
-        let mut stmt = conn.prepare(&sql_activity).map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
-            .map_err(|e| e.to_string())?;
-
-        for row in rows.flatten() {
-            let offset = row.0;
-            if offset >= 0 && offset < 7 {
-                recent_activity[offset as usize] = row.1;
-            }
-        }
-    }
+    // 最近 7 天的每日播放时长固定包含今天，不随其他行为统计的时间筛选变化。
+    let recent_activity = query_recent_activity(&conn)?;
 
     Ok(BehaviorStats {
         total_plays,

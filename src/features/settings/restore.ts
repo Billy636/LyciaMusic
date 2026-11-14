@@ -6,7 +6,8 @@ import {
 } from '../../composables/lyrics/constants';
 import { playerStorage } from '../../services/storage/playerStorage';
 import type { AppSettings } from '../../types';
-import { mergeAppSettings } from './store';
+import { mergeAppSettings, mergeSidebarSettings } from './store';
+import { getVisibleSidebarNavigation } from './sidebarNavigation';
 
 const readLegacyLyricsSettings = <T extends object>(key: string): Partial<T> | null => {
   if (typeof localStorage === 'undefined') {
@@ -72,8 +73,16 @@ export function restorePersistedAppSettings(
 
     const savedTheme =
       (saved.theme && typeof saved.theme === 'object' ? saved.theme : {}) as SavedThemeShape;
-    const savedSidebar =
+    let savedSidebar =
       (saved.sidebar && typeof saved.sidebar === 'object' ? saved.sidebar : {}) as Partial<typeof currentSettings.sidebar>;
+    if (savedSidebar.homepageId === undefined) {
+      // Pin the old first-visible homepage once; later reordering keeps it fixed.
+      const legacySidebar = mergeSidebarSettings(currentSettings.sidebar, savedSidebar);
+      savedSidebar = {
+        ...savedSidebar,
+        homepageId: getVisibleSidebarNavigation(legacySidebar)[0]?.id ?? 'localMusic',
+      };
+    }
     const savedCustomBackground =
       savedTheme.customBackground && typeof savedTheme.customBackground === 'object'
         ? savedTheme.customBackground
@@ -86,7 +95,7 @@ export function restorePersistedAppSettings(
     }
 
     const savedWindowMaterial = typeof savedTheme.windowMaterial === 'string'
-      && ['none', 'mica', 'acrylic', 'blur'].includes(savedTheme.windowMaterial)
+      && ['none', 'mica', 'acrylic', 'blur', 'transparent'].includes(savedTheme.windowMaterial)
       ? savedTheme.windowMaterial as typeof currentSettings.theme.windowMaterial
       : currentSettings.theme.windowMaterial;
 

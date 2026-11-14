@@ -1,7 +1,47 @@
+import { readonly, shallowRef } from 'vue';
 import { tauriInvoke } from '../services/tauri/invoke';
 import type { PreparedCustomBackgroundImage } from '../services/tauri/contracts';
 
 export type CustomBackgroundMediaType = 'image' | 'video';
+export type CustomBackgroundPreparationConsumer = 'global-background' | 'custom-skin-preview';
+
+const backgroundCacheResetVersion = shallowRef(0);
+export const customBackgroundCacheResetVersion = readonly(backgroundCacheResetVersion);
+export const notifyCustomBackgroundCacheCleared = () => {
+  backgroundCacheResetVersion.value += 1;
+};
+
+const preparationRequestIds = new Map<CustomBackgroundPreparationConsumer, number>();
+
+// Keep ordering across component remounts and WebView reloads. Only two small
+// sequence values are retained; the backend owns and bounds the pending work.
+const nextPreparationRequestId = (consumer: CustomBackgroundPreparationConsumer) => {
+  const storageKey = `lycia.custom-background.request.${consumer}`;
+  let previous = preparationRequestIds.get(consumer) ?? 0;
+  try {
+    const stored = Number(sessionStorage.getItem(storageKey));
+    if (Number.isSafeInteger(stored) && stored > previous) previous = stored;
+  } catch {
+    // The in-memory counter still works when session storage is unavailable.
+  }
+  const requestId = Math.max(previous + 1, Date.now() * 1024);
+  preparationRequestIds.set(consumer, requestId);
+  try {
+    sessionStorage.setItem(storageKey, String(requestId));
+  } catch {
+    // Storage is optional, including in non-browser callers.
+  }
+  return requestId;
+};
+
+export const isCustomBackgroundRequestSuperseded = (error: unknown) =>
+  (error instanceof Error ? error.message : String(error)) === 'CUSTOM_BACKGROUND_REQUEST_SUPERSEDED';
+
+export const cancelCustomBackgroundImage = (consumerId: CustomBackgroundPreparationConsumer) =>
+  tauriInvoke('cancel_custom_background_image', {
+    consumerId,
+    requestId: nextPreparationRequestId(consumerId),
+  });
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'webm']);
 export const CUSTOM_BACKGROUND_VIDEO_MAX_PIXELS = 3840 * 2160;
@@ -43,7 +83,11 @@ export function getCustomBackgroundRenderTarget(): CustomBackgroundRenderTarget 
 
 export function prepareCustomBackgroundImage(
   path: string,
-  options: { target?: CustomBackgroundRenderTarget; blurCssPixels?: number } = {},
+  options: {
+    target?: CustomBackgroundRenderTarget;
+    blurCssPixels?: number;
+    consumerId?: CustomBackgroundPreparationConsumer;
+  } = {},
 ): Promise<PreparedCustomBackgroundImage> {
   const blurCssPixels = Math.max(0, options.blurCssPixels ?? 0);
   const target = optimizeCustomBackgroundRenderTarget(
@@ -55,6 +99,10 @@ export function prepareCustomBackgroundImage(
     targetWidth: target.width,
     targetHeight: target.height,
     blurRadius: blurCssPixels * target.devicePixelRatio,
+    ...(options.consumerId ? {
+      consumerId: options.consumerId,
+      requestId: nextPreparationRequestId(options.consumerId),
+    } : {}),
   });
 }
 
@@ -120,8 +168,19 @@ export function loadCustomBackgroundMediaMetadata(
       }
     };
     video.onerror = () => {
+      // load() clears MediaError, so capture it before releasing the source.
+      const errorCode = video.error?.code;
       cleanup();
-      reject(new Error('视频无法解码，请选择 H.264 MP4 或 VP8/VP9 WebM 文件'));
+      let message = '无法加载所选视频，请确认文件存在且可读取';
+      if (errorCode === 1) {
+        message = '视频加载已中断，请重新选择文件';
+      } else if (errorCode === 3) {
+        message = '视频解码失败，请选择 H.264 MP4 或 VP8/VP9 WebM 文件';
+      } else if (errorCode === 4) {
+        // Unsupported sources also include blocked or inaccessible URLs.
+        message = '视频文件无法读取或格式不受支持，请选择 H.264 MP4 或 VP8/VP9 WebM 文件';
+      }
+      reject(new Error(message));
     };
     video.src = src;
     video.load();

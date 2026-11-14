@@ -1,8 +1,9 @@
 import type { AppSettings, HistoryItem, Playlist, Song, EqualizerPreset } from '../../types';
 import { localStore } from './localStore';
+import { isPlaylistImportData } from '../../features/playlistImport/types';
 
-export type ArtistSortMode = 'count' | 'name' | 'custom';
-export type AlbumSortMode = 'count' | 'name' | 'artist' | 'custom';
+export type ArtistSortMode = 'count' | 'count_asc' | 'name' | 'name_desc';
+export type AlbumSortMode = 'count' | 'count_asc' | 'name' | 'name_desc' | 'artist' | 'artist_desc';
 export type FolderSortMode = 'title' | 'name' | 'artist' | 'track_number' | 'added_at' | 'added_at_asc' | 'custom';
 export type LocalSortMode = 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc' | 'custom';
 export type AlbumDetailSortMode = 'track_number' | 'track_number_desc' | 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
@@ -12,6 +13,7 @@ export const playerStorageKeys = {
   settings: 'player_settings',
   volume: 'player_volume',
   playMode: 'player_mode',
+  shuffleState: 'player_shuffle_state_v1',
   lastTime: 'player_last_time',
   outputDevice: 'player_output_device',
   outputDeviceMode: 'player_output_device_mode',
@@ -19,13 +21,17 @@ export const playerStorageKeys = {
   favorites: 'player_favorites',
   playlists: 'player_custom_playlists',
   artistSortMode: 'player_artist_sort_mode',
+  albumArtistSortMode: 'player_album_artist_sort_mode',
   albumSortMode: 'player_album_sort_mode',
   albumDetailSortMode: 'player_album_detail_sort_mode',
   folderSortMode: 'player_folder_sort_mode',
   localSortMode: 'player_local_sort_mode',
   playlistSortMode: 'player_playlist_sort_mode',
+  playlistSortOverrides: 'player_playlist_sort_overrides',
   artistCustomOrder: 'player_artist_custom_order',
+  albumArtistCustomOrder: 'player_album_artist_custom_order',
   albumCustomOrder: 'player_album_custom_order',
+  albumFolderCollections: 'player_album_folder_collections',
   folderCustomOrder: 'player_folder_custom_order',
   localCustomOrder: 'player_local_custom_order',
   legacyAppSettings: 'app_settings',
@@ -146,6 +152,13 @@ export const playerStorage = {
 
       const playlist = item as Playlist;
       return typeof playlist.id === 'string' && typeof playlist.name === 'string' && Array.isArray(playlist.songPaths);
+    }).map(playlist => {
+      if (playlist.importData && !isPlaylistImportData(playlist.importData)) {
+        const restored = { ...playlist };
+        delete restored.importData;
+        return restored;
+      }
+      return playlist;
     });
   },
 
@@ -195,8 +208,6 @@ export const playerStorage = {
     playlists: Playlist[];
     settings: AppSettings;
     playQueuePaths: string[];
-    artistCustomOrder: string[];
-    albumCustomOrder: string[];
     folderCustomOrder: Record<string, string[]>;
     localCustomOrder: string[];
   }) {
@@ -206,8 +217,6 @@ export const playerStorage = {
     localStore.setJson(playerStorageKeys.playlists, options.playlists);
     localStore.setJson(playerStorageKeys.settings, options.settings);
     localStore.setJson(options.queuePathKey, options.playQueuePaths);
-    localStore.setJson(playerStorageKeys.artistCustomOrder, options.artistCustomOrder);
-    localStore.setJson(playerStorageKeys.albumCustomOrder, options.albumCustomOrder);
     localStore.setJson(playerStorageKeys.folderCustomOrder, options.folderCustomOrder);
     localStore.setJson(playerStorageKeys.localCustomOrder, options.localCustomOrder);
     localStore.remove(options.legacyPlaylistKey);

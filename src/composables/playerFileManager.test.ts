@@ -17,6 +17,8 @@ const fileExistsMock = vi.fn();
 vi.mock('../services/tauri/fileApi', () => ({
   fileApi: {
     scanMusicFolder: (...args: unknown[]) => scanMusicFolderMock(...args),
+    scanMusicFolderPaths: (...args: unknown[]) => scanMusicFolderMock(...args)
+      .then((songs: Song[]) => songs.map(song => song.path)),
     deleteFolder: vi.fn(),
     moveFileToFolder: vi.fn(),
     batchMoveMusicFiles: (...args: unknown[]) => batchMoveMusicFilesMock(...args),
@@ -26,6 +28,17 @@ vi.mock('../services/tauri/fileApi', () => ({
     deleteMusicFile: (...args: unknown[]) => deleteMusicFileMock(...args),
     fileExists: (...args: unknown[]) => fileExistsMock(...args),
   },
+}));
+
+vi.mock('./useLibrarySongResolver', () => ({
+  useLibrarySongResolver: () => ({
+    clearResolvedSongCache: vi.fn(),
+    loadSongs: async (paths: string[]) => {
+      const results = scanMusicFolderMock.mock.results;
+      const songs: Song[] = await results[results.length - 1]?.value ?? [];
+      return songs.filter(song => paths.includes(song.path));
+    },
+  }),
 }));
 
 const makeSong = (overrides: Partial<Song> = {}): Song => ({
@@ -116,7 +129,7 @@ describe('playerFileManager.refreshFolder', () => {
       addedCount: 1,
       addedPaths: [addedSong.path],
     });
-    expect(libraryStore.getSongByPath(addedSong.path)).toEqual(addedSong);
+    expect(libraryStore.getSongByPath(addedSong.path)).toBeNull();
     expect(libraryStore.getSongByPath(removedSong.path)).toBeNull();
     expect(libraryStore.canonicalSongPaths).toEqual([
       outsideSong.path,
@@ -152,7 +165,7 @@ describe('playerFileManager.refreshFolder', () => {
 
     await fileManager.refreshFolder('c:/music/a');
 
-    expect(scanMusicFolderMock).toHaveBeenCalledWith('c:/music/a', 60);
+    expect(scanMusicFolderMock).toHaveBeenCalledWith('c:/music/a', 60, true);
   });
 
   it('accurately syncs songs when path casing or slashes differ on Windows', async () => {

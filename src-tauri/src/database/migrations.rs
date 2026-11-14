@@ -165,6 +165,10 @@ fn migrate_song_columns(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE songs ADD COLUMN comment TEXT", [])
             .ok();
     }
+    if !columns.iter().any(|column| column == "genre") {
+        conn.execute("ALTER TABLE songs ADD COLUMN genre TEXT", [])
+            .map_err(|error| error.to_string())?;
+    }
 
     Ok(())
 }

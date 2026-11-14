@@ -10,7 +10,8 @@ const songDetailCache = new MemoryCache<string, SongDetail>({
   ttlMs: SONG_DETAIL_CACHE_TTL_MS,
 });
 
-const inFlightRequests = new Map<string, Promise<SongDetail>>();
+const inFlightRequests = new Map<string, Promise<SongDetail | null>>();
+let cacheGeneration = 0;
 
 export function useSongDetailCache() {
   const loadSongDetail = async (path: string) => {
@@ -28,13 +29,19 @@ export function useSongDetailCache() {
       return inFlight;
     }
 
+    const requestGeneration = cacheGeneration;
     const request = tauriInvoke('get_song_detail', { path })
       .then((detail) => {
+        if (requestGeneration !== cacheGeneration || inFlightRequests.get(path) !== request) {
+          return null;
+        }
         songDetailCache.set(path, detail);
         return detail;
       })
       .finally(() => {
-        inFlightRequests.delete(path);
+        if (inFlightRequests.get(path) === request) {
+          inFlightRequests.delete(path);
+        }
       });
 
     inFlightRequests.set(path, request);
@@ -43,7 +50,13 @@ export function useSongDetailCache() {
 
   return {
     loadSongDetail,
-    clearSongDetailCache: () => {
+    clearSongDetailCache: (path?: string) => {
+      if (path !== undefined) {
+        songDetailCache.delete(path);
+        inFlightRequests.delete(path);
+        return;
+      }
+      cacheGeneration += 1;
       songDetailCache.clear();
       inFlightRequests.clear();
     },

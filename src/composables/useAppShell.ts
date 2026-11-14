@@ -1,4 +1,4 @@
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 
 import { usePlayer } from './player';
@@ -7,6 +7,7 @@ import { useExternalPathBridge } from './useExternalPathBridge';
 import { useAppShellTheme } from './useAppShellTheme';
 import { useMiniPlayerWindowBridge } from './useMiniPlayerWindowBridge';
 import { useTaskbarPlayerBridge } from './useTaskbarPlayerBridge';
+import { useSongNotificationBridge } from './useSongNotificationBridge';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
 import { useTrayMenuEvents } from './useTrayMenuEvents';
 import { useAddToPlaylistDialog } from '../features/collections/addToPlaylistDialog';
@@ -21,17 +22,38 @@ import { clearStartupThemePaint } from './startupTheme';
 import { useUiStore } from '../shared/stores/ui';
 import { useMainWindowRenderingPower } from './renderingPower';
 import { useLibrarySearchIndex } from './useLibrarySearchIndex';
+import { useSettingsStore } from '../features/settings/store';
+import { useCoverCache } from './useCoverCache';
+import { usePlaylistFileBridge } from '../features/playlistImport/files';
 
 export function useAppShell() {
   const {
     init,
     playQueuePaths,
     currentSong,
+    currentCover,
+    currentCoverFull,
+    currentCoverPath,
     isMiniMode,
     showPlayerDetail,
     handleExternalPaths,
     libraryScanProgress,
   } = usePlayer();
+  const settingsStore = useSettingsStore();
+  const { clearCoverCaches, loadCover, loadFullCover } = useCoverCache();
+  watch(() => settingsStore.settings.preferFolderCover, async (preferFolderCover, _previous, onCleanup) => {
+    let active = true;
+    onCleanup(() => { active = false; });
+    clearCoverCaches();
+    const song = currentSong.value;
+    if (!song) return;
+    const path = song.cue_source_path || song.path;
+    const [cover, fullCover] = await Promise.all([loadCover(path), loadFullCover(path)]);
+    if (!active || currentSong.value?.path !== song.path || settingsStore.settings.preferFolderCover !== preferFolderCover) return;
+    currentCover.value = cover || '';
+    currentCoverFull.value = fullCover || cover || '';
+    currentCoverPath.value = cover ? path : '';
+  });
   const {
     showAddToPlaylistModal,
     playlistAddTargetSongs,
@@ -59,12 +81,13 @@ export function useAppShell() {
   const route = useRoute();
   const router = useRouter();
   const { skipNextPageTransition, startupCompositionMaskVisible } = storeToRefs(useUiStore());
-  const { currentViewMode, filterCondition, currentFolderFilter, activeRootPath } = usePlayerViewState();
+  const { currentViewMode, filterCondition, currentArtistBrowseMode, currentFolderFilter, folderCollectionPath, activeRootPath } = usePlayerViewState();
   const { folderTree, searchQuery } = usePlayerLibraryView();
   let startupCompositionMaskStartedAt = 0;
 
   useMainWindowRenderingPower();
   useLibrarySearchIndex();
+  usePlaylistFileBridge();
 
   const prepareStartupTransparentComposition = async () => {
     await whenInitialThemeSynced();
@@ -106,7 +129,9 @@ export function useAppShell() {
     router,
     currentViewMode,
     filterCondition,
+    currentArtistBrowseMode,
     currentFolderFilter,
+    folderCollectionPath,
     activeRootPath,
     folderTree,
     searchQuery,
@@ -114,6 +139,7 @@ export function useAppShell() {
 
   useMiniPlayerWindowBridge();
   useTaskbarPlayerBridge();
+  useSongNotificationBridge();
   useKeyboardShortcuts();
   useTrayMenuEvents(router);
 

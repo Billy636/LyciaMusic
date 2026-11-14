@@ -104,6 +104,7 @@ export const cleanupRemovedLibrarySongPaths = async ({
 
   collectionsStore.favoritePaths = collectionsStore.favoritePaths.filter(path => !isRemovedPath(path));
   collectionsStore.playlists.forEach((playlist) => {
+    if (playlist.importData?.linked) return;
     playlist.songPaths = playlist.songPaths.filter(path => !isRemovedPath(path));
   });
   collectionsStore.recentSongs = collectionsStore.recentSongs.filter(item => !isRemovedPath(item.path));

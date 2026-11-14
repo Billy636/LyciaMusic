@@ -1,21 +1,28 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
+import { useRoute } from 'vue-router';
 
 import { useAppShell } from '../../composables/useAppShell';
 import { useDesktopLyricsWindowBridge } from '../../composables/useDesktopLyricsWindowBridge';
-import { useUiStore } from '../../shared/stores/ui';
+import { usePageTransition, usePageTransitionLayout } from '../../composables/usePageTransition';
+import { SIDEBAR_MAX_WIDTH, useUiStore } from '../../shared/stores/ui';
 import Sidebar from './Sidebar.vue';
 import TitleBar from './TitleBar.vue';
 import PlayerFooter from './PlayerFooter.vue';
 import GlobalBackground from './GlobalBackground.vue';
 
-const PlayQueueSidebar = defineAsyncComponent(() => import('../player/PlayQueueSidebar.vue'));
+const loadPlayQueue = () => import('../player/PlayQueueSidebar.vue');
+const PlayQueueSidebar = defineAsyncComponent(loadPlayQueue);
 const PlayerDetail = defineAsyncComponent(() => import('../player/PlayerDetail.vue'));
 const AddToPlaylistModal = defineAsyncComponent(() => import('../overlays/AddToPlaylistModal.vue'));
 const Toast = defineAsyncComponent(() => import('../common/Toast.vue'));
 const SongInfoModal = defineAsyncComponent(() => import('../overlays/SongInfoModal.vue'));
+const PlaylistImportDialog = defineAsyncComponent(() => import('../playlists/PlaylistImportDialog.vue'));
+import { usePlaylistImportDialog } from '../../features/playlistImport/dialog';
+const { visible: showPlaylistImport } = usePlaylistImportDialog();
 
+const route = useRoute();
 const {
   isMiniMode,
   isExternalDragActive,
@@ -37,10 +44,17 @@ const {
 import { useSongInfoDialog } from '../../composables/useSongInfoDialog';
 const { isSongInfoVisible, currentSongInfo, closeSongInfo } = useSongInfoDialog();
 const {
+  sidebarWidth,
   showPlaylist,
   skipNextPageTransition,
   startupCompositionMaskVisible,
 } = storeToRefs(useUiStore());
+const pageTransitionName = usePageTransition(() => route.path, skipNextPageTransition);
+const { isSettingsLayout, commitPageLayout } = usePageTransitionLayout(
+  () => route.path,
+  skipNextPageTransition,
+  isMiniMode,
+);
 
 const PLAY_QUEUE_LEAVE_MS = 300;
 const isPlayQueueMounted = ref(showPlaylist.value);
@@ -81,7 +95,29 @@ watch(showPlaylist, (visible) => {
   );
 });
 
+let cancelQueuePrefetch: (() => void) | null = null;
+
+onMounted(() => {
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (typeof idleWindow.requestIdleCallback === 'function') {
+    const idleId = idleWindow.requestIdleCallback(() => {
+      void loadPlayQueue();
+    }, { timeout: 4_000 });
+    cancelQueuePrefetch = () => idleWindow.cancelIdleCallback?.(idleId);
+    return;
+  }
+
+  const timer = globalThis.setTimeout(() => {
+    void loadPlayQueue();
+  }, 4_000);
+  cancelQueuePrefetch = () => globalThis.clearTimeout(timer);
+});
+
 onBeforeUnmount(() => {
+  cancelQueuePrefetch?.();
   if (playQueueLeaveTimer !== null) window.clearTimeout(playQueueLeaveTimer);
 });
 
@@ -91,6 +127,7 @@ useDesktopLyricsWindowBridge();
 <template>
   <div
     class="flex flex-col h-screen w-full text-gray-800 dark:text-gray-200 relative overflow-hidden font-sans"
+    :style="{ '--app-sidebar-width': `${sidebarWidth}px` }"
   >
     <transition name="window-restore">
       <GlobalBackground v-if="!isMiniMode" />
@@ -181,22 +218,30 @@ useDesktopLyricsWindowBridge();
       :class="mainContainerClass"
       :style="{ backdropFilter: mainBlurStyle }"
     >
-      <Sidebar />
+      <div
+        class="h-full shrink-0 overflow-hidden"
+        :class="isSettingsLayout ? 'invisible' : ''"
+        :style="{ maxWidth: isSettingsLayout ? '0px' : `${SIDEBAR_MAX_WIDTH}px` }"
+        :aria-hidden="isSettingsLayout"
+      >
+        <Sidebar />
+      </div>
 
       <div class="flex-1 flex flex-col min-w-0">
-        <TitleBar />
+        <TitleBar :settings-layout="isSettingsLayout" />
         <main class="flex-1 overflow-hidden relative min-h-0">
           <router-view v-slot="{ Component, route }">
-            <transition :name="skipNextPageTransition ? '' : 'page-fade'" mode="out-in">
-              <component
-                v-if="!route.meta.keepAlive"
-                :is="Component"
-                :key="route.path"
-              />
-              <KeepAlive v-else include="Home">
+            <transition
+              :name="pageTransitionName"
+              :duration="pageTransitionName.startsWith('settings-') ? { enter: 240, leave: 120 } : undefined"
+              mode="out-in"
+              @after-leave="commitPageLayout"
+              @before-enter="commitPageLayout"
+            >
+              <KeepAlive include="Home">
                 <component
                   :is="Component"
-                  :key="String(route.name ?? route.path)"
+                  :key="route.meta.keepAlive ? String(route.name ?? route.path) : route.path"
                 />
               </KeepAlive>
             </transition>
@@ -236,6 +281,7 @@ useDesktopLyricsWindowBridge();
     />
 
     <Toast />
+    <PlaylistImportDialog v-if="showPlaylistImport" />
   </div>
 </template>
 
@@ -253,6 +299,50 @@ useDesktopLyricsWindowBridge();
 .page-fade-leave-to {
   opacity: 0;
   transform: translateY(-10px);
+}
+
+/* Animate route content only: the brand, title bar and playback controls stay
+   anchored. Returning retraces the entry direction (120ms out + 240ms in). */
+.settings-forward-enter-active,
+.settings-back-enter-active {
+  will-change: opacity, transform;
+  transition: opacity 240ms cubic-bezier(0.16, 1, 0.3, 1), transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.settings-forward-leave-active,
+.settings-back-leave-active {
+  pointer-events: none;
+  will-change: opacity, transform;
+  transition: opacity 0.12s ease-in, transform 0.12s ease-in;
+}
+
+.settings-forward-enter-from,
+.settings-back-leave-to {
+  opacity: 0;
+  transform: translate3d(12px, 0, 0);
+}
+
+.settings-forward-leave-to,
+.settings-back-enter-from {
+  opacity: 0;
+  transform: translate3d(-12px, 0, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-forward-enter-active,
+  .settings-forward-leave-active,
+  .settings-back-enter-active,
+  .settings-back-leave-active {
+    transition: none;
+    will-change: auto;
+  }
+
+  .settings-forward-enter-from,
+  .settings-forward-leave-to,
+  .settings-back-enter-from,
+  .settings-back-leave-to {
+    transform: none;
+  }
 }
 
 .footer-slide-enter-active,
@@ -308,7 +398,7 @@ useDesktopLyricsWindowBridge();
     linear-gradient(135deg, #f7f7f8 0%, #eeeeef 100%);
 }
 
-:global(.dark) .startup-composition-mask {
+.dark .startup-composition-mask {
   background:
     radial-gradient(circle at 18% 14%, rgba(236, 65, 65, 0.10), transparent 30%),
     linear-gradient(135deg, #121212 0%, #171717 54%, #101010 100%);
@@ -337,7 +427,7 @@ useDesktopLyricsWindowBridge();
   padding: 24px 18px;
 }
 
-:global(.dark) .startup-composition-mask__sidebar {
+.dark .startup-composition-mask__sidebar {
   border-right-color: rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.035);
 }
@@ -365,10 +455,10 @@ useDesktopLyricsWindowBridge();
   background: rgba(15, 23, 42, 0.08);
 }
 
-:global(.dark) .startup-composition-mask__brand-line,
-:global(.dark) .startup-composition-mask__nav-line,
-:global(.dark) .startup-composition-mask__topbar,
-:global(.dark) .startup-composition-mask__panel {
+.dark .startup-composition-mask__brand-line,
+.dark .startup-composition-mask__nav-line,
+.dark .startup-composition-mask__topbar,
+.dark .startup-composition-mask__panel {
   background: rgba(255, 255, 255, 0.07);
 }
 

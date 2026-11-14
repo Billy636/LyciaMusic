@@ -69,10 +69,12 @@ export function applyPersistedStartupTheme() {
     return;
   }
 
-  const isDark = isPersistedDarkTheme(readPersistedSettings());
+  const savedSettings = readPersistedSettings();
+  const isDark = isPersistedDarkTheme(savedSettings);
   const startupColor = isDark ? DARK_STARTUP_COLOR : LIGHT_STARTUP_COLOR;
 
   document.documentElement.classList.toggle('dark', isDark);
+  document.documentElement.classList.toggle('custom-background-theme', savedSettings?.theme?.mode === 'custom');
   document.documentElement.style.backgroundColor = startupColor;
 
   if (document.body) {

@@ -64,6 +64,7 @@ describe('playerLibraryRuntime.scanLibrary', () => {
       {
         path: 'C:\\Music',
         song_count: 1,
+        locked: false,
       },
     ]);
 
@@ -199,6 +200,7 @@ describe('playerLibraryRuntime.scanLibrary', () => {
       {
         path: 'C:\\Music',
         song_count: 1,
+        locked: false,
       },
     ]);
     settingsStore.patchSettings({
@@ -246,7 +248,7 @@ describe('playerLibraryRuntime.scanLibrary', () => {
       const libraryStore = useLibraryStore();
       const settingsStore = useSettingsStore();
 
-      libraryStore.setLibraryFolders([{ path: 'C:\\Music', song_count: 1 }]);
+      libraryStore.setLibraryFolders([{ path: 'C:\\Music', song_count: 1, locked: false }]);
       settingsStore.patchSettings({ autoScanLibraryOnStartup: false });
 
       invokeMock.mockResolvedValue([]);
@@ -276,7 +278,7 @@ describe('playerLibraryRuntime.scanLibrary', () => {
       const libraryStore = useLibraryStore();
       const settingsStore = useSettingsStore();
 
-      libraryStore.setLibraryFolders([{ path: 'C:\\Music', song_count: 1 }]);
+      libraryStore.setLibraryFolders([{ path: 'C:\\Music', song_count: 1, locked: false }]);
       settingsStore.patchSettings({ autoScanLibraryOnStartup: true });
 
       invokeMock.mockResolvedValue([]);
