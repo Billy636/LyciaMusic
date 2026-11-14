@@ -1,4 +1,5 @@
 mod matcher;
+mod normalization;
 mod sources;
 mod types;
 mod watcher;
@@ -15,6 +16,9 @@ use tauri::State;
 pub use types::*;
 pub(crate) use watcher::__cmd__configure_playlist_files;
 pub use watcher::{configure_playlist_files, PlaylistFileWatcher};
+
+// Only indexed songs from enabled remote libraries can enter an imported playlist.
+const CATALOG_FILTER: &str = "(COALESCE(s.source_type, 'local') = 'local' OR (s.source_type = 'remote' AND rs.enabled = 1 AND s.path LIKE 'remote://%'))";
 
 pub fn ensure_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch("CREATE TABLE IF NOT EXISTS playlist_import_paths (playlist_id TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY(playlist_id, path)); CREATE INDEX IF NOT EXISTS playlist_import_paths_path ON playlist_import_paths(path);").map_err(|e| e.to_string())
@@ -48,7 +52,7 @@ pub(super) fn retain_paths(conn: &Connection, id: &str, paths: &[String]) -> Res
     let mut statement = conn
         .prepare("INSERT OR IGNORE INTO playlist_import_paths (playlist_id, path) VALUES (?1, ?2)")
         .map_err(|e| e.to_string())?;
-    for path in paths {
+    for path in paths.iter().filter(|path| !path.contains("://")) {
         statement
             .execute(params![id, normalize_path(path)])
             .map_err(|e| e.to_string())?;
@@ -62,8 +66,14 @@ pub(super) fn index_paths(
 ) -> Result<Vec<String>, String> {
     let normalized: Vec<String> = paths
         .iter()
-        .filter(|p| !p.contains("://"))
-        .map(|p| normalize_path(p))
+        .filter(|p| !p.contains("://") || p.starts_with("remote://"))
+        .map(|p| {
+            if p.starts_with("remote://") {
+                p.clone()
+            } else {
+                normalize_path(p)
+            }
+        })
         .collect();
     if normalized.is_empty() {
         return Ok(vec![]);
@@ -73,31 +83,38 @@ pub(super) fn index_paths(
         let conn = db.lock().map_err(|e| e.to_string())?;
         for chunk in normalized.chunks(256) {
             let placeholders = vec!["?"; chunk.len()].join(",");
-            let sql = format!("SELECT path, COALESCE(cue_source_path, path) FROM songs WHERE COALESCE(source_type, 'local') = 'local' AND path IN ({placeholders})");
+            let sql = format!("SELECT s.path, COALESCE(s.cue_source_path, s.path), COALESCE(s.source_type, 'local') = 'remote' FROM songs s LEFT JOIN remote_sources rs ON rs.id = s.remote_source_id WHERE {} AND s.path IN ({placeholders})", CATALOG_FILTER);
             let mut statement = conn.prepare(&sql).map_err(|e| e.to_string())?;
             for row in statement
                 .query_map(params_from_iter(chunk.iter()), |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, bool>(2)?,
+                    ))
                 })
                 .map_err(|e| e.to_string())?
             {
-                let (path, physical) = row.map_err(|e| e.to_string())?;
-                known.insert(path, physical);
+                let (path, physical, remote) = row.map_err(|e| e.to_string())?;
+                known.insert(path, (physical, remote));
             }
         }
     }
     let missing: Vec<String> = normalized
         .iter()
-        .filter(|p| !known.contains_key(*p))
+        .filter(|p| !p.starts_with("remote://") && !known.contains_key(*p))
         .cloned()
         .collect();
     let songs = parse_audio_files_internal(missing, ScanOptions::default());
     for song in &songs {
         known.insert(
             song.path.clone(),
-            song.cue_source_path
-                .clone()
-                .unwrap_or_else(|| song.path.clone()),
+            (
+                song.cue_source_path
+                    .clone()
+                    .unwrap_or_else(|| song.path.clone()),
+                false,
+            ),
         );
     }
     if !songs.is_empty() {
@@ -107,16 +124,17 @@ pub(super) fn index_paths(
     Ok(normalized
         .into_iter()
         .filter(|path| {
-            known
-                .get(path)
-                .is_some_and(|physical| std::path::Path::new(physical).is_file())
+            known.get(path).is_some_and(|(physical, remote)| {
+                *remote || std::path::Path::new(physical).is_file()
+            })
         })
         .collect())
 }
 
 #[tauri::command]
 pub async fn read_playlist_source(input: SourceInput) -> Result<SourceDocument, String> {
-    match input.kind.as_str() {
+    let text_format = input.text_format;
+    let mut document = match input.kind.as_str() {
         "url" => tokio::time::timeout(
             std::time::Duration::from_secs(90),
             sources::read_url(&input.value),
@@ -130,14 +148,24 @@ pub async fn read_playlist_source(input: SourceInput) -> Result<SourceDocument, 
         .map_err(|e| e.to_string())?,
         "text" => sources::parse_list(&input.value, "txt", "导入的歌单", "粘贴的歌曲清单"),
         _ => Err("不支持的歌单来源".into()),
+    }?;
+    for track in &mut document.tracks {
+        if track.text_line.is_some() {
+            track.text_format = text_format;
+        }
     }
+    Ok(document)
 }
 
 #[tauri::command]
 pub async fn match_playlist_tracks(
     tracks: Vec<SourceTrack>,
+    fields: Option<MatchFields>,
     db: State<'_, DbState>,
 ) -> Result<Vec<TrackMatch>, String> {
+    if fields.is_some_and(|fields| !fields.title) {
+        return Err("自定义匹配必须勾选歌名".into());
+    }
     if tracks.len() > sources::MAX_TRACKS {
         return Err("单次最多匹配 10000 首歌曲".into());
     }
@@ -150,7 +178,7 @@ pub async fn match_playlist_tracks(
             let conn = db.lock().map_err(|e| e.to_string())?;
             matcher::catalog(&conn)?
         };
-        matcher::match_tracks(&catalog, &tracks)
+        matcher::match_tracks(&catalog, &tracks, fields)
     })
     .await
     .map_err(|e| e.to_string())?

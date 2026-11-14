@@ -10,6 +10,8 @@ const props = defineProps<{
   triggerId?: string;
   describedBy?: string;
   menuZIndex?: number;
+  disabled?: boolean;
+  solid?: boolean;
 }>();
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 const id = useId();
@@ -27,7 +29,7 @@ function revealActive() {
     ?.scrollIntoView({ block: 'nearest' }));
 }
 function open() {
-  if (!trigger.value || !props.options.length) return;
+  if (props.disabled || !trigger.value || !props.options.length) return;
   const rect = trigger.value.getBoundingClientRect();
   const gap = 6, margin = 8;
   const below = Math.max(0, window.innerHeight - rect.bottom - gap - margin);
@@ -77,6 +79,7 @@ function scroll(event: Event) {
   close();
 }
 watch(() => props.modelValue, () => { activeIndex.value = Math.max(0, selectedIndex.value); });
+watch(() => props.disabled, disabled => { if (disabled) close(); });
 onMounted(() => {
   window.addEventListener('pointerdown', outside);
   window.addEventListener('scroll', scroll, true);
@@ -96,9 +99,9 @@ onBeforeUnmount(() => {
     <span :id="`${id}-label`" :class="{ 'sr-only': hideLabel }">{{ label }}</span>
     <button :id="triggerId" ref="trigger" type="button" role="combobox" aria-haspopup="listbox"
       :aria-labelledby="`${id}-label ${id}-value`" :aria-controls="`${id}-listbox`" :aria-expanded="opened"
-      :aria-describedby="describedBy"
+      :aria-describedby="describedBy" :disabled="disabled"
       :aria-activedescendant="opened ? `${id}-option-${activeIndex}` : undefined"
-      class="settings-select-surface settings-select-trigger" :class="{ 'is-open': opened }"
+      class="settings-select-surface settings-select-trigger" :class="{ 'is-open': opened, 'is-solid': solid }"
       @click="opened ? close() : open()" @keydown="keydown" @blur="close">
       <span :id="`${id}-value`" class="min-w-0 truncate">{{ selectedLabel }}</span>
       <ChevronDown class="h-4 w-4 shrink-0 opacity-70 transition-transform" :class="{ 'rotate-180': opened }" aria-hidden="true" />
@@ -106,6 +109,7 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <div v-if="opened" :id="`${id}-listbox`" ref="menu" role="listbox" :aria-labelledby="`${id}-label`"
         class="settings-select-surface settings-select-menu custom-scrollbar"
+        :class="{ 'is-solid': solid }"
         :style="[menuStyle, { zIndex: menuZIndex }]" @pointerdown.prevent>
         <div v-for="(option, index) in options" :id="`${id}-option-${index}`" :key="option.value"
           role="option" :aria-selected="modelValue === option.value" :data-option-index="index"
@@ -141,8 +145,16 @@ onBeforeUnmount(() => {
   --select-accent: #ff9393;
   color: #f3f4f6;
 }
+.settings-select-surface.is-solid {
+  --select-trigger-bg: #fff;
+  --select-menu-bg: var(--select-trigger-bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.dark .settings-select-surface.is-solid { --select-trigger-bg: #2f2f34; }
 .settings-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 38px; padding: 8px 12px; background: var(--select-trigger-bg); text-align: left; cursor: pointer; transition: border-color 160ms, box-shadow 160ms; }
 .settings-select-trigger:hover { border-color: rgb(236 65 65 / .3); }
+.settings-select-trigger:disabled { opacity: .45; cursor: default; }
 .settings-select-trigger:focus-visible, .settings-select-trigger.is-open { outline: none; border-color: rgb(236 65 65 / .55); box-shadow: 0 0 0 3px rgb(236 65 65 / .12); }
 .settings-select-menu { position: fixed; z-index: 9500; overflow-y: auto; padding: 5px; box-sizing: border-box; background: var(--select-menu-bg); box-shadow: 0 12px 32px rgb(0 0 0 / .18); font-size: 13px; }
 .settings-select-option { display: flex; align-items: center; gap: 12px; min-height: 38px; padding: 8px 12px; border-radius: 6px; cursor: pointer; user-select: none; }

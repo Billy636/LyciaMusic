@@ -29,7 +29,7 @@ import type {
   SaveArtistAvatarResponse,
 } from '../../types';
 import type { AudioOutputMode } from '../../types';
-import type { SourceInput, SourceDocument, SourceTrack, TrackMatch, FileBinding } from '../../features/playlistImport/types';
+import type { SourceInput, SourceDocument, SourceTrack, TrackMatch, FileBinding, MatchFields } from '../../features/playlistImport/types';
 import type { LocalSortMode } from '../storage/playerStorage';
 import type {
   DuplicateDeleteGroup,
@@ -268,7 +268,7 @@ export interface ImmersiveFullscreenState {
 
 export interface TauriCommandMap {
   read_playlist_source: { payload: { input: SourceInput }; response: SourceDocument };
-  match_playlist_tracks: { payload: { tracks: SourceTrack[] }; response: TrackMatch[] };
+  match_playlist_tracks: { payload: { tracks: SourceTrack[]; fields?: MatchFields | null }; response: TrackMatch[] };
   prepare_playlist_paths: { payload: { playlistId: string; paths: string[] }; response: string[] };
   configure_playlist_files: { payload: { bindings: FileBinding[]; retained: { id: string; paths: string[] }[] }; response: void };
   export_playlist_m3u8: { payload: { path: string; paths: string[]; relative: boolean }; response: void };

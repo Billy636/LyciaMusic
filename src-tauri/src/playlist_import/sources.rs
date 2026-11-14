@@ -150,20 +150,22 @@ pub fn parse_file(
         .to_string_lossy()
         .to_string();
     let source = normalize_path(&path.to_string_lossy());
+    let path_lines: Vec<_> = content
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.starts_with('#'))
+        .collect();
     let path_list = extension == "txt"
-        && content
-            .lines()
-            .map(str::trim)
-            .filter(|s| !s.is_empty() && !s.starts_with('#'))
-            .all(|line| {
-                let line = line.replace('\\', "/");
-                Path::new(&line)
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .is_some_and(|ext| {
-                        crate::music::utils::is_supported_library_extension(&ext.to_lowercase())
-                    })
-            });
+        && !path_lines.is_empty()
+        && path_lines.iter().all(|line| {
+            let line = line.replace('\\', "/");
+            Path::new(&line)
+                .extension()
+                .and_then(|s| s.to_str())
+                .is_some_and(|ext| {
+                    crate::music::utils::is_supported_library_extension(&ext.to_lowercase())
+                })
+        });
     let mut doc = if extension == "m3u" || extension == "m3u8" || path_list {
         parse_m3u(
             &content,
@@ -230,11 +232,15 @@ fn parse_m3u(
     }
     let remote = tracks
         .iter()
-        .filter(|t| t.path.as_deref().is_some_and(|p| p.contains("://")))
+        .filter(|t| {
+            t.path
+                .as_deref()
+                .is_some_and(|p| p.contains("://") && !p.starts_with("remote://"))
+        })
         .count();
     let warnings = if remote > 0 {
         vec![format!(
-            "有 {remote} 个网络地址；本次仅解析本地音乐，网络条目会保留为不可用。"
+            "有 {remote} 个外部网络地址；仅支持本地文件和已索引的远程曲库歌曲，这些网络条目会保留为不可用。"
         )]
     } else {
         vec![]
@@ -287,6 +293,70 @@ fn duration(value: &str) -> Option<f64> {
     result.filter(|d| d.is_finite() && *d > 0.0)
 }
 
+fn text_parts(line: &str, last: bool) -> Option<(&str, &str)> {
+    let positions = [" - ", " – ", " — "].into_iter().filter_map(|separator| {
+        let position = if last {
+            line.rfind(separator)
+        } else {
+            line.find(separator)
+        }?;
+        Some((position, separator.len()))
+    });
+    let (index, width) = if last {
+        positions.max_by_key(|p| p.0)
+    } else {
+        positions.min_by_key(|p| p.0)
+    }?;
+    Some((line[..index].trim(), line[index + width..].trim()))
+}
+
+pub(super) fn text_variants(track: &SourceTrack) -> Vec<SourceTrack> {
+    let Some(line) = track.text_line.as_deref() else {
+        return vec![track.clone()];
+    };
+    let mut variants: Vec<SourceTrack> = Vec::new();
+    let mut add = |title: &str, artist: &str| {
+        let artists = split_artists(artist);
+        if !title.is_empty()
+            && !variants
+                .iter()
+                .any(|v| v.title == title && v.artists == artists)
+        {
+            variants.push(SourceTrack {
+                title: title.into(),
+                artists,
+                ..track.clone()
+            });
+        }
+    };
+    match track.text_format {
+        TextFormat::Auto => {
+            // GoMusic does not escape separators inside titles/artist names. Try
+            // both ends, but bound the alternatives independently of line length.
+            for last in [true, false] {
+                if let Some((left, right)) = text_parts(line, last) {
+                    add(left, right);
+                    add(right, left);
+                }
+            }
+            add(line, "");
+        }
+        TextFormat::TitleArtist => {
+            let (title, artist) = text_parts(line, true).unwrap_or((line, ""));
+            add(title, artist);
+        }
+        TextFormat::ArtistTitle => {
+            let (artist, title) = text_parts(line, false).unwrap_or(("", line));
+            add(title, artist);
+        }
+        TextFormat::Title => add(line, ""),
+    }
+    if variants.is_empty() {
+        variants.push(track.clone());
+    }
+    variants
+}
+
 pub fn parse_list(
     content: &str,
     format: &str,
@@ -296,9 +366,16 @@ pub fn parse_list(
     if content.len() > MAX_BYTES {
         return Err("歌曲清单不能超过 16 MB".into());
     }
+    let normalized_content = content.replace("\r\n", "\n").replace('\r', "\n");
+    let content = normalized_content.trim_start_matches('\u{feff}');
     let mut tracks = Vec::new();
     let mut list_name = name.to_string();
-    if format == "json" || content.trim_start().starts_with(['[', '{']) {
+    let mut start = content.trim_start().chars();
+    let looks_like_json = matches!(
+        (start.next(), start.find(|c| !c.is_whitespace())),
+        (Some('['), Some('{' | '[' | '"' | ']')) | (Some('{'), Some('"' | '}'))
+    );
+    if format == "json" || looks_like_json {
         let value: Value =
             serde_json::from_str(content).map_err(|e| format!("JSON 歌单格式错误：{e}"))?;
         let rows = value
@@ -323,6 +400,7 @@ pub fn parse_list(
             tracks.push(SourceTrack {
                 id: row.get("id").map(text).filter(|s| !s.is_empty()),
                 title,
+                aliases: artists(&row["aliases"]),
                 artists: artists(
                     row.get("artists")
                         .or_else(|| row.get("artist"))
@@ -335,6 +413,7 @@ pub fn parse_list(
                 },
                 duration: duration(&text(&row["duration"])),
                 path: None,
+                ..Default::default()
             });
         }
     } else if format == "csv" {
@@ -377,7 +456,7 @@ pub fn parse_list(
             let parts: Vec<&str> = line.split('\t').collect();
             let (title, artist, album) = if parts.len() > 1 {
                 (parts[0], parts[1], parts.get(2).copied().unwrap_or(""))
-            } else if let Some((title, artist)) = line.split_once(" - ") {
+            } else if let Some((title, artist)) = text_parts(line, true) {
                 (title, artist, "")
             } else {
                 (line, "", "")
@@ -386,6 +465,7 @@ pub fn parse_list(
                 title: title.trim().into(),
                 artists: split_artists(artist),
                 album: album.trim().into(),
+                text_line: (parts.len() == 1).then(|| line.to_string()),
                 ..Default::default()
             });
         }
@@ -581,6 +661,10 @@ pub async fn read_url(input: &str) -> Result<SourceDocument, String> {
                 SourceTrack {
                     id: Some(id.clone()),
                     title: s["name"].as_str().unwrap_or("").to_string(),
+                    aliases: artists(&s["alia"])
+                        .into_iter()
+                        .chain(artists(&s["tns"]))
+                        .collect(),
                     artists: artists(
                         s.get("ar")
                             .or_else(|| s.get("artists"))
@@ -597,6 +681,7 @@ pub async fn read_url(input: &str) -> Result<SourceDocument, String> {
                         .and_then(Value::as_f64)
                         .map(|d| d / 1000.0),
                     path: None,
+                    ..Default::default()
                 }
             })
             .collect::<Vec<_>>();
@@ -656,6 +741,7 @@ pub async fn read_url(input: &str) -> Result<SourceDocument, String> {
                     .unwrap_or_else(|| text(&s["album"]["name"])),
                 duration: s["interval"].as_f64(),
                 path: None,
+                ..Default::default()
             })
             .collect::<Vec<_>>();
         let total = playlist["total_song_num"]
