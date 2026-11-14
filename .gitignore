@@ -56,6 +56,7 @@ MD/
 website/
 
 # --- 本地临时文档与设计草稿 ---
+/docs/
 *.resolved
 lyrics_architecture_analysis.md
 lyrics_refactor_plan.md
