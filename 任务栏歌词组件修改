@@ -1,0 +1,65 @@
+name: Build Windows Installer
+
+# 在 Windows runner 上自动打包 exe 安装程序（NSIS）与便携版 zip。
+# 触发方式：
+#   - 推送到 main 分支：自动打包（本次需求，默认开启）
+#   - 手动：Actions 页面点 "Run workflow"
+#   - 打 tag（v*）：打包并发布为 GitHub Release
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # 加速后续重复构建（可选，若 vendor patch 引发问题可删除本步骤）
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+
+      # 同时产出：
+      #   - 免检测安装版（skip，跳过 WebView2 检测）
+      #   - Standard 标准版（downloadBootstrapper，自动下载 WebView2）
+      #   - 便携版 zip
+      # 全部输出到 ./releases
+      - name: Build Windows installers
+        run: npm run build:releases
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LyciaPlayer-Windows
+          path: releases/**
+          if-no-files-found: error
+
+      # 仅在推送 tag（v*）时，把产物作为 GitHub Release 附件发布
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: releases/**
+          generate_release_notes: true
