@@ -5,7 +5,7 @@
       :data-folder-path="node.path"
       :data-folder-name="node.name"
       :class="[
-        isSelected ? 'bg-blue-500/10 text-blue-500 dark:text-blue-400' : 'hover:bg-black/5 dark:hover:bg-white/5',
+        isSelected ? 'bg-blue-500/10 text-blue-500 dark:text-blue-400' : 'hover:bg-black/5 dark:hover:bg-white/10',
         isTarget ? 'ring-2 ring-blue-500 bg-blue-50/50 dark:bg-blue-900/20 z-10' : '',
       ]"
       @click.stop="handleSelect"
@@ -17,7 +17,7 @@
       <button
         v-if="node.child_count > 0"
         type="button"
-        class="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-500 transition-colors hover:bg-black/5 hover:text-gray-700 dark:text-white/50 dark:hover:bg-white/5 dark:hover:text-white/80"
+        class="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-500 transition-colors hover:bg-black/5 hover:text-gray-700 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white/80"
         :aria-label="node.is_expanded ? '折叠文件夹' : '展开文件夹'"
         @click.stop="handleToggle"
       >

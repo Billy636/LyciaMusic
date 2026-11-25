@@ -626,7 +626,7 @@ onUnmounted(() => {
               :key="item.album.key"
               data-album-card
               :title="item.album.folderPath ? `文件夹合集：${item.album.folderPath}` : undefined"
-              class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5"
+              class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/10"
               @click="handleAlbumClick(item.album)"
               @contextmenu.prevent="handleContextMenu($event, item.album)"
             >
@@ -684,7 +684,7 @@ onUnmounted(() => {
           :key="item.album.key"
           data-album-card
           :title="item.album.folderPath ? `文件夹合集：${item.album.folderPath}` : undefined"
-          class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/5"
+          class="group cursor-pointer rounded-xl p-2 md:p-3 transition-all duration-300 flex flex-col relative select-none hover:bg-white/40 dark:hover:bg-white/10"
           @click="handleAlbumClick(item.album)"
           @contextmenu.prevent="handleContextMenu($event, item.album)"
         >

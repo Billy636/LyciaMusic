@@ -22,6 +22,7 @@ import AudioVisualizer from '../player/AudioVisualizer.vue';
 import SongHighlightMarkers from '../player/SongHighlightMarkers.vue';
 import FooterContextMenu from '../overlays/FooterContextMenu.vue';
 import EqualizerPanel from '../player/EqualizerPanel.vue';
+import { commitSongSwitch, setSongSwitchHovered } from '../../features/songNotification/manualSwitch';
 
 const {
   currentSong, currentCover, isPlaying, volume, currentTime, playMode, showPlaylist, showPlayerDetail,
@@ -228,6 +229,16 @@ const volumeLeave = () => {
     if (popup.value === 'volume' && !isDraggingVolume.value && !popupRef.value?.contains(document.activeElement)) closePopup();
   }, 300);
 };
+const isSwitchAction = (id: FooterMovableId) => id === 'next' || id === 'previous';
+const switchDirection = (id: FooterMovableId): 'next' | 'previous' => id === 'previous' ? 'previous' : 'next';
+const onActionEnter = (id: FooterMovableId, event: MouseEvent | FocusEvent) => {
+  volumeEnter(id, event);
+  if (isSwitchAction(id)) setSongSwitchHovered(true, switchDirection(id), 'main');
+};
+const onActionLeave = (id: FooterMovableId) => {
+  if (id === 'volume') volumeLeave();
+  if (isSwitchAction(id)) setSongSwitchHovered(false, switchDirection(id), 'main');
+};
 const actionLabel = (id: FooterMovableId) => {
   if (id === 'play') return isPlaying.value ? '暂停' : '播放';
   if (id === 'pin') return isPinned.value ? '取消固定当前底栏' : '固定当前底栏';
@@ -272,6 +283,9 @@ const activateAction = async (id: FooterMovableId, event: MouseEvent, fromMenu =
     return;
   }
   closePopup();
+  if (isSwitchAction(id)) {
+    commitSongSwitch(switchDirection(id), 'main');
+  }
   switch (id) {
     case 'previous': await prevSong(); break;
     case 'play': await togglePlay(); break;
@@ -343,7 +357,7 @@ const isIdle = ref(false);
 const pointerInside = ref(false);
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
 const clearIdleTimer = () => { if (idleTimer) clearTimeout(idleTimer); idleTimer = undefined; };
-const mustStayVisible = () => !behavior.value.autoHide || route.path === '/settings' || pointerInside.value
+const mustStayVisible = () => !behavior.value.autoHide || pointerInside.value
   || popup.value !== null || showContextMenu.value || showProgressContextMenu.value || isDraggingProgress.value
   || showPlaylist.value || showLyricsPlayerSettingsPanel.value || !!footerRef.value?.querySelector(':focus-visible');
 const startIdleTimer = () => {
@@ -448,28 +462,25 @@ onUnmounted(() => {
         :label="actionLabel(item.id)" :active="actionActive(item.id)" :playing="isPlaying"
         :expanded="item.id === 'more' ? popup === 'more' : undefined" :disabled="actionDisabled(item.id)"
         :play-mode="playMode" :volume="volume" :progress-hidden="isProgressHidden" :pinned="isPinned"
-        @activate="activateAction(item.id, $event)" @enter="volumeEnter(item.id, $event)" @leave="item.id === 'volume' && volumeLeave()" @wheel="actionWheel(item.id, $event)" />
+        @activate="activateAction(item.id, $event)" @enter="onActionEnter(item.id, $event)" @leave="onActionLeave(item.id)" @wheel="actionWheel(item.id, $event)" />
     </div>
     <Teleport to="body">
       <div v-if="popup" ref="popupRef" class="footer-popup fixed z-[9500]"
-        :class="popup === 'volume' ? 'pb-3' : 'overflow-auto rounded-xl border border-black/10 bg-white p-1 text-gray-800 shadow-2xl dark:border-white/10 dark:bg-zinc-900 dark:text-gray-100'"
+        :class="popup === 'volume' ? 'pb-3' : 'ui-glass-surface footer-menu-glass overflow-auto rounded-xl p-1'"
         :style="{ left: `${popupLeft}px`, bottom: `${popupBottom}px`, maxHeight: popup === 'volume' ? undefined : `calc(100vh - ${popupBottom + 12}px)`, width: popup === 'equalizer' ? 'min(600px, calc(100vw - 24px))' : popup === 'volume' ? '36px' : '232px' }"
         :aria-label="popup === 'equalizer' ? '均衡器' : popup === 'volume' ? '音量' : '更多底栏操作'"
         @pointerdown.stop @mouseenter="clearVolumeTimer" @mouseleave="popup === 'volume' && volumeLeave()" @wheel="popup === 'volume' && actionWheel('volume', $event)">
         <template v-if="popup === 'more'">
-          <FooterActionButton v-for="item in groups.more" :id="item.id" :key="item.id" menu :playing="isPlaying" :label="actionLabel(item.id)" :active="actionActive(item.id)" :expanded="item.id === 'more' ? popup === 'more' : undefined" :disabled="actionDisabled(item.id)" :play-mode="playMode" :volume="volume" :progress-hidden="isProgressHidden" :pinned="isPinned" @activate="activateAction(item.id, $event, true)" />
-          <p v-if="!groups.more.length" class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">暂无更多操作</p>
+          <FooterActionButton v-for="item in groups.more" :id="item.id" :key="item.id" menu :playing="isPlaying" :label="actionLabel(item.id)" :active="actionActive(item.id)" :expanded="item.id === 'more' ? popup === 'more' : undefined" :disabled="actionDisabled(item.id)" :play-mode="playMode" :volume="volume" :progress-hidden="isProgressHidden" :pinned="isPinned" @activate="activateAction(item.id, $event, true)" @enter="onActionEnter(item.id, $event)" @leave="onActionLeave(item.id)" />
+          <p v-if="!groups.more.length" class="ui-glass-muted px-3 py-2 text-sm">暂无更多操作</p>
         </template>
         <template v-else-if="popup === 'volume'">
           <!-- Keep the original narrow vertical volume popup and hover bridge. -->
           <div class="absolute top-full left-0 h-4 w-full"></div>
-          <div class="flex h-32 w-9 flex-col items-center justify-between rounded-2xl border py-3 shadow-2xl backdrop-blur-md transition-colors"
-            :class="showPlayerDetail ? 'bg-[#1c1c1c]/80 border-white/10' : 'bg-white/90 dark:bg-zinc-900/85 border-gray-100 dark:border-white/10'">
-            <div class="select-none text-[10px] font-bold transition-colors"
-              :class="showPlayerDetail ? 'text-white/60' : 'text-gray-500 dark:text-white/60'">{{ volume }}%</div>
+          <div class="ui-glass-surface flex h-32 w-9 flex-col items-center justify-between rounded-2xl py-3">
+            <div class="ui-glass-muted select-none text-[10px] font-bold">{{ volume }}%</div>
             <div ref="volumeBarRef" role="slider" tabindex="0" aria-label="音量" aria-orientation="vertical" :aria-valuemin="0" :aria-valuemax="100" :aria-valuenow="volume" :aria-valuetext="`${volume}%`"
-              class="relative my-1 w-1.5 flex-1 cursor-pointer touch-none rounded-full transition-colors"
-              :class="showPlayerDetail ? 'bg-white/15' : 'bg-gray-200 dark:bg-white/15'"
+              class="ui-surface-track relative my-1 w-1.5 flex-1 cursor-pointer touch-none rounded-full transition-colors"
               @pointerdown="startVolumeDrag" @lostpointercapture="finishVolumeDrag" @keydown="adjustVolumeFromKeyboard" @blur="volumeLeave">
               <div class="absolute bottom-0 w-full rounded-full bg-[#EC4141]" :style="{ height: `${volume}%` }"></div>
               <div class="absolute bottom-0 left-1/2 h-3.5 w-3.5 -translate-x-1/2 cursor-grab rounded-full bg-white shadow-sm active:cursor-grabbing" :style="{ bottom: `calc(${volume}% - 7px)` }"></div>
@@ -477,13 +488,13 @@ onUnmounted(() => {
           </div>
         </template>
         <template v-else>
-          <div class="flex items-center justify-between px-3 py-1 text-xs"><span>均衡器</span><button type="button" title="关闭均衡器面板" class="p-1" @click="closePopup(true)"><X class="h-4 w-4" /></button></div>
-          <div class="p-3"><EqualizerPanel embedded /></div>
+          <div class="flex items-center justify-between px-3 py-1 text-xs"><span>均衡器</span><button type="button" title="关闭均衡器面板" class="ui-surface-hover rounded-lg p-1 opacity-60 hover:opacity-100" @click="closePopup(true)"><X class="h-4 w-4" /></button></div>
+          <div class="p-3"><EqualizerPanel embedded glass /></div>
         </template>
       </div>
-      <div v-if="showProgressContextMenu" class="fixed z-[9999] min-w-[210px] rounded-lg border border-black/10 bg-white py-1 text-sm text-gray-800 shadow-xl dark:border-white/10 dark:bg-zinc-900 dark:text-white"
+      <div v-if="showProgressContextMenu" class="ui-glass-surface fixed z-[9999] min-w-[210px] rounded-lg py-1 text-sm"
         :style="{ left: `${progressContextMenuX}px`, top: `${progressContextMenuY}px` }" @pointerdown.stop @contextmenu.prevent>
-        <button type="button" class="block w-full px-3 py-2 text-left hover:bg-black/5 dark:hover:bg-white/5" @click="addProgressHighlight">在 {{ formatMarkerTime(progressContextTimeMs) }} 添加高潮点</button>
+        <button type="button" class="ui-surface-hover block w-full px-3 py-2 text-left" @click="addProgressHighlight">在 {{ formatMarkerTime(progressContextTimeMs) }} 添加高潮点</button>
       </div>
     </Teleport>
     <FooterContextMenu :visible="showContextMenu" :x="contextMenuX" :y="contextMenuY" :song="currentSong" @close="showContextMenu = false" />
@@ -495,6 +506,11 @@ onUnmounted(() => {
 .footer-info-area { position: absolute; top: 0; left: 16px; height: 100%; min-width: 0; }
 .footer-free-button { position: absolute; top: 50%; transform: translate(-50%, -50%); }
 .footer-content.is-idle { opacity: 0; pointer-events: none; }
+/* 底栏弹层：材质统一交给全局 .ui-glass-surface（与播放队列/歌词样式抽屉同源） */
+.footer-menu-glass {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
 .progress-track { transition: height 150ms ease, opacity 150ms ease; }
 .progress-thumb { opacity: 0; transition: opacity 150ms ease; }
 .footer-progress:hover .progress-track, .footer-progress:focus-visible .progress-track, .footer-progress.dragging .progress-track { height: 5px; }

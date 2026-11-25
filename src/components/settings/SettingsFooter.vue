@@ -2,15 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import { Check, RotateCcw } from 'lucide-vue-next';
 import { useFooterSettings } from '../../features/settings/useFooterSettings';
-import type { FooterBehavior, FooterScene } from '../../types/footer';
+import type { FooterBehavior, FooterCoverShape, FooterScene } from '../../types/footer';
 import FooterLayoutEditor from './FooterLayoutEditor.vue';
-import ModernModal from '../common/ModernModal.vue';
 import SettingsSelect from './SettingsSelect.vue';
 
 const { footer, setBehavior, setCoverShape, setLinked, resetScene } = useFooterSettings();
 const scene = ref<FooterScene>('main');
 const behavior = computed(() => footer.value.behavior[scene.value]);
-const pending = ref<'link' | 'reset' | null>(null);
 function changeBehavior(key: keyof FooterBehavior, event: Event) {
   const value = (event.target as HTMLSelectElement).value;
   changeSelection(key, value);
@@ -25,7 +23,11 @@ const mainInfoOptions = [
   { value: 'both', label: '封面、标题与播放时间' },
   { value: 'none', label: '不显示' },
 ];
-const coverShapeOptions = [{ value: 'square', label: '方形' }, { value: 'circle', label: '圆形' }];
+const coverShapeOptions = [
+  { value: 'rounded', label: '圆角矩形' },
+  { value: 'square', label: '方形' },
+  { value: 'circle', label: '圆形' },
+];
 const infoOptions = computed(() => scene.value === 'detail'
   ? mainInfoOptions.filter(option => option.value === 'time' || option.value === 'none')
   : mainInfoOptions);
@@ -76,16 +78,16 @@ onBeforeUnmount(() => {
 });
 function changeLinked(event: Event) {
   (event.target as HTMLInputElement).checked = footer.value.linked;
-  if (footer.value.linked) setLinked(false, scene.value); else pending.value = 'link';
+  setLinked(!footer.value.linked, scene.value);
 }
-function confirm() {
-  if (pending.value === 'link') setLinked(true, scene.value);
-  if (pending.value === 'reset') resetScene(scene.value);
-  pending.value = null;
+function toggleAutoHide() {
+  // 开启闲置隐藏即等同于取消固定底栏（pin 的激活态就是 !autoHide）。
+  setBehavior(scene.value, { autoHide: !behavior.value.autoHide });
 }
-const confirmation = computed(() => pending.value === 'link'
-  ? '将当前场景的封面形状、按钮布局、间距、进度条显示与颜色、底栏自动隐藏设置应用到另一个场景。歌曲信息和播放页专属音频频谱始终独立，不会同步。'
-  : `恢复当前场景的原版布局、间距和显示设置。${footer.value.linked ? '通用按钮和可同步的显示设置会同时恢复；另一场景的歌曲信息不变。' : ''}不会修改播放状态或音频参数。`);
+
+function restoreLayout() {
+  resetScene(scene.value);
+}
 </script>
 
 <template>
@@ -102,7 +104,7 @@ const confirmation = computed(() => pending.value === 'link'
         <span class="w-1 h-4 bg-[#EC4141] rounded-full" aria-hidden="true"></span>
         自定义控件位置
       </h2>
-      <FooterLayoutEditor :scene="scene" @reset="pending = 'reset'" />
+      <FooterLayoutEditor :scene="scene" @reset="restoreLayout" />
     </section>
     <section class="space-y-3">
       <h2 class="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
@@ -114,7 +116,14 @@ const confirmation = computed(() => pending.value === 'link'
           <label for="footer-cover-shape" class="display-label">封面形状</label>
           <SettingsSelect class="display-info-select" label="封面形状" hide-label trigger-id="footer-cover-shape"
             :model-value="footer.coverShape[scene]" :options="coverShapeOptions"
-            @update:model-value="setCoverShape(scene, $event === 'circle' ? 'circle' : 'square')" />
+            @update:model-value="setCoverShape(scene, $event as FooterCoverShape)" />
+        </div>
+        <div v-if="footer.coverShape[scene] === 'circle'" class="display-row">
+          <span id="footer-cover-rotate-label" class="display-label">播放时旋转圆形封面</span>
+          <button type="button" role="switch" aria-labelledby="footer-cover-rotate-label" :aria-checked="behavior.coverRotate"
+            class="display-switch" :class="{ 'is-on': behavior.coverRotate }" @click="setBehavior(scene, { coverRotate: !behavior.coverRotate })">
+            <span aria-hidden="true"></span>
+          </button>
         </div>
         <div class="display-row">
           <label for="footer-song-info" class="display-label">歌曲信息</label>
@@ -131,7 +140,7 @@ const confirmation = computed(() => pending.value === 'link'
         <div class="display-row">
           <span id="footer-auto-hide-label" class="display-label">闲置时隐藏底栏</span>
           <button type="button" role="switch" aria-labelledby="footer-auto-hide-label" :aria-checked="behavior.autoHide"
-            class="display-switch" :class="{ 'is-on': behavior.autoHide }" @click="setBehavior(scene, { autoHide: !behavior.autoHide })">
+            class="display-switch" :class="{ 'is-on': behavior.autoHide }" @click="toggleAutoHide">
             <span aria-hidden="true"></span>
           </button>
         </div>
@@ -173,7 +182,6 @@ const confirmation = computed(() => pending.value === 'link'
         </div>
       </div>
     </section>
-    <ModernModal :visible="pending !== null" :title="pending === 'link' ? '两个场景保持一致' : '恢复原版布局'" :content="confirmation" confirm-text="确认" @confirm="confirm" @cancel="pending = null" />
   </div>
 </template>
 
@@ -201,8 +209,8 @@ const confirmation = computed(() => pending.value === 'link'
 .progress-color-trigger { display:flex; align-items:center; justify-content:center; width:32px; height:32px; border-radius:50%; }
 .progress-color-trigger:hover, .progress-color-trigger[aria-expanded="true"] { background:rgb(128 128 128 / .1); }
 .progress-color-trigger>span { display:block; width:18px; height:18px; border-radius:50%; border:1px solid rgb(128 128 128 / .25); box-shadow:0 0 0 3px rgb(128 128 128 / .07); }
-.progress-color-popover { position:absolute; z-index:150; top:calc(100% + 9px); right:0; width:244px; padding:14px; border:1px solid rgb(148 163 184 / .2); border-radius:12px; background:rgb(255 255 255 / .9); box-shadow:0 12px 36px rgb(0 0 0 / .15); backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px); }
-.dark .progress-color-popover { border-color:rgb(255 255 255 / .1); background:rgb(24 32 40 / .92); }
+.progress-color-popover { position:absolute; z-index:150; top:calc(100% + 9px); right:0; width:244px; padding:14px; border:1px solid var(--panel-surface-border); border-radius:14px; background:var(--panel-surface-bg); color:var(--panel-surface-fg); box-shadow:var(--panel-surface-shadow); backdrop-filter:blur(var(--panel-surface-blur)) saturate(140%); -webkit-backdrop-filter:blur(var(--panel-surface-blur)) saturate(140%); }
+.dark .progress-color-popover { border-color:var(--panel-surface-border); background:var(--panel-surface-bg); }
 .color-popover-heading { margin-bottom:12px; font-size:12px; font-weight:500; }
 .color-presets { display:flex; justify-content:space-between; gap:8px; }
 .color-presets button { display:flex; align-items:center; justify-content:center; width:26px; height:26px; border:1px solid rgb(0 0 0 / .08); border-radius:50%; color:#111827; }

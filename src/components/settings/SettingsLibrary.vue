@@ -398,7 +398,7 @@ const confirmRemove = async () => {
 }
 
 .scan-settings-trigger { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; border: 0; border-radius: 8px; background: transparent; color: var(--app-text-secondary); padding: 8px; font: inherit; font-size: 12px; cursor: pointer; }
-.scan-settings-trigger:hover { background: rgb(236 65 65 / .07); color: #ec4141; }
+.scan-settings-trigger:hover { background: var(--hover-surface); color: #ec4141; }
 .scan-settings-trigger:disabled { opacity: .5; cursor: not-allowed; }
 .scan-warning-card { margin-top: 14px; border-radius: 12px; padding: 14px 16px; background: rgb(236 65 65 / .055); border: 1px solid rgb(236 65 65 / .14); }
 .scan-warning-list { margin: 8px 0 0; padding-left: 18px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }

@@ -974,6 +974,8 @@ pub enum SongPathSortMode {
     AddedAtAsc,
     FileModifiedAt,
     FileModifiedAtAsc,
+    /// 仅用于「最近播放」视图：按最后播放时间倒序。
+    PlayedAt,
 }
 
 #[derive(Debug)]
@@ -1165,6 +1167,8 @@ fn sort_song_view_rows(rows: &mut [SongViewRow], sort_mode: &SongPathSortMode) {
                     .to_lowercase()
                     .cmp(&song_title_label(right).to_lowercase())
             }),
+        // 「最近播放」视图在调用方按最后播放时间排序，不会走到这里。
+        SongPathSortMode::PlayedAt => std::cmp::Ordering::Equal,
     });
 }
 
@@ -1870,30 +1874,53 @@ pub fn get_recent_history(
     limit: Option<usize>,
 ) -> Result<Vec<RecentHistoryEntry>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let max_rows = limit.unwrap_or(1000).clamp(1, 5000) as i64;
+    let max_rows = limit.unwrap_or(100).clamp(1, 100) as i64;
 
+    // 逐条读取播放事件（不再按歌曲折叠）：同一首歌被别的歌隔开后可以再次出现。
+    // 多取一些行以抵消去重后被丢弃的连续重复项。
     let mut stmt = conn
         .prepare(
-            "SELECT s.path, MAX(ph.played_at) AS played_at
+            "SELECT s.path, s.title, s.artist, ph.played_at
              FROM play_history ph
              INNER JOIN songs s ON ph.song_id = s.id
              WHERE ph.event = 'recent'
-             GROUP BY ph.song_id
-             ORDER BY played_at DESC
+             ORDER BY ph.played_at DESC, ph.id DESC
              LIMIT ?1",
         )
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([max_rows], |row| {
-            Ok(RecentHistoryEntry {
-                song_path: row.get(0)?,
-                played_at: row.get::<_, i64>(1)? * 1000,
-            })
+        .query_map([max_rows * 4], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
         })
         .map_err(|e| e.to_string())?;
 
-    Ok(rows.filter_map(|row| row.ok()).collect())
+    let mut result: Vec<RecentHistoryEntry> = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    for (path, title, artist, played_at) in rows.flatten() {
+        let identity = format!(
+            "{}|{}",
+            normalize_identity_text(artist.as_deref().unwrap_or("")),
+            normalize_identity_text(title.as_deref().unwrap_or("")),
+        );
+        // 同一首歌（按歌手+标题判定）只保留最新一条，兼容同曲多文件 / CUE 分轨。
+        if !seen.insert(identity) {
+            continue;
+        }
+        result.push(RecentHistoryEntry {
+            song_path: path,
+            played_at: played_at * 1000,
+        });
+        if result.len() >= max_rows as usize {
+            break;
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -2346,24 +2373,21 @@ pub fn get_recent_song_paths_view(
         .filter(|value| !value.trim().is_empty())
         .map(|value| load_matching_song_paths(&conn, value))
         .transpose()?;
-    let mut latest_entries = HashMap::<String, i64>::new();
+    // 最近播放只保留每首歌一条（按路径去重，首次出现即最新播放），
+    // 排序直接沿用传入列表的先后顺序；不在后端重复排序。
+    let mut ordered_entries: Vec<(String, i64)> = Vec::new();
+    let mut seen_paths = std::collections::HashSet::<String>::new();
 
     for entry in recent_entries {
         let normalized_path = normalize_path(&entry.song_path);
-        if normalized_path.is_empty() {
+        if normalized_path.is_empty() || !seen_paths.insert(normalized_path.clone()) {
             continue;
         }
-
-        let existing = latest_entries
-            .entry(normalized_path)
-            .or_insert(entry.played_at);
-        if entry.played_at > *existing {
-            *existing = entry.played_at;
-        }
+        ordered_entries.push((normalized_path, entry.played_at));
     }
 
-    let mut rows: Vec<SongViewRow> = Vec::new();
-    for normalized_path in latest_entries.into_keys() {
+    let mut rows_with_played: Vec<(SongViewRow, i64)> = Vec::new();
+    for (normalized_path, played_at) in ordered_entries {
         let Some(row) = load_song_view_row(&conn, &normalized_path)? else {
             continue;
         };
@@ -2374,10 +2398,35 @@ pub fn get_recent_song_paths_view(
             .unwrap_or(true);
 
         if matches_search {
-            rows.push(row);
+            rows_with_played.push((row, played_at));
         }
     }
 
+    // 「最近播放」默认按最后播放时间倒序（最近听过的排前面），
+    // 与最近专辑 / 歌单目录的聚合排序口径一致。
+    if matches!(sort_mode, SongPathSortMode::PlayedAt) {
+        rows_with_played.sort_by(|(left, left_played), (right, right_played)| {
+            right_played
+                .cmp(left_played)
+                .then_with(|| {
+                    song_title_label(left)
+                        .to_lowercase()
+                        .cmp(&song_title_label(right).to_lowercase())
+                })
+        });
+        let offset = offset.unwrap_or(0) as usize;
+        let limit = limit
+            .map(|value| value.clamp(1, 512) as usize)
+            .unwrap_or(usize::MAX);
+        return Ok(rows_with_played
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(|(row, _)| row.path)
+            .collect());
+    }
+
+    let mut rows: Vec<SongViewRow> = rows_with_played.into_iter().map(|(row, _)| row).collect();
     sort_song_view_rows(&mut rows, &sort_mode);
     let offset = offset.unwrap_or(0) as usize;
     let limit = limit

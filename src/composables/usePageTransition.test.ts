@@ -105,7 +105,6 @@ describe('page transition selection', () => {
 type LayoutTestContext = ReturnType<typeof usePageTransitionLayout> & {
   path: Ref<string>;
   skip: Ref<boolean>;
-  mini: Ref<boolean>;
 };
 
 function withPageLayout(initialPath: string, check: (context: LayoutTestContext) => void) {
@@ -114,9 +113,8 @@ function withPageLayout(initialPath: string, check: (context: LayoutTestContext)
     scope.run(() => {
       const path = ref(initialPath);
       const skip = ref(false);
-      const mini = ref(false);
-      const layout = usePageTransitionLayout(() => path.value, skip, mini);
-      check({ path, skip, mini, ...layout });
+      const layout = usePageTransitionLayout(() => path.value, skip);
+      check({ path, skip, ...layout });
     });
   } finally {
     scope.stop();
@@ -170,10 +168,10 @@ describe('page transition layout timing', () => {
     });
   });
 
-  it.each(['skip', 'mini'] as const)('applies pending and subsequent routes immediately under %s, then resumes deferral', (flagName) => {
+  it('applies pending and subsequent routes immediately while the layout is bypassed, then resumes deferral', () => {
     withPageLayout('/', (context) => {
       const { path, isSettingsLayout, commitPageLayout } = context;
-      const bypass = context[flagName];
+      const bypass = context.skip;
 
       path.value = '/settings';
       expect(isSettingsLayout.value).toBe(false);

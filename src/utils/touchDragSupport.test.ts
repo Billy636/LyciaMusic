@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import playerFooter from '../components/layout/PlayerFooter.vue?raw';
 import sidebarPlaylists from '../components/layout/SidebarPlaylists.vue?raw';
-import miniPlayer from '../components/layout/MiniPlayerWindow.vue?raw';
 import songTable from '../components/song-list/SongTable.vue?raw';
 import sidebarDrag from '../composables/useSidebarPlaylistDragDrop.ts?raw';
 import songDrag from '../composables/useSongDrag.ts?raw';
@@ -36,9 +35,5 @@ describe('touch drag support', () => {
     expect(playerFooter).toContain("window.addEventListener('pointermove'");
     expect(playerFooter).toContain("window.addEventListener('pointerup'");
     expect(playerFooter).toContain("window.addEventListener('pointercancel'");
-    expect(miniPlayer).toContain('@pointerdown.stop="startVolumeDrag"');
-    expect(miniPlayer).toContain("window.addEventListener('pointermove'");
-    expect(miniPlayer).toContain("window.addEventListener('pointerup'");
-    expect(miniPlayer).toContain("window.addEventListener('pointercancel'");
   });
 });

@@ -1,12 +1,13 @@
 {
   "name": "lycia-music",
   "private": true,
-  "version": "1.5.4",
+  "version": "1.6.24",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "dev:lyrics": "vite --config scripts/lyrics-smoke/vite.config.ts --open /scripts/lyrics-smoke/index.html",
+    "prebuild": "node scripts/clean-dist.js",
     "build": "npm run typecheck && vite build",
     "build:installer": "npm run version:check && tauri build --bundles nsis --config src-tauri/tauri.installer.conf.json",
     "preview": "vite preview",
@@ -46,6 +47,7 @@
     "@tauri-apps/plugin-global-shortcut": "^2.3.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2",
+    "figma-squircle": "^1.1.0",
     "jss": "^10.10.0",
     "jss-preset-default": "^10.10.0",
     "lucide-vue-next": "^0.562.0",

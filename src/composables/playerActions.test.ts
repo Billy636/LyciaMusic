@@ -27,7 +27,6 @@ describe('player action hooks', () => {
     const playSong = vi.fn();
     const nextSong = vi.fn();
     const toggleAlwaysOnTop = vi.fn();
-    const toggleQueue = vi.fn();
 
     const playbackActions = usePlaybackActions({
       currentSong: ref(demoSong),
@@ -67,18 +66,15 @@ describe('player action hooks', () => {
       playerUiShell: {
         toggleAlwaysOnTop,
         togglePlayerDetail: vi.fn(),
-        toggleQueue,
       },
     });
 
     playbackActions.handleAutoNext();
     windowActions.toggleAlwaysOnTop(true);
-    windowActions.toggleQueue();
 
     expect(playSong).toHaveBeenCalledWith(demoSong, { preserveQueue: true });
     expect(nextSong).not.toHaveBeenCalled();
     expect(toggleAlwaysOnTop).toHaveBeenCalledWith(true);
-    expect(toggleQueue).toHaveBeenCalledTimes(1);
   });
 
   it('forwards collection, library, and import actions', () => {

@@ -1,4 +1,5 @@
 import { storeToRefs } from 'pinia';
+import { watch } from 'vue';
 
 import { useLyrics } from './lyrics';
 import { useToast } from './toast';
@@ -418,6 +419,13 @@ function createPlayerCore() {
   const playerHistoryFavorites = createPlayerHistoryFavorites({
     legacyPlayerHistoryKey: LEGACY_PLAYER_HISTORY_KEY,
   });
+
+  // 自动续播 / 恢复上次播放等路径不一定经过 playSong，这里统一把当前歌曲置顶。
+  // immediate 必须开：恢复上次播放发生在 setup 之前时，没有它这次「置顶」就永远
+  // 不会执行，列表里会一直留着旧的排位（表现为正在播放的歌回不到第一首）。
+  watch(() => currentSong.value?.path, path => {
+    if (path && currentSong.value) void playerHistoryFavorites.addToHistory(currentSong.value);
+  }, { immediate: true });
 
   const collectionsActions = useCollectionsActions({
     playerPlaylist,
@@ -1002,7 +1010,6 @@ function createPlayerCore() {
   const appShellDomain = {
     init,
     playQueue: playbackRefs.playQueue,
-    isMiniMode: uiRefs.isMiniMode,
     showPlayerDetail: uiRefs.showPlayerDetail,
     showMiniPlaylist: uiRefs.showMiniPlaylist,
     showPlaylist: uiRefs.showPlaylist,

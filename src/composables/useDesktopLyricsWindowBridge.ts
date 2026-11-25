@@ -13,6 +13,7 @@ import { usePlaybackStore } from '../features/playback/store';
 import { useSettingsStore } from '../features/settings/store';
 import { useUiStore } from '../shared/stores/ui';
 import { nativeDesktopLyrics, usesNativeDesktopLyrics } from '../features/desktopLyrics/native';
+import { commitSongSwitch } from '../features/songNotification/manualSwitch';
 import {
   applyDesktopLyricsVisibilityPreference,
   persistDesktopLyricsVisibilityPreference,
@@ -353,6 +354,10 @@ export function useDesktopLyricsWindowBridge() {
       showRomaji: lyricsSettings.showRomaji,
       isAlwaysOnTop: desktopLyricsSettings.isAlwaysOnTop,
       alwaysShowShadowBackground: desktopLyricsSettings.alwaysShowShadowBackground,
+      backgroundShape: desktopLyricsSettings.backgroundShape ?? 'rounded',
+      backgroundColorMode: desktopLyricsSettings.backgroundColorMode ?? 'dark',
+      customBackgroundColor: desktopLyricsSettings.customBackgroundColor ?? '#101018',
+      backgroundOpacity: desktopLyricsSettings.backgroundOpacity ?? 42,
       autoHideWhenFullscreen: desktopLyricsSettings.autoHideWhenFullscreen,
       autoHideWhenPaused: desktopLyricsSettings.autoHideWhenPaused,
       showDoubleLine: desktopLyricsSettings.showDoubleLine,
@@ -523,9 +528,11 @@ export function useDesktopLyricsWindowBridge() {
         await togglePlay();
         break;
       case 'prev-song':
+        commitSongSwitch('previous', 'desktopLyrics');
         prevSong();
         break;
       case 'next-song':
+        commitSongSwitch('next', 'desktopLyrics');
         nextSong();
         break;
       case 'adjust-offset': {
@@ -702,11 +709,11 @@ export function useDesktopLyricsWindowBridge() {
 
   watch(
     [currentTime, isPlaying, () => playbackStore.seekRevision ?? 0, () => currentSong.value?.path,
-      () => playbackStore.currentPlaybackId ?? 0],
-    ([time, playing, seekRevision, songPath, playbackId], previous) => {
+      () => playbackStore.currentPlaybackId ?? 0, audioDelay],
+    ([time, playing, seekRevision, songPath, playbackId, delay], previous) => {
       playbackClockTracker.resolvePlaybackSample(time, playing, seekRevision, songPath ?? null, playbackId);
       if (showDesktopLyrics.value && previous
-        && (playing !== previous[1] || seekRevision !== previous[2] || playbackId !== previous[4])) {
+        && (playing !== previous[1] || seekRevision !== previous[2] || playbackId !== previous[4] || delay !== previous[5])) {
         void emitPlaybackToDesktopLyrics().catch((error) => {
           logDesktopLyricsBridgeError('sync playback to', error);
         });

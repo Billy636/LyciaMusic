@@ -1,5 +1,6 @@
 export type FooterScene = 'main' | 'detail';
-export type FooterCoverShape = 'square' | 'circle';
+/** rounded=连续曲率圆角矩形（旧值 square 迁移而来），square=直角方形，circle=圆形。 */
+export type FooterCoverShape = 'rounded' | 'square' | 'circle';
 export type FooterActionId = 'favorite' | 'mode' | 'queue' | 'volume' | 'desktopLyrics'
   | 'equalizer' | 'wasapiExclusive' | 'volumeBalance' | 'pin' | 'progress' | 'lyricsStyle' | 'visualizer' | 'more';
 export type FooterMovableId = FooterActionId | 'previous' | 'play' | 'next';
@@ -21,9 +22,11 @@ export interface FooterBehavior {
   progressColor?: string;
   autoHide: boolean;
   visualizer: boolean;
+  /** 圆形封面时是否随播放旋转。 */
+  coverRotate: boolean;
 }
 export interface FooterSettings {
-  version: 1;
+  version: number;
   linked: boolean;
   coverShape: Record<FooterScene, FooterCoverShape>;
   main: FooterLayoutItem[];

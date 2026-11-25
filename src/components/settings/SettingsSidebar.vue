@@ -141,7 +141,6 @@ function moveItem(id: SidebarNavigationId, direction: -1 | 1) {
               <SidebarNavigationIcon :id="item.id" />
             </span>
             <span class="navigation-item-label text-sm font-medium text-gray-800 dark:text-gray-200">{{ item.label }}</span>
-            <span v-if="homepageId === item.id" class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-[#EC4141] bg-red-100/60 dark:bg-red-500/15">首页</span>
           </button>
           <button
             type="button"
@@ -195,11 +194,7 @@ function moveItem(id: SidebarNavigationId, direction: -1 | 1) {
         </label>
         <label class="display-element-option">
           <input v-model="settings.showTaskbarPlayerIcon" type="checkbox" />
-          <span>任务栏播控入口</span>
-        </label>
-        <label class="display-element-option">
-          <input v-model="settings.showMiniPlayerIcon" type="checkbox" />
-          <span>迷你窗口入口</span>
+          <span>铃动窗入口</span>
         </label>
         <label class="display-element-option" title="开启后，双击当前歌曲可暂停或继续；关闭后，双击会从头播放。双击其他歌曲始终从头播放。">
           <input v-model="settings.doubleClickCurrentSongToPause" type="checkbox" />

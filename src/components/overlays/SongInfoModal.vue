@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open } from '@tauri-apps/plugin-dialog';
 import { RefreshCw, SquarePen, Tag } from 'lucide-vue-next';
 import type { LyricsReadingOrder, Song, SongDetail } from '../../types';
@@ -267,6 +268,42 @@ const handleKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Escape' && props.visible) {
     handleClose();
   }
+};
+
+// 顶部空白条兼做窗口拖拽与点击退出：移动超过阈值才算拖拽（此时交给
+// startDragging，系统接管后续指针），原地按下抬起视为点击，关闭页面。
+// 之前用 data-tauri-drag-region 时，系统拖拽循环会吞掉 click，
+// 导致顶部空白区永远无法点击退出。
+const appWindow = getCurrentWindow();
+const DRAG_STRIP_MOVE_THRESHOLD = 5;
+let dragStripPointerId: number | null = null;
+let dragStripStart = { x: 0, y: 0 };
+let dragStripMoved = false;
+
+const onDragStripPointerDown = (event: PointerEvent) => {
+  if (event.button !== 0 || dragStripPointerId !== null) return;
+  dragStripPointerId = event.pointerId;
+  dragStripStart = { x: event.clientX, y: event.clientY };
+  dragStripMoved = false;
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+};
+
+const onDragStripPointerMove = (event: PointerEvent) => {
+  if (event.pointerId !== dragStripPointerId || dragStripMoved) return;
+  const dx = event.clientX - dragStripStart.x;
+  const dy = event.clientY - dragStripStart.y;
+  if (Math.hypot(dx, dy) > DRAG_STRIP_MOVE_THRESHOLD) {
+    dragStripMoved = true;
+    const target = event.currentTarget as HTMLElement;
+    target.releasePointerCapture(event.pointerId);
+    void appWindow.startDragging();
+  }
+};
+
+const onDragStripPointerUp = (event: PointerEvent) => {
+  if (event.pointerId !== dragStripPointerId) return;
+  dragStripPointerId = null;
+  if (!dragStripMoved) handleClose();
 };
 
 onMounted(() => window.addEventListener('keydown', handleKeydown));
@@ -616,7 +653,13 @@ const formatTime = (timestampSeconds?: number) => {
         @click="handleClose"
       ></div>
 
-      <div class="song-info-window-drag-strip" data-tauri-drag-region></div>
+      <div
+        class="song-info-window-drag-strip"
+        @pointerdown="onDragStripPointerDown"
+        @pointermove="onDragStripPointerMove"
+        @pointerup="onDragStripPointerUp"
+        @pointercancel="onDragStripPointerUp"
+      ></div>
 
       <div
         class="song-info-stage"

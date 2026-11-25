@@ -1,5 +1,17 @@
-import type { TaskbarContentMode, TaskbarCoverShape, TaskbarLyricEffect } from '../features/taskbarPlayer/shared';
+import type {
+  TaskbarBackgroundMode,
+  TaskbarContentMode,
+  TaskbarCoverShape,
+  TaskbarFrameShape,
+  TaskbarFreePosition,
+  TaskbarLyricEffect,
+} from '../features/taskbarPlayer/shared';
 import type { PlaylistImportData } from '../features/playlistImport/types';
+import type {
+  SongNotificationBackgroundMode,
+  SongNotificationFrameShape,
+  SongNotificationModuleSettings,
+} from '../features/songNotification/shared';
 
 export interface SongCore {
   id?: number;       // 数据库主键 (用于播放记录关联)
@@ -187,6 +199,8 @@ export interface RecentPlaylistCatalogItem {
 export interface HistoryItem {
   path: string;
   playedAt: number;
+  /** 歌手+标题归一化标识，用于判断同一首歌是否间隔出现。 */
+  identity?: string;
 }
 
 export interface Playlist {
@@ -434,6 +448,13 @@ export interface LyricsSettings {
 export interface DesktopLyricsSettings {
   isAlwaysOnTop: boolean;
   alwaysShowShadowBackground: boolean;
+  /** 歌词背景盒形状；圆角矩形 / 胶囊圆形为 iOS 连续曲率观感（与铃动窗一致的 R 角比例）。 */
+  backgroundShape: 'rounded' | 'pill' | 'square';
+  /** 背景颜色：深色 / 浅色 / 自定义。 */
+  backgroundColorMode: 'dark' | 'light' | 'custom';
+  customBackgroundColor: string;
+  /** 背景不透明度 0–100。 */
+  backgroundOpacity: number;
   autoHideWhenFullscreen: boolean;
   autoHideWhenPaused: boolean;
   showDoubleLine: boolean;
@@ -502,7 +523,7 @@ export type ShortcutActionId =
   | 'nextSong'
   | 'volumeUp'
   | 'volumeDown'
-  | 'toggleMiniMode'
+  | 'toggleTaskbarPlayer'
   | 'toggleFavorite'
   | 'addSongHighlight'
   | 'playSongHighlight'
@@ -533,6 +554,13 @@ export interface AppSettings {
   closeToTray: boolean;
   showDesktopLyrics: boolean;
   showSongNotification: boolean;
+  /** 切歌提示卡的背景框形状（连续曲率圆角矩形 / 胶囊 / 方形）。 */
+  songNotificationFrameShape: SongNotificationFrameShape;
+  /** 切歌提示卡背景：封面虚化背景色 / 自定义背景色。 */
+  songNotificationBackgroundMode: SongNotificationBackgroundMode;
+  songNotificationBackgroundColor: string;
+  /** 各播放按钮模块是否接入切歌提示；缺省按全开处理。 */
+  songNotificationModules: SongNotificationModuleSettings;
   showQualityBadges: boolean;
   showSongComments: boolean;
   doubleClickCurrentSongToPause: boolean;
@@ -556,13 +584,19 @@ export interface AppSettings {
   shortcuts: ShortcutSettings;
   showTaskbarPlayer: boolean;
   showTaskbarPlayerIcon: boolean;
-  showMiniPlayerIcon: boolean;
   taskbarBackgroundOpacity: number;
+  taskbarBackgroundMode: TaskbarBackgroundMode;
+  taskbarBackgroundColor: string;
+  taskbarFrameShape: TaskbarFrameShape;
+  /** 铃动窗是否置顶；关闭后可被其他窗口覆盖。 */
+  taskbarAlwaysOnTop: boolean;
   taskbarWindowWidth: number;
   taskbarTextColor: string;
   /** Deprecated compatibility field; position locking uses taskbarPositionLocked. */
   taskbarPlayerCanDrag: boolean;
+  /** Locked keeps the player docked to the desktop bottom bar; unlocked allows free dragging. */
   taskbarPositionLocked: boolean;
+  taskbarFreePosition: TaskbarFreePosition | null;
   taskbarContentMode: TaskbarContentMode;
   taskbarLyricEffect: TaskbarLyricEffect;
   taskbarLyricHighlightColor: string | null;

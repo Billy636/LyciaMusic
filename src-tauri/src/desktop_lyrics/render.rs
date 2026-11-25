@@ -20,6 +20,11 @@ use windows::{
 };
 use windows_numerics::{Matrix3x2, Vector2};
 
+/// 顶部工具栏中心在 y=22、半高约 8；留 10px 呼吸区后即歌词正文起点。
+const BODY_TOP: f32 = 40.;
+/// 歌词正文底部留白；窗口高度按正文实际高度自适应，避免小字号时出现大块空白。
+const BODY_BOTTOM_MARGIN: f32 = 12.;
+
 fn point(x: f32, y: f32) -> Vector2 {
     Vector2 { X: x, Y: y }
 }
@@ -53,6 +58,102 @@ fn mix_color(a: D2D1_COLOR_F, b: D2D1_COLOR_F, amount: f32) -> D2D1_COLOR_F {
         b: channel(a.b, b.b),
         a: alpha,
     }
+}
+
+const DESKTOP_BACKGROUND_DARK: &str = "#101018";
+const DESKTOP_BACKGROUND_LIGHT: &str = "#ececec";
+
+fn background_alpha(settings: &Settings) -> f32 {
+    if settings.background_opacity.is_finite() {
+        (settings.background_opacity / 100.).clamp(0., 1.)
+    } else {
+        0.42
+    }
+}
+
+/// 背景盒颜色与明暗判断（dark / light / custom）。返回 (颜色, 是否浅色)。
+fn background_palette(settings: &Settings) -> (D2D1_COLOR_F, bool) {
+    let alpha = background_alpha(settings);
+    match settings.background_color_mode.as_str() {
+        "light" => (color(DESKTOP_BACKGROUND_LIGHT, alpha), true),
+        "custom" => {
+            let hex = if css_rgb(settings.custom_background_color.trim()).is_some() {
+                settings.custom_background_color.as_str()
+            } else {
+                DESKTOP_BACKGROUND_DARK
+            };
+            let rgb = css_rgb(hex).unwrap_or([0.063, 0.063, 0.094]);
+            let is_light = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) > 0.62;
+            (color(hex, alpha), is_light)
+        }
+        _ => (color(DESKTOP_BACKGROUND_DARK, alpha), false),
+    }
+}
+
+/// figma-squircle 同款圆角参数（均匀半径 + preserveSmoothing），与前端
+/// taskbarSquircle.ts 使用相同的数学，保证与铃动窗一致的连续曲率。
+struct SquircleCorner {
+    radius: f32,
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
+    p: f32,
+    arc: f32,
+}
+
+fn squircle_corner(radius: f32, smoothing: f32, budget: f32) -> SquircleCorner {
+    let p = (1. + smoothing) * radius;
+    let arc_measure = 90. * (1. - smoothing);
+    let arc = (arc_measure / 2.).to_radians().sin() * radius * std::f32::consts::SQRT_2;
+    let angle_alpha = (90. - arc_measure) / 2.;
+    let p3_to_p4 = radius * (angle_alpha / 2.).to_radians().tan();
+    let angle_beta = 45. * smoothing;
+    let c = p3_to_p4 * angle_beta.to_radians().cos();
+    let d = c * angle_beta.to_radians().tan();
+    let mut b = (p - arc - c - d) / 3.;
+    let mut a = 2. * b;
+    let mut p = p;
+    if p > budget {
+        // preserveSmoothing：预算不足时压缩 a/b，保持曲率平滑不被截断。
+        let p1_to_p3_max = budget - d - arc - c;
+        let min_a = p1_to_p3_max / 6.;
+        let max_b = p1_to_p3_max - min_a;
+        b = b.min(max_b);
+        a = p1_to_p3_max - b;
+        p = p.min(budget);
+    }
+    SquircleCorner {
+        radius,
+        a,
+        b,
+        c,
+        d,
+        p,
+        arc,
+    }
+}
+
+fn bezier(
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    x3: f32,
+    y3: f32,
+) -> D2D1_BEZIER_SEGMENT {
+    D2D1_BEZIER_SEGMENT {
+        point1: point(x1, y1),
+        point2: point(x2, y2),
+        point3: point(x3, y3),
+    }
+}
+
+fn background_radius(width: f32, height: f32, _scale: f32) -> f32 {
+    // 与铃动窗共用同一规则：半径 = 元素高度 × 16/44（44px 小条的 16px 圆角）。
+    // height 是物理像素，比例换算后仍是物理像素，无需再乘缩放。
+    let radius = height * 16. / 44.;
+    radius.min(width.min(height) / 2.).max(0.)
 }
 
 fn font_locale(family: &str) -> &'static str {
@@ -535,9 +636,16 @@ pub struct Renderer {
     rows: Vec<Row>,
     glyph_tiles: Vec<(usize, GlyphMask)>,
     transition: Option<Transition>,
+    /// 当前歌曲+设置下所需窗口高度的高水位（逻辑像素）。
+    /// 同一首歌内只增不减，避免换句时窗口反复伸缩导致闪烁。
+    desired_height: Option<f32>,
+    /// desired_height 对应的歌曲与设置签名；变化时重新起算高水位。
+    height_signature: String,
     showing_interlude: bool,
     fade_brushes: Vec<ID2D1Brush>,
     fade_layer: ID2D1Layer,
+    /// 圆角背景路径缓存，键为 (物理宽, 物理高, 缩放千分位)。
+    background_geometry: Option<(f32, f32, f32, ID2D1PathGeometry)>,
     font_key: String,
     family: String,
     weight: Option<DWRITE_FONT_WEIGHT>,
@@ -592,9 +700,12 @@ impl Renderer {
             rows: vec![],
             glyph_tiles: vec![],
             transition: None,
+            desired_height: None,
+            height_signature: String::new(),
             showing_interlude: false,
             fade_brushes: vec![],
             fade_layer,
+            background_geometry: None,
             font_key: String::new(),
             family: "Segoe UI".into(),
             weight: None,
@@ -626,7 +737,193 @@ impl Renderer {
         self.height = height;
         self.scale = scale;
         self.glyph_tiles.clear();
+        self.background_geometry = None;
         Ok(true)
+    }
+
+    /// 连续曲率（squircle）背景路径，逻辑坐标系与目标变换一致；按窗口尺寸缓存。
+    unsafe fn background_geometry(
+        &mut self,
+        width: f32,
+        height: f32,
+        radius: f32,
+    ) -> Result<ID2D1PathGeometry> {
+        // key 必须包含 radius：圆角矩形 ↔ 胶囊圆形只改半径，尺寸不变时
+        // 若按 (宽, 高, 缩放) 缓存会复用旧几何，导致切换形状毫无变化。
+        let key = (width, height, radius);
+        if let Some((kw, kh, kradius, geometry)) = &self.background_geometry {
+            if (*kw, *kh, *kradius) == key {
+                return Ok(geometry.clone());
+            }
+        }
+        let factory: ID2D1Factory = self.target.GetFactory()?;
+        let geometry = factory.CreatePathGeometry()?;
+        let sink = geometry.Open()?;
+        let budget = width.min(height) / 2.;
+        let r = radius.min(budget).max(0.);
+        if r > 0. {
+            let cp = squircle_corner(r, 0.6, budget);
+            // 顶边起点 → 右上角 → 右边 → 右下角 → 底边 → 左下角 → 左边 → 左上角 → 闭合。
+            sink.BeginFigure(point(cp.p, 0.), D2D1_FIGURE_BEGIN_FILLED);
+
+            // 右上角
+            sink.AddBezier(&bezier(
+                width - cp.p + cp.a,
+                0.,
+                width - cp.p + cp.a + cp.b,
+                0.,
+                width - cp.p + cp.a + cp.b + cp.c,
+                cp.d,
+            ));
+            sink.AddArc(&D2D1_ARC_SEGMENT {
+                point: point(width - cp.p + cp.a + cp.b + cp.c + cp.arc, cp.d + cp.arc),
+                size: D2D_SIZE_F {
+                    width: cp.radius,
+                    height: cp.radius,
+                },
+                rotationAngle: 0.,
+                sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                arcSize: D2D1_ARC_SIZE_SMALL,
+            });
+            sink.AddBezier(&bezier(
+                width - cp.p + cp.a + cp.b + cp.c + cp.arc + cp.d,
+                cp.d + cp.arc + cp.c,
+                width - cp.p + cp.a + cp.b + cp.c + cp.arc + cp.d,
+                cp.d + cp.arc + cp.b + cp.c,
+                width,
+                cp.p,
+            ));
+
+            // 右下角
+            sink.AddLine(point(width, height - cp.p));
+            sink.AddBezier(&bezier(
+                width,
+                height - cp.p + cp.a,
+                width,
+                height - cp.p + cp.a + cp.b,
+                width - cp.d,
+                height - cp.p + cp.a + cp.b + cp.c,
+            ));
+            sink.AddArc(&D2D1_ARC_SEGMENT {
+                point: point(width - cp.d - cp.arc, height - cp.p + cp.a + cp.b + cp.c + cp.arc),
+                size: D2D_SIZE_F {
+                    width: cp.radius,
+                    height: cp.radius,
+                },
+                rotationAngle: 0.,
+                sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                arcSize: D2D1_ARC_SIZE_SMALL,
+            });
+            sink.AddBezier(&bezier(
+                width - cp.d - cp.arc - cp.c,
+                height - cp.p + cp.a + cp.b + cp.c + cp.arc + cp.d,
+                width - cp.d - cp.arc - cp.b - cp.c,
+                height - cp.p + cp.a + cp.b + cp.c + cp.arc + cp.d,
+                width - cp.p,
+                height,
+            ));
+
+            // 左下角
+            sink.AddLine(point(cp.p, height));
+            sink.AddBezier(&bezier(
+                cp.p - cp.a,
+                height,
+                cp.p - cp.a - cp.b,
+                height,
+                cp.p - cp.a - cp.b - cp.c,
+                height - cp.d,
+            ));
+            sink.AddArc(&D2D1_ARC_SEGMENT {
+                point: point(cp.p - cp.a - cp.b - cp.c - cp.arc, height - cp.d - cp.arc),
+                size: D2D_SIZE_F {
+                    width: cp.radius,
+                    height: cp.radius,
+                },
+                rotationAngle: 0.,
+                sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                arcSize: D2D1_ARC_SIZE_SMALL,
+            });
+            sink.AddBezier(&bezier(
+                cp.p - cp.a - cp.b - cp.c - cp.arc - cp.d,
+                height - cp.d - cp.arc - cp.c,
+                cp.p - cp.a - cp.b - cp.c - cp.arc - cp.d,
+                height - cp.d - cp.arc - cp.b - cp.c,
+                0.,
+                height - cp.p,
+            ));
+
+            // 左上角
+            sink.AddLine(point(0., cp.p));
+            sink.AddBezier(&bezier(
+                0.,
+                cp.p - cp.a,
+                0.,
+                cp.p - cp.a - cp.b,
+                cp.d,
+                cp.p - cp.a - cp.b - cp.c,
+            ));
+            sink.AddArc(&D2D1_ARC_SEGMENT {
+                point: point(cp.d + cp.arc, cp.p - cp.a - cp.b - cp.c - cp.arc),
+                size: D2D_SIZE_F {
+                    width: cp.radius,
+                    height: cp.radius,
+                },
+                rotationAngle: 0.,
+                sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                arcSize: D2D1_ARC_SIZE_SMALL,
+            });
+            sink.AddBezier(&bezier(
+                cp.d + cp.arc + cp.c,
+                cp.p - cp.a - cp.b - cp.c - cp.arc - cp.d,
+                cp.d + cp.arc + cp.b + cp.c,
+                cp.p - cp.a - cp.b - cp.c - cp.arc - cp.d,
+                cp.p,
+                0.,
+            ));
+
+            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+        } else {
+            sink.BeginFigure(point(0., 0.), D2D1_FIGURE_BEGIN_FILLED);
+            sink.AddLine(point(width, 0.));
+            sink.AddLine(point(width, height));
+            sink.AddLine(point(0., height));
+            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+        }
+        sink.Close()?;
+        self.background_geometry = Some((key.0, key.1, key.2, geometry.clone()));
+        Ok(geometry)
+    }
+
+    /// 背景盒：形状（连续曲率圆角 / 胶囊圆形 / 方形）、颜色与不透明度均由设置驱动。
+    unsafe fn paint_background(
+        &mut self,
+        width: f32,
+        height: f32,
+        settings: &Settings,
+    ) -> Result<()> {
+        let (bg, _) = background_palette(settings);
+        if bg.a <= 0. {
+            return Ok(());
+        }
+        self.brush.SetColor(&bg);
+        if settings.background_shape == "square" {
+            self.target.FillRectangle(&rect(0., 0., width, height), &self.brush);
+            return Ok(());
+        }
+        // 胶囊圆形：半径取半高（两端半圆、连续曲率），与铃动窗的胶囊一致。
+        let radius = if settings.background_shape == "pill" {
+            (height / 2.).max(0.)
+        } else {
+            background_radius(width, height, self.scale)
+        };
+        if radius <= 0. {
+            self.target.FillRectangle(&rect(0., 0., width, height), &self.brush);
+            return Ok(());
+        }
+        // SAFETY: D2D geometry creation on the render thread only.
+        let geometry = unsafe { self.background_geometry(width, height, radius)? };
+        self.target.FillGeometry(&geometry, &self.brush, None);
+        Ok(())
     }
 
     unsafe fn select_font(&mut self, state: &Snapshot) -> Result<()> {
@@ -770,6 +1067,11 @@ impl Renderer {
         self.rebuild_fitted(state, active, 1., 0)
     }
 
+    /// 最近一次完整字号排版所需的逻辑窗口高度（含工具栏与底部留白）。
+    pub fn pending_height(&self) -> Option<f32> {
+        self.desired_height
+    }
+
     pub fn cancel_transition(&mut self) {
         self.transition = None;
     }
@@ -824,9 +1126,9 @@ impl Renderer {
             promotion_x: preview.anchor_x - current.anchor_x * promotion_scale,
             promotion_y: preview.top - current.top * promotion_scale,
             promotion_scale,
-            outgoing_distance: (outgoing.top + outgoing.height - 52.).max(0.) + 8.,
+            outgoing_distance: (outgoing.top + outgoing.height - BODY_TOP).max(0.) + 8.,
             incoming_distance: self.rows.get(1).map_or(0., |row| {
-                (self.height as f32 / self.scale - 20. - row.top + 8.).max(row.height + 8.)
+                (self.height as f32 / self.scale - BODY_BOTTOM_MARGIN - row.top + 8.).max(row.height + 8.)
             }),
             previous,
             outgoing,
@@ -869,8 +1171,9 @@ impl Renderer {
         let width = self.width as f32 / self.scale;
         let height = self.height as f32 / self.scale;
         let available = (width - 48.).max(1.);
-        let scale = s.player_font_scale.clamp(0.5, 3.) * vertical_scale;
-        let gap = s.player_line_gap.clamp(0.5, 3.) * vertical_scale;
+        let scale = s.player_font_scale.clamp(0.5, 2.) * vertical_scale;
+        let gap_ratio = s.player_line_gap.clamp(0.5, 2.);
+        let gap = gap_ratio * vertical_scale;
         let wrap = s.overflow_mode == "wrap";
         let alpha = s.text_opacity.clamp(0., 1.);
         let theme_colors: Vec<_> = state
@@ -935,12 +1238,10 @@ impl Renderer {
             } else {
                 ShadowStyle::NEXT
             };
-            let mut font_size = if is_active {
-                26_f32.max((width * 0.048).min(height * 0.06))
-            } else {
-                20_f32.max((width * 0.036).min(height * 0.048))
-            } * scale;
-            let sub_size = 14_f32.max((width * 0.0225).min(height * 0.0275)) * scale;
+            // 固定基准字号：原先按窗口高度取值会与高度自适应形成正反馈，
+            // 换句重排时字号随高度变化 → 所需高度再变 → 窗口持续伸缩闪烁。
+            let mut font_size = if is_active { 26. } else { 20. } * scale;
+            let sub_size = 14. * scale;
             let shadow = if is_active {
                 s.first_line_text_shadow_strength
             } else {
@@ -1270,7 +1571,9 @@ impl Renderer {
                 anchor_x: 0.,
                 font_size,
             });
-            y += 3.52 * gap;
+            // 100% 行距为默认最小间距；200% 时两行之间留出约一整行歌词的距离。
+            // 额外间距按活动行字号计算，因此随字号线性变化。
+            y += 3.52 * gap + (gap_ratio - 1.).max(0.) * font_size;
         }
         if self.texts.is_empty() {
             let text = match state.lyrics_status.as_str() {
@@ -1307,9 +1610,32 @@ impl Renderer {
                 opacity: alpha,
             });
         }
-        let body_top = 52.;
-        let body_bottom = (height - 20.).max(body_top + 1.);
+        let body_top = BODY_TOP;
+        let body_bottom = (height - BODY_BOTTOM_MARGIN).max(body_top + 1.);
         let body_height = body_bottom - body_top;
+        if attempt == 0 {
+            // 只在「歌曲或影响排版的设置」变化时重新起算，其余换句重排沿用
+            // 高水位：只增高不收缩，彻底避免逐句换行的窗口伸缩与背景闪烁。
+            let signature = format!(
+                "{:.3}|{:.3}|{}|{}|{}|{}|{}|{:.2}|{}",
+                s.player_font_scale,
+                s.player_line_gap,
+                s.show_double_line,
+                s.show_romaji,
+                s.show_translation,
+                s.player_alignment,
+                width,
+                scale,
+                state.song.as_ref().map(|song| song.path.as_str()).unwrap_or(""),
+            );
+            let measured = y + BODY_TOP + BODY_BOTTOM_MARGIN;
+            if self.height_signature != signature {
+                self.height_signature = signature;
+                self.desired_height = Some(measured);
+            } else {
+                self.desired_height = Some(self.desired_height.unwrap_or(0.).max(measured));
+            }
+        }
         if y > body_height && attempt < 4 {
             return self.rebuild_fitted(
                 state,
@@ -1448,32 +1774,47 @@ impl Renderer {
             .as_ref()
             .map(|transition| (transition.started.elapsed().as_secs_f32() / 0.36).min(1.));
         self.target.BeginDraw();
+        // 背景盒的形状/颜色/不透明度由设置驱动，先铺背景再画歌词。
         // Alpha 1/255 keeps the unlocked transparent surface draggable without a visible box.
         self.target.Clear(Some(&color(
             "#101018",
             if surface {
-                0.42
+                0.
             } else if state.settings.is_locked {
                 0.
             } else {
                 1. / 255.
             },
         )));
+        self.target
+            .SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        // 背景盒不再描边：外圈细线在深色/浅色封面上都会显得突兀，用户要求只留底色。
+        let border: Option<(D2D1_COLOR_F, bool)> = None;
+        if surface {
+            let (bg, _is_light) = background_palette(&state.settings);
+            if bg.a > 0. {
+                self.paint_background(width, height, &state.settings)?;
+            }
+        }
         if let Some((start, end)) = interlude {
             self.paint_interlude(state, time, start, end);
         } else {
             self.paint_lyrics(time, transition_progress);
         }
-        self.target
-            .SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        if surface {
-            self.brush.SetColor(&color("#ffffff", 0.16));
-            self.target.DrawRectangle(
-                &rect(0.5, 0.5, width - 1., height - 1.),
-                &self.brush,
-                1.,
-                None,
-            );
+        if let Some((border_color, rounded)) = border {
+            self.brush.SetColor(&border_color);
+            if rounded {
+                let radius = background_radius(width, height, self.scale);
+                let geometry = self.background_geometry(width, height, radius)?;
+                self.target.DrawGeometry(&geometry, &self.brush, 1., None);
+            } else {
+                self.target.DrawRectangle(
+                    &rect(0.5, 0.5, width - 1., height - 1.),
+                    &self.brush,
+                    1.,
+                    None,
+                );
+            }
         }
         if toolbar {
             self.toolbar(width, state.settings.is_locked, playing, hover);
@@ -1513,7 +1854,7 @@ impl Renderer {
         };
         let width = self.width as f32 / self.scale;
         let height = self.height as f32 / self.scale;
-        let scale = settings.player_font_scale.clamp(0.5, 3.);
+        let scale = settings.player_font_scale.clamp(0.5, 2.);
         let radius = (4.2 * scale).min((width - 48.).max(1.) / 8.4);
         let step = radius * 3.2;
         let used = step * 2. + radius * 2.;
@@ -1527,9 +1868,9 @@ impl Renderer {
             .clamp(0., (available - used).max(0.))
             + 24.
             + radius;
-        let y = ((52. + height - 20.) / 2.
+        let y = ((BODY_TOP + height - BODY_BOTTOM_MARGIN) / 2.
             + height * settings.player_offset_y.clamp(-100., 100.) / 100.)
-            .clamp(52. + radius, (height - 20. - radius).max(52. + radius));
+            .clamp(BODY_TOP + radius, (height - BODY_BOTTOM_MARGIN - radius).max(BODY_TOP + radius));
         let elapsed = (time - start).max(0.) as f32;
         let completion = progress(start, end, time);
         self.target
@@ -1562,7 +1903,7 @@ impl Renderer {
         // Keep animated sentence groups inside the lyric body; the toolbar is painted
         // separately after this fixed clip is removed.
         self.target.PushAxisAlignedClip(
-            &rect(24., 52., (width - 48.).max(1.), (height - 72.).max(1.)),
+            &rect(24., BODY_TOP, (width - 48.).max(1.), (height - BODY_TOP - BODY_BOTTOM_MARGIN).max(1.)),
             D2D1_ANTIALIAS_MODE_ALIASED,
         );
         if let Some((transition, progress)) = self
@@ -1926,7 +2267,7 @@ mod tests {
                     text.layout.GetMetrics(&mut metrics).unwrap();
                     assert_eq!(metrics.lineCount, 1, "scroll mode must not wrap");
                     assert!(
-                        text.y >= 51.9 && text.y + text.height <= 140.1,
+                        text.y >= 39.9 && text.y + text.height <= 148.1,
                         "all rows must fit vertically: y={} h={}",
                         text.y,
                         text.height
@@ -1991,7 +2332,7 @@ mod tests {
                 wrap_state.settings.overflow_mode = "wrap".into();
                 renderer.rebuild(&wrap_state, 0).unwrap();
                 assert!(renderer.lanes.iter().all(|l| l.width <= 472.1));
-                assert!(renderer.texts.iter().all(|t| t.y + t.height <= 140.1));
+                assert!(renderer.texts.iter().all(|t| t.y + t.height <= 148.1));
                 let main_rows: std::collections::BTreeSet<_> = renderer.texts
                     [renderer.lanes[0].range.clone()]
                 .iter()
@@ -2019,7 +2360,7 @@ mod tests {
                     5,
                     "standalone romanization receives its own reserved row"
                 );
-                assert!(renderer.texts.iter().all(|t| t.y + t.height <= 140.1));
+                assert!(renderer.texts.iter().all(|t| t.y + t.height <= 148.1));
                 assert!(renderer.lanes[0].offset(18., 472.) >= renderer.lanes[0].offset(2., 472.));
                 renderer
                     .draw(hwnd, &plain, 18., false, false, None, false, 1.)

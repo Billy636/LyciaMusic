@@ -11,6 +11,8 @@ import {
 } from '../caches/librarySongPathCache';
 
 type BackendLocalSortMode = Exclude<LocalSortMode, 'custom'>;
+// 「最近播放」视图固定按最后播放时间倒序，后端提供专用排序模式。
+type RecentViewSortMode = BackendLocalSortMode | 'played_at';
 type SelectionSortMode = BackendLocalSortMode | 'name';
 type FavoriteDetailFilter = { type: 'artist' | 'album'; name: string } | null;
 
@@ -45,7 +47,7 @@ const makeFavoriteCacheKey = (
 const makeRecentCacheKey = (
   recentSongs: HistoryItem[],
   query: string,
-  sortMode: BackendLocalSortMode,
+  sortMode: RecentViewSortMode,
 ) => [
   'recent',
   sortMode,
@@ -125,7 +127,7 @@ export function useLibraryCollectionSongPathCache() {
   }: {
     recentSongs: HistoryItem[];
     query?: string;
-    sortMode: BackendLocalSortMode;
+    sortMode: RecentViewSortMode;
   }) => {
     if (recentSongs.length === 0) {
       return [];

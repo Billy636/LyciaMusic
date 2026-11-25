@@ -26,7 +26,11 @@ const mainHasCover = computed(() => ['cover', 'song', 'both'].includes(footer.va
 // Without a main-page thumbnail, keep the cover at its large-cover geometry
 // even when collapsed: only opacity changes, never a flight from empty space.
 const usesLargeCoverLayout = computed(() => !!props.isExpanded || !mainHasCover.value);
-const isCircleCover = computed(() => footer.value.coverShape[usesLargeCoverLayout.value ? 'detail' : 'main'] === 'circle');
+const coverScene = computed(() => usesLargeCoverLayout.value ? 'detail' : 'main');
+const activeCoverShape = computed(() => footer.value.coverShape[coverScene.value]);
+const isCircleCover = computed(() => activeCoverShape.value === 'circle');
+const isSquareCover = computed(() => activeCoverShape.value === 'square');
+const coverRotateEnabled = computed(() => footer.value.behavior[coverScene.value].coverRotate !== false);
 const isCoverFocusMove = ref(false);
 watch([() => !!props.isExpanded, () => !!props.isCoverFocused], ([expanded, focused], [wasExpanded, wasFocused]) => {
   // Only an in-page layout toggle uses the focus timing. A remembered layout
@@ -227,7 +231,7 @@ const rotationSurfaceRef = ref<HTMLElement | null>(null);
 const reflectionRotationRef = ref<HTMLElement | null>(null);
 const { isMainWindowLowPower, mainWindowRenderingSnapshot } = useRenderingPower();
 useCoverRotation(rotationSurfaceRef, reflectionRotationRef,
-  () => isCircleCover.value && !!currentSong.value,
+  () => isCircleCover.value && coverRotateEnabled.value && !!currentSong.value,
   () => isPlaying.value && !isMainWindowLowPower.value
     && (!!props.isExpanded || (mainHasCover.value && footerCoverVisible.value)), 700);
 useCoverTilt(detailCoverRef, tiltSurfaceRef, () => !!props.isExpanded
@@ -252,7 +256,7 @@ defineExpose({ detailCoverRef });
       :aria-label="props.isCoverFocused ? '恢复封面与歌词布局' : '居中欣赏封面，隐藏歌词'"
       :class="[
         usesLargeCoverLayout ? 'top-[45%] left-[calc(75px+18%)] -translate-x-1/2 -translate-y-1/2 w-[clamp(220px,45vh,580px)]' : 'top-[calc(100vh-64px)] left-[16px] translate-x-0 translate-y-0 w-12',
-        isCircleCover ? 'rounded-[50%]' : usesLargeCoverLayout ? 'rounded-2xl' : 'rounded-lg',
+        isCircleCover ? 'rounded-[50%]' : isSquareCover ? 'rounded-none' : 'cover-rounded-squircle',
         props.isExpanded ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none',
       ]"
       :style="[coverTransitionStyle, {
@@ -295,7 +299,7 @@ defineExpose({ detailCoverRef });
           <div v-if="props.isExpanded" class="absolute top-[calc(100%+2px)] left-0 w-full h-[65%] pointer-events-none z-10 reflection-wrapper overflow-hidden">
             <div class="absolute inset-0 reflection-glass overflow-hidden">
               <div class="absolute top-0 left-0 w-full aspect-square scale-y-[-1]">
-                <div ref="reflectionRotationRef" class="reflection-mask cover-rotation-surface w-full h-full overflow-hidden" :class="isCircleCover ? 'rounded-[50%]' : 'rounded-2xl'">
+                <div ref="reflectionRotationRef" class="reflection-mask cover-rotation-surface w-full h-full overflow-hidden" :class="isCircleCover ? 'rounded-[50%]' : isSquareCover ? 'rounded-none' : 'cover-rounded-squircle'">
                   <transition name="song-switch-cover" mode="out-in">
                     <div :key="currentSongPath" class="w-full h-full relative">
                       <img v-if="reflectionCoverUrl" :src="reflectionCoverUrl" class="absolute top-0 left-0 w-full aspect-square object-cover transition-opacity duration-[240ms] ease-out" draggable="false" decoding="async" />
@@ -321,6 +325,11 @@ defineExpose({ detailCoverRef });
 </template>
 
 <style scoped>
+/* 圆角矩形：连续曲率（iOS squircle），尺寸不变；不支持 corner-shape 时回落普通圆角。 */
+.cover-rounded-squircle { border-radius: 14%; }
+@supports (corner-shape: squircle) {
+  .cover-rounded-squircle { corner-shape: squircle; }
+}
 .shared-cover {
   --cover-layout-easing: cubic-bezier(0.22, 1, 0.36, 1);
   /* Only transform changes when focusing; keep the existing thumbnail flight separate. */

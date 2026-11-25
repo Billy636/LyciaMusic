@@ -134,7 +134,7 @@ function commitValue() {
 
 .appearance-range-label {
   min-width: 0;
-  color: rgba(255, 255, 255, 0.82);
+  color: color-mix(in srgb, currentColor 82%, transparent);
   font-size: 13px;
   font-weight: 500;
 }
@@ -155,7 +155,7 @@ function commitValue() {
 .appearance-range-value {
   min-width: 36px;
   margin-right: 4px;
-  color: rgba(255, 255, 255, 0.5);
+  color: color-mix(in srgb, currentColor 50%, transparent);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -169,10 +169,10 @@ function commitValue() {
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid color-mix(in srgb, currentColor 8%, transparent);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.6);
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  color: color-mix(in srgb, currentColor 60%, transparent);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
@@ -180,9 +180,9 @@ function commitValue() {
 }
 
 .appearance-range-button:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.95);
+  border-color: color-mix(in srgb, currentColor 18%, transparent);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  color: color-mix(in srgb, currentColor 95%, transparent);
 }
 
 .appearance-range-button:disabled {
@@ -193,7 +193,7 @@ function commitValue() {
 .appearance-range-reset {
   border-color: transparent;
   background: transparent;
-  color: rgba(255, 255, 255, 0.45);
+  color: color-mix(in srgb, currentColor 45%, transparent);
 }
 
 .appearance-range-input {
@@ -213,13 +213,13 @@ function commitValue() {
 .appearance-range-input::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(to right, rgba(255, 255, 255, 0.8) var(--range-progress), rgba(255, 255, 255, 0.18) var(--range-progress));
+  background: linear-gradient(to right, color-mix(in srgb, currentColor 80%, transparent) var(--range-progress), color-mix(in srgb, currentColor 18%, transparent) var(--range-progress));
 }
 
 .appearance-range-input::-moz-range-track {
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(to right, rgba(255, 255, 255, 0.8) var(--range-progress), rgba(255, 255, 255, 0.18) var(--range-progress));
+  background: linear-gradient(to right, color-mix(in srgb, currentColor 80%, transparent) var(--range-progress), color-mix(in srgb, currentColor 18%, transparent) var(--range-progress));
 }
 
 .appearance-range-input::-webkit-slider-thumb {
@@ -229,7 +229,7 @@ function commitValue() {
   margin-top: -4px;
   border: 0;
   border-radius: 50%;
-  background: #fff;
+  background: currentColor;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
@@ -238,13 +238,13 @@ function commitValue() {
   height: 12px;
   border: 0;
   border-radius: 50%;
-  background: #fff;
+  background: currentColor;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
 .appearance-range-button:focus-visible,
 .appearance-range-input:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.75);
+  outline: 2px solid color-mix(in srgb, currentColor 75%, transparent);
   outline-offset: 3px;
 }
 

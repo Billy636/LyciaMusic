@@ -100,10 +100,6 @@ export const createPlayerUiShell = ({
     uiStore.showPlayerDetail = !uiStore.showPlayerDetail;
   };
 
-  const toggleQueue = () => {
-    uiStore.showQueue = !uiStore.showQueue;
-  };
-
   return {
     handleVolume,
     handleVolumeWheel,
@@ -115,6 +111,5 @@ export const createPlayerUiShell = ({
     removeSongFromList,
     toggleAlwaysOnTop,
     togglePlayerDetail,
-    toggleQueue,
   };
 };

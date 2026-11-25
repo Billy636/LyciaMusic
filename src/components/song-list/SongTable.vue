@@ -801,7 +801,7 @@ const getRowStyle = (songIndex: number, songPath: string) => {
           @dblclick="handleSongDoubleClick(song)"
           @contextmenu.prevent="emit('contextmenu', $event, song)"
           @dragstart.prevent
-          class="group w-full min-w-0 border-b border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5 select-none cursor-default relative flex items-center px-2 gap-3 [touch-action:none]"
+          class="group w-full min-w-0 border-b border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/10 select-none cursor-default relative flex items-center px-2 gap-3 [touch-action:none]"
           :class="{
             'bg-red-500/10 dark:bg-red-500/20': selectedPaths.has(song.path),
             'song-drag-source': isDraggedSong(song.path),

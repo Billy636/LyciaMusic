@@ -239,7 +239,7 @@ const getGradientForAlbum = (name: string) => {
                   }
                   showSortMenu = false;
                 "
-                class="px-3 py-2 text-xs cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+                class="px-3 py-2 text-xs cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-white/10 transition-colors"
                 :class="(albumDetailSortMode || '').startsWith(mode) ? 'text-blue-500 font-medium' : 'text-gray-600 dark:text-gray-300'"
               >
                 <span>{{ sortLabelMap[mode] }}</span>

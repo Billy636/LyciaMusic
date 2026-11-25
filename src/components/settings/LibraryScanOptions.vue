@@ -221,7 +221,7 @@ onScopeDispose(() => { browseGeneration++; });
 .scan-picker-entries { max-height: 220px; overflow-y: auto; }
 .scan-picker-entry { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; color: inherit; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .scan-picker-entry span { flex: 1; }
-.scan-picker-entry:hover { background: rgb(236 65 65 / .07); }
+.scan-picker-entry:hover { background: var(--hover-surface); }
 .scan-picker-empty { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0; padding: 18px 0; color: var(--app-text-secondary); font-size: 12px; }
 .scan-picker-footer { display: flex; justify-content: flex-end; margin-top: 10px; }
 .scan-picker-footer button { min-height: 32px; padding: 6px 11px; border: 0; border-radius: 7px; background: #ec4141; color: white; font: inherit; font-size: 12px; cursor: pointer; }

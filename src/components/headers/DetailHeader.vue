@@ -197,7 +197,7 @@ const handlePlayAll = () => {
             <button 
               v-if="showRename" 
               @click="emit('rename')" 
-              class="text-gray-500 dark:text-white/60 hover:text-gray-800 dark:hover:text-white transition p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 shrink-0"
+              class="text-gray-500 dark:text-white/60 hover:text-gray-800 dark:hover:text-white transition p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 shrink-0"
               title="修改名称"
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -260,7 +260,7 @@ const handlePlayAll = () => {
              >
                <div class="px-3 py-2 text-xs text-gray-400">当前歌单排序</div>
                <button type="button" role="menuitemradio" :aria-checked="followsDefault"
-                 class="w-full px-3 py-2 text-xs flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-white/5 focus-visible:outline focus-visible:outline-blue-500"
+                 class="w-full px-3 py-2 text-xs flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-white/10 focus-visible:outline focus-visible:outline-blue-500"
                  :class="followsDefault ? 'text-blue-500 font-medium' : 'text-gray-600 dark:text-gray-300'"
                  @click="setPlaylistSortMode(null); finishSortSelection()">
                  <span>跟随默认</span><span class="ml-auto text-gray-400 text-[10px]">{{ defaultSortLabel }}</span>
@@ -279,7 +279,7 @@ const handlePlayAll = () => {
                    }
                    finishSortSelection();
                  "
-                 class="w-full px-3 py-2 text-xs cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-white/5 transition-colors focus-visible:outline focus-visible:outline-blue-500"
+                 class="w-full px-3 py-2 text-xs cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-white/10 transition-colors focus-visible:outline focus-visible:outline-blue-500"
                  :class="!followsDefault && playlistSortMode.startsWith(mode) ? 'text-blue-500 font-medium' : 'text-gray-600 dark:text-gray-300'"
                >
                  <span>{{ { title: '\u6b4c\u66f2\u540d', name: '\u6587\u4ef6\u540d', artist: '\u6b4c\u624b', added_at: '\u6dfb\u52a0\u65f6\u95f4', custom: '\u81ea\u5b9a\u4e49' }[mode] }}</span>

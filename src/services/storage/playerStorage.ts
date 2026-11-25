@@ -51,6 +51,7 @@ const normalizeHistoryItem = (value: unknown): HistoryItem | null => {
     return {
       path: item.path,
       playedAt: item.playedAt,
+      ...(typeof item.identity === 'string' ? { identity: item.identity } : {}),
     };
   }
 

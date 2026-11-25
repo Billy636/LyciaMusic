@@ -8,7 +8,7 @@ describe('PlayQueueSidebar shared player panel', () => {
     expect(source).toContain("import './playerSidePanel.css'");
     expect(source).toContain('class="player-side-panel player-side-panel--right pointer-events-auto"');
     expect(source).toContain('<transition name="player-side-panel" appear>');
-    expect(source).toContain("'player-side-panel--solid-backdrop': !showPlayerDetail");
+    expect(source).not.toContain('player-side-panel--solid-backdrop');
     expect(source).not.toContain('slide-right');
     expect(source).not.toContain('w-[340px]');
     expect(source).not.toContain('calc(100vh -');

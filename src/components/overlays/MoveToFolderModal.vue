@@ -181,7 +181,7 @@ onUnmounted(() => {
           <div v-if="loadingRoots && !roots.length" class="flex justify-center py-10"><LoaderCircle class="h-5 w-5 animate-spin text-gray-400" /></div>
           <p v-else-if="!roots.length" class="py-10 text-center text-sm text-gray-400">暂无音乐库文件夹</p>
           <div v-for="{ node, depth } in rows" :key="node.path" class="flex items-center rounded-lg"
-            :class="selected?.path === node.path ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'text-gray-800 hover:bg-black/5 dark:text-gray-200 dark:hover:bg-white/5'"
+            :class="selected?.path === node.path ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'text-gray-800 hover:bg-black/5 dark:text-gray-200 dark:hover:bg-white/10'"
             :style="{ paddingLeft: (depth * 18 + 4) + 'px' }">
             <button v-if="node.child_count > 0" type="button" :disabled="locked || loading.has(node.path)"
               :aria-label="(expanded.has(node.path) ? '折叠 ' : '展开 ') + node.name" :aria-expanded="expanded.has(node.path)"

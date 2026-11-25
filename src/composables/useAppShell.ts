@@ -5,7 +5,6 @@ import { usePlayer } from './player';
 import { useAppThemeSync } from './useAppThemeSync';
 import { useExternalPathBridge } from './useExternalPathBridge';
 import { useAppShellTheme } from './useAppShellTheme';
-import { useMiniPlayerWindowBridge } from './useMiniPlayerWindowBridge';
 import { useTaskbarPlayerBridge } from './useTaskbarPlayerBridge';
 import { useSongNotificationBridge } from './useSongNotificationBridge';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
@@ -34,7 +33,6 @@ export function useAppShell() {
     currentCover,
     currentCoverFull,
     currentCoverPath,
-    isMiniMode,
     showPlayerDetail,
     handleExternalPaths,
     libraryScanProgress,
@@ -137,7 +135,6 @@ export function useAppShell() {
     searchQuery,
   });
 
-  useMiniPlayerWindowBridge();
   useTaskbarPlayerBridge();
   useSongNotificationBridge();
   useKeyboardShortcuts();
@@ -181,7 +178,6 @@ export function useAppShell() {
   };
 
   return {
-    isMiniMode,
     showPlayerDetail,
     isExternalDragActive,
     libraryScanProgress,

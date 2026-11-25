@@ -49,7 +49,7 @@ const showFatalError = (title: string, error: unknown) => {
   console.error(title, error)
 
   try {
-    localStorage.setItem('lycia_last_fatal_error', `${title}\n\n${message}`)
+    localStorage.setItem('lycia_last_fatal_error', `[${currentWindowLabel}] ${title}\n\n${message}`)
   } catch {
     // Ignore storage failures. The visible fallback is the important part.
   }
@@ -104,6 +104,11 @@ const bootstrapApp = async () => {
   }
 
   app.mount('#app')
+  try {
+    localStorage.setItem('lycia_last_mount_ok', currentWindowLabel)
+  } catch {
+    // 诊断信息写入失败不影响启动。
+  }
   if (currentWindowLabel === 'main' && storage) {
     try {
       storage = await tauriInvoke('complete_data_storage_migration')

@@ -1,4 +1,4 @@
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 
 import { useThemeSettings } from './useThemeSettings';
 import { useWindowMaterial, type WindowMaterialMode } from './windowMaterial';
@@ -9,6 +9,13 @@ const clampValue = (value: number, min: number, max: number) => (
 );
 type SelectableWindowMaterialMode = Exclude<WindowMaterialMode, 'none'>;
 type WindowMaterialDisabledReason = 'windows' | 'windows11' | 'unsupported' | 'transparency' | 'theme-conflict' | null;
+
+type ActiveDynamicBgType = Exclude<ThemeSettings['dynamicBgType'], 'none'>;
+// 关闭后再启用时恢复到用户上次选中的模式，避免每次都回到同一个默认值。
+let lastDynamicBgType: ActiveDynamicBgType = 'blur';
+let lastWindowMaterialMode: SelectableWindowMaterialMode = 'acrylic';
+const DYNAMIC_BG_TYPES: readonly ActiveDynamicBgType[] = ['flow', 'blur', 'mist'];
+const MATERIAL_MODES: readonly SelectableWindowMaterialMode[] = ['acrylic', 'mica', 'blur', 'transparent'];
 
 export function useSettingsThemeControls() {
   const { theme, patchTheme, setThemeMode, setDynamicBackgroundType, setWindowMaterial } = useThemeSettings();
@@ -58,6 +65,19 @@ export function useSettingsThemeControls() {
     () => colorScheme.value === 'custom' || hasWindowMaterialSelected.value,
   );
 
+  // 「关闭」改由滑动开关表达：开关状态即是否为 none；关掉再打开时恢复上次模式。
+  const isDynamicBgEnabled = computed(() => theme.value.dynamicBgType !== 'none');
+  const isWindowMaterialEnabled = computed(() => materialMode.value !== 'none');
+
+  watch(() => theme.value.dynamicBgType, (value) => {
+    if (value !== 'none' && DYNAMIC_BG_TYPES.includes(value)) lastDynamicBgType = value;
+  }, { immediate: true });
+  watch(materialMode, (value) => {
+    if (value !== 'none' && MATERIAL_MODES.includes(value as SelectableWindowMaterialMode)) {
+      lastWindowMaterialMode = value as SelectableWindowMaterialMode;
+    }
+  }, { immediate: true });
+
   const setColorScheme = (mode: 'system' | 'light' | 'dark' | 'custom') => {
     colorScheme.value = mode;
   };
@@ -100,33 +120,35 @@ export function useSettingsThemeControls() {
     getWindowMaterialModeDisabledReason(mode) !== null
   );
 
-  const isWindowMaterialButtonDisabled = (mode: SelectableWindowMaterialMode) => (
-    materialMode.value !== mode && isWindowMaterialModeDisabled(mode)
+  const isWindowMaterialButtonDisabled = (mode: WindowMaterialMode) => (
+    mode !== 'none' && materialMode.value !== mode && isWindowMaterialModeDisabled(mode)
   );
 
-  const toggleWindowMaterial = (mode: SelectableWindowMaterialMode) => {
-    if (materialMode.value === mode) {
-      materialMode.value = 'none';
-      if (mode === 'blur') {
-        showBlurTuning.value = false;
-      }
-      if (mode === 'transparent') {
-        showTransparentTuning.value = false;
-      }
-      return;
-    }
-
-    if (isWindowMaterialModeDisabled(mode)) {
-      return;
-    }
+  /** 与「动态背景」一致的单选语义：点选即选中；关闭使用独立的滑动开关。 */
+  const selectWindowMaterial = (mode: WindowMaterialMode) => {
+    if (mode !== 'none' && isWindowMaterialModeDisabled(mode)) return;
+    if (materialMode.value === mode && mode !== 'none') return;
 
     materialMode.value = mode;
-    if (mode !== 'blur') {
-      showBlurTuning.value = false;
+    if (mode !== 'blur') showBlurTuning.value = false;
+    if (mode !== 'transparent') showTransparentTuning.value = false;
+  };
+
+  const toggleDynamicBackground = () => {
+    if (isDynamicBgDisabled.value) return;
+    setDynamicBackgroundType(isDynamicBgEnabled.value ? 'none' : lastDynamicBgType);
+  };
+
+  const toggleWindowMaterial = () => {
+    if (isWindowMaterialDisabled.value) return;
+    if (isWindowMaterialEnabled.value) {
+      selectWindowMaterial('none');
+      return;
     }
-    if (mode !== 'transparent') {
-      showTransparentTuning.value = false;
-    }
+    // 优先恢复上次模式；该模式当前不可用时退到第一个可用模式，全部不可用则不启用。
+    const candidates = [lastWindowMaterialMode, ...MATERIAL_MODES];
+    const available = candidates.find(mode => !isWindowMaterialModeDisabled(mode));
+    if (available) selectWindowMaterial(available);
   };
 
   const openCustomModal = () => {
@@ -195,6 +217,10 @@ export function useSettingsThemeControls() {
     showTransparentTuning,
     setColorScheme,
     setDynamicType,
+    selectWindowMaterial,
+    isDynamicBgEnabled,
+    isWindowMaterialEnabled,
+    toggleDynamicBackground,
     toggleWindowMaterial,
     openCustomModal,
     toggleBlurTuning,

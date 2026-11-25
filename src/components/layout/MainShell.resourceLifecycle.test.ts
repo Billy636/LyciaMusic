@@ -14,9 +14,9 @@ describe('MainShell heavy UI lifecycle', () => {
   });
 
   it('mounts the remaining heavy overlays only while they are needed', () => {
-    expect(source).toContain('v-if="!isMiniMode && isPlayQueueMounted"');
-    expect(source).toContain('v-if="!isMiniMode && showAddToPlaylistModal"');
-    expect(source).toContain('v-if="!isMiniMode && isSongInfoVisible"');
+    expect(source).toContain('v-if="isPlayQueueMounted"');
+    expect(source).toContain('v-if="showAddToPlaylistModal"');
+    expect(source).toContain('v-if="isSongInfoVisible"');
   });
 
   it('keeps the queue instance alive until its leave animation finishes', () => {

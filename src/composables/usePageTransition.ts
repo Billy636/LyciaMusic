@@ -39,7 +39,6 @@ export function usePageTransition(
 export function usePageTransitionLayout(
   getRoutePath: () => string,
   skipNextPageTransition: Ref<boolean>,
-  isMiniMode: Ref<boolean>,
 ): {
   isSettingsLayout: ComputedRef<boolean>;
   commitPageLayout: () => void;
@@ -54,8 +53,8 @@ export function usePageTransitionLayout(
   // The old page must keep its original width throughout its leave animation.
   // When animation is bypassed (or the main shell is absent), no hook can be
   // relied on to advance the layout, so apply the actual route immediately.
-  watch([getRoutePath, skipNextPageTransition, isMiniMode], () => {
-    if (skipNextPageTransition.value || isMiniMode.value) commitPageLayout();
+  watch([getRoutePath, skipNextPageTransition], () => {
+    if (skipNextPageTransition.value) commitPageLayout();
   }, { flush: 'sync' });
 
   return { isSettingsLayout, commitPageLayout };

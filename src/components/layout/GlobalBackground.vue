@@ -25,7 +25,7 @@ import { useCustomBackgroundPreviewState } from '../../composables/customBackgro
 import FlowBackground from './FlowBackground.vue';
 import MistBackground from './MistBackground.vue';
 
-const { currentSong, currentCover, currentCoverPath, currentCoverFull, showPlayerDetail, isMiniMode } = usePlayer();
+const { currentSong, currentCover, currentCoverPath, currentCoverFull, showPlayerDetail } = usePlayer();
 const { theme, isDarkTheme, patchTheme } = useThemeSettings();
 const { activeWindowMaterial } = useWindowMaterial();
 const { loadFullCover } = useCoverCache();
@@ -33,7 +33,7 @@ const { isMainWindowLowPower } = useRenderingPower();
 const { isCustomBackgroundPreviewOpen } = useCustomBackgroundPreviewState();
 const playbackStore = usePlaybackStore();
 const { currentSongPath } = storeToRefs(playbackStore);
-const isBackgroundPreparationSuspended = computed(() => isMainWindowLowPower.value || isMiniMode.value);
+const isBackgroundPreparationSuspended = computed(() => isMainWindowLowPower.value);
 
 // --- 大背景物理尺寸动态测量 ---
 const backgroundRoot = ref<HTMLElement | null>(null);
@@ -284,7 +284,7 @@ const customMediaSrc = computed(() => {
 });
 
 const shouldSuspendCustomVideo = computed(() => (
-  isMainWindowLowPower.value || isCustomBackgroundPreviewOpen.value || isMiniMode.value
+  isMainWindowLowPower.value || isCustomBackgroundPreviewOpen.value
 ));
 const customVideoPlaybackSrc = computed(() => (
   renderedCustomMedia.value?.mediaType === 'video' && !shouldSuspendCustomVideo.value
@@ -563,7 +563,7 @@ const customBgTransform = computed(() => {
         v-if="activeBackgroundInfo?.type === 'flow'"
         :cover-src="bgImageSrc"
         :cover-pending="coverPending"
-        :paused="reduceDynamicEffects || isMiniMode"
+        :paused="reduceDynamicEffects"
         :dark="isDarkTheme"
       />
     </transition>
@@ -572,7 +572,7 @@ const customBgTransform = computed(() => {
       <MistBackground
         v-if="activeBackgroundInfo?.type === 'mist'"
         :cover-src="activeBackgroundInfo.src"
-        :suspended="reduceDynamicEffects || isMiniMode"
+        :suspended="reduceDynamicEffects"
         :dark="isDarkTheme"
       />
     </transition>
@@ -598,7 +598,7 @@ const customBgTransform = computed(() => {
 
     <transition name="fade">
       <div
-        v-if="activeBackgroundInfo?.type === 'custom' && customMediaSrc && !isMiniMode"
+        v-if="activeBackgroundInfo?.type === 'custom' && customMediaSrc"
         class="absolute inset-0 global-background-container overflow-hidden"
       >
         <div

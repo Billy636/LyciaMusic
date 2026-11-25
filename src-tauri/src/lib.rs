@@ -78,7 +78,8 @@ use statistics::{
 };
 use system_fonts::get_system_fonts;
 use taskbar::{
-    cancel_taskbar_player_drag, drag_taskbar_player, get_taskbar_tray_geometry,
+    cancel_taskbar_player_drag, drag_taskbar_player, drag_taskbar_player_free,
+    get_taskbar_tray_geometry,
     install_taskbar_zorder_guard, refresh_taskbar_window_topmost, setup_taskbar_window,
     uninstall_taskbar_zorder_guard,
 };
@@ -90,7 +91,7 @@ use toolbox::{
 
 #[cfg(target_os = "windows")]
 use toolbox::{append_webview2_browser_arg, should_disable_gpu_for_startup};
-use window_boundary::{set_mini_boundary_enabled, set_retain_material_on_unfocus};
+use window_boundary::set_retain_material_on_unfocus;
 use window_fullscreen::set_immersive_fullscreen;
 use window_material::{apply_transparent_window, get_window_material_capabilities};
 use window_theme::set_dark_mode_for_window;
@@ -133,7 +134,7 @@ pub fn run() {
             app.handle().plugin(
                 tauri_plugin_window_state::Builder::default()
                     .with_filename(state_path.to_string_lossy())
-                    .with_denylist(&["desktop-lyrics", "mini-player", "taskbar-player", "tray-menu", "song-notification"])
+                    .with_denylist(&["desktop-lyrics", "taskbar-player", "tray-menu", "song-notification"])
                     .build(),
             )?;
             for config in &app.config().app.windows {
@@ -282,7 +283,6 @@ pub fn run() {
             open_external_program,
             file_exists,
             refresh_folder_songs,
-            set_mini_boundary_enabled,
             set_retain_material_on_unfocus,
             get_window_material_capabilities,
             apply_transparent_window,
@@ -299,6 +299,7 @@ pub fn run() {
             setup_taskbar_window,
             get_taskbar_tray_geometry,
             drag_taskbar_player,
+            drag_taskbar_player_free,
             cancel_taskbar_player_drag,
             install_taskbar_zorder_guard,
             refresh_taskbar_window_topmost,

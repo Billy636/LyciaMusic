@@ -11,13 +11,29 @@ import { clearImageCaches } from '../../caches/imageCaches';
 import { appApi } from '../../services/tauri/appApi';
 import ConfirmModal from '../overlays/ConfirmModal.vue';
 import SettingsDataStorage from './SettingsDataStorage.vue';
+import SettingsNumberControl from './SettingsNumberControl.vue';
 
-const { settings } = useSettings();
+const { settings, patchSettings } = useSettings();
 const {
   pauseSong,
   libraryScanProgress,
 } = usePlayer();
 const { showToast } = useToast();
+
+const lyricsSyncOffsetMs = computed({
+  get: () => Math.round(settings.value.lyricsSyncOffset * 1000),
+  set: (value: number) => {
+    const numeric = Number(value);
+    const offset = Number.isFinite(numeric)
+      ? Math.max(-1000, Math.min(1000, Math.round(numeric / 10) * 10)) : 0;
+    patchSettings({ lyricsSyncOffset: offset / 1000 });
+  },
+});
+
+const lyricsSyncOffsetLabel = computed(() => {
+  const offset = lyricsSyncOffsetMs.value;
+  return offset === 0 ? '0 ms' : `${offset > 0 ? '+' : ''}${offset} ms`;
+});
 
 const launchOnStartup = ref(false);
 const isLoadingLaunchOnStartup = ref(true);
@@ -237,7 +253,7 @@ const handleClearCaches = async () => {
         <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
           <div>
             <div class="text-sm font-medium text-gray-800 dark:text-gray-200">切歌提示</div>
-            <div class="mt-1 text-xs app-text-secondary">切换歌曲时在桌面右下角显示</div>
+            <div class="mt-1 text-xs app-text-secondary">切换歌曲时在桌面右下角显示。可至个性化-切歌卡片自定义。</div>
           </div>
           <button
             type="button"
@@ -250,6 +266,21 @@ const handleClearCaches = async () => {
           >
             <span class="inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out shadow-sm" :class="settings.showSongNotification ? 'translate-x-6' : 'translate-x-1'" />
           </button>
+        </div>
+
+        <div class="p-4 flex items-center justify-between gap-4 border-b border-[var(--settings-divider)] hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
+          <div class="min-w-0">
+            <div class="text-sm font-medium text-gray-800 dark:text-gray-200">同步偏移（全局）</div>
+            <div class="mt-1 text-xs app-text-secondary">正值让歌词更晚显示，负值让歌词更早显示；同时影响播放页、桌面歌词及铃动窗歌词。</div>
+          </div>
+          <div class="flex items-center gap-3 shrink-0">
+            <span class="rounded-full bg-[#EC4141]/10 px-3 py-1 text-xs font-medium text-[#EC4141] tabular-nums">{{ lyricsSyncOffsetLabel }}</span>
+            <div class="w-[300px] max-w-[36vw]">
+              <SettingsNumberControl :model-value="lyricsSyncOffsetMs" :min="-1000" :max="1000"
+                :step="50" unit="ms" :default-value="0" label="同步偏移"
+                @update:model-value="lyricsSyncOffsetMs = $event" />
+            </div>
+          </div>
         </div>
 
         <div class="p-4 flex items-center justify-between border-b border-[var(--settings-divider)] last:border-0 hover:bg-white/40 dark:hover:bg-white/10 transition-colors">
@@ -347,11 +378,13 @@ const handleClearCaches = async () => {
   width: min(280px, calc(100vw - 48px));
   max-width: calc(100vw - 48px);
   pointer-events: none;
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  border: 1px solid var(--panel-surface-border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
-  color: rgb(31 41 55);
+  background: var(--panel-surface-bg);
+  box-shadow: var(--panel-surface-shadow);
+  color: var(--panel-surface-fg);
+  -webkit-backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%);
+  backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.55;
@@ -411,9 +444,9 @@ const handleClearCaches = async () => {
 }
 
 .dark .settings-side-effect-tip-popover {
-  border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(31, 31, 31, 0.96);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+  border-color: var(--panel-surface-border);
+  background: var(--panel-surface-bg);
+  box-shadow: var(--panel-surface-shadow);
   color: rgba(255, 255, 255, 0.92);
 }
 

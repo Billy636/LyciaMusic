@@ -354,7 +354,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPAR
             let scale = HIT.with(Cell::get).scale;
             info.ptMinTrackSize = POINT {
                 x: (520. * scale) as i32,
-                y: (160. * scale) as i32,
+                y: (120. * scale) as i32,
             };
             info.ptMaxTrackSize = POINT {
                 x: (1440. * scale) as i32,
@@ -393,7 +393,7 @@ fn drag_bounds(drag: Drag, cursor: POINT, scale: f32) -> Bounds {
     }
     if top || bottom {
         b.height = (b.height + if top { -dy } else { dy })
-            .clamp((160. * scale) as i32, (1000. * scale) as i32);
+            .clamp((120. * scale) as i32, (1000. * scale) as i32);
         if top {
             b.y += drag.bounds.height - b.height;
         }
@@ -437,7 +437,7 @@ fn constrain_bounds_size(mut bounds: Bounds, scale: f32) -> Bounds {
         .clamp((520. * scale) as i32, (1440. * scale) as i32);
     bounds.height = bounds
         .height
-        .clamp((160. * scale) as i32, (1000. * scale) as i32);
+        .clamp((120. * scale) as i32, (1000. * scale) as i32);
     bounds
 }
 
@@ -557,6 +557,8 @@ unsafe fn run(
     let mut recovery_count = 0;
     let mut last_cursor = POINT::default();
     let mut cursor_moved_at = Instant::now();
+    // 原生工具栏的切歌悬停：只在进入/离开按钮时发一次，交给主窗口驱动 50% 预告。
+    let mut last_switch_hover: Option<&'static str> = None;
     let mut previous_opacity = 1.;
     let mut last_frame = Instant::now() - Duration::from_secs(1);
     // The first frame must succeed before open() reports success.
@@ -676,6 +678,33 @@ unsafe fn run(
         let width = bounds.width as f32 / scale;
         let over = x >= 0. && y >= 0. && x < width && y < bounds.height as f32 / scale;
         let hover = toolbar_hit(x, y, width, state.settings.is_locked);
+        // 上一首 / 下一首按钮的悬停预览（与播放底栏、铃动窗同一条信号通道）。
+        let switch_hover = if state.settings.is_locked {
+            None
+        } else {
+            match hover {
+                Some(1) => Some("previous"),
+                Some(3) => Some("next"),
+                _ => None,
+            }
+        };
+        if switch_hover != last_switch_hover {
+            if let Some(direction) = last_switch_hover {
+                let _ = app.emit_to(
+                    "main",
+                    "song-notification:switch",
+                    serde_json::json!({"module":"desktopLyrics","phase":"leave","direction":direction}),
+                );
+            }
+            if let Some(direction) = switch_hover {
+                let _ = app.emit_to(
+                    "main",
+                    "song-notification:switch",
+                    serde_json::json!({"module":"desktopLyrics","phase":"hover","direction":direction}),
+                );
+            }
+            last_switch_hover = switch_hover;
+        }
         for event in events {
             match event {
                 WindowEvent::Click => {
@@ -809,8 +838,10 @@ unsafe fn run(
         display_position.observe(bounds);
         let toolbar_state = toolbar_interaction(state.settings.is_locked, over, hover, revealed);
         let toolbar = toolbar_state.visible;
+        // 背景框严格由「始终显示背景」设置决定；reveal 只短暂显示工具栏，
+        // 不再强制弹出背景盒，否则首次打开会先闪一个灰色背景框再消失。
         let surface = state.settings.always_show_shadow_background
-            || (!state.settings.is_locked && (over || revealed));
+            || (!state.settings.is_locked && over);
         let interaction = (toolbar, surface, hover);
         if previous_interaction != interaction {
             dirty = true;
@@ -863,6 +894,25 @@ unsafe fn run(
                 renderer.rebuild(&state, active)?;
                 layout_dirty = false;
                 dirty = true;
+                // 窗口高度跟随完整字号排版自适应：字号小时收缩消除空白，
+                // 字号大时增高保证不压缩；高度仍有 160~1000 逻辑像素的边界。
+                if let Some(desired_logical) = renderer.pending_height() {
+                    let desired_px = (desired_logical * scale).ceil() as i32;
+                    if (bounds.height - desired_px).abs() > (6. * scale).ceil() as i32 {
+                        let mut next = bounds;
+                        next.height = desired_px;
+                        let mut fitted = constrain_bounds_size(next, scale);
+                        if fitted.height != bounds.height {
+                            // 保持顶边不动：高度自适应只向下伸展/收缩。底边锚定会随
+                            // 每次伸缩累积 y 偏移，导致歌词窗口逐渐飘出屏幕且无法召回。
+                            fitted.y = bounds.y;
+                            position(hwnd, fitted)?;
+                            bounds = fitted;
+                            let _ = app.emit_to("main", "desktop-lyrics:bounds", bounds);
+                            layout_dirty = true;
+                        }
+                    }
+                }
             } else if active_changed {
                 if clock.playing() {
                     renderer.transition_to(&state, active)?;
@@ -960,7 +1010,7 @@ mod tests {
                 x: 4000,
                 y: -600,
                 width: 2880,
-                height: 320
+                height: 240
             },
         );
     }
@@ -1225,9 +1275,9 @@ mod tests {
             b,
             Bounds {
                 x: 480,
-                y: 220,
+                y: 260,
                 width: 520,
-                height: 160
+                height: 120
             }
         );
     }

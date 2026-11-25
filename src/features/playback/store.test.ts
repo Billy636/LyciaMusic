@@ -41,13 +41,11 @@ describe('playback and ui stores', () => {
   it('stores ui state directly in the ui store', () => {
     const uiStore = useUiStore();
 
-    uiStore.showQueue = true;
+    uiStore.showPlaylist = true;
     uiStore.dominantColors = ['#111111', '#222222', '#333333', '#444444'];
-    uiStore.isMiniMode = true;
 
-    expect(uiStore.showQueue).toBe(true);
+    expect(uiStore.showPlaylist).toBe(true);
     expect(uiStore.dominantColors).toEqual(['#111111', '#222222', '#333333', '#444444']);
-    expect(uiStore.isMiniMode).toBe(true);
   });
 
   it('keeps playback and ui state scoped to their dedicated stores', () => {
@@ -56,7 +54,7 @@ describe('playback and ui stores', () => {
 
     expect(playbackStore.isPlaying).toBe(false);
     expect(playbackStore.playQueue).toEqual([]);
-    expect(uiStore.showQueue).toBe(false);
+    expect(uiStore.showPlaylist).toBe(false);
     expect(uiStore.showPlayerDetail).toBe(false);
   });
 });

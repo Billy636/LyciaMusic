@@ -7,19 +7,21 @@ import { isRemoteSong } from '../../utils/remoteSong';
 import ModernModal from '../common/ModernModal.vue';
 import { useLibrarySongWindowCache } from '../../composables/useLibrarySongWindowCache';
 import { useLibrarySongResolver } from '../../composables/useLibrarySongResolver';
+import { useSettings } from '../../features/settings/useSettings';
 import './playerSidePanel.css';
 
 const {
   playQueuePaths,
   currentSong,
   showPlaylist,
-  showPlayerDetail,
   togglePlaylist,
   playSong,
+  togglePlay,
   formatDuration,
   clearQueue,
   removeSongFromQueue,
 } = usePlayer();
+const { settings } = useSettings();
 const { libraryDataVersion } = storeToRefs(useLibraryStore());
 const { ensureWindow, getSongAt, clearSongWindowCache } = useLibrarySongWindowCache();
 const { loadSong } = useLibrarySongResolver();
@@ -95,12 +97,44 @@ const handleQueueScroll = (event: Event) => {
   ensureVisibleQueue();
 };
 
-const handlePlayPath = async (path: string) => {
+const playFromPath = async (path: string) => {
   const song = await loadSong(path);
   if (song) {
     await playSong(song, { preserveQueue: true });
   }
 };
+
+// 「双击当前歌曲暂停 / 继续」（设置-界面与导航）：侧栏队列单击即播，
+// 双击必须拦下前一次 click，否则当前歌曲会被重播。仅对当前行做 260ms 去抖，
+// 其他行保持即时播放（双击其他歌曲始终从头播放，与设置语义一致）。
+const QUEUE_DOUBLE_CLICK_MS = 260;
+let queueClickTimer: ReturnType<typeof setTimeout> | null = null;
+const handlePlayPath = async (path: string) => {
+  if (settings.value.doubleClickCurrentSongToPause && currentSong.value?.path === path) {
+    if (queueClickTimer !== null) {
+      clearTimeout(queueClickTimer);
+      queueClickTimer = null;
+      return togglePlay();
+    }
+    queueClickTimer = setTimeout(() => {
+      queueClickTimer = null;
+      void playFromPath(path);
+    }, QUEUE_DOUBLE_CLICK_MS);
+    return;
+  }
+  if (queueClickTimer !== null) {
+    clearTimeout(queueClickTimer);
+    queueClickTimer = null;
+  }
+  await playFromPath(path);
+};
+
+onUnmounted(() => {
+  if (queueClickTimer !== null) {
+    clearTimeout(queueClickTimer);
+    queueClickTimer = null;
+  }
+});
 
 const scrollToCurrentSong = async (behavior: ScrollBehavior = 'auto') => {
   if (!currentSong.value) return;
@@ -182,7 +216,6 @@ watch(
         v-if="showPlaylist"
         ref="queuePanelRef"
         class="player-side-panel player-side-panel--right pointer-events-auto"
-        :class="{ 'player-side-panel--solid-backdrop': !showPlayerDetail }"
         role="dialog"
         aria-modal="false"
         aria-labelledby="play-queue-sidebar-title"
@@ -195,7 +228,7 @@ watch(
             <div class="player-side-panel__eyebrow">QUEUE</div>
             <div class="mt-1 flex items-center gap-2">
               <h3 id="play-queue-sidebar-title" class="player-side-panel__title">播放队列</h3>
-              <span class="rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[11px] font-medium tabular-nums text-white/55" :aria-label="`队列中共 ${playQueuePaths.length} 首歌曲`">{{ playQueuePaths.length }}</span>
+              <span class="rounded-full border border-fg-10 bg-fg-6 px-2 py-0.5 text-[11px] font-medium tabular-nums fg-55" :aria-label="`队列中共 ${playQueuePaths.length} 首歌曲`">{{ playQueuePaths.length }}</span>
             </div>
           </div>
           <div class="flex shrink-0 items-center gap-1">
@@ -216,9 +249,9 @@ watch(
         </header>
 
         <div ref="queueContainerRef" class="player-side-panel__scroll custom-scrollbar p-3" @scroll="handleQueueScroll">
-          <div v-if="playQueuePaths.length === 0" class="flex h-full flex-col items-center justify-center space-y-4 py-20 text-white/50">
-            <div class="flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-white/[0.04]">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-9 w-9 text-white/40" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+          <div v-if="playQueuePaths.length === 0" class="flex h-full flex-col items-center justify-center space-y-4 py-20 fg-50">
+            <div class="flex h-20 w-20 items-center justify-center rounded-full border border-fg-10 bg-fg-4">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-9 w-9 fg-40" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
             </div>
             <span class="text-sm font-medium">播放队列为空</span>
           </div>
@@ -232,8 +265,8 @@ watch(
             :style="{ height: `${QUEUE_ROW_HEIGHT}px` }"
             :class="[
               currentSong?.path === song.path
-                ? 'border-white/25 bg-white/14 text-white'
-                : 'border-white/[0.04] bg-white/[0.02] text-white/80 hover:border-white/12 hover:bg-white/[0.07]'
+                ? 'border-fg-25 bg-fg-14 fg-100'
+                : 'border-fg-4 bg-fg-2 fg-80 hover:border-fg-12 hover:bg-fg-7'
             ]"
           >
             <div class="w-8 flex justify-center items-center shrink-0">
@@ -243,8 +276,8 @@ watch(
                 <div class="w-[3px] bg-[#EC4141] animate-music-bar-3"></div>
               </div>
               <template v-else>
-                <span class="font-mono text-xs text-white/40 group-hover:hidden">{{ song.virtualIndex + 1 }}</span>
-                <svg xmlns="http://www.w3.org/2000/svg" class="hidden h-3 w-3 text-white/80 group-hover:block" aria-hidden="true" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg>
+                <span class="font-mono text-xs fg-40 group-hover:hidden">{{ song.virtualIndex + 1 }}</span>
+                <svg xmlns="http://www.w3.org/2000/svg" class="hidden h-3 w-3 fg-80 group-hover:block" aria-hidden="true" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg>
               </template>
             </div>
 
@@ -253,23 +286,23 @@ watch(
                 <span class="min-w-0 truncate text-sm font-medium leading-tight">{{ song.title || song.name.replace(/\.[^/.]+$/, "") }}</span>
                 <span
                   v-if="isRemoteSong(song)"
-                  class="shrink-0 rounded-full border border-white/15 bg-white/[0.06] px-1.5 py-[1px] text-[10px] font-medium text-white/60"
+                  class="shrink-0 rounded-full border border-fg-15 bg-fg-6 px-1.5 py-[1px] text-[10px] font-medium fg-60"
                 >远程</span>
               </div>
               <span
                 class="text-[11px] truncate mt-1 font-medium"
-                :class="currentSong?.path === song.path ? 'text-white/70' : 'text-white/45'"
+                :class="currentSong?.path === song.path ? 'fg-70' : 'fg-45'"
               >{{ song.artist || 'Unknown Artist' }}</span>
             </div>
 
             <div class="flex items-center gap-3">
-              <div class="shrink-0 font-mono text-xs group-hover:hidden" :class="currentSong?.path === song.path ? 'text-white/70' : 'text-white/40'">
+              <div class="shrink-0 font-mono text-xs group-hover:hidden" :class="currentSong?.path === song.path ? 'fg-70' : 'fg-40'">
                 {{ formatDuration(song.duration) }}
               </div>
               <button
                 type="button"
                 @click="handleRemove(song, $event)"
-                class="hidden h-6 w-6 items-center justify-center rounded-full text-white/50 transition-colors hover:bg-white/10 hover:text-white active:scale-90 group-hover:flex"
+                class="hidden h-6 w-6 items-center justify-center rounded-full fg-50 transition-colors hover:bg-fg-10 hover-fg active:scale-90 group-hover:flex"
                 title="移出队列"
                 aria-label="移出队列"
               >
