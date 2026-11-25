@@ -30,7 +30,7 @@ export const MIN_PLAYER_TRANSLATION_FONT_SCALE = 0.5;
 export const MAX_PLAYER_TRANSLATION_FONT_SCALE = 2;
 export const DEFAULT_PLAYER_LINE_GAP = 1;
 export const MIN_PLAYER_LINE_GAP = 0.5;
-export const MAX_PLAYER_LINE_GAP = 3.0;
+export const MAX_PLAYER_LINE_GAP = 2.0;
 export const DEFAULT_PLAYER_OFFSET_X = 0;
 export const MIN_PLAYER_OFFSET_X = -30;
 export const MAX_PLAYER_OFFSET_X = 30;
@@ -50,7 +50,7 @@ export const DEFAULT_DESKTOP_CUSTOM_ROMAJI_UNPLAYED_COLOR = '#FFFFFF';
 export const DEFAULT_DESKTOP_CUSTOM_ROMAJI_COLOR = '#BFDBFE';
 export const DEFAULT_DESKTOP_CUSTOM_TRANSLATION_COLOR = '#FBCFE8';
 export const DEFAULT_DESKTOP_TEXT_OPACITY = 1;
-export const MIN_DESKTOP_TEXT_OPACITY = 0.6;
+export const MIN_DESKTOP_TEXT_OPACITY = 0;
 export const MAX_DESKTOP_TEXT_OPACITY = 1;
 export const DEFAULT_DESKTOP_TEXT_SHADOW_COLOR = '#000000';
 export const DEFAULT_DESKTOP_TEXT_SHADOW_STRENGTH = 0;
@@ -60,6 +60,17 @@ export const DEFAULT_DESKTOP_TEXT_STROKE_COLOR = '#000000';
 export const DEFAULT_DESKTOP_TEXT_STROKE_DEPTH = 0;
 export const MIN_DESKTOP_TEXT_STROKE_DEPTH = 0;
 export const MAX_DESKTOP_TEXT_STROKE_DEPTH = 100;
+// 桌面歌词背景盒：形状 / 颜色 / 不透明度（与原生渲染的默认值保持一致）。
+export type DesktopLyricsBackgroundShape = 'rounded' | 'pill' | 'square';
+export type DesktopLyricsBackgroundColorMode = 'dark' | 'light' | 'custom';
+export const DEFAULT_DESKTOP_BACKGROUND_SHAPE: DesktopLyricsBackgroundShape = 'rounded';
+export const DEFAULT_DESKTOP_BACKGROUND_COLOR_MODE: DesktopLyricsBackgroundColorMode = 'dark';
+export const DEFAULT_DESKTOP_BACKGROUND_DARK_COLOR = '#101018';
+export const DEFAULT_DESKTOP_BACKGROUND_LIGHT_COLOR = '#ececec';
+export const DEFAULT_DESKTOP_CUSTOM_BACKGROUND_COLOR = '#101018';
+export const DEFAULT_DESKTOP_BACKGROUND_OPACITY = 42;
+export const MIN_DESKTOP_BACKGROUND_OPACITY = 0;
+export const MAX_DESKTOP_BACKGROUND_OPACITY = 100;
 
 export interface LyricsFontOption {
   value: LyricsFontPreset;
@@ -139,6 +150,10 @@ export const defaultLyricsSettings: LyricsSettings = {
 export const defaultDesktopLyricsSettings: DesktopLyricsSettings = {
   isAlwaysOnTop: false,
   alwaysShowShadowBackground: false,
+  backgroundShape: DEFAULT_DESKTOP_BACKGROUND_SHAPE,
+  backgroundColorMode: DEFAULT_DESKTOP_BACKGROUND_COLOR_MODE,
+  customBackgroundColor: DEFAULT_DESKTOP_CUSTOM_BACKGROUND_COLOR,
+  backgroundOpacity: DEFAULT_DESKTOP_BACKGROUND_OPACITY,
   autoHideWhenFullscreen: true,
   autoHideWhenPaused: false,
   showDoubleLine: false,
@@ -383,6 +398,29 @@ export function normalizeDesktopLyricsSettingsPatch(
     alwaysShowShadowBackground: typeof patch.alwaysShowShadowBackground === 'boolean'
       ? patch.alwaysShowShadowBackground
       : defaultDesktopLyricsSettings.alwaysShowShadowBackground,
+    backgroundShape: patch.backgroundShape === 'square'
+      ? 'square'
+      : patch.backgroundShape === 'pill'
+        ? 'pill'
+        : DEFAULT_DESKTOP_BACKGROUND_SHAPE,
+    backgroundColorMode: patch.backgroundColorMode === 'light'
+      ? 'light'
+      : patch.backgroundColorMode === 'custom'
+        ? 'custom'
+        : DEFAULT_DESKTOP_BACKGROUND_COLOR_MODE,
+    customBackgroundColor: normalizeHexColor(
+      patch.customBackgroundColor,
+      defaultDesktopLyricsSettings.customBackgroundColor,
+    ),
+    backgroundOpacity: Math.min(
+      MAX_DESKTOP_BACKGROUND_OPACITY,
+      Math.max(
+        MIN_DESKTOP_BACKGROUND_OPACITY,
+        Math.round(Number.isFinite(patch.backgroundOpacity)
+          ? (patch.backgroundOpacity as number)
+          : DEFAULT_DESKTOP_BACKGROUND_OPACITY),
+      ),
+    ),
     autoHideWhenFullscreen: typeof patch.autoHideWhenFullscreen === 'boolean'
       ? patch.autoHideWhenFullscreen
       : defaultDesktopLyricsSettings.autoHideWhenFullscreen,

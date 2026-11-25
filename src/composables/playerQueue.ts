@@ -4,6 +4,7 @@ import { playbackApi } from '../services/tauri/playbackApi';
 import { useLibraryStore } from '../features/library/store';
 import { usePlaybackStore } from '../features/playback/store';
 import { createShuffleCycle } from '../features/playback/shuffle';
+import { registerUpcomingSongPeek, type SongSwitchDirection } from '../features/songNotification/upcoming';
 import { playerStorage, playerStorageKeys } from '../services/storage/playerStorage';
 import type { Song } from '../types';
 import { useLibrarySongResolver } from './useLibrarySongResolver';
@@ -217,6 +218,47 @@ export const createPlayerQueue = ({
     playPath(navigationPaths[index]);
     preloadAdjacentSongs(navigationPaths, index);
   };
+
+  /**
+   * 切歌提示专用：不改动队列，只预览按当前顺序/随机模式真正会播到的歌。
+   * 与 nextSong/prevSong 共用同一套导航路径与随机历史，避免提示与实际切歌不一致。
+   */
+  const peekPathForSwitch = (direction: SongSwitchDirection): string | undefined => {
+    if (direction === 'next' && tempQueuePaths.value.length > 0) {
+      return tempQueuePaths.value[0];
+    }
+
+    const navigationPaths = getNavigationPaths();
+    if (!navigationPaths.length) return undefined;
+
+    if (playMode.value === 2) {
+      const remembered = direction === 'next'
+        ? shuffleFuture[shuffleFuture.length - 1]
+        : shuffleHistory[shuffleHistory.length - 1];
+      if (remembered && navigationPaths.includes(remembered)) return remembered;
+      return shuffleCycle.peekNext(navigationPaths, currentSong.value?.path);
+    }
+
+    let index = navigationPaths.indexOf(currentSong.value?.path ?? '');
+    index = direction === 'next'
+      ? (index + 1) % navigationPaths.length
+      : (index - 1 + navigationPaths.length) % navigationPaths.length;
+    return navigationPaths[index];
+  };
+
+  const peekSongForSwitch = (direction: SongSwitchDirection): Song | null => {
+    const path = peekPathForSwitch(direction);
+    // 单曲列表 / 单曲循环时没有「另一首」，不弹切歌提示。
+    if (!path || path === currentSong.value?.path) return null;
+    return getCachedSong(path);
+  };
+
+  registerUpcomingSongPeek({
+    next: () => peekSongForSwitch('next'),
+    previous: () => peekSongForSwitch('previous'),
+    nextPath: () => peekPathForSwitch('next'),
+    previousPath: () => peekPathForSwitch('previous'),
+  });
 
   const clearQueue = async () => {
     playQueuePaths.value = [];

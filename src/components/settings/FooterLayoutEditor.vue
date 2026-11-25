@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onDeactivated, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
-import { AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, Minus, MoveHorizontal, Plus, RotateCcw, X } from 'lucide-vue-next';
+import { AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, MoveHorizontal, RotateCcw, X } from 'lucide-vue-next';
 import { useFooterSettings } from '../../features/settings/useFooterSettings';
 import { footerAction } from '../../features/settings/footer';
 import { footerAlignedPositions, footerButtonWidth, footerDropPosition, resolveFreeFooterLayout, type FooterAlignment, type FooterDropGuides } from '../../features/settings/freeFooterLayout';
@@ -8,6 +8,7 @@ import type { FooterMovableId, FooterPlacement, FooterScene } from '../../types/
 import FooterIcon from '../layout/FooterIcon.vue';
 import FooterActionButton from '../layout/FooterActionButton.vue';
 import FooterSongInfo from '../layout/FooterSongInfo.vue';
+import SettingsNumberControl from './SettingsNumberControl.vue';
 import { footerViewport, footerLivePresentation as live } from '../layout/footerPresentation';
 
 const props = defineProps<{ scene: FooterScene }>();
@@ -21,14 +22,11 @@ const previewScale = computed(() => Math.min(1, previewWidth.value / Math.max(1,
 const layout = computed(() => resolveFreeFooterLayout(footer.value, props.scene, width.value));
 const behavior = computed(() => footer.value.behavior[props.scene]);
 const spacing = computed(() => footer.value.spacing[footer.value.linked ? 'main' : props.scene]);
-const spacingControlId = useId();
 const spacingControls = [
   { key: 'controls', label: '播放按钮间距', min: 8, max: 40, default: 24, hint: '仅调整上一首、播放/暂停、下一首之间的间距' },
   { key: 'utilities', label: '功能按钮间距', min: 0, max: 24, default: 8, hint: '调整播放模式、播放队列、音量、歌词、均衡器等功能按钮的间距' },
 ] as const;
-function adjustSpacing(key: 'controls' | 'utilities', delta: number) {
-  const control = spacingControls.find(item => item.key === key)!;
-  const value = Math.max(control.min, Math.min(control.max, spacing.value[key] + delta));
+function setSpacingValue(key: 'controls' | 'utilities', value: number) {
   setSpacing(props.scene, { [key]: value }, width.value);
 }
 const previewIconProps = (id: FooterMovableId) => ({
@@ -208,7 +206,9 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <button type="button" class="editor-reset" @click="$emit('reset')">恢复原版布局</button>
+        <button type="button" class="editor-reset" title="恢复原版布局" aria-label="恢复原版布局" @click="$emit('reset')">
+          <RotateCcw :size="15" aria-hidden="true" />
+        </button>
       </div>
     </div>
     <div ref="viewport" class="free-bar" :class="{ 'detail-scene': live.expanded, dragging: drag?.active }"
@@ -243,30 +243,13 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <div v-for="control in spacingControls" :key="control.key" class="spacing-row" :title="control.hint">
-      <label :for="`${spacingControlId}-${control.key}`" class="spacing-label">
+      <div class="spacing-label">
         <span class="spacing-icon"><MoveHorizontal class="h-4 w-4" aria-hidden="true" /></span>
         <span>{{ control.label }}</span>
-      </label>
-      <div class="spacing-control">
-        <button type="button" class="spacing-step" :aria-label="`减少${control.label}`" :title="`减少${control.label}`"
-          :disabled="spacing[control.key] <= control.min" @click="adjustSpacing(control.key, -1)">
-          <Minus class="h-4 w-4" aria-hidden="true" />
-        </button>
-        <input :id="`${spacingControlId}-${control.key}`" class="spacing-slider" type="range" :min="control.min" :max="control.max" step="1"
-          :value="spacing[control.key]" :aria-valuetext="`${spacing[control.key]} 像素`"
-          :style="{ '--spacing-fill': `${(spacing[control.key] - control.min) / (control.max - control.min) * 100}%` }"
-          @input="setSpacing(scene, { [control.key]: Number(($event.target as HTMLInputElement).value) }, width)" />
-        <button type="button" class="spacing-step" :aria-label="`增加${control.label}`" :title="`增加${control.label}`"
-          :disabled="spacing[control.key] >= control.max" @click="adjustSpacing(control.key, 1)">
-          <Plus class="h-4 w-4" aria-hidden="true" />
-        </button>
       </div>
-      <output :for="`${spacingControlId}-${control.key}`" class="spacing-value">{{ spacing[control.key] }}<span>px</span></output>
-      <button type="button" class="spacing-reset" :title="`恢复默认${control.label}`" :aria-label="`恢复默认${control.label}`"
-        :disabled="spacing[control.key] === control.default"
-        @click="setSpacing(scene, { [control.key]: control.default }, width)">
-        <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
-      </button>
+      <SettingsNumberControl class="spacing-control" :model-value="spacing[control.key]"
+        :min="control.min" :max="control.max" :step="1" unit="px" :default-value="control.default"
+        :label="control.label" @update:model-value="setSpacingValue(control.key, $event)" />
     </div>
     <div v-if="menuId" ref="menu" class="editor-menu" :style="{ left: `${menuLeft}px`, top: `${menuTop}px` }" :aria-label="`${footerAction(menuId).label}选项`" @pointerdown.stop>
       <div class="menu-heading"><FooterIcon v-bind="previewIconProps(menuId)" /><span>{{ footerAction(menuId).label }}</span><button type="button" aria-label="关闭按钮选项" @click.stop="closeMenu(true)"><X class="h-4 w-4" /></button></div>
@@ -283,11 +266,11 @@ onBeforeUnmount(() => {
 .editor-toolbar-actions { display:flex; align-items:center; gap:8px; }
 .alignment-control { position:relative; }
 .alignment-trigger { display:flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:6px; color:var(--app-text-secondary); }
-.alignment-trigger:hover,.alignment-trigger.is-open { color:#ec4141; background:rgb(236 65 65 / .07); }
+.alignment-trigger:hover,.alignment-trigger.is-open { color:#ec4141; background:var(--hover-surface); }
 .alignment-menu { position:absolute; z-index:80; right:0; top:calc(100% + 8px); width:256px; max-width:calc(100vw - 32px); padding:5px; border:1px solid rgb(148 163 184 / .2); border-radius:10px; background:rgb(255 255 255 / .92); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); box-shadow:0 12px 32px rgb(0 0 0 / .15); }
 .dark .alignment-menu { background:rgb(24 32 40 / .92); border-color:rgb(255 255 255 / .12); }
 .alignment-menu>button { display:flex; align-items:center; gap:10px; width:100%; padding:10px; border-radius:6px; text-align:left; }
-.alignment-menu>button:hover:not(:disabled) { background:rgb(236 65 65 / .07); }
+.alignment-menu>button:hover:not(:disabled) { background:var(--hover-surface); }
 .alignment-menu>button:disabled { opacity:.55; cursor:not-allowed; }
 .alignment-menu-label { display:block; font-size:13px; }
 .alignment-menu-hint { display:block; margin-top:3px; font-size:11px; color:var(--app-text-secondary); }
@@ -299,8 +282,9 @@ onBeforeUnmount(() => {
 .alignment-gap-guide::before { left:0; } .alignment-gap-guide::after { right:0; }
 .alignment-gap-label { position:absolute; top:calc(50% + 32px); transform:translateX(-50%); color:#ec4141; font-size:10px; white-space:nowrap; pointer-events:none; }
 .editor-caption { margin:0; font-size:13px; color:var(--app-text-secondary); }
-.editor-reset { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; height:30px; min-width:104px; padding:0 12px; border:1px solid rgb(128 128 128 / .25); border-radius:6px; font-size:12px; white-space:nowrap; }
-.editor-reset:hover { background:rgb(128 128 128 / .06); }
+/* 与数值控件的恢复按钮一致：常态淡出、悬停只出系统文字提示，不做高亮/变色。 */
+.editor-reset { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:28px; height:28px; padding:0; border:0; border-radius:6px; color:var(--app-text-secondary); opacity:.3; }
+.editor-reset:focus-visible { outline:2px solid #ec4141; outline-offset:2px; opacity:1; }
 .free-bar { position:relative; height:104px; border-radius:12px; background:rgb(128 128 128 / .035); outline:1px solid rgb(128 128 128 / .15); }
 .detail-scene { background:linear-gradient(125deg,rgb(128 100 150 / .14),rgb(60 120 160 / .14)); }
 .free-bar.dragging { background-image:radial-gradient(rgb(128 128 128 / .2) 1px,transparent 1px); background-size:12px 12px; }
@@ -320,54 +304,29 @@ onBeforeUnmount(() => {
 .pool-title { font-size:12px; color:var(--app-text-secondary); margin-bottom:8px; }
 .pool-items { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:32px; }
 .pool-button { display:flex; align-items:center; gap:8px; padding:5px 8px; font-size:12px; border-radius:6px; cursor:grab; touch-action:none; }
-.pool-button:hover { background:rgb(128 128 128 / .08); }
+.pool-button:hover { background:var(--hover-surface); }
 .empty-pool { color:var(--app-text-muted); font-size:11px; }
 .targeted { outline:2px solid #ec4141; }
 .spacing-row {
-  --spacing-track: rgb(15 23 42 / .1);
-  --spacing-muted: var(--app-text-secondary);
   display:grid;
-  grid-template-columns:minmax(144px, 1fr) minmax(160px, 340px) auto auto;
+  grid-template-columns:minmax(144px, 1fr) minmax(220px, 420px);
   gap:16px;
   align-items:center;
   margin-top:18px;
   padding:10px 0;
 }
-.dark .spacing-row { --spacing-track:rgb(255 255 255 / .16); }
-.spacing-label { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:500; cursor:pointer; }
+.spacing-label { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:500; }
 .spacing-icon { display:flex; align-items:center; justify-content:center; width:20px; height:28px; flex-shrink:0; color:#ec4141; }
 .dark .spacing-icon { color:#ff8b8b; }
-.spacing-control { display:flex; align-items:center; gap:12px; min-width:0; }
-.spacing-step { display:flex; align-items:center; justify-content:center; width:28px; height:28px; flex-shrink:0; color:var(--spacing-muted); transition:color 150ms; }
-.spacing-step:hover:not(:disabled) { color:#ec4141; }
-.spacing-step:disabled { opacity:.4; cursor:default; }
-.spacing-slider { appearance:none; -webkit-appearance:none; width:100%; min-width:0; height:28px; margin:0; padding:0; border:0; background:transparent; cursor:pointer; border-radius:6px; }
-.spacing-slider::-webkit-slider-runnable-track { height:4px; border-radius:999px; background:linear-gradient(to right, #ec4141 0%, #ec4141 var(--spacing-fill), var(--spacing-track) var(--spacing-fill), var(--spacing-track) 100%); }
-.spacing-slider::-moz-range-track { height:4px; border-radius:999px; background:var(--spacing-track); }
-.spacing-slider::-moz-range-progress { height:4px; border-radius:999px; background:#ec4141; }
-.spacing-slider::-webkit-slider-thumb { appearance:none; -webkit-appearance:none; box-sizing:border-box; width:14px; height:14px; margin-top:-5px; border:1px solid rgb(15 23 42 / .08); border-radius:50%; background:#fff; box-shadow:0 1px 5px rgb(0 0 0 / .2); transition:box-shadow 150ms ease; }
-.spacing-slider::-moz-range-thumb { box-sizing:border-box; width:14px; height:14px; border:1px solid rgb(15 23 42 / .08); border-radius:50%; background:#fff; box-shadow:0 1px 5px rgb(0 0 0 / .2); transition:box-shadow 150ms ease; }
-.spacing-slider:hover::-webkit-slider-thumb, .spacing-slider:active::-webkit-slider-thumb { box-shadow:0 0 0 4px rgb(236 65 65 / .13), 0 1px 5px rgb(0 0 0 / .2); }
-.spacing-slider:hover::-moz-range-thumb, .spacing-slider:active::-moz-range-thumb { box-shadow:0 0 0 4px rgb(236 65 65 / .13), 0 1px 5px rgb(0 0 0 / .2); }
-.spacing-slider:focus-visible, .spacing-reset:focus-visible, .spacing-step:focus-visible { outline:2px solid rgb(236 65 65 / .65); outline-offset:3px; }
-.spacing-value { display:inline-flex; align-items:baseline; justify-content:center; gap:3px; min-width:52px; padding:6px 0; font-size:13px; font-weight:500; font-variant-numeric:tabular-nums; }
-.spacing-value span { color:var(--spacing-muted); font-size:10px; font-weight:400; }
-.spacing-reset { display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:7px; color:var(--spacing-muted); transition:color 150ms, background-color 150ms; }
-.spacing-reset:hover:not(:disabled) { background:rgb(236 65 65 / .08); color:#ec4141; }
-.spacing-reset:disabled { opacity:.35; cursor:default; }
+.spacing-control { min-width:0; }
 .editor-menu { position:absolute; z-index:30; width:216px; max-width:calc(100% - 16px); padding:6px; background:#fff; border:1px solid rgb(128 128 128 / .2); border-radius:10px; box-shadow:0 12px 40px rgb(0 0 0 / .15); }
 .menu-heading { display:flex; align-items:center; gap:8px; padding:6px 8px 10px; font-size:13px; }
 .menu-heading>button { margin-left:auto; padding:4px; }
 .menu-option { display:block; width:100%; padding:8px 12px; text-align:left; border-radius:5px; font-size:13px; }
-.menu-option:hover { background:rgb(128 128 128 / .08); }
+.menu-option:hover { background:var(--hover-surface); }
 .dark .editor-menu { background:#242428; }
 @media(max-width:760px) {
-  .spacing-row { grid-template-columns:minmax(0, 1fr) auto auto; gap:10px 12px; }
-  .spacing-label { grid-column:1; grid-row:1; }
-  .spacing-value { grid-column:2; grid-row:1; }
-  .spacing-reset { grid-column:3; grid-row:1; }
-  .spacing-control { grid-column:1 / -1; grid-row:2; }
+  .spacing-row { grid-template-columns:minmax(0, 1fr); gap:8px 12px; }
 }
-@media(prefers-reduced-motion:reduce) { .spacing-reset, .spacing-slider::-webkit-slider-thumb { transition:none; } .spacing-slider::-moz-range-thumb { transition:none; } }
 @media(max-width:600px) { .editor-pools { grid-template-columns:1fr; } }
 </style>

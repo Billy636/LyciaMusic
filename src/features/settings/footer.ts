@@ -32,14 +32,14 @@ export function createDefaultFooterSettings(): FooterSettings {
   const main = FOOTER_ACTIONS.filter(action => !action.detailOnly).map(({ id, position }) => ({ id, position }));
   const detailExtras = FOOTER_ACTIONS.filter(action => action.detailOnly).map(({ id, position }) => ({ id, position }));
   return {
-    version: 1, linked: true, coverShape: { main: 'square', detail: 'square' }, main, detail: main.map(item => ({ ...item })),
+    version: 2, linked: true, coverShape: { main: 'rounded', detail: 'rounded' }, main, detail: main.map(item => ({ ...item })),
     detailExtras,
     detailOrder: legacyDetailOrder(main, detailExtras),
     spacing: { main: { controls: 24, utilities: 8 }, detail: { controls: 24, utilities: 8 } },
     placement: { main: {}, detail: {} },
     behavior: {
-      main: { info: 'song', progress: 'always', lastVisibleProgress: 'always', autoHide: false, visualizer: false },
-      detail: { info: 'time', progress: 'always', lastVisibleProgress: 'always', autoHide: true, visualizer: true },
+      main: { info: 'song', progress: 'always', lastVisibleProgress: 'always', autoHide: false, visualizer: false, coverRotate: true },
+      detail: { info: 'time', progress: 'always', lastVisibleProgress: 'always', autoHide: true, visualizer: true, coverRotate: true },
     },
   };
 }
@@ -71,6 +71,7 @@ function normalizeBehavior(value: unknown, fallback: FooterBehavior): FooterBeha
       ? raw.progressColor.toLowerCase() : '',
     autoHide: typeof raw.autoHide === 'boolean' ? raw.autoHide : fallback.autoHide,
     visualizer: typeof raw.visualizer === 'boolean' ? raw.visualizer : fallback.visualizer,
+    coverRotate: typeof raw.coverRotate === 'boolean' ? raw.coverRotate : true,
   };
 }
 
@@ -86,10 +87,20 @@ export function normalizeFooterSettings(value: unknown): FooterSettings {
   const main = normalizeLayout(raw.main, defaults.main), detail = normalizeLayout(raw.detail, defaults.detail);
   const detailExtras = normalizeLayout(raw.detailExtras, defaults.detailExtras);
   const linked = typeof raw.linked === 'boolean' ? raw.linked : defaults.linked;
+  // version 1 的 'square' 实际渲染为圆角矩形，迁移为 'rounded'；
+  // version 2 起新增真正的直角 'square'，按值保留三种形状。
+  const legacy = typeof raw.version === 'number' ? raw.version < 2 : true;
   // Older versions stored one shape for both scenes, including unlinked layouts.
-  const legacyShape = raw.coverShape === 'circle' ? 'circle' : 'square';
+  const legacyShape: FooterCoverShape = raw.coverShape === 'circle' ? 'circle' : 'rounded';
   const shapes = object(raw.coverShape);
-  const normalizeShape = (value: unknown): FooterCoverShape => value === 'square' || value === 'circle' ? value : legacyShape;
+  const normalizeShape = (value: unknown): FooterCoverShape => {
+    if (legacy) {
+      if (value === 'circle') return 'circle';
+      return 'rounded'; // 旧 square = 圆角矩形
+    }
+    if (value === 'square' || value === 'circle' || value === 'rounded') return value;
+    return legacyShape;
+  };
   const mainShape = normalizeShape(shapes.main);
   const fallbackOrder = legacyDetailOrder(linked ? main : detail, detailExtras);
   const detailOrder = Array.isArray(raw.detailOrder)
@@ -123,7 +134,7 @@ export function normalizeFooterSettings(value: unknown): FooterSettings {
     return { controls: clamp(entry.controls, 24, 8, 40), utilities: clamp(entry.utilities, 8, 0, 24) };
   };
   const normalized: FooterSettings = {
-    version: 1, linked, coverShape: { main: mainShape, detail: linked ? mainShape : normalizeShape(shapes.detail) }, main, detail, detailExtras, detailOrder,
+    version: 2, linked, coverShape: { main: mainShape, detail: linked ? mainShape : normalizeShape(shapes.detail) }, main, detail, detailExtras, detailOrder,
     spacing: { main: normalizeSpacing(spacing.main), detail: normalizeSpacing(spacing.detail) },
     placement: { main: normalizePlacement(placement.main, normalizedBehavior.main.info), detail: normalizePlacement(placement.detail, normalizedBehavior.detail.info) },
     behavior: normalizedBehavior,

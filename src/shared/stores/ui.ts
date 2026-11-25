@@ -13,8 +13,6 @@ export const useUiStore = defineStore('ui', () => {
   const showPlayerDetail = ref(false);
   // Keep the selected detail layout through page changes and player remounts.
   const isPlayerCoverFocused = ref(false);
-  const showQueue = ref(false);
-  const isMiniMode = ref(false);
   const showVolumePopover = ref(false);
   const skipNextPageTransition = ref(false);
   const startupCompositionMaskVisible = ref(false);
@@ -32,8 +30,6 @@ export const useUiStore = defineStore('ui', () => {
     showMiniPlaylist,
     showPlayerDetail,
     isPlayerCoverFocused,
-    showQueue,
-    isMiniMode,
     showVolumePopover,
     skipNextPageTransition,
     startupCompositionMaskVisible,

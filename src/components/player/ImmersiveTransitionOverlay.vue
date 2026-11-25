@@ -54,13 +54,14 @@ const waitForViewport = () => new Promise<void>((resolve) => {
     cancelAnimationFrame(frame);
     // Native command completion is not a guarantee that WebView layout has
     // caught up. Wait for a quiet resize interval and two rendering frames.
+    // 原生扩张动画约 240ms，期间 resize 持续触发会不断重置静默计时。
     quietTimer = setTimeout(() => {
       frame = requestAnimationFrame(() => {
         frame = requestAnimationFrame(finish);
       });
-    }, 48);
+    }, 64);
   };
-  const deadline = setTimeout(finish, 240);
+  const deadline = setTimeout(finish, 700);
   cancelVisualWait = finish;
   window.addEventListener('resize', resized);
   resized();

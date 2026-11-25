@@ -11,14 +11,14 @@
   min-height: 0;
   overflow: hidden;
   isolation: isolate;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.3);
-  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--panel-surface-border);
+  background: var(--panel-surface-bg);
+  color: var(--panel-surface-fg);
   font-family: "Inter", system-ui, sans-serif;
   font-size: 14px;
-  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.36);
-  -webkit-backdrop-filter: blur(24px);
-  backdrop-filter: blur(24px);
+  box-shadow: var(--panel-surface-shadow);
+  -webkit-backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%);
+  backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%);
 }
 
 .player-side-panel--left {
@@ -35,11 +35,6 @@
   --player-side-panel-enter-x: 100%;
 }
 
-/* Outside the artwork-backed player, keep white text legible on light pages. */
-.player-side-panel--solid-backdrop {
-  background: rgba(24, 24, 27, 0.85);
-}
-
 .player-side-panel__header {
   display: flex;
   flex-shrink: 0;
@@ -47,12 +42,12 @@
   justify-content: space-between;
   gap: 12px;
   padding: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
 }
 
 .player-side-panel__eyebrow {
   margin-bottom: 6px;
-  color: rgba(255, 255, 255, 0.35);
+  color: color-mix(in srgb, currentColor 38%, transparent);
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.3em;
@@ -60,7 +55,7 @@
 }
 
 .player-side-panel__title {
-  color: rgba(255, 255, 255, 0.9);
+  color: color-mix(in srgb, currentColor 96%, transparent);
   font-size: 15px;
   font-weight: 600;
   line-height: 20px;
@@ -74,7 +69,7 @@
   justify-content: center;
   gap: 6px;
   border-radius: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: color-mix(in srgb, currentColor 62%, transparent);
   transition: color 160ms ease, background-color 160ms ease;
 }
 
@@ -92,12 +87,12 @@
 
 .player-side-panel__icon-button:hover,
 .player-side-panel__action:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  color: currentColor;
 }
 
 .player-side-panel button:focus-visible {
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 50%, transparent);
 }
 
 .player-side-panel__scroll {
@@ -106,7 +101,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+  scrollbar-color: color-mix(in srgb, currentColor 24%, transparent) transparent;
 }
 
 .player-side-panel__scroll::-webkit-scrollbar {
@@ -119,11 +114,11 @@
 
 .player-side-panel__scroll::-webkit-scrollbar-thumb {
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.16);
+  background: color-mix(in srgb, currentColor 18%, transparent);
 }
 
 .player-side-panel__scroll:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.28);
+  background: color-mix(in srgb, currentColor 30%, transparent);
 }
 
 .player-side-panel-enter-active,

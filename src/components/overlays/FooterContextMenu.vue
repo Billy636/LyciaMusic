@@ -186,23 +186,23 @@ const handleAction = (action: FooterMenuAction) => {
     <div 
       v-if="visible" 
       ref="menuRef"
-      class="fixed z-[9999] bg-white/80 backdrop-blur-2xl rounded-lg shadow-xl border border-gray-100/50 py-1.5 text-sm text-gray-700 min-w-[210px] animate-in fade-in zoom-in-95 duration-75 select-none"
+      class="ui-glass-surface fixed z-[9999] rounded-lg py-1.5 text-sm min-w-[210px] animate-in fade-in zoom-in-95 duration-75 select-none"
       :style="menuStyle"
       @contextmenu.prevent
     >
       <template v-for="entry in menuEntries" :key="entry.key">
         <div
           v-if="entry.type === 'divider'"
-          class="my-1 h-px bg-gray-200/70"
+          class="ui-glass-divider my-1 h-px border-t"
         ></div>
         <div
           v-else
           @click="handleAction(entry.key)"
-          class="px-4 py-2.5 hover:bg-gray-100 cursor-pointer flex items-center group transition-colors"
+          class="ui-surface-hover px-4 py-2.5 cursor-pointer flex items-center group transition-colors"
           :class="entry.key === 'refreshSongInfo' && isRefreshingSongInfo ? 'pointer-events-none opacity-50' : ''"
           :aria-disabled="entry.key === 'refreshSongInfo' && isRefreshingSongInfo"
         >
-          <div class="w-5 h-5 mr-3 flex items-center justify-center text-gray-500 group-hover:text-gray-800">
+          <div class="ui-glass-muted w-5 h-5 mr-3 flex items-center justify-center">
             <component :is="entry.icon" class="w-5 h-5" :stroke-width="1.8" />
           </div>
           <span>{{ entry.label }}</span>

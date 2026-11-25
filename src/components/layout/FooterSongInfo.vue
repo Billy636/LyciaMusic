@@ -27,7 +27,7 @@ watch([() => props.width, textKind], ([width, kind]) => {
     <!-- This anchor stays mounted; the shared large cover owns its own motion. -->
     <button type="button" :data-footer-cover="preview ? undefined : ''" title="切换播放页"
       class="absolute left-0 top-1/2 h-12 w-12 -translate-y-1/2 overflow-hidden"
-      :class="[hasCover && !preview ? 'pointer-events-auto' : 'pointer-events-none', coverShape === 'circle' ? 'rounded-[50%]' : 'rounded-lg']"
+      :class="[hasCover && !preview ? 'pointer-events-auto' : 'pointer-events-none', coverShape === 'circle' ? 'rounded-[50%]' : coverShape === 'square' ? 'rounded-none' : 'footer-cover-rounded']"
       :style="{ opacity: hasCover ? 1 : 0 }" :inert="!hasCover || preview || undefined" :aria-hidden="!hasCover || preview" @click.stop="$emit('toggle')">
       <img v-if="(expanded || preview) && cover && hasCover" :src="cover" class="h-full w-full object-cover" alt="" draggable="false" />
     </button>
@@ -52,6 +52,11 @@ watch([() => props.width, textKind], ([width, kind]) => {
 </template>
 
 <style scoped>
+/* 圆角矩形：连续曲率（iOS squircle），尺寸不变；不支持 corner-shape 时回落圆角。 */
+.footer-cover-rounded { border-radius: 22%; }
+@supports (corner-shape: squircle) {
+  .footer-cover-rounded { corner-shape: squircle; }
+}
 .footer-info-text { position:absolute; left:0; top:50%; height:40px; margin-top:-20px; transition:transform 400ms cubic-bezier(.4,0,.2,1); }
 .footer-info-copy { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; min-width:0; }
 .footer-info-secondary { color:var(--app-text-secondary, #4b5563); }

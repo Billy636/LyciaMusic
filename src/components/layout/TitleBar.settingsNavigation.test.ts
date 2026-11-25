@@ -65,7 +65,6 @@ const createContext = (
   settingsBackTitle: canGoBack ? '返回个性化' : '返回音乐页面',
   handleSettingsBack: vi.fn(),
   settings: { showTaskbarPlayerIcon: false, showTaskbarPlayer: false },
-  isMiniMode: false,
   isDarkTheme: false,
   themeToggleTitle: '切换深色',
   rotation: 0,
@@ -130,7 +129,6 @@ function setupTitleBar(initialPath = '/settings') {
       usePlayerViewState: () => ({
         searchQuery: Vue.ref(''),
         setSearch: vi.fn(),
-        isMiniMode: Vue.ref(false),
         currentViewMode: Vue.ref('songs'),
       }),
     },
@@ -320,7 +318,7 @@ describe('TitleBar settings navigation', () => {
     expect(nodes.some(node => node.props?.title === '后退')).toBe(true);
   });
 
-  it.each([false, true])('retains theme, mini-player, taskbar and window controls (settings: %s)', isSettingsRoute => {
+  it.each([false, true])('retains theme, taskbar and window controls (settings: %s)', isSettingsRoute => {
     const context = createContext(isSettingsRoute);
     context.settings.showTaskbarPlayerIcon = true;
     const nodes = renderedNodes(context);
@@ -336,15 +334,13 @@ describe('TitleBar settings navigation', () => {
 
     clickControl(isSettingsRoute ? '返回音乐页面' : '设置');
     clickControl('切换深色');
-    clickControl('Mini 模式');
-    clickControl('任务栏播控');
+    clickControl('铃动窗');
     clickControl('最小化');
     clickControl('最大化或还原');
     clickControl('关闭');
 
     expect(context.toggleSettingsPage).toHaveBeenCalledOnce();
     expect(context.toggleThemeMode).toHaveBeenCalledOnce();
-    expect(context.isMiniMode).toBe(true);
     expect(context.toggleTaskbarPlayer).toHaveBeenCalledOnce();
     expect(context.minimize).toHaveBeenCalledOnce();
     expect(context.toggleMaximize).toHaveBeenCalledOnce();

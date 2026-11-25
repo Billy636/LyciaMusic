@@ -1,11 +1,98 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed, watchEffect, onMounted, onBeforeUnmount } from 'vue';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import DesktopLyricsToolbar from './DesktopLyricsToolbar.vue';
+import { buildSquircleMask } from '../layout/taskbarSquircle';
+import { resolveFrameRadius, type FrameShape } from '../../features/shape/squircle';
 import { useDesktopLyricsDisplay } from '../../composables/useDesktopLyricsDisplay';
 import { useDesktopLyricsWindowController } from '../../composables/useDesktopLyricsWindowController';
 
 const showDragShadow = ref(false);
+
+// WebView 回退渲染器的背景盒：与原生渲染使用同一组设置字段（形状/颜色/不透明度）。
+const hexToRgba = (hex: string, alpha: number) => {
+  const value = hex.replace('#', '');
+  const full = value.length === 3
+    ? value.split('').map(char => char + char).join('')
+    : value.padEnd(6, '0').slice(0, 6);
+  const r = parseInt(full.slice(0, 2), 16) || 0;
+  const g = parseInt(full.slice(2, 4), 16) || 0;
+  const b = parseInt(full.slice(4, 6), 16) || 0;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+const surfaceBackgroundStyle = computed(() => {
+  const mode = settings.value.backgroundColorMode;
+  const hex = mode === 'light'
+    ? '#ececec'
+    : mode === 'custom'
+      ? settings.value.customBackgroundColor
+      : '#101018';
+  const rawAlpha = settings.value.backgroundOpacity;
+  const alpha = Number.isFinite(rawAlpha)
+    ? Math.min(1, Math.max(0, (rawAlpha as number) / 100))
+    : 0.42;
+  return {
+    backgroundColor: hexToRgba(hex, alpha),
+    borderRadius: settings.value.backgroundShape === 'pill'
+      ? '999px'
+      : settings.value.backgroundShape === 'square' ? '0px' : `${backgroundRadiusPx.value}px`,
+    maskImage: backgroundMask.value ? `url("${backgroundMask.value}")` : 'none',
+    WebkitMaskImage: backgroundMask.value ? `url("${backgroundMask.value}")` : 'none',
+    maskSize: '100% 100%',
+    WebkitMaskSize: '100% 100%',
+  };
+});
+
+// WebView 回退渲染器：与铃动窗同款物理像素级连续曲率蒙版，只有尺寸不同。
+// 尺寸口径与切歌提示一致：Tauri 原生物理窗口 ÷ scaleFactor 得到 CSS 布局尺寸，
+// 蒙版则直接按物理像素绘制，窗口缩放时同步刷新，避免 DPR 取整造成 R 角错位。
+const widgetViewport = ref({ width: window.innerWidth, height: window.innerHeight });
+const widgetPhysical = ref({ width: 0, height: 0, factor: window.devicePixelRatio || 1 });
+const lyricWindow = getCurrentWindow();
+let unlistenWidgetResize: (() => void) | null = null;
+const syncWidgetViewport = async () => {
+  try {
+    const [size, factor] = await Promise.all([lyricWindow.innerSize(), lyricWindow.scaleFactor()]);
+    if (factor > 0 && size.width > 0 && size.height > 0) {
+      widgetViewport.value = { width: size.width / factor, height: size.height / factor };
+      widgetPhysical.value = { width: size.width, height: size.height, factor };
+      return;
+    }
+  } catch (error) {
+    console.warn('Failed to query desktop lyrics physical size:', error);
+  }
+  widgetViewport.value = { width: window.innerWidth, height: window.innerHeight };
+  widgetPhysical.value = { width: 0, height: 0, factor: window.devicePixelRatio || 1 };
+};
+const onWindowResize = () => void syncWidgetViewport();
+onMounted(() => {
+  window.addEventListener('resize', onWindowResize);
+  void syncWidgetViewport();
+  void lyricWindow.onResized(() => void syncWidgetViewport())
+    .then(fn => { unlistenWidgetResize = fn; })
+    .catch(() => undefined);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onWindowResize);
+  unlistenWidgetResize?.();
+});
+const backgroundRadiusPx = computed(() => resolveFrameRadius(
+  settings.value.backgroundShape as FrameShape, widgetViewport.value.height,
+));
+const backgroundMask = ref('');
+watchEffect(() => {
+  const r = backgroundRadiusPx.value;
+  backgroundMask.value = r > 0
+    ? buildSquircleMask({
+      ...widgetViewport.value,
+      radius: r,
+      scaleFactor: widgetPhysical.value.factor,
+      physicalWidth: widgetPhysical.value.width || undefined,
+      physicalHeight: widgetPhysical.value.height || undefined,
+    }) ?? ''
+    : '';
+});
 
 const {
   playbackTime,
@@ -77,7 +164,7 @@ const {
               'desktop-widget--surface-visible': showDragShadow || settings.alwaysShowShadowBackground,
             },
           ]"
-          :style="widgetStyle"
+          :style="[widgetStyle, surfaceBackgroundStyle]"
           @mousedown="startWindowDrag"
         >
           <div class="desktop-lyrics-body" :style="lyricsPlayerStyle">
@@ -238,16 +325,15 @@ const {
 }
 
 .desktop-widget--surface-visible {
-  border-color: color-mix(in srgb, var(--desktop-accent-b) 22%, transparent);
-  background:
+  /* 背景框只保留底色与投影：不再描边、不再画内高光，避免外层出现一圈白边。 */
+  border-color: transparent;
+  /* 底色由内联 background-color 提供（跟随背景颜色/不透明度设置），这里只保留装饰性渐变。 */
+  background-image:
     radial-gradient(circle at top center, color-mix(in srgb, var(--desktop-accent-a) 24%, transparent), transparent 42%),
-    radial-gradient(circle at bottom right, color-mix(in srgb, var(--desktop-accent-c) 16%, transparent), transparent 38%),
-    linear-gradient(180deg, rgba(20, 20, 24, 0.68), rgba(12, 12, 16, 0.54));
+    radial-gradient(circle at bottom right, color-mix(in srgb, var(--desktop-accent-c) 16%, transparent), transparent 38%);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--desktop-accent-d) 18%, transparent),
     0 22px 56px rgba(0, 0, 0, 0.18),
-    0 6px 18px rgba(0, 0, 0, 0.08),
-    0 0 0 1px color-mix(in srgb, var(--desktop-accent-a) 8%, transparent);
+    0 6px 18px rgba(0, 0, 0, 0.08);
 }
 
 .desktop-widget::before {

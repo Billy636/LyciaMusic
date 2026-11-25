@@ -46,8 +46,7 @@ describe('shared player side-panel skin', () => {
     });
   });
 
-  it('respects reduced motion and gives non-player pages a readable backdrop', () => {
+  it('respects reduced motion', () => {
     expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*transition: none/);
-    expect(declarations('.player-side-panel--solid-backdrop').background).toBe('rgba(24, 24, 27, 0.85)');
   });
 });

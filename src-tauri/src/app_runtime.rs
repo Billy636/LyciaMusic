@@ -13,10 +13,8 @@ use tauri::{
 };
 use tokio::sync::Semaphore;
 
-const APP_SHOW_MAIN_EVENT: &str = "app:show-main";
 const APP_TRAY_MENU_OPEN_EVENT: &str = "app:tray-menu-open";
 const MAIN_WINDOW_LABEL: &str = "main";
-const MINI_PLAYER_WINDOW_LABEL: &str = "mini-player";
 const TRAY_ID: &str = "tray";
 const DEFAULT_TRAY_TOOLTIP: &str = "LyciaMusic";
 // Windows 托盘 tooltip 上限为 128 字符，留出余量
@@ -90,16 +88,6 @@ fn queue_open_paths<R: tauri::Runtime>(app: &tauri::AppHandle<R>, paths: Vec<Str
 }
 
 fn reveal_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    let mini_player_visible = app
-        .get_webview_window(MINI_PLAYER_WINDOW_LABEL)
-        .and_then(|window| window.is_visible().ok())
-        .unwrap_or(false);
-
-    if mini_player_visible {
-        let _ = app.emit(APP_SHOW_MAIN_EVENT, ());
-        return;
-    }
-
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.unminimize();
         let _ = window.show();

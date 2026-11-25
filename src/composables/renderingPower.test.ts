@@ -14,7 +14,6 @@ const foregroundSnapshot = (): MainWindowRenderingSnapshot => ({
   windowFocused: true,
   windowVisible: true,
   windowMinimized: false,
-  miniMode: false,
 });
 
 describe('main window rendering power', () => {
@@ -25,7 +24,6 @@ describe('main window rendering power', () => {
   it('uses low power rendering when the main window is not visible', () => {
     expect(resolveMainWindowLowPower({ ...foregroundSnapshot(), windowVisible: false })).toBe(true);
     expect(resolveMainWindowLowPower({ ...foregroundSnapshot(), windowMinimized: true })).toBe(true);
-    expect(resolveMainWindowLowPower({ ...foregroundSnapshot(), miniMode: true })).toBe(true);
   });
 
   it('keeps full rendering when the main window is visible but not focused', () => {

@@ -145,7 +145,7 @@ const animatedTotal = useAnimatedNumber(total.value, 2000);
         v-for="(segment, index) in segments"
         :key="segment.id"
         class="group/item relative p-3 rounded-xl transition-all duration-300 cursor-pointer overflow-hidden border border-transparent animate-slide-in"
-        :class="[hoveredSegmentId === segment.id ? 'bg-gray-100/80 dark:bg-white/10 border-gray-200 dark:border-white/10 scale-105' : 'hover:bg-gray-50 dark:hover:bg-white/5']"
+        :class="[hoveredSegmentId === segment.id ? 'bg-gray-100/80 dark:bg-white/10 border-gray-200 dark:border-white/10 scale-105' : 'hover:bg-gray-50 dark:hover:bg-white/10']"
         @mouseenter="hoveredSegmentId = segment.id"
         @mouseleave="hoveredSegmentId = null"
         :style="{ animationDelay: `${0.5 + index * 0.1}s` }"

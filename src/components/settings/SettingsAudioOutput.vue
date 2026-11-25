@@ -513,12 +513,15 @@ onScopeDispose(() => {
   width: min(520px, calc(100vw - 48px));
   max-height: 252px;
   overflow-y: auto;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  /* 与「歌词样式」抽屉同源，但颜色/模糊来自外观令牌，切浅色/深色/皮肤会一起变 */
+  border: 1px solid var(--panel-surface-border);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16);
+  background: var(--panel-surface-bg);
+  box-shadow: var(--panel-surface-shadow);
+  color: var(--panel-surface-fg);
   padding: 6px;
-  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%);
+  backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%);
 }
 
 .settings-device-select__option {
@@ -530,7 +533,7 @@ onScopeDispose(() => {
   gap: 12px;
   border-radius: 10px;
   padding: 8px 10px;
-  color: rgb(31 41 55);
+  color: var(--panel-surface-fg);
   font-size: 13px;
   font-weight: 500;
   line-height: 1.35;
@@ -540,14 +543,13 @@ onScopeDispose(() => {
 
 .settings-device-select__option:hover,
 .settings-device-select__option:focus-visible {
-  background: rgba(236, 65, 65, 0.08);
-  color: #ec4141;
+  background: color-mix(in srgb, currentColor 12%, transparent);
   outline: none;
 }
 
 .settings-device-select__option--selected {
-  background: rgba(236, 65, 65, 0.12);
-  color: #ec4141;
+  background: color-mix(in srgb, var(--panel-surface-accent) 16%, transparent);
+  color: var(--panel-surface-accent);
 }
 
 .settings-device-select__option-text {
@@ -601,11 +603,13 @@ onScopeDispose(() => {
   width: min(300px, calc(100vw - 48px));
   max-width: calc(100vw - 48px);
   pointer-events: none;
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  border: 1px solid var(--panel-surface-border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
-  color: rgb(31 41 55);
+  background: var(--panel-surface-bg);
+  box-shadow: var(--panel-surface-shadow);
+  color: var(--panel-surface-fg);
+  -webkit-backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%);
+  backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.55;
@@ -627,9 +631,9 @@ onScopeDispose(() => {
 }
 
 .dark .audio-tip-popover {
-  border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(31, 31, 31, 0.96);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+  border-color: var(--panel-surface-border);
+  background: var(--panel-surface-bg);
+  box-shadow: var(--panel-surface-shadow);
   color: rgba(255, 255, 255, 0.92);
 }
 
@@ -655,24 +659,5 @@ onScopeDispose(() => {
   color: rgba(255, 255, 255, 0.72);
 }
 
-.dark .settings-device-select__menu {
-  border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(31, 31, 31, 0.94);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.3);
-}
-
-.dark .settings-device-select__option {
-  color: rgba(255, 255, 255, 0.88);
-}
-
-.dark .settings-device-select__option:hover,
-.dark .settings-device-select__option:focus-visible {
-  background: rgba(236, 65, 65, 0.16);
-  color: rgba(255, 255, 255, 0.96);
-}
-
-.dark .settings-device-select__option--selected {
-  background: rgba(236, 65, 65, 0.22);
-  color: #fff;
-}
+/* 菜单材质由外观令牌驱动，深浅主题不再各写一套 */
 </style>

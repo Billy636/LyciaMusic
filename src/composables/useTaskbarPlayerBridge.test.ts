@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => {
     currentSong: ref<Song | null>(null),
     currentTime: ref(0),
     isPlaying: ref(false),
+    volume: ref(100),
+    showPlaylist: ref(false),
     isDarkTheme: ref(true),
     parsedLyrics: ref<LyricLine[]>([]),
     lyricsStatus: ref<LyricsStatus>('idle'),
@@ -107,9 +109,14 @@ vi.mock('./player', () => ({
     currentSong: mocks.currentSong,
     currentTime: mocks.currentTime,
     isPlaying: mocks.isPlaying,
+    volume: mocks.volume,
+    showPlaylist: mocks.showPlaylist,
     togglePlay: vi.fn(),
     prevSong: vi.fn(),
     nextSong: vi.fn(),
+    handleVolume: vi.fn(),
+    toggleMute: vi.fn(),
+    togglePlaylist: vi.fn(),
   }),
 }));
 vi.mock('./lyrics', () => ({
@@ -236,7 +243,7 @@ describe('taskbar player lyrics bridge', () => {
     expect(mocks.emitTo).toHaveBeenCalledExactlyOnceWith(
       TASKBAR_PLAYER_WINDOW_LABEL, TASKBAR_PLAYER_PLAYBACK_EVENT, {
         songPath: 'first.mp3', playbackTime: 12.2, syncedAt: 1_000_100,
-        isPlaying: true, audioDelay: 0.25,
+        isPlaying: true, audioDelay: 0.25, volume: 100,
       },
     );
     mocks.audioDelay.value = -0.5;

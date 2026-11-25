@@ -77,7 +77,7 @@ export function useLibraryCurrentViewSongs({
   const lastSuccessfulAllViewSongPaths = ref<string[]>([]);
 
   const { loadAllViewSongPaths } = useLibraryAllSongPathCache();
-  const { loadFavoriteSongPaths, loadRecentSongPaths } = useLibraryCollectionSongPathCache();
+  const { loadFavoriteSongPaths } = useLibraryCollectionSongPathCache();
   const { loadAlbumSongPaths, loadGenreSongPaths } = useLibraryDetailSongPathCache();
   const { loadFolderViewSongPaths, libraryFolderSongPathCacheVersion } = useLibraryFolderSongPathCache();
   const allViewSongPaths = ref<string[]>([]);
@@ -338,11 +338,10 @@ export function useLibraryCurrentViewSongs({
       currentViewMode,
       recentSongs,
       searchQuery,
-      localSortMode,
       canonicalSongPaths,
       searchRevision,
     ],
-    async ([viewMode, items, query, sortMode]) => {
+    async ([viewMode, items, query]) => {
       const requestId = ++recentViewRequestId;
 
       if (viewMode !== 'recent') {
@@ -358,11 +357,13 @@ export function useLibraryCurrentViewSongs({
       }
 
       try {
-        if (query.trim() && sortMode !== 'custom') {
+        // 「最近播放」固定按最后播放时间倒序（最近听过的排前面），
+        // 与该页的专辑 / 歌单聚合卡片排序口径一致，不受曲库排序模式影响。
+        if (query.trim()) {
           const nextPaths = await tauriInvoke('get_recent_song_paths_view', {
             recentEntries: items.map(item => ({ songPath: item.path, playedAt: item.playedAt })),
             query,
-            sortMode,
+            sortMode: 'played_at',
             offset: 0,
             limit: 256,
           });
@@ -372,18 +373,21 @@ export function useLibraryCurrentViewSongs({
           }
           return;
         }
+        // 无搜索时直接使用本地最近列表顺序：本地列表是「刚播放的歌置顶」的
+        // 权威来源，避免后端去重/缓存把已在列表中的歌排回旧位置。
+        // 再按 playedAt 倒序兜底：即使列表插入顺序被旧数据打乱，最后播放的歌
+        // 依旧排在第一首。
+        const ordered = items
+          .map((item, index) => ({ item, index }))
+          .sort((left, right) => {
+            const delta = (right.item.playedAt || 0) - (left.item.playedAt || 0);
+            return delta !== 0 ? delta : left.index - right.index;
+          })
+          .map(entry => entry.item);
+        recentViewSongPaths.value = [...new Set(
+          ordered.map(item => item.path).filter(path => canonicalPathSet.value.has(path)),
+        )];
         recentSearchHasMore.value = false;
-        const nextPaths = await loadRecentSongPaths({
-          recentSongs: items,
-          query,
-          sortMode: sortMode === 'custom' ? 'title' : sortMode,
-        });
-
-        if (requestId !== recentViewRequestId) {
-          return;
-        }
-
-        recentViewSongPaths.value = nextPaths;
       } catch {
         if (requestId !== recentViewRequestId) {
           return;
@@ -731,9 +735,9 @@ export function useLibraryCurrentViewSongs({
       }
 
       if (currentViewMode.value === 'recent') {
-        return localSortMode.value === 'custom'
-          ? applyCustomPathOrder(recentViewSongPaths.value, localCustomOrder.value)
-          : recentViewSongPaths.value;
+        // 「最近播放」天然按时间排序，不能沿用「本地音乐」的自定义拖动顺序，
+        // 否则新播放的歌会停在旧的自定义槽位上。
+        return recentViewSongPaths.value;
       }
 
       if (currentViewMode.value === 'all') {
@@ -825,11 +829,8 @@ export function useLibraryCurrentViewSongs({
     }
 
     if (currentViewMode.value === 'recent') {
-      if (localSortMode.value !== 'custom') {
-        return recentViewSongPaths.value;
-      }
-
-      return applyCustomPathOrder(recentViewSongPaths.value, localCustomOrder.value);
+      // 与搜索分支一致：最近播放只认「最后播放时间」，永不套自定义排序。
+      return recentViewSongPaths.value;
     }
 
     if (currentViewMode.value === 'favorites') {

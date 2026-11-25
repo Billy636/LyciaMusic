@@ -7,12 +7,18 @@ import type { EqualizerSettings } from '../../types';
 import { playbackApi } from '../../services/tauri/playbackApi';
 import ModernModal from '../common/ModernModal.vue';
 
-// 支持嵌入模式配置，默认 false
-withDefaults(defineProps<{
+// 支持嵌入模式配置，默认 false；glass 表示面板落在玻璃材质上（底栏弹层/抽屉）
+const props = withDefaults(defineProps<{
   embedded?: boolean;
+  glass?: boolean;
 }>(), {
-  embedded: false
+  embedded: false,
+  glass: false
 });
+
+// 玻璃面上不写死颜色：控件全部用 currentColor 混色，外观切浅色/深色/自定义皮肤时自动跟着变。
+const onGlass = computed(() => props.glass === true);
+const rootToneClass = computed(() => (onGlass.value ? '' : 'text-gray-800 dark:text-gray-200'));
 
 // 10 段频率标度友好简写
 const FREQ_LABELS = ['31', '62', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
@@ -303,10 +309,10 @@ onScopeDispose(() => {
 </script>
 
 <template>
-  <div :class="embedded ? 'eq-panel p-0 w-full select-none text-gray-800 dark:text-gray-200' : 'eq-panel p-4 w-[600px] bg-[#FFFFFF] dark:bg-[#1E1E1E] text-gray-800 dark:text-gray-200 rounded-2xl border border-gray-100 dark:border-gray-800 select-none'">
+  <div class="eq-panel select-none" :class="[embedded ? 'p-0 w-full' : 'p-4 w-[600px] bg-[#FFFFFF] dark:bg-[#1E1E1E] rounded-2xl border border-gray-100 dark:border-gray-800', rootToneClass, { 'eq-glass': onGlass }]">
     
     <!-- 顶部状态栏：仅保留开关 (在嵌入模式下隐藏) -->
-    <div v-if="!embedded" class="flex items-center justify-between mb-4 pb-2 border-b border-gray-100 dark:border-gray-800">
+    <div v-if="!embedded" class="eq-divider flex items-center justify-between mb-4 pb-2 border-b border-gray-100 dark:border-gray-800">
       <div class="flex items-center gap-2">
         <span class="font-semibold text-sm text-gray-700 dark:text-gray-300">均衡器</span>
         
@@ -343,8 +349,8 @@ onScopeDispose(() => {
         @click="handleApplyPreset(preset)"
         class="px-2.5 py-1 text-xs rounded-lg transition-colors cursor-pointer whitespace-nowrap"
         :class="isBuiltInPresetActive(preset)
-          ? 'bg-[#EC4141] text-white shadow-sm' 
-          : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'"
+          ? 'bg-[#EC4141] text-white shadow-sm'
+          : 'eq-preset bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'"
       >
         {{ preset.name }}
       </button>
@@ -360,8 +366,8 @@ onScopeDispose(() => {
           @dblclick="openEditDialogForPreset(preset)"
           class="px-2.5 py-1 text-xs rounded-lg transition-colors cursor-pointer whitespace-nowrap"
           :class="selectedPresetId === preset.id
-            ? 'bg-[#EC4141] text-white shadow-sm' 
-            : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'"
+            ? 'bg-[#EC4141] text-white shadow-sm'
+            : 'eq-preset bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'"
         >
           {{ preset.name }}
         </button>
@@ -381,8 +387,8 @@ onScopeDispose(() => {
     <!-- 均衡器推子区 -->
     <div class="flex justify-between items-stretch h-48 mb-4 mt-2 px-1 gap-0.5">
       <!-- 前级 Preamp 推子 -->
-      <div class="flex flex-col items-center justify-between w-[34px] mr-2 border-r border-gray-100 dark:border-gray-800 pr-2">
-        <span class="text-[12px] text-gray-600 dark:text-gray-300 font-bold font-mono h-4 flex items-center leading-none">
+      <div class="eq-divider flex flex-col items-center justify-between w-[34px] mr-2 border-r border-gray-100 dark:border-gray-800 pr-2">
+        <span class="eq-value text-[12px] font-bold font-mono h-4 flex items-center leading-none text-gray-600 dark:text-gray-300">
           {{ displayPreamp > 0 ? '+' : '' }}{{ displayPreamp.toFixed(1) }}
         </span>
         <div
@@ -390,7 +396,7 @@ onScopeDispose(() => {
           @wheel.prevent.stop="handlePreampWheel"
         >
           <!-- 滑轨背景线 -->
-          <div class="absolute w-[3px] h-full bg-gray-100 dark:bg-gray-800 rounded-full pointer-events-none" :class="{ 'opacity-40': !eq.enabled }"></div>
+          <div class="eq-track absolute w-[3px] h-full rounded-full pointer-events-none bg-gray-100 dark:bg-gray-800" :class="{ 'opacity-40': !eq.enabled }"></div>
           <!-- 已填充部分高亮 -->
           <div 
             class="absolute w-[3px] rounded-full pointer-events-none"
@@ -422,7 +428,7 @@ onScopeDispose(() => {
             :class="{ 'opacity-50': !eq.enabled }"
           />
         </div>
-        <span class="text-[12px] text-gray-600 dark:text-gray-300 font-bold font-mono h-4 flex items-center leading-none" :class="{ 'opacity-40': !eq.enabled }">Pre</span>
+        <span class="eq-value text-[12px] font-bold font-mono h-4 flex items-center leading-none text-gray-600 dark:text-gray-300" :class="{ 'opacity-40': !eq.enabled }">Pre</span>
       </div>
 
       <!-- 10 段频段推子 -->
@@ -432,12 +438,12 @@ onScopeDispose(() => {
         class="flex flex-col items-center justify-between flex-1"
         @wheel.prevent.stop="(e) => handleGainWheel(e, index)"
       >
-        <span class="text-[11px] text-gray-600 dark:text-gray-300 font-bold font-mono h-4 flex items-center leading-none">
+        <span class="eq-value text-[11px] font-bold font-mono h-4 flex items-center leading-none text-gray-600 dark:text-gray-300">
           {{ gain > 0 ? '+' : '' }}{{ gain.toFixed(1) }}
         </span>
         <div class="relative w-full flex-1 my-1 flex justify-center items-center">
           <!-- 滑轨背景线 -->
-          <div class="absolute w-[3px] h-full bg-gray-100 dark:bg-gray-800 rounded-full pointer-events-none" :class="{ 'opacity-40': !eq.enabled }"></div>
+          <div class="eq-track absolute w-[3px] h-full rounded-full pointer-events-none bg-gray-100 dark:bg-gray-800" :class="{ 'opacity-40': !eq.enabled }"></div>
           <!-- 已填充部分高亮（正向） -->
           <div 
             class="absolute w-[3px] rounded-full pointer-events-none"
@@ -471,17 +477,17 @@ onScopeDispose(() => {
           />
 
         </div>
-        <span class="text-[11px] text-gray-600 dark:text-gray-300 font-bold h-4 flex items-center leading-none">
+        <span class="eq-value text-[11px] font-bold h-4 flex items-center leading-none text-gray-600 dark:text-gray-300">
           {{ FREQ_LABELS[index] }}
         </span>
       </div>
     </div>
 
     <!-- 底部控制区 -->
-    <div class="flex items-center justify-end mt-3 pt-2 border-t border-gray-100 dark:border-gray-800">
+    <div class="eq-divider flex items-center justify-end mt-3 pt-2 border-t border-gray-100 dark:border-gray-800">
       <button 
         @click="handleReset"
-        class="flex items-center gap-1 px-2.5 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 rounded-lg cursor-pointer transition-colors text-xs"
+        class="eq-reset flex items-center gap-1 px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-800 dark:hover:text-gray-200"
       >
         <RefreshCw class="w-3 h-3" />
         <span>重置</span>
@@ -558,6 +564,24 @@ onScopeDispose(() => {
 </template>
 
 <style scoped>
+/* 玻璃弹层内：控件颜色全部由 currentColor 混出，跟随「个性化-外观」的配色自动变化。 */
+.eq-panel.eq-glass .eq-preset {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: color-mix(in srgb, currentColor 78%, transparent);
+}
+.eq-panel.eq-glass .eq-preset:hover {
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  color: currentColor;
+}
+.eq-panel.eq-glass .eq-track { background: color-mix(in srgb, currentColor 18%, transparent); }
+.eq-panel.eq-glass .eq-value { color: color-mix(in srgb, currentColor 74%, transparent); }
+.eq-panel.eq-glass .eq-divider { border-color: color-mix(in srgb, currentColor 12%, transparent); }
+.eq-panel.eq-glass .eq-reset { color: color-mix(in srgb, currentColor 66%, transparent); }
+.eq-panel.eq-glass .eq-reset:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  color: currentColor;
+}
+
 /* 竖向滑动推子基础样式 */
 .eq-slider {
   position: absolute;

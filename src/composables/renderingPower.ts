@@ -1,16 +1,12 @@
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { getCurrentWindow, type Window } from '@tauri-apps/api/window';
-import { storeToRefs } from 'pinia';
-
 import { setLibrarySongPathCacheLowPower } from '../caches/librarySongPathCache';
-import { useUiStore } from '../shared/stores/ui';
 
 export interface MainWindowRenderingSnapshot {
   documentHidden: boolean;
   windowFocused: boolean;
   windowVisible: boolean;
   windowMinimized: boolean;
-  miniMode: boolean;
 }
 
 const defaultSnapshot = (): MainWindowRenderingSnapshot => ({
@@ -18,7 +14,6 @@ const defaultSnapshot = (): MainWindowRenderingSnapshot => ({
   windowFocused: true,
   windowVisible: true,
   windowMinimized: false,
-  miniMode: false,
 });
 
 const mainWindowRenderingSnapshot = ref<MainWindowRenderingSnapshot>(defaultSnapshot());
@@ -26,8 +21,7 @@ const mainWindowRenderingSnapshot = ref<MainWindowRenderingSnapshot>(defaultSnap
 export function resolveMainWindowLowPower(snapshot: MainWindowRenderingSnapshot) {
   return snapshot.documentHidden
     || !snapshot.windowVisible
-    || snapshot.windowMinimized
-    || snapshot.miniMode;
+    || snapshot.windowMinimized;
 }
 
 export function setMainWindowRenderingSnapshot(patch: Partial<MainWindowRenderingSnapshot>) {
@@ -70,7 +64,6 @@ export async function hideMainWindowToTray(appWindow: Window = getCurrentWindow(
 
 export function useMainWindowRenderingPower() {
   const appWindow = getCurrentWindow();
-  const { isMiniMode } = storeToRefs(useUiStore());
   const unlisteners: Array<() => void> = [];
   let windowStateGeneration = 0;
 
@@ -130,14 +123,6 @@ export function useMainWindowRenderingPower() {
     window.removeEventListener('blur', syncWindowState);
     unlisteners.splice(0).forEach((unlisten) => unlisten());
   });
-
-  watch(
-    isMiniMode,
-    (miniMode) => {
-      setMainWindowRenderingSnapshot({ miniMode });
-    },
-    { immediate: true },
-  );
 
   return useRenderingPower();
 }

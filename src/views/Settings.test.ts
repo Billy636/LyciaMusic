@@ -31,12 +31,13 @@ const panelNames = [
   'SettingsTheme',
   'SettingsToolbox',
   'SettingsAudioOutput',
+  'SettingsSongNotification',
 ];
 const panelModules = Object.fromEntries(panelNames.map(name => [
   `../components/settings/${name}.vue`,
   { default: vue.defineComponent({ render: () => vue.h('div', { 'data-settings-panel': name }) }) },
 ]));
-const icons = Object.fromEntries(['Captions', 'ChevronRight', 'PaintRoller', 'PanelLeft'].map(name => [
+const icons = Object.fromEntries(['Captions', 'ChevronRight', 'Music2', 'PaintRoller', 'PanelLeft'].map(name => [
   name,
   vue.defineComponent({ render: () => vue.h('svg', { 'data-test-icon': name }) }),
 ]));

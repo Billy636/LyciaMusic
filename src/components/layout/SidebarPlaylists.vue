@@ -56,7 +56,7 @@ const getPlaylistCover = (playlistId: string) => {
         <svg xmlns="http://www.w3.org/2000/svg" :class="['h-3 w-3 transition-transform duration-200', isOpen ? 'rotate-90' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
         <span class="text-xs font-bold tracking-wide">快捷歌单</span>
       </button>
-      <button type="button" @click.stop="$emit('createPlaylist')" class="app-text-secondary hover:text-gray-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded p-0.5 transition-colors" title="新建歌单" aria-label="新建歌单"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></button>
+      <button type="button" @click.stop="$emit('createPlaylist')" class="app-text-secondary hover:text-gray-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 rounded p-0.5 transition-colors" title="新建歌单" aria-label="新建歌单"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></button>
     </div>
 
     <Transition name="playlist-list">
@@ -79,7 +79,7 @@ const getPlaylistCover = (playlistId: string) => {
             :aria-current="activeId === list.id ? 'page' : undefined"
             class="playlist-drop-target px-3 py-2 mx-2 rounded-md cursor-pointer flex items-center transition-all duration-300 group relative border-t-2 border-transparent border-b-2 select-none active:scale-[0.98] [touch-action:none]"
             :class="[
-              selectedPlaylistIds.has(list.id) || activeId === list.id ? 'bg-black/10 dark:bg-white/10 text-black dark:text-white font-medium shadow-sm translate-x-1' : 'hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-300 hover:translate-x-1',
+              selectedPlaylistIds.has(list.id) || activeId === list.id ? 'bg-black/10 dark:bg-white/10 text-black dark:text-white font-medium shadow-sm translate-x-1' : 'hover:bg-black/5 dark:hover:bg-white/10 text-gray-600 dark:text-gray-300 hover:translate-x-1',
               (dragState.active && dragState.type === 'playlist' && dragState.data?.id === list.id) ? 'opacity-50 bg-gray-100 dark:bg-white/5' : '',
               (dragState.active && dragState.targetPlaylist?.id === list.id && dragState.type === 'song') ? '!bg-red-500/10 !ring-2 !ring-[#EC4141] ring-inset' : '',
               { 'song-drop-active': dragState.active && dragState.type === 'song', 'song-drop-confirm': dragState.completedPlaylistId === list.id },
@@ -103,7 +103,7 @@ const getPlaylistCover = (playlistId: string) => {
       </ul>
       </div>
     </Transition>
-    <button type="button" class="mx-2 mt-1 flex w-[calc(100%-1rem)] items-center justify-between rounded-md px-3 py-2 text-xs text-gray-500 transition-colors hover:bg-black/5 hover:text-[#EC4141] dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-[#ff8b8b]" @click.stop="$emit('openAll')">
+    <button type="button" class="mx-2 mt-1 flex w-[calc(100%-1rem)] items-center justify-between rounded-md px-3 py-2 text-xs text-gray-500 transition-colors hover:bg-black/5 hover:text-[#EC4141] dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-[#ff8b8b]" @click.stop="$emit('openAll')">
       <span>查看全部 <span class="tabular-nums">({{ totalCount }})</span></span>
       <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 5 7 7-7 7" /></svg>
     </button>

@@ -724,7 +724,7 @@ const handleSelectNewMedia = async () => {
                     :key="option.value"
                     @click="preview.foregroundStyle = option.value"
                     class="flex-1 rounded-md py-1.5 text-xs font-medium transition-all"
-                    :class="preview.foregroundStyle === option.value ? 'bg-[#EC4141] text-white shadow-sm' : 'text-white/60 hover:bg-white/5 hover:text-white'"
+                    :class="preview.foregroundStyle === option.value ? 'bg-[#EC4141] text-white shadow-sm' : 'text-white/60 hover:bg-white/10 hover:text-white'"
                   >
                     {{ option.label }}
                   </button>
@@ -735,7 +735,7 @@ const handleSelectNewMedia = async () => {
         </div>
 
         <div class="flex gap-4 border-t border-white/10 bg-[#242424] px-6 py-4">
-          <button @click="handleCancel" class="flex-1 rounded-full border border-white/10 py-2.5 text-sm font-medium transition hover:bg-white/5">
+          <button @click="handleCancel" class="flex-1 rounded-full border border-white/10 py-2.5 text-sm font-medium transition hover:bg-white/10">
             取消
           </button>
           <button

@@ -608,7 +608,7 @@ onUnmounted(() => {
             <div
               v-for="item in row.items"
               :key="item.artist.name"
-              class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/5 p-2 rounded-lg transition-colors relative select-none"
+              class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/10 p-2 rounded-lg transition-colors relative select-none"
               @click="handleArtistClick(item.artist)"
               @contextmenu.prevent="handleContextMenu($event, item.artist)"
             >
@@ -644,7 +644,7 @@ onUnmounted(() => {
         <div
           v-for="item in flatArtistVirtualState.items"
           :key="item.artist.name"
-          class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/5 p-2 rounded-lg transition-colors relative select-none"
+          class="group cursor-pointer flex items-center gap-4 hover:bg-black/5 dark:hover:bg-white/10 p-2 rounded-lg transition-colors relative select-none"
           @click="handleArtistClick(item.artist)"
           @contextmenu.prevent="handleContextMenu($event, item.artist)"
         >

@@ -339,7 +339,7 @@ onBeforeUnmount(() => {
           {{ TEXT.topByCount }}
         </h4>
         <div class="space-y-2">
-          <div v-for="(song, index) in topSongs7d" :key="song.song_path" class="flex items-center gap-3 p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+          <div v-for="(song, index) in topSongs7d" :key="song.song_path" class="flex items-center gap-3 p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
             <div :class="['w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0', index === 0 ? 'bg-yellow-400 text-yellow-900' : index === 1 ? 'bg-gray-300 text-gray-700' : index === 2 ? 'bg-amber-600 text-amber-100' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300']">{{ index + 1 }}</div>
             <div class="w-8 h-8 rounded bg-gray-200 dark:bg-white/10 shrink-0 overflow-hidden shadow-sm">
               <img v-if="getCoverUrl(song.song_path)" :src="getCoverUrl(song.song_path)!" class="w-full h-full object-cover" loading="lazy" />
@@ -367,7 +367,7 @@ onBeforeUnmount(() => {
           {{ TEXT.topByDuration }}
         </h4>
         <div class="space-y-2">
-          <div v-for="(song, index) in topSongsByDuration" :key="song.song_path" class="flex items-center gap-3 p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+          <div v-for="(song, index) in topSongsByDuration" :key="song.song_path" class="flex items-center gap-3 p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
             <div :class="['w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0', index === 0 ? 'bg-yellow-400 text-yellow-900' : index === 1 ? 'bg-gray-300 text-gray-700' : index === 2 ? 'bg-amber-600 text-amber-100' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300']">{{ index + 1 }}</div>
             <div class="w-8 h-8 rounded bg-gray-200 dark:bg-white/10 shrink-0 overflow-hidden shadow-sm">
               <img v-if="getCoverUrl(song.song_path)" :src="getCoverUrl(song.song_path)!" class="w-full h-full object-cover" loading="lazy" />
@@ -397,7 +397,7 @@ onBeforeUnmount(() => {
           {{ TEXT.topArtists }}
         </h4>
         <div v-if="topArtists.length > 0" class="space-y-2">
-          <div v-for="(artist, index) in topArtists" :key="artist.artist" class="flex items-center gap-3 p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors animate-list-item" :style="{ animationDelay: `${800 + index * 60}ms` }">
+          <div v-for="(artist, index) in topArtists" :key="artist.artist" class="flex items-center gap-3 p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors animate-list-item" :style="{ animationDelay: `${800 + index * 60}ms` }">
             <div :class="['w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0', index === 0 ? 'bg-yellow-400 text-yellow-900' : index === 1 ? 'bg-gray-300 text-gray-700' : index === 2 ? 'bg-amber-600 text-amber-100' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300']">{{ index + 1 }}</div>
             <div class="flex-1 min-w-0">
               <p class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate" :title="artist.artist">{{ artist.artist }}</p>
@@ -419,7 +419,7 @@ onBeforeUnmount(() => {
           {{ TEXT.topAlbums }}
         </h4>
         <div v-if="topAlbums.length > 0" class="space-y-2">
-          <div v-for="(album, index) in topAlbums" :key="album.album" class="flex items-center gap-3 p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors animate-list-item" :style="{ animationDelay: `${900 + index * 60}ms` }">
+          <div v-for="(album, index) in topAlbums" :key="album.album" class="flex items-center gap-3 p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors animate-list-item" :style="{ animationDelay: `${900 + index * 60}ms` }">
             <div :class="['w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0', index === 0 ? 'bg-yellow-400 text-yellow-900' : index === 1 ? 'bg-gray-300 text-gray-700' : index === 2 ? 'bg-amber-600 text-amber-100' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300']">{{ index + 1 }}</div>
             <div class="flex-1 min-w-0">
               <p class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate" :title="album.album">{{ album.album }}</p>

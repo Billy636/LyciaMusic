@@ -11,7 +11,7 @@ export const TRAY_MENU_PANEL_WIDTH = 190;
 export const TRAY_MENU_SUBMENU_WIDTH = 132;
 export const TRAY_MENU_SUBMENU_GAP = 8;
 export const TRAY_MENU_WINDOW_WIDTH = TRAY_MENU_PANEL_WIDTH + TRAY_MENU_SUBMENU_WIDTH + TRAY_MENU_SUBMENU_GAP;
-export const TRAY_MENU_WINDOW_HEIGHT = 303;
+export const TRAY_MENU_WINDOW_HEIGHT = 273;
 
 export type TrayMenuSubmenuPlacement = 'left' | 'right';
 
@@ -22,7 +22,6 @@ export type TrayMenuAction =
   | 'play-mode-list-loop'
   | 'play-mode-single-loop'
   | 'play-mode-shuffle'
-  | 'toggle-mini-player'
   | 'toggle-desktop-lyrics'
   | 'toggle-taskbar-player'
   | 'open-settings'
@@ -38,7 +37,6 @@ export interface TrayMenuStatePayload {
   isPlaying: boolean;
   isDarkTheme: boolean;
   playMode: number;
-  isMiniMode: boolean;
   showDesktopLyrics: boolean;
   showTaskbarPlayer: boolean;
   submenuPlacement: TrayMenuSubmenuPlacement;
@@ -49,7 +47,6 @@ export interface TrayMenuActionDeps {
   togglePlay: () => void | Promise<unknown>;
   nextSong: () => void;
   playMode: Ref<number>;
-  isMiniMode: Ref<boolean>;
   showDesktopLyrics: Ref<boolean>;
   showTaskbarPlayer: Ref<boolean>;
   revealMainWindow: () => Promise<unknown>;
@@ -83,14 +80,6 @@ export async function handleTrayMenuAction(action: TrayMenuAction, deps: TrayMen
     case 'play-mode-shuffle':
       deps.playMode.value = 2;
       break;
-    case 'toggle-mini-player': {
-      const nextIsMiniMode = !deps.isMiniMode.value;
-      deps.isMiniMode.value = nextIsMiniMode;
-      if (!nextIsMiniMode) {
-        await deps.revealMainWindow();
-      }
-      break;
-    }
     case 'toggle-desktop-lyrics':
       deps.showDesktopLyrics.value = !deps.showDesktopLyrics.value;
       break;
@@ -98,7 +87,6 @@ export async function handleTrayMenuAction(action: TrayMenuAction, deps: TrayMen
       deps.showTaskbarPlayer.value = !deps.showTaskbarPlayer.value;
       break;
     case 'open-settings':
-      deps.isMiniMode.value = false;
       await deps.openSettings();
       await deps.revealMainWindow();
       break;

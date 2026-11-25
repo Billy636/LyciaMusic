@@ -11,7 +11,7 @@ export type SettingsSection =
   | 'shortcuts'
   | 'about';
 
-export type PersonalizationPage = 'theme' | 'sidebar' | 'footer' | 'desktopLyrics' | 'taskbarPlayer';
+export type PersonalizationPage = 'theme' | 'sidebar' | 'footer' | 'desktopLyrics' | 'taskbarPlayer' | 'songNotification';
 export type ToolboxPage = 'tags' | 'duplicates';
 
 export const SETTINGS_SECTION_LABELS = {
@@ -30,7 +30,8 @@ export const PERSONALIZATION_PAGE_LABELS = {
   sidebar: '界面与导航',
   footer: '播放底栏',
   desktopLyrics: '桌面歌词',
-  taskbarPlayer: '任务栏播控',
+  taskbarPlayer: '铃动窗',
+  songNotification: '切歌卡片',
 } satisfies Record<PersonalizationPage, string>;
 
 export const TOOLBOX_PAGE_LABELS = {

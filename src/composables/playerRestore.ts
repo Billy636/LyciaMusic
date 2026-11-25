@@ -43,16 +43,37 @@ export const createPlayerRestore = ({
   const { loadSong, rememberSongs } = useLibrarySongResolver();
 
   const restoreRecentHistory = async () => {
+    // 本地持久化的最近播放列表是顺序与重复规则的权威来源，避免数据库按秒粒度
+    // 重排导致「刚播放的歌没排到最前」。
+    if (collectionsStore.recentSongs.length > 0) return;
+
     const legacyHistory = readStoredHistory(keys.legacyPlayerHistory);
+    const songLookup = createSongLookup();
+    const identityOf = (path: string) => {
+      const song = songLookup.get(path);
+      if (!song) return '';
+      return [song.artist, song.title || song.name].filter(Boolean)
+        .map(value => String(value).trim().toLowerCase()).join('|');
+    };
+    const collapseAdjacent = (items: HistoryItem[]) => {
+      const seen = new Set<string>();
+      return items.reduce<HistoryItem[]>((acc, item) => {
+        const key = item.identity || identityOf(item.path);
+        if (key && seen.has(key)) return acc;
+        if (key) seen.add(key);
+        acc.push({ ...item, identity: key || undefined });
+        return acc;
+      }, []).slice(0, 100);
+    };
 
     try {
-      const records = await historyApi.getRecentHistory(200);
+      const records = await historyApi.getRecentHistory(100);
       if (records.length > 0) {
-        collectionsStore.setRecentSongs(records
+        collectionsStore.setRecentSongs(collapseAdjacent(records
           .map(record => ({
             path: record.songPath,
             playedAt: record.playedAt,
-          })));
+          }))));
 
         if (collectionsStore.recentSongs.length > 0) {
           playerStorage.remove(keys.legacyPlayerHistory);
@@ -68,7 +89,7 @@ export const createPlayerRestore = ({
       return;
     }
 
-    collectionsStore.setRecentSongs(legacyHistory.slice(0, 200));
+    collectionsStore.setRecentSongs(collapseAdjacent(legacyHistory.slice(0, 90)));
 
     const importedEntries = legacyHistory.map(item => ({
       songPath: item.path,

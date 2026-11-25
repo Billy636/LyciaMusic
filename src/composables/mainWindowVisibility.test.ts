@@ -19,7 +19,6 @@ describe('main window visibility toggle', () => {
       windowFocused: true,
       windowVisible: true,
       windowMinimized: false,
-      miniMode: false,
     });
     const mainWindow = createWindow(true, false);
 

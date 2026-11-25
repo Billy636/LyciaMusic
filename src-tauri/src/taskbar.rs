@@ -341,6 +341,165 @@ pub fn get_taskbar_tray_geometry(app: tauri::AppHandle) -> Result<TaskbarTrayGeo
     }
 }
 
+/// 拖动时至少保留在屏幕内的像素，其余允许藏到屏幕边缘外。
+const MIN_VISIBLE: i32 = 18;
+
+#[derive(serde::Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TaskbarDragResult {
+    pub x: i32,
+    pub y: i32,
+}
+
+/// 拖动范围：锁定状态只在底栏内水平移动，解锁后可在整块虚拟桌面自由移动。
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, Debug)]
+enum DragArea {
+    Dock { min_x: i32, max_x: i32, y: i32 },
+    /// 虚拟桌面范围在 worker 内部按自身 DPI 上下文读取，避免混用缩放值。
+    Free,
+}
+
+#[cfg(target_os = "windows")]
+fn drag_worker(
+    hwnd_raw: isize,
+    session_id: u64,
+    grab_offset_x: i32,
+    grab_offset_y: i32,
+    area: DragArea,
+) -> Result<TaskbarDragResult, String> {
+    use std::time::{Duration, Instant};
+    use windows::Win32::UI::HiDpi::{
+        SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT,
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_ESCAPE, VK_LBUTTON, VK_RBUTTON,
+    };
+    use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetCursorPos, GetSystemMetrics, GetWindowRect, IsWindow, IsWindowVisible, SetWindowPos,
+        SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_SWAPBUTTON, SM_XVIRTUALSCREEN,
+        SM_YVIRTUALSCREEN, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
+    };
+
+    // Runtime workers do not necessarily inherit the window thread's awareness.
+    // Keep the native reads and writes in physical pixels, then restore this
+    // pooled thread's context on every exit path.
+    struct RestoreDpiContext(DPI_AWARENESS_CONTEXT);
+    impl Drop for RestoreDpiContext {
+        fn drop(&mut self) {
+            unsafe { SetThreadDpiAwarenessContext(self.0) };
+        }
+    }
+    let mut previous_dpi =
+        unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+    if previous_dpi.0.is_null() {
+        previous_dpi =
+            unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE) };
+    }
+    if previous_dpi.0.is_null() {
+        return Err("Failed to set the taskbar drag worker's DPI awareness".to_string());
+    }
+    let _restore_dpi = RestoreDpiContext(previous_dpi);
+
+    let hwnd = hwnd_raw as HWND;
+    let mut rect: RECT = unsafe { std::mem::zeroed() };
+    if unsafe { IsWindow(hwnd) } == 0 || unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+        return Err("Taskbar player window is unavailable".to_string());
+    }
+    let mut confirmed_x = rect.left;
+    let mut confirmed_y = rect.top;
+
+    let (min_x, max_x, min_y, max_y) = match area {
+        DragArea::Dock { min_x, max_x, y } => (min_x, max_x.max(min_x), y, y),
+        DragArea::Free => {
+            let window_width = rect.right - rect.left;
+            let window_height = rect.bottom - rect.top;
+            // 允许拖出屏幕边缘，只保证至少 MIN_VISIBLE 仍在桌面内，方便藏边。
+            let margin_x = (window_width - MIN_VISIBLE).max(0);
+            let margin_y = (window_height - MIN_VISIBLE).max(0);
+            let virtual_x = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+            let virtual_y = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+            let virtual_width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+            let virtual_height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+            (
+                virtual_x - margin_x,
+                (virtual_x + virtual_width - window_width + margin_x).max(virtual_x),
+                virtual_y - margin_y,
+                (virtual_y + virtual_height - window_height + margin_y).max(virtual_y),
+            )
+        }
+    };
+
+    let started = Instant::now();
+    // DOM button 0 follows the user's primary-button preference;
+    // GetAsyncKeyState reports physical left/right buttons instead.
+    let primary_button = if unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0 {
+        VK_RBUTTON
+    } else {
+        VK_LBUTTON
+    };
+
+    // Read native input instead of WebView pointer events. The no-activate
+    // taskbar window can lose DOM capture while the button is still held.
+    loop {
+        if TASKBAR_DRAG_ACTIVE_SESSION.load(Ordering::SeqCst) != session_id
+            || TASKBAR_DRAG_CANCELLED_SESSION.load(Ordering::SeqCst) >= session_id
+            || started.elapsed() >= Duration::from_secs(30)
+            || unsafe { IsWindow(hwnd) } == 0
+            || unsafe { IsWindowVisible(hwnd) } == 0
+            || unsafe { GetAsyncKeyState(primary_button.0 as i32) } >= 0
+            || unsafe { GetAsyncKeyState(VK_ESCAPE.0 as i32) } < 0
+        {
+            break;
+        }
+
+        let mut cursor = POINT { x: 0, y: 0 };
+        if unsafe { GetCursorPos(&mut cursor) } == 0 {
+            return Err(format!(
+                "Failed to read the cursor position: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let next_x = cursor.x.saturating_sub(grab_offset_x).clamp(min_x, max_x);
+        let next_y = cursor.y.saturating_sub(grab_offset_y).clamp(min_y, max_y);
+        if next_x != confirmed_x || next_y != confirmed_y {
+            // Keep every coordinate physical and apply movement
+            // synchronously so completion cannot precede a queued move.
+            if unsafe {
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    next_x,
+                    next_y,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER,
+                )
+            } == 0
+            {
+                return Err(format!(
+                    "Failed to move the taskbar player: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+                break;
+            }
+            confirmed_x = rect.left;
+            confirmed_y = rect.top;
+        }
+        std::thread::sleep(Duration::from_millis(12));
+    }
+
+    if unsafe { IsWindow(hwnd) } != 0 && unsafe { GetWindowRect(hwnd, &mut rect) } != 0 {
+        confirmed_x = rect.left;
+        confirmed_y = rect.top;
+    }
+    Ok(TaskbarDragResult { x: confirmed_x, y: confirmed_y })
+}
+
+/// 锁定状态下的拖动：只在底栏横向区间内移动，纵向保持固定。
 #[tauri::command]
 pub async fn drag_taskbar_player(
     window: tauri::Window,
@@ -349,129 +508,23 @@ pub async fn drag_taskbar_player(
     max_x: i32,
     y: i32,
     grab_offset_x: i32,
-) -> Result<i32, String> {
+) -> Result<TaskbarDragResult, String> {
     if window.label() != TASKBAR_PLAYER_WINDOW_LABEL {
         return Err("Only the taskbar player window can start taskbar dragging".to_string());
-    }
-    if min_x > max_x {
-        return Err("Invalid taskbar drag bounds".to_string());
     }
 
     #[cfg(target_os = "windows")]
     {
-        use std::time::{Duration, Instant};
-        use windows::Win32::UI::HiDpi::{
-            SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT,
-            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
-        };
-        use windows::Win32::UI::Input::KeyboardAndMouse::{
-            GetAsyncKeyState, VK_ESCAPE, VK_LBUTTON, VK_RBUTTON,
-        };
-        use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            GetCursorPos, GetSystemMetrics, GetWindowRect, IsWindow, IsWindowVisible, SetWindowPos,
-            SM_SWAPBUTTON, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
-        };
-
+        if min_x > max_x {
+            return Err("Invalid taskbar drag bounds".to_string());
+        }
         // The caller reserves the id before any IPC. Separate monotonic high
         // watermarks prevent delayed starts from reviving a cancelled session
         // or replacing a newer drag, even before this async command is polled.
         TASKBAR_DRAG_ACTIVE_SESSION.fetch_max(session_id, Ordering::SeqCst);
         let hwnd = window.hwnd().map_err(|error| error.to_string())?.0 as isize;
-
         tauri::async_runtime::spawn_blocking(move || {
-            // Runtime workers do not necessarily inherit the window thread's
-            // awareness. Keep the native reads and writes in physical pixels,
-            // then restore this pooled thread's context on every exit path.
-            struct RestoreDpiContext(DPI_AWARENESS_CONTEXT);
-            impl Drop for RestoreDpiContext {
-                fn drop(&mut self) {
-                    unsafe { SetThreadDpiAwarenessContext(self.0) };
-                }
-            }
-            let mut previous_dpi =
-                unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
-            if previous_dpi.0.is_null() {
-                previous_dpi = unsafe {
-                    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE)
-                };
-            }
-            if previous_dpi.0.is_null() {
-                return Err("Failed to set the taskbar drag worker's DPI awareness".to_string());
-            }
-            let _restore_dpi = RestoreDpiContext(previous_dpi);
-
-            let hwnd = hwnd as HWND;
-            let mut rect: RECT = unsafe { std::mem::zeroed() };
-            if unsafe { IsWindow(hwnd) } == 0 || unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
-                return Err("Taskbar player window is unavailable".to_string());
-            }
-            let mut confirmed_x = rect.left;
-            let mut confirmed_y = rect.top;
-            let started = Instant::now();
-            // DOM button 0 follows the user's primary-button preference;
-            // GetAsyncKeyState reports physical left/right buttons instead.
-            let primary_button = if unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0 {
-                VK_RBUTTON
-            } else {
-                VK_LBUTTON
-            };
-
-            // Read native input instead of WebView pointer events. The no-activate
-            // taskbar window can lose DOM capture while the button is still held.
-            loop {
-                if TASKBAR_DRAG_ACTIVE_SESSION.load(Ordering::SeqCst) != session_id
-                    || TASKBAR_DRAG_CANCELLED_SESSION.load(Ordering::SeqCst) >= session_id
-                    || started.elapsed() >= Duration::from_secs(30)
-                    || unsafe { IsWindow(hwnd) } == 0
-                    || unsafe { IsWindowVisible(hwnd) } == 0
-                    || unsafe { GetAsyncKeyState(primary_button.0 as i32) } >= 0
-                    || unsafe { GetAsyncKeyState(VK_ESCAPE.0 as i32) } < 0
-                {
-                    break;
-                }
-
-                let mut cursor = POINT { x: 0, y: 0 };
-                if unsafe { GetCursorPos(&mut cursor) } == 0 {
-                    return Err(format!(
-                        "Failed to read the cursor position: {}",
-                        std::io::Error::last_os_error()
-                    ));
-                }
-                let next_x = cursor.x.saturating_sub(grab_offset_x).clamp(min_x, max_x);
-                if next_x != confirmed_x || y != confirmed_y {
-                    // Keep every coordinate physical and apply movement
-                    // synchronously so completion cannot precede a queued move.
-                    if unsafe {
-                        SetWindowPos(
-                            hwnd,
-                            std::ptr::null_mut(),
-                            next_x,
-                            y,
-                            0,
-                            0,
-                            SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER,
-                        )
-                    } == 0
-                    {
-                        return Err(format!(
-                            "Failed to move the taskbar player: {}",
-                            std::io::Error::last_os_error()
-                        ));
-                    }
-                    if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
-                        break;
-                    }
-                    confirmed_x = rect.left;
-                    confirmed_y = rect.top;
-                }
-                std::thread::sleep(Duration::from_millis(12));
-            }
-
-            if unsafe { IsWindow(hwnd) } != 0 && unsafe { GetWindowRect(hwnd, &mut rect) } != 0 {
-                confirmed_x = rect.left;
-            }
-            Ok(confirmed_x)
+            drag_worker(hwnd, session_id, grab_offset_x, 0, DragArea::Dock { min_x, max_x, y })
         })
         .await
         .map_err(|error| format!("Taskbar drag worker failed: {error}"))?
@@ -479,6 +532,36 @@ pub async fn drag_taskbar_player(
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (window, session_id, min_x, max_x, y, grab_offset_x);
+        Err("Taskbar player dragging is only supported on Windows".to_string())
+    }
+}
+
+/// 解锁状态下的拖动：限制在整块虚拟桌面内，可跨屏自由移动。
+#[tauri::command]
+pub async fn drag_taskbar_player_free(
+    window: tauri::Window,
+    session_id: u64,
+    grab_offset_x: i32,
+    grab_offset_y: i32,
+) -> Result<TaskbarDragResult, String> {
+    if window.label() != TASKBAR_PLAYER_WINDOW_LABEL {
+        return Err("Only the taskbar player window can start free dragging".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        TASKBAR_DRAG_ACTIVE_SESSION.fetch_max(session_id, Ordering::SeqCst);
+        let hwnd = window.hwnd().map_err(|error| error.to_string())?.0 as isize;
+
+        tauri::async_runtime::spawn_blocking(move || {
+            drag_worker(hwnd, session_id, grab_offset_x, grab_offset_y, DragArea::Free)
+        })
+        .await
+        .map_err(|error| format!("Taskbar drag worker failed: {error}"))?
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, session_id, grab_offset_x, grab_offset_y);
         Err("Taskbar player dragging is only supported on Windows".to_string())
     }
 }

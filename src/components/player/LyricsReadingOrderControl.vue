@@ -473,37 +473,37 @@ onBeforeUnmount(() => {
 .reading-order-control--inline .reading-order-heading h3 { margin-top: 0; }
 .reading-order-inline-options { margin-top: 12px; }
 .reading-order-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
-.reading-order-eyebrow { color: rgb(255 255 255 / 30%); font-size: 9px; font-weight: 600; letter-spacing: .3em; text-transform: uppercase; }
-.reading-order-heading h3 { margin: 6px 0 0; color: rgb(255 255 255 / 85%); font-size: 13px; font-weight: 500; }
-.reading-order-reset { flex-shrink: 0; padding: 4px 6px; border-radius: 8px; color: rgb(255 255 255 / 55%); font-size: 11px; }
-.reading-order-reset:hover { background: rgb(255 255 255 / 7%); color: white; }
-.reading-order-scope { display: flex; gap: 3px; padding: 3px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 12px; background: rgb(255 255 255 / 3%); }
-.reading-order-scope button { flex: 1; min-width: 0; min-height: 28px; border-radius: 8px; color: rgb(255 255 255 / 50%); font-size: 11px; font-weight: 500; transition: background-color 160ms, color 160ms; }
-.reading-order-scope button[aria-pressed="true"] { background: rgb(255 255 255 / 12%); color: white; }
+.reading-order-eyebrow { color: color-mix(in srgb, currentColor 30%, transparent); font-size: 9px; font-weight: 600; letter-spacing: .3em; text-transform: uppercase; }
+.reading-order-heading h3 { margin: 6px 0 0; color: color-mix(in srgb, currentColor 85%, transparent); font-size: 13px; font-weight: 500; }
+.reading-order-reset { flex-shrink: 0; padding: 4px 6px; border-radius: 8px; color: color-mix(in srgb, currentColor 55%, transparent); font-size: 11px; }
+.reading-order-reset:hover { background: color-mix(in srgb, currentColor 7%, transparent); color: currentColor; }
+.reading-order-scope { display: flex; gap: 3px; padding: 3px; border: 1px solid color-mix(in srgb, currentColor 10%, transparent); border-radius: 12px; background: color-mix(in srgb, currentColor 3%, transparent); }
+.reading-order-scope button { flex: 1; min-width: 0; min-height: 28px; border-radius: 8px; color: color-mix(in srgb, currentColor 50%, transparent); font-size: 11px; font-weight: 500; transition: background-color 160ms, color 160ms; }
+.reading-order-scope button[aria-pressed="true"] { background: color-mix(in srgb, currentColor 12%, transparent); color: currentColor; }
 .reading-order-scope button:disabled { cursor: not-allowed; opacity: .3; }
-.reading-order-status { display: flex; justify-content: space-between; gap: 8px; margin: 8px 2px; color: rgb(255 255 255 / 43%); font-size: 10px; line-height: 1.5; }
+.reading-order-status { display: flex; justify-content: space-between; gap: 8px; margin: 8px 2px; color: color-mix(in srgb, currentColor 43%, transparent); font-size: 10px; line-height: 1.5; }
 .reading-order-status > span:last-child { flex-shrink: 0; }
 .reading-order-song { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.reading-order-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 10px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 14px; background: rgb(255 255 255 / 3%); text-align: left; transition: background-color 160ms, border-color 160ms; }
-.reading-order-trigger:hover, .reading-order-trigger--expanded { border-color: rgb(255 255 255 / 22%); background: rgb(255 255 255 / 7%); }
+.reading-order-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 10px; border: 1px solid color-mix(in srgb, currentColor 10%, transparent); border-radius: 14px; background: color-mix(in srgb, currentColor 3%, transparent); text-align: left; transition: background-color 160ms, border-color 160ms; }
+.reading-order-trigger:hover, .reading-order-trigger--expanded { border-color: color-mix(in srgb, currentColor 22%, transparent); background: color-mix(in srgb, currentColor 7%, transparent); }
 .reading-order-sequence { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.reading-order-role { padding: 3px 5px; border-radius: 6px; background: rgb(255 255 255 / 6%); color: rgb(255 255 255 / 65%); font-size: 11px; line-height: 1.3; }
-.reading-order-role--main { color: rgb(255 255 255 / 90%); }
-.reading-order-arrow { color: rgb(255 255 255 / 30%); font-size: 11px; }
-.reading-order-chevron { flex-shrink: 0; color: rgb(255 255 255 / 45%); transition: transform 160ms; }
+.reading-order-role { padding: 3px 5px; border-radius: 6px; background: color-mix(in srgb, currentColor 6%, transparent); color: color-mix(in srgb, currentColor 65%, transparent); font-size: 11px; line-height: 1.3; }
+.reading-order-role--main { color: color-mix(in srgb, currentColor 90%, transparent); }
+.reading-order-arrow { color: color-mix(in srgb, currentColor 30%, transparent); font-size: 11px; }
+.reading-order-chevron { flex-shrink: 0; color: color-mix(in srgb, currentColor 45%, transparent); transition: transform 160ms; }
 .reading-order-chevron--expanded { transform: rotate(180deg); }
-.reading-order-popover { z-index: 120; overflow: auto; padding: 8px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 24px; background: rgb(0 0 0 / 30%); color: white; box-shadow: 0 28px 70px rgb(0 0 0 / 36%); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); overscroll-behavior: contain; }
+.reading-order-popover { z-index: 120; overflow: auto; padding: 8px; border: 1px solid var(--panel-surface-border); border-radius: 24px; background: var(--panel-surface-bg); color: var(--panel-surface-fg); box-shadow: var(--panel-surface-shadow); backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%); -webkit-backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%); overscroll-behavior: contain; }
 .reading-order-sort-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .reading-order-sort-list > li { position: relative; }
 .reading-order-sort-row--dragging { z-index: 1; }
-.reading-order-drag-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid transparent; border-radius: 16px; background: rgb(255 255 255 / 3%); color: rgb(255 255 255 / 80%); text-align: left; cursor: grab; touch-action: none; user-select: none; transition: background-color 160ms, border-color 160ms, box-shadow 220ms; }
-.reading-order-drag-item:hover { background: rgb(255 255 255 / 7%); }
-.reading-order-drag-item--dragging { border-color: rgb(255 255 255 / 25%); background: rgb(255 255 255 / 14%); box-shadow: 0 8px 20px rgb(0 0 0 / 20%); color: white; cursor: grabbing; }
+.reading-order-drag-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid transparent; border-radius: 16px; background: color-mix(in srgb, currentColor 3%, transparent); color: color-mix(in srgb, currentColor 80%, transparent); text-align: left; cursor: grab; touch-action: none; user-select: none; transition: background-color 160ms, border-color 160ms, box-shadow 220ms; }
+.reading-order-drag-item:hover { background: color-mix(in srgb, currentColor 7%, transparent); }
+.reading-order-drag-item--dragging { border-color: color-mix(in srgb, currentColor 25%, transparent); background: color-mix(in srgb, currentColor 14%, transparent); box-shadow: 0 8px 20px rgb(0 0 0 / 20%); color: currentColor; cursor: grabbing; }
 .reading-order-sort-list:has(.reading-order-drag-item--dragging) .reading-order-drag-item { cursor: grabbing; }
-.reading-order-position { flex-shrink: 0; color: rgb(255 255 255 / 35%); font-size: 11px; font-variant-numeric: tabular-nums; }
+.reading-order-position { flex-shrink: 0; color: color-mix(in srgb, currentColor 35%, transparent); font-size: 11px; font-variant-numeric: tabular-nums; }
 .reading-order-item-label { flex: 1; font-size: 13px; font-weight: 500; }
-.reading-order-grip { flex-shrink: 0; color: rgb(255 255 255 / 40%); }
-.reading-order-drag-item:focus-visible, .reading-order-trigger:focus-visible, .reading-order-scope button:focus-visible, .reading-order-reset:focus-visible { box-shadow: 0 0 0 2px rgb(255 255 255 / 65%); }
+.reading-order-grip { flex-shrink: 0; color: color-mix(in srgb, currentColor 40%, transparent); }
+.reading-order-drag-item:focus-visible, .reading-order-trigger:focus-visible, .reading-order-scope button:focus-visible, .reading-order-reset:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 65%, transparent); }
 .reading-order-popover-enter-active, .reading-order-popover-leave-active { transition: opacity 160ms ease, transform 160ms ease; }
 .reading-order-popover-enter-from, .reading-order-popover-leave-to { opacity: 0; transform: translateX(-8px); }
 @media (prefers-reduced-motion: reduce) { .reading-order-drag-item, .reading-order-popover-enter-active, .reading-order-popover-leave-active { transition: none; } }

@@ -2,7 +2,6 @@
 import {
   Check,
   ChevronRight,
-  Minimize2,
   Music2,
   PanelBottom,
   Pause,
@@ -17,6 +16,7 @@ import {
 } from 'lucide-vue-next';
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { emitSongSwitchSignal } from '../../features/songNotification/switchSignal';
 import { computed, nextTick, onMounted, onUnmounted, ref, type Component } from 'vue';
 
 import {
@@ -39,7 +39,6 @@ const currentSong = ref<Song | null>(null);
 const isPlaying = ref(false);
 const isDarkTheme = ref(true);
 const playMode = ref(0);
-const isMiniMode = ref(false);
 const showDesktopLyrics = ref(false);
 const showTaskbarPlayer = ref(false);
 const isPlayModeMenuOpen = ref(false);
@@ -216,7 +215,6 @@ onMounted(async () => {
     isPlaying.value = event.payload.isPlaying;
     isDarkTheme.value = event.payload.isDarkTheme;
     playMode.value = event.payload.playMode;
-    isMiniMode.value = event.payload.isMiniMode;
     showDesktopLyrics.value = event.payload.showDesktopLyrics;
     showTaskbarPlayer.value = event.payload.showTaskbarPlayer;
     submenuPlacement.value = event.payload.submenuPlacement;
@@ -277,14 +275,26 @@ onUnmounted(() => {
       <div class="menu-divider" />
 
       <section class="transport" aria-label="播放控制" @mouseenter="closePlayModeMenu" @focusin="closePlayModeMenu">
-        <button class="transport-button" title="上一首" @click="sendAction('prev-song', { hide: false })">
+        <button
+          class="transport-button"
+          title="上一首"
+          @pointerenter="emitSongSwitchSignal('tray', 'hover', 'previous')"
+          @pointerleave="emitSongSwitchSignal('tray', 'leave', 'previous')"
+          @click="sendAction('prev-song', { hide: false })"
+        >
           <SkipBack :size="22" :stroke-width="2.35" />
         </button>
         <button class="transport-button transport-button--play" title="播放/暂停" @click="sendAction('toggle-play', { hide: false })">
           <Pause v-if="isPlaying" :size="24" :stroke-width="2.5" />
           <Play v-else :size="24" :stroke-width="2.5" />
         </button>
-        <button class="transport-button" title="下一首" @click="sendAction('next-song', { hide: false })">
+        <button
+          class="transport-button"
+          title="下一首"
+          @pointerenter="emitSongSwitchSignal('tray', 'hover', 'next')"
+          @pointerleave="emitSongSwitchSignal('tray', 'leave', 'next')"
+          @click="sendAction('next-song', { hide: false })"
+        >
           <SkipForward :size="22" :stroke-width="2.35" />
         </button>
       </section>
@@ -312,14 +322,6 @@ onUnmounted(() => {
         <ChevronRight class="row-chevron" :size="18" :stroke-width="2.2" />
       </button>
 
-      <button class="menu-row" @mouseenter="closePlayModeMenu" @focus="closePlayModeMenu" @click="sendAction('toggle-mini-player')">
-        <span class="row-icon">
-          <Minimize2 :size="18" :stroke-width="2.15" />
-        </span>
-        <span class="row-label">mini窗口</span>
-        <Check v-if="isMiniMode" class="row-check" :size="16" :stroke-width="2.3" />
-      </button>
-
       <div class="menu-divider" />
 
       <button class="menu-row" @mouseenter="closePlayModeMenu" @focus="closePlayModeMenu" @click="sendAction('toggle-desktop-lyrics')">
@@ -339,7 +341,7 @@ onUnmounted(() => {
         <span class="row-icon">
           <PanelBottom :size="18" :stroke-width="2.15" />
         </span>
-        <span class="row-label">任务栏播控</span>
+        <span class="row-label">铃动窗</span>
         <Check v-if="showTaskbarPlayer" class="row-check" :size="16" :stroke-width="2.3" />
       </button>
 

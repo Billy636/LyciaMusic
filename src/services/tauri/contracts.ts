@@ -504,7 +504,7 @@ export interface TauriCommandMap {
     payload: {
       recentEntries: RecentHistoryImportRecord[];
       query?: string;
-      sortMode: 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc';
+      sortMode: 'title' | 'artist' | 'added_at' | 'added_at_asc' | 'file_modified_at' | 'file_modified_at_asc' | 'played_at';
       offset?: number;
       limit?: number;
     };
@@ -548,7 +548,6 @@ export interface TauriCommandMap {
     };
     response: StatisticsImportResult;
   };
-  set_mini_boundary_enabled: { payload: { enabled: boolean }; response: void };
   set_retain_material_on_unfocus: { payload: { enabled: boolean }; response: void };
   set_dark_mode_for_window: { payload: { dark: boolean }; response: void };
   get_window_material_capabilities: {

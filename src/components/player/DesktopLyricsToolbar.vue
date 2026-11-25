@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { DesktopLyricsAction } from '../../features/desktopLyrics/shared';
+import { emitSongSwitchSignal } from '../../features/songNotification/switchSignal';
 
 const props = withDefaults(
   defineProps<{
@@ -54,7 +55,13 @@ function emitAction(action: DesktopLyricsAction) {
 
         <span class="desktop-toolbar-divider" aria-hidden="true"></span>
 
-        <button class="desktop-toolbar-button" title="上一首" @click="emitAction({ type: 'prev-song' })">
+        <button
+          class="desktop-toolbar-button"
+          title="上一首"
+          @pointerenter="emitSongSwitchSignal('desktopLyrics', 'hover', 'previous')"
+          @pointerleave="emitSongSwitchSignal('desktopLyrics', 'leave', 'previous')"
+          @click="emitAction({ type: 'prev-song' })"
+        >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-[16px] w-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
             <path stroke-linecap="round" stroke-linejoin="round" d="M7 6v12" />
             <path stroke-linecap="round" stroke-linejoin="round" d="M17 7 9.5 12 17 17V7Z" />
@@ -74,7 +81,13 @@ function emitAction(action: DesktopLyricsAction) {
           </svg>
         </button>
 
-        <button class="desktop-toolbar-button" title="下一首" @click="emitAction({ type: 'next-song' })">
+        <button
+          class="desktop-toolbar-button"
+          title="下一首"
+          @pointerenter="emitSongSwitchSignal('desktopLyrics', 'hover', 'next')"
+          @pointerleave="emitSongSwitchSignal('desktopLyrics', 'leave', 'next')"
+          @click="emitAction({ type: 'next-song' })"
+        >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-[16px] w-[16px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
             <path stroke-linecap="round" stroke-linejoin="round" d="M17 6v12" />
             <path stroke-linecap="round" stroke-linejoin="round" d="M7 7l7.5 5L7 17V7Z" />

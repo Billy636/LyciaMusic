@@ -104,7 +104,7 @@ describe('startup update checks', () => {
     expect(api.useStartupUpdateNotice().startupUpdate.value).toBeNull();
   });
 
-  it.each(['mini-player', 'desktop-lyrics', 'tray-menu', 'taskbar-player'])('does not run in %s', async label => {
+  it.each(['desktop-lyrics', 'tray-menu', 'taskbar-player'])('does not run in %s', async label => {
     mocks.getCurrentWindow.mockReturnValue({ label });
     api.startStartupUpdateCheck(() => true);
     await vi.runAllTimersAsync();

@@ -3,8 +3,6 @@ import type { ForegroundFullscreenState, ImmersiveFullscreenState, WindowMateria
 export type { ForegroundFullscreenState, ImmersiveFullscreenState, WindowMaterialCapabilities } from './contracts';
 
 export const windowApi = {
-  setMiniBoundaryEnabled: (enabled: boolean) =>
-    tauriInvoke('set_mini_boundary_enabled', { enabled }),
   setRetainMaterialOnUnfocus: (enabled: boolean) =>
     tauriInvoke('set_retain_material_on_unfocus', { enabled }),
   setDarkModeForWindow: (dark: boolean) =>

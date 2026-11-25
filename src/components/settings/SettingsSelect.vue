@@ -128,7 +128,8 @@ onBeforeUnmount(() => {
 .settings-select-surface {
   --select-border: rgb(148 163 184 / .24);
   --select-trigger-bg: rgb(255 255 255 / .62);
-  --select-menu-bg: rgb(255 255 255 / .86);
+  --select-menu-bg: var(--panel-surface-bg);
+  --select-menu-fg: var(--panel-surface-fg);
   --select-hover-bg: rgb(236 65 65 / .08);
   --select-accent: #c83232;
   color: #1f2937;
@@ -138,12 +139,13 @@ onBeforeUnmount(() => {
   -webkit-backdrop-filter: blur(24px) saturate(140%);
 }
 .dark .settings-select-surface {
-  --select-border: rgb(255 255 255 / .14);
-  --select-trigger-bg: rgb(255 255 255 / .05);
-  --select-menu-bg: rgb(24 32 40 / .86);
+  /* 与播放底栏「播放队列」抽屉一致：半透明黑玻璃 + 24px 模糊。 */
+  --select-border: rgb(255 255 255 / .1);
+  --select-trigger-bg: rgb(0 0 0 / .3);
+  --select-menu-bg: rgb(0 0 0 / .3);
   --select-hover-bg: rgb(255 255 255 / .09);
   --select-accent: #ff9393;
-  color: #f3f4f6;
+  color: rgba(255 255 255 / .85);
 }
 .settings-select-surface.is-solid {
   --select-trigger-bg: #fff;
@@ -152,12 +154,13 @@ onBeforeUnmount(() => {
   -webkit-backdrop-filter: none;
 }
 .dark .settings-select-surface.is-solid { --select-trigger-bg: #2f2f34; }
-.settings-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 38px; padding: 8px 12px; background: var(--select-trigger-bg); text-align: left; cursor: pointer; transition: border-color 160ms, box-shadow 160ms; }
-.settings-select-trigger:hover { border-color: rgb(236 65 65 / .3); }
+.settings-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 38px; padding: 8px 12px; background: transparent; border-color: transparent; text-align: left; cursor: pointer; transition: background-color 160ms, border-color 160ms, box-shadow 160ms; }
+.settings-select-trigger:hover { background: var(--select-trigger-bg); border-color: rgb(236 65 65 / .3); }
 .settings-select-trigger:disabled { opacity: .45; cursor: default; }
-.settings-select-trigger:focus-visible, .settings-select-trigger.is-open { outline: none; border-color: rgb(236 65 65 / .55); box-shadow: 0 0 0 3px rgb(236 65 65 / .12); }
-.settings-select-menu { position: fixed; z-index: 9500; overflow-y: auto; padding: 5px; box-sizing: border-box; background: var(--select-menu-bg); box-shadow: 0 12px 32px rgb(0 0 0 / .18); font-size: 13px; }
+.settings-select-trigger:focus-visible, .settings-select-trigger.is-open { outline: none; background: var(--select-trigger-bg); border-color: rgb(236 65 65 / .55); box-shadow: 0 0 0 3px rgb(236 65 65 / .12); }
+.settings-select-surface.is-solid .settings-select-trigger { background: var(--select-trigger-bg); border-color: var(--select-border); }
+.settings-select-menu { position: fixed; z-index: 9500; overflow-y: auto; padding: 5px; box-sizing: border-box; border-color: var(--panel-surface-border); background: var(--select-menu-bg); color: var(--select-menu-fg); box-shadow: var(--panel-surface-shadow); -webkit-backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%); backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%); font-size: 13px; }
 .settings-select-option { display: flex; align-items: center; gap: 12px; min-height: 38px; padding: 8px 12px; border-radius: 6px; cursor: pointer; user-select: none; }
-.settings-select-option.is-active { background: var(--select-hover-bg); }
-.settings-select-option.is-selected { color: var(--select-accent); font-weight: 500; }
+.settings-select-option.is-active { background: color-mix(in srgb, currentColor 12%, transparent); }
+.settings-select-option.is-selected { background: color-mix(in srgb, var(--panel-surface-accent) 16%, transparent); color: var(--panel-surface-accent); font-weight: 500; }
 </style>

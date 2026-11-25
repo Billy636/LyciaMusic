@@ -14,11 +14,28 @@ const formatPlaylistDate = () => {
 };
 
 export const useCollectionsStore = defineStore('collections', () => {
-  const RECENT_SONG_LIMIT = 200;
+  const RECENT_SONG_LIMIT = 100;
+  const RECENT_STORAGE_KEY = 'lycia_recent_songs_v1';
   const favoritePaths = ref<string[]>([]);
   const playlists = ref<Playlist[]>([]);
   const initialized = ref(false);
-  const recentSongs = ref<HistoryItem[]>([]);
+  const storedRecent = localStore.getJson<HistoryItem[]>(RECENT_STORAGE_KEY);
+  const identityOfItem = (item: HistoryItem) => item.identity || item.path;
+  const uniqueRecent = (items: HistoryItem[]) => {
+    const seen = new Set<string>();
+    return items.filter(item => {
+      const key = identityOfItem(item);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, RECENT_SONG_LIMIT);
+  };
+  const recentSongs = ref<HistoryItem[]>(Array.isArray(storedRecent)
+    ? uniqueRecent(storedRecent.filter(item => item && typeof item.path === 'string' && typeof item.playedAt === 'number'))
+    : []);
+  watch(recentSongs, items => {
+    localStore.setJson(RECENT_STORAGE_KEY, items);
+  }, { deep: true, flush: 'sync' });
   const playlistSortMode = ref<PlaylistSortMode>('custom');
   const storedOverrides = playerStorage.readObject<Record<string, unknown>>(playerStorageKeys.playlistSortOverrides);
   const playlistSortOverrides = ref<Record<string, PlaylistSortMode>>(Object.fromEntries(
@@ -175,12 +192,14 @@ export const useCollectionsStore = defineStore('collections', () => {
   };
 
   const addRecentSong = (song: Song) => {
-    recentSongs.value = recentSongs.value.filter(item => item.path !== song.path);
-    recentSongs.value.unshift({ path: song.path, playedAt: Date.now() });
-
-    if (recentSongs.value.length > RECENT_SONG_LIMIT) {
-      recentSongs.value = recentSongs.value.slice(0, RECENT_SONG_LIMIT);
-    }
+    const now = Date.now();
+    const identity = [song.artist, song.title || song.name].filter(Boolean)
+      .map(value => String(value).trim().toLowerCase()).join('|');
+    // 当前播放的歌始终置顶；按路径或歌手+标题任一命中都视为同一首，
+    // 旧位置移除后重新置顶，避免同曲多文件 / 元数据差异产生重复。
+    const rest = recentSongs.value.filter(item =>
+      item.path !== song.path && (!identity || item.identity !== identity));
+    recentSongs.value = [{ path: song.path, playedAt: now, identity }, ...rest].slice(0, RECENT_SONG_LIMIT);
   };
 
   const removeRecentSongs = (songPaths: string[]) => {

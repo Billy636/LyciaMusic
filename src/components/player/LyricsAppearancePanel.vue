@@ -435,7 +435,7 @@ onUnmounted(() => {
               >
             </div>
             <p class="appearance-sync-description">正值让歌词延后，负值让歌词提前。用于补偿音频输出延迟，默认 0 ms。</p>
-            <p class="appearance-sync-description">全局生效：播放页、桌面歌词、mini 模式及任务栏歌词。</p>
+            <p class="appearance-sync-description">全局生效：播放页、桌面歌词及铃动窗歌词。</p>
           </div>
           <LyricsBackgroundControl v-else-if="activeSection === 'background'" />
         </div>
@@ -449,20 +449,20 @@ onUnmounted(() => {
 .lyrics-appearance-panel--covered { visibility: hidden; }
 .lyrics-appearance-directory { padding: 8px; }
 .appearance-section { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 12px; border: 1px solid transparent; border-radius: 14px; text-align: left; transition: background-color 160ms, border-color 160ms; }
-.appearance-section:hover, .appearance-section--active { border-color: rgb(255 255 255 / 10%); background: rgb(255 255 255 / 8%); }
-.appearance-section-icon { flex-shrink: 0; color: rgb(255 255 255 / 55%); }
+.appearance-section:hover, .appearance-section--active { border-color: color-mix(in srgb, currentColor 10%, transparent); background: color-mix(in srgb, currentColor 8%, transparent); }
+.appearance-section-icon { flex-shrink: 0; color: color-mix(in srgb, currentColor 55%, transparent); }
 .appearance-section-copy { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
-.appearance-section-label { color: rgb(255 255 255 / 88%); font-size: 13px; font-weight: 500; line-height: 18px; }
-.appearance-section-summary { overflow: hidden; color: rgb(255 255 255 / 43%); font-size: 11px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
-.appearance-section-chevron, .appearance-section-pin { flex-shrink: 0; color: rgb(255 255 255 / 38%); }
-.appearance-section--active .appearance-section-chevron { color: rgb(255 255 255 / 80%); }
-.appearance-popover { z-index: 101; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border: 1px solid rgb(255 255 255 / 12%); border-radius: 20px; background: rgb(14 20 30 / 65%); color: rgb(255 255 255 / 85%); box-shadow: 0 18px 48px rgb(0 0 0 / 24%); backdrop-filter: blur(28px); font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; --popover-enter-x: -10px; }
+.appearance-section-label { color: color-mix(in srgb, currentColor 88%, transparent); font-size: 13px; font-weight: 500; line-height: 18px; }
+.appearance-section-summary { overflow: hidden; color: color-mix(in srgb, currentColor 43%, transparent); font-size: 11px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.appearance-section-chevron, .appearance-section-pin { flex-shrink: 0; color: color-mix(in srgb, currentColor 38%, transparent); }
+.appearance-section--active .appearance-section-chevron { color: color-mix(in srgb, currentColor 80%, transparent); }
+.appearance-popover { z-index: 101; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border: 1px solid var(--panel-surface-border); border-radius: 20px; background: var(--panel-surface-bg); color: var(--panel-surface-fg); box-shadow: var(--panel-surface-shadow); backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%); -webkit-backdrop-filter: blur(var(--panel-surface-blur)) saturate(140%); font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; --popover-enter-x: -10px; }
 .appearance-popover--left { --popover-enter-x: 10px; }
 .appearance-popover--overlay { --popover-enter-x: 12px; }
-.appearance-popover-header { display: flex; flex-shrink: 0; align-items: center; gap: 4px; padding: 10px 12px; border-bottom: 1px solid rgb(255 255 255 / 8%); }
+.appearance-popover-header { display: flex; flex-shrink: 0; align-items: center; gap: 4px; padding: 10px 12px; border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent); }
 .appearance-popover-header h3 { flex: 1; min-width: 0; margin: 0; font-size: 13px; font-weight: 600; }
-.appearance-pin-button[aria-pressed="true"] { background: rgb(255 255 255 / 12%); color: white; }
-.appearance-popover-scroll { min-height: 0; overflow-y: auto; padding: 16px; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 20%) transparent; }
+.appearance-pin-button[aria-pressed="true"] { background: color-mix(in srgb, currentColor 12%, transparent); color: currentColor; }
+.appearance-popover-scroll { min-height: 0; overflow-y: auto; padding: 16px; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, currentColor 20%, transparent) transparent; }
 .appearance-section-content { animation: appearance-section-in 180ms cubic-bezier(.22, 1, .36, 1) both; }
 @keyframes appearance-section-in {
   from { opacity: 0; }
@@ -476,46 +476,46 @@ onUnmounted(() => {
 .appearance-expand-enter-active, .appearance-expand-leave-active { transition: grid-template-rows 280ms cubic-bezier(.22, 1, .36, 1), opacity 180ms ease, transform 280ms cubic-bezier(.22, 1, .36, 1); }
 .appearance-expand-enter-from, .appearance-expand-leave-to { grid-template-rows: 0fr; opacity: 0; transform: translateY(-6px); }
 .appearance-control-group { display: flex; flex-direction: column; gap: 10px; }
-.appearance-control-group--divided { padding-top: 16px; border-top: 1px solid rgb(255 255 255 / 8%); }
-.appearance-control-label { color: rgb(255 255 255 / 82%); font-size: 13px; font-weight: 500; }
+.appearance-control-group--divided { padding-top: 16px; border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent); }
+.appearance-control-label { color: color-mix(in srgb, currentColor 82%, transparent); font-size: 13px; font-weight: 500; }
 .appearance-control-heading { display: flex; align-items: center; justify-content: space-between; }
 .appearance-sync-value-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.appearance-sync-input { width: 108px; min-height: 36px; padding: 6px 10px; border: 1px solid rgb(255 255 255 / 14%); border-radius: 10px; background: rgb(255 255 255 / 5%); color: rgb(255 255 255 / 85%); font-size: 12px; font-variant-numeric: tabular-nums; color-scheme: dark; }
-.appearance-sync-input:focus-visible { outline: 2px solid rgb(255 255 255 / 70%); outline-offset: 2px; }
-.appearance-sync-description { margin: 0; color: rgb(255 255 255 / 50%); font-size: 12px; line-height: 1.6; }
-.appearance-reset { display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 8px; color: rgb(255 255 255 / 45%); }
-.appearance-reset:hover { background: rgb(255 255 255 / 8%); color: white; }
+.appearance-sync-input { width: 108px; min-height: 36px; padding: 6px 10px; border: 1px solid color-mix(in srgb, currentColor 14%, transparent); border-radius: 10px; background: color-mix(in srgb, currentColor 5%, transparent); color: color-mix(in srgb, currentColor 85%, transparent); font-size: 12px; font-variant-numeric: tabular-nums; color-scheme: dark; }
+.appearance-sync-input:focus-visible { outline: 2px solid color-mix(in srgb, currentColor 70%, transparent); outline-offset: 2px; }
+.appearance-sync-description { margin: 0; color: color-mix(in srgb, currentColor 50%, transparent); font-size: 12px; line-height: 1.6; }
+.appearance-reset { display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 8px; color: color-mix(in srgb, currentColor 45%, transparent); }
+.appearance-reset:hover { background: color-mix(in srgb, currentColor 8%, transparent); color: currentColor; }
 .appearance-options { display: flex; gap: 6px; }
-.appearance-options button { display: flex; flex: 1; align-items: center; justify-content: center; gap: 8px; min-width: 0; min-height: 36px; padding: 6px 8px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 12px; background: rgb(255 255 255 / 3%); color: rgb(255 255 255 / 55%); font-size: 12px; transition: color 160ms, background-color 160ms, border-color 160ms; }
-.appearance-options button:hover { background: rgb(255 255 255 / 7%); color: white; }
-.appearance-options button[aria-pressed="true"] { border-color: rgb(255 255 255 / 22%); background: rgb(255 255 255 / 13%); color: white; }
+.appearance-options button { display: flex; flex: 1; align-items: center; justify-content: center; gap: 8px; min-width: 0; min-height: 36px; padding: 6px 8px; border: 1px solid color-mix(in srgb, currentColor 10%, transparent); border-radius: 12px; background: color-mix(in srgb, currentColor 3%, transparent); color: color-mix(in srgb, currentColor 55%, transparent); font-size: 12px; transition: color 160ms, background-color 160ms, border-color 160ms; }
+.appearance-options button:hover { background: color-mix(in srgb, currentColor 7%, transparent); color: currentColor; }
+.appearance-options button[aria-pressed="true"] { border-color: color-mix(in srgb, currentColor 22%, transparent); background: color-mix(in srgb, currentColor 13%, transparent); color: currentColor; }
 .writing-mode-preview { display: flex; flex-direction: column; justify-content: center; gap: 3px; width: 16px; height: 16px; }
 .writing-mode-preview span { height: 2px; border-radius: 2px; background: currentColor; }
 .writing-mode-preview span:nth-child(2) { width: 75%; }
 .writing-mode-preview span:nth-child(3) { width: 50%; }
 .writing-mode-preview--vertical { transform: rotate(90deg); }
-.appearance-font-tabs { padding: 3px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 12px; background: rgb(255 255 255 / 3%); }
+.appearance-font-tabs { padding: 3px; border: 1px solid color-mix(in srgb, currentColor 10%, transparent); border-radius: 12px; background: color-mix(in srgb, currentColor 3%, transparent); }
 .appearance-font-tabs button { min-height: 28px; border-color: transparent; border-radius: 8px; background: transparent; font-size: 11px; }
 .appearance-font-tabs button[aria-pressed="true"] { border-color: transparent; }
-.appearance-font-list { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 20%) transparent; }
-.appearance-font-option { display: flex; width: 100%; align-items: center; gap: 8px; min-height: 38px; padding: 8px 10px; border-radius: 10px; color: rgb(255 255 255 / 65%); text-align: left; font-size: 12px; }
-.appearance-font-option:hover { background: rgb(255 255 255 / 6%); color: white; }
-.appearance-font-option[aria-pressed="true"] { background: rgb(255 255 255 / 12%); color: white; }
-.appearance-current-badge { flex-shrink: 0; padding: 2px 6px; border-radius: 6px; background: rgb(255 255 255 / 10%); color: rgb(255 255 255 / 65%); font-size: 10px; }
+.appearance-font-list { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, currentColor 20%, transparent) transparent; }
+.appearance-font-option { display: flex; width: 100%; align-items: center; gap: 8px; min-height: 38px; padding: 8px 10px; border-radius: 10px; color: color-mix(in srgb, currentColor 65%, transparent); text-align: left; font-size: 12px; }
+.appearance-font-option:hover { background: color-mix(in srgb, currentColor 6%, transparent); color: currentColor; }
+.appearance-font-option[aria-pressed="true"] { background: color-mix(in srgb, currentColor 12%, transparent); color: currentColor; }
+.appearance-current-badge { flex-shrink: 0; padding: 2px 6px; border-radius: 6px; background: color-mix(in srgb, currentColor 10%, transparent); color: color-mix(in srgb, currentColor 65%, transparent); font-size: 10px; }
 .appearance-custom-font { display: flex; align-items: center; gap: 4px; }
 .appearance-custom-font .appearance-font-option { flex: 1; min-width: 0; }
-.appearance-font-delete { display: flex; width: 28px; height: 28px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; color: rgb(255 255 255 / 40%); }
-.appearance-font-delete:hover { background: rgb(255 255 255 / 8%); color: white; }
-.appearance-import { min-height: 36px; border: 1px solid rgb(255 255 255 / 14%); border-radius: 12px; background: rgb(255 255 255 / 5%); color: rgb(255 255 255 / 75%); font-size: 12px; }
-.appearance-import:hover { background: rgb(255 255 255 / 10%); color: white; }
+.appearance-font-delete { display: flex; width: 28px; height: 28px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; color: color-mix(in srgb, currentColor 40%, transparent); }
+.appearance-font-delete:hover { background: color-mix(in srgb, currentColor 8%, transparent); color: currentColor; }
+.appearance-import { min-height: 36px; border: 1px solid color-mix(in srgb, currentColor 14%, transparent); border-radius: 12px; background: color-mix(in srgb, currentColor 5%, transparent); color: color-mix(in srgb, currentColor 75%, transparent); font-size: 12px; }
+.appearance-import:hover { background: color-mix(in srgb, currentColor 10%, transparent); color: currentColor; }
 .appearance-import:disabled { opacity: .5; cursor: wait; }
-.appearance-empty { margin: 10px 4px; color: rgb(255 255 255 / 40%); font-size: 11px; line-height: 1.6; text-align: center; }
+.appearance-empty { margin: 10px 4px; color: color-mix(in srgb, currentColor 40%, transparent); font-size: 11px; line-height: 1.6; text-align: center; }
 .appearance-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.appearance-switch { display: flex; width: 38px; height: 24px; flex-shrink: 0; align-items: center; padding: 3px; border: 1px solid rgb(255 255 255 / 10%); border-radius: 20px; background: rgb(255 255 255 / 10%); }
+.appearance-switch { display: flex; width: 38px; height: 24px; flex-shrink: 0; align-items: center; padding: 3px; border: 1px solid color-mix(in srgb, currentColor 10%, transparent); border-radius: 20px; background: color-mix(in srgb, currentColor 10%, transparent); }
 .appearance-switch span { width: 16px; height: 16px; border-radius: 50%; background: white; transition: transform 160ms; }
-.appearance-switch[aria-checked="true"] { border-color: rgb(255 255 255 / 25%); background: rgb(255 255 255 / 30%); }
+.appearance-switch[aria-checked="true"] { border-color: color-mix(in srgb, currentColor 25%, transparent); background: color-mix(in srgb, currentColor 30%, transparent); }
 .appearance-switch[aria-checked="true"] span { transform: translateX(14px); }
-.appearance-section:focus-visible, .appearance-popover button:focus-visible { outline: 2px solid rgb(255 255 255 / 70%); outline-offset: -2px; }
+.appearance-section:focus-visible, .appearance-popover button:focus-visible { outline: 2px solid color-mix(in srgb, currentColor 70%, transparent); outline-offset: -2px; }
 .appearance-popover-enter-active, .appearance-popover-leave-active { transition: opacity 150ms, transform 180ms; }
 .appearance-popover-enter-from, .appearance-popover-leave-to { opacity: 0; transform: translateX(var(--popover-enter-x)); }
 @media (max-height: 599px) {

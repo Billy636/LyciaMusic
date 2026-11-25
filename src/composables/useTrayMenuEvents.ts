@@ -31,6 +31,7 @@ import {
   type TrayMenuSubmenuPlacement,
 } from '../features/tray/actions';
 import { resolveTrayMenuPosition } from '../features/tray/positioning';
+import { commitSongSwitch } from '../features/songNotification/manualSwitch';
 
 let trayMenuWindowPromise: Promise<WebviewWindow> | null = null;
 let isTrayMenuReady = false;
@@ -170,7 +171,7 @@ export function useTrayMenuEvents(router: Router) {
   const playbackStore = usePlaybackStore();
   const uiStore = useUiStore();
   const { playMode } = storeToRefs(playbackStore);
-  const { isMiniMode, skipNextPageTransition } = storeToRefs(uiStore);
+  const { skipNextPageTransition } = storeToRefs(uiStore);
 
   let unlistenTrayMenu: UnlistenFn | null = null;
   let unlistenTrayMenuOpen: UnlistenFn | null = null;
@@ -181,7 +182,6 @@ export function useTrayMenuEvents(router: Router) {
     isPlaying: isPlaying.value,
     isDarkTheme: isDarkTheme.value,
     playMode: playMode.value,
-    isMiniMode: isMiniMode.value,
     showDesktopLyrics: showDesktopLyrics.value,
     showTaskbarPlayer: showTaskbarPlayer.value,
     submenuPlacement: trayMenuSubmenuPlacement,
@@ -265,13 +265,14 @@ export function useTrayMenuEvents(router: Router) {
 
   onMounted(async () => {
     unlistenTrayMenu = await listen<TrayMenuAction>(APP_TRAY_MENU_EVENT, (event) => {
+      if (event.payload === 'prev-song') commitSongSwitch('previous', 'tray');
+      else if (event.payload === 'next-song') commitSongSwitch('next', 'tray');
       void (async () => {
         await handleTrayMenuAction(event.payload, {
           prevSong,
           togglePlay,
           nextSong,
           playMode,
-          isMiniMode,
           showDesktopLyrics,
           showTaskbarPlayer,
           revealMainWindow,

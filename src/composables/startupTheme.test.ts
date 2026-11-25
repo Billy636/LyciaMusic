@@ -134,7 +134,6 @@ describe('startup theme bootstrap', () => {
   it('does not apply startup paint to transparent auxiliary windows', () => {
     expect(shouldApplyStartupThemePaint('main')).toBe(true);
     expect(shouldApplyStartupThemePaint('desktop-lyrics')).toBe(false);
-    expect(shouldApplyStartupThemePaint('mini-player')).toBe(false);
     expect(shouldApplyStartupThemePaint('tray-menu')).toBe(false);
   });
 });

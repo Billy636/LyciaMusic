@@ -16,14 +16,12 @@ import { readLyricsAppearanceDraft } from './useLyricsAppearanceDraft';
 import PlayerDetailBackground from './PlayerDetailBackground.vue';
 import PlayerDetailLeft from './PlayerDetailLeft.vue';
 import ImmersiveTransitionOverlay from './ImmersiveTransitionOverlay.vue';
-import QueueList from './QueueList.vue';
 import { resolvePlayerDetailEscapeAction } from './playerDetailKeyboard';
 import { hideMainWindowToTray } from '../../composables/renderingPower';
 import { useUiStore } from '../../shared/stores/ui';
 
 const {
   showPlayerDetail,
-  showQueue,
   showPlaylist,
   currentSong,
   closePlayerDetail,
@@ -73,7 +71,7 @@ const handleFocusContentShown = () => {
 };
 
 // Opening a right-side tool should never leave it hidden behind the focused cover.
-watch([showQueue, showPlaylist, showLyricsPlayerSettingsPanel], (opened, previous) => {
+watch([showPlaylist, showLyricsPlayerSettingsPanel], (opened, previous) => {
   if (opened.some((visible, index) => visible && !previous[index])) isCoverFocused.value = false;
 });
 
@@ -597,13 +595,8 @@ const metaInfo = computed(() => {
           >
             <div v-show="!isCoverFocused" class="h-full min-h-0 w-full">
               <transition v-if="isFocusContentMounted" name="fade-scale" mode="out-in">
-                <QueueList
-                  v-if="showQueue"
-                  class="h-full rounded-2xl border border-white/5 bg-black/10 p-4 shadow-xl backdrop-blur-sm"
-                />
-
                 <LyricsView
-                  v-else-if="showPlayerDetail && hasLyricsPresentation"
+                  v-if="showPlayerDetail && hasLyricsPresentation"
                   :appearance-preview="lyricsAppearancePreview"
                   class="h-full"
                 />

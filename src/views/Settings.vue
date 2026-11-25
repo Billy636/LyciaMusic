@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { Captions, ChevronRight, Copy, PaintRoller, PanelLeft, PanelBottom, PanelBottomDashed, Tags } from 'lucide-vue-next';
+import { Captions, ChevronRight, Copy, Music2, PaintRoller, PanelLeft, PanelBottom, PanelBottomDashed, Tags } from 'lucide-vue-next';
 import { useRoute } from 'vue-router';
 import {
   PERSONALIZATION_PAGE_LABELS,
@@ -25,6 +25,7 @@ import SettingsDuplicateSongs from "../components/settings/SettingsDuplicateSong
 import SettingsAudioOutput from "../components/settings/SettingsAudioOutput.vue";
 import SettingsFooter from '../components/settings/SettingsFooter.vue';
 import SettingsTaskbarPlayer from '../components/settings/SettingsTaskbarPlayer.vue';
+import SettingsSongNotification from '../components/settings/SettingsSongNotification.vue';
 
 const navigation = useSettingsNavigationStore();
 const { activeSection, personalizationPage, toolboxPage } = storeToRefs(navigation);
@@ -62,6 +63,7 @@ const personalizationPages = [
   { id: 'footer', name: PERSONALIZATION_PAGE_LABELS.footer, icon: PanelBottom },
   { id: 'desktopLyrics', name: PERSONALIZATION_PAGE_LABELS.desktopLyrics, icon: Captions },
   { id: 'taskbarPlayer', name: PERSONALIZATION_PAGE_LABELS.taskbarPlayer, icon: PanelBottomDashed },
+  { id: 'songNotification', name: PERSONALIZATION_PAGE_LABELS.songNotification, icon: Music2 },
 ] satisfies { id: PersonalizationPage; name: string; icon: typeof PaintRoller }[];
 
 const toolboxPages = [
@@ -136,7 +138,7 @@ watch([activeSection, personalizationPage, toolboxPage], ([section, page, toolPa
           :data-settings-section="tab.id"
           :aria-current="activeSection === tab.id ? 'page' : undefined"
           class="settings-nav-item relative flex w-full cursor-pointer items-center rounded-md px-4 py-2.5 text-left text-sm transition-all duration-300 active:scale-[0.97]"
-          :class="activeSection === tab.id ? 'translate-x-1 bg-black/10 font-semibold text-black shadow-sm dark:bg-white/10 dark:text-white' : 'font-medium text-gray-800 hover:translate-x-1 hover:bg-black/5 hover:text-black dark:text-gray-200 dark:hover:bg-white/5 dark:hover:text-white'"
+          :class="activeSection === tab.id ? 'translate-x-1 bg-black/10 font-semibold text-black shadow-sm dark:bg-white/10 dark:text-white' : 'font-medium text-gray-800 hover:translate-x-1 hover:bg-black/5 hover:text-black dark:text-gray-200 dark:hover:bg-white/10 dark:hover:text-white'"
           @click="selectSection(tab.id)"
         >
           <div
@@ -178,7 +180,7 @@ watch([activeSection, personalizationPage, toolboxPage], ([section, page, toolPa
                   :key="page.id"
                   type="button"
                   :data-personalization-page="page.id"
-                  class="group flex min-h-16 w-full cursor-pointer items-center gap-4 rounded-md px-4 py-4 text-left text-gray-800 transition-colors hover:bg-black/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#EC4141]/60 dark:text-gray-100 dark:hover:bg-white/5"
+                  class="group flex min-h-16 w-full cursor-pointer items-center gap-4 rounded-md px-4 py-4 text-left text-gray-800 transition-colors hover:bg-black/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#EC4141]/60 dark:text-gray-100 dark:hover:bg-white/10"
                   @click="navigation.openPersonalizationPage(page.id)"
                 >
                   <component :is="page.icon" class="h-5 w-5 shrink-0" :stroke-width="1.7" aria-hidden="true" />
@@ -191,6 +193,7 @@ watch([activeSection, personalizationPage, toolboxPage], ([section, page, toolPa
               <SettingsFooter v-else-if="personalizationPage === 'footer'" />
               <SettingsDesktopLyrics v-else-if="personalizationPage === 'desktopLyrics'" />
               <SettingsTaskbarPlayer v-else-if="personalizationPage === 'taskbarPlayer'" />
+              <SettingsSongNotification v-else-if="personalizationPage === 'songNotification'" />
             </div>
           </Transition>
         </section>
@@ -215,7 +218,7 @@ watch([activeSection, personalizationPage, toolboxPage], ([section, page, toolPa
                   :key="page.id"
                   type="button"
                   :data-toolbox-page="page.id"
-                  class="group flex min-h-16 w-full cursor-pointer items-center gap-4 rounded-md px-4 py-4 text-left text-gray-800 transition-colors hover:bg-black/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#EC4141]/60 dark:text-gray-100 dark:hover:bg-white/5"
+                  class="group flex min-h-16 w-full cursor-pointer items-center gap-4 rounded-md px-4 py-4 text-left text-gray-800 transition-colors hover:bg-black/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#EC4141]/60 dark:text-gray-100 dark:hover:bg-white/10"
                   @click="navigation.openToolboxPage(page.id)"
                 >
                   <component :is="page.icon" class="h-5 w-5 shrink-0" :stroke-width="1.7" aria-hidden="true" />

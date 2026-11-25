@@ -84,7 +84,7 @@ onMounted(() => window.addEventListener('mousedown', handleClickOutside));
 onUnmounted(() => window.removeEventListener('mousedown', handleClickOutside));
 
 const itemClass =
-  'song-menu-item flex cursor-pointer items-center px-4 py-2.5 transition-colors text-sm text-gray-700 dark:text-gray-200 hover:bg-black/5 dark:hover:bg-white/5';
+  'song-menu-item flex cursor-pointer items-center px-4 py-2.5 transition-colors text-sm text-gray-700 dark:text-gray-200 hover:bg-black/5 dark:hover:bg-white/10';
 const sectionTitleClass = 'song-menu-section px-4 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.08em] text-gray-400 dark:text-white/40 truncate max-w-[220px]';
 
 const motionDelay = (index: number): CSSProperties => ({

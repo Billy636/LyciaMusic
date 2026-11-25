@@ -2,14 +2,29 @@ import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import {
   TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
+  TASKBAR_PLAYER_MAX_WIDTH,
   normalizeTaskbarWidth,
   normalizeTaskbarTextColor,
+  normalizeTaskbarBackgroundMode,
+  normalizeTaskbarBackgroundColor,
+  normalizeTaskbarFrameShape,
+  coerceCoverShapeForFrame,
+  TASKBAR_PLAYER_DEFAULT_BACKGROUND_COLOR,
   normalizeTaskbarContentMode,
   normalizeTaskbarLyricEffect,
   normalizeTaskbarLyricHighlightColor,
   normalizeTaskbarCoverShape,
+  normalizeTaskbarFreePosition,
   normalizeTaskbarLeftOffset,
 } from '../taskbarPlayer/shared';
+import {
+  SONG_NOTIFICATION_DEFAULT_BACKGROUND_COLOR,
+  SONG_NOTIFICATION_DEFAULT_MODULES,
+  normalizeSongNotificationBackgroundColor,
+  normalizeSongNotificationBackgroundMode,
+  normalizeSongNotificationFrameShape,
+  normalizeSongNotificationModules,
+} from '../songNotification/shared';
 
 import type {
   AppSettings,
@@ -150,7 +165,11 @@ export const defaultAudioSettings: AudioSettings = {
 export const defaultAppSettings: AppSettings = {
   closeToTray: true,
   showDesktopLyrics: false,
-  showSongNotification: false,
+  showSongNotification: true,
+  songNotificationFrameShape: 'rounded',
+  songNotificationBackgroundMode: 'live',
+  songNotificationBackgroundColor: SONG_NOTIFICATION_DEFAULT_BACKGROUND_COLOR,
+  songNotificationModules: { ...SONG_NOTIFICATION_DEFAULT_MODULES },
   showQualityBadges: true,
   showSongComments: true,
   doubleClickCurrentSongToPause: false,
@@ -174,17 +193,22 @@ export const defaultAppSettings: AppSettings = {
   shortcuts: createDefaultShortcutSettings(),
   showTaskbarPlayer: false,
   showTaskbarPlayerIcon: true,
-  showMiniPlayerIcon: true,
   taskbarBackgroundOpacity: TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
+  taskbarBackgroundMode: 'live' as const,
+  taskbarBackgroundColor: TASKBAR_PLAYER_DEFAULT_BACKGROUND_COLOR,
+  taskbarFrameShape: 'rounded' as const,
+  taskbarAlwaysOnTop: true,
   taskbarWindowWidth: 280,
   taskbarTextColor: '#ffffff',
   taskbarPlayerCanDrag: false,
-  taskbarPositionLocked: false,
+  // 默认锁定在桌面底栏，解锁后可自由拖动。
+  taskbarPositionLocked: true,
+  taskbarFreePosition: null,
   taskbarContentMode: 'adaptive',
   taskbarLyricEffect: 'karaoke',
   taskbarLyricHighlightColor: null,
   taskbarTranslationKaraoke: true,
-  taskbarCoverShape: 'square',
+  taskbarCoverShape: 'rounded' as const,
   taskbarCoverRotate: false,
   taskbarLeftOffset: null,
   gpuAcceleration: true,
@@ -347,16 +371,33 @@ export const mergeAppSettings = (
     ...rest
   } = patch;
 
+  // 外框形状决定允许的封面形状：圆框只能配圆封面，圆角框配圆角/圆形，方框任意。
+  const mergedFrameShape = normalizeTaskbarFrameShape(patch.taskbarFrameShape ?? base.taskbarFrameShape);
+  const mergedCoverShape = coerceCoverShapeForFrame(
+    normalizeTaskbarCoverShape(patch.taskbarCoverShape ?? base.taskbarCoverShape),
+    mergedFrameShape,
+  );
+
   return {
     // Ignore removed legacy fields that may still exist in persisted settings.
     ...base,
     ...rest,
     doubleClickCurrentSongToPause: typeof patch.doubleClickCurrentSongToPause === 'boolean'
       ? patch.doubleClickCurrentSongToPause : base.doubleClickCurrentSongToPause,
-    showMiniPlayerIcon: typeof patch.showMiniPlayerIcon === 'boolean'
-      ? patch.showMiniPlayerIcon : base.showMiniPlayerIcon,
     showSongNotification: typeof (patch.showSongNotification ?? base.showSongNotification) === 'boolean'
-      ? (patch.showSongNotification ?? base.showSongNotification) : false,
+      ? (patch.showSongNotification ?? base.showSongNotification) : true,
+    songNotificationFrameShape: normalizeSongNotificationFrameShape(
+      patch.songNotificationFrameShape ?? base.songNotificationFrameShape,
+    ),
+    songNotificationBackgroundMode: normalizeSongNotificationBackgroundMode(
+      patch.songNotificationBackgroundMode ?? base.songNotificationBackgroundMode,
+    ),
+    songNotificationBackgroundColor: normalizeSongNotificationBackgroundColor(
+      patch.songNotificationBackgroundColor ?? base.songNotificationBackgroundColor,
+    ),
+    songNotificationModules: normalizeSongNotificationModules(
+      patch.songNotificationModules ?? base.songNotificationModules,
+    ),
     ...(patch.footer || base.footer ? { footer: normalizeFooterSettings(patch.footer ?? base.footer) } : {}),
     libraryMinDurationSeconds: normalizeLibraryMinDurationSeconds(
       libraryMinDurationSeconds ?? base.libraryMinDurationSeconds,
@@ -373,14 +414,26 @@ export const mergeAppSettings = (
     taskbarBackgroundOpacity: typeof (patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity) === 'number'
       && Number.isFinite(patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity)
       ? Math.min(100, Math.max(0, Math.round(patch.taskbarBackgroundOpacity ?? base.taskbarBackgroundOpacity))) : TASKBAR_PLAYER_DEFAULT_BACKGROUND_OPACITY,
-    taskbarWindowWidth: normalizeTaskbarWidth(patch.taskbarWindowWidth ?? base.taskbarWindowWidth),
+    taskbarBackgroundMode: normalizeTaskbarBackgroundMode(
+      patch.taskbarBackgroundMode ?? base.taskbarBackgroundMode,
+    ),
+    taskbarBackgroundColor: normalizeTaskbarBackgroundColor(
+      patch.taskbarBackgroundColor ?? base.taskbarBackgroundColor,
+    ),
+    taskbarFrameShape: mergedFrameShape,
+    taskbarAlwaysOnTop: typeof (patch.taskbarAlwaysOnTop ?? base.taskbarAlwaysOnTop) === 'boolean'
+      ? (patch.taskbarAlwaysOnTop ?? base.taskbarAlwaysOnTop) : true,
+    taskbarWindowWidth: normalizeTaskbarWidth(patch.taskbarWindowWidth ?? base.taskbarWindowWidth, TASKBAR_PLAYER_MAX_WIDTH),
     taskbarTextColor: normalizeTaskbarTextColor(patch.taskbarTextColor ?? base.taskbarTextColor),
     taskbarPlayerCanDrag: typeof (patch.taskbarPlayerCanDrag ?? base.taskbarPlayerCanDrag) === 'boolean'
       ? (patch.taskbarPlayerCanDrag ?? base.taskbarPlayerCanDrag) : false,
-    // The legacy can-drag flag was not used by the drag handle. Only an explicit
-    // position lock should hide it; existing settings must remain draggable.
+    // The legacy can-drag flag is unused; the lock state alone decides between
+    // the docked bottom-bar layout and free desktop dragging.
     taskbarPositionLocked: typeof (patch.taskbarPositionLocked ?? base.taskbarPositionLocked) === 'boolean'
-      ? (patch.taskbarPositionLocked ?? base.taskbarPositionLocked) : false,
+      ? (patch.taskbarPositionLocked ?? base.taskbarPositionLocked) : true,
+    taskbarFreePosition: normalizeTaskbarFreePosition(
+      patch.taskbarFreePosition === undefined ? base.taskbarFreePosition : patch.taskbarFreePosition,
+    ),
     taskbarContentMode: normalizeTaskbarContentMode(patch.taskbarContentMode ?? base.taskbarContentMode),
     taskbarLyricEffect: normalizeTaskbarLyricEffect(patch.taskbarLyricEffect ?? base.taskbarLyricEffect),
     taskbarLyricHighlightColor: normalizeTaskbarLyricHighlightColor(
@@ -388,7 +441,7 @@ export const mergeAppSettings = (
     ),
     taskbarTranslationKaraoke: typeof (patch.taskbarTranslationKaraoke ?? base.taskbarTranslationKaraoke) === 'boolean'
       ? (patch.taskbarTranslationKaraoke ?? base.taskbarTranslationKaraoke) : true,
-    taskbarCoverShape: normalizeTaskbarCoverShape(patch.taskbarCoverShape ?? base.taskbarCoverShape),
+    taskbarCoverShape: mergedCoverShape,
     taskbarCoverRotate: typeof (patch.taskbarCoverRotate ?? base.taskbarCoverRotate) === 'boolean'
       ? (patch.taskbarCoverRotate ?? base.taskbarCoverRotate) : false,
     taskbarLeftOffset: (patch.taskbarLeftOffset ?? base.taskbarLeftOffset) == null
